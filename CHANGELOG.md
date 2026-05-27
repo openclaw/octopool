@@ -13,6 +13,7 @@
 
 - Expand the relay allowlist to public repo metadata, PR and issue lists, commits, and workflow metadata.
 - Add cached top-level CLI translations for common read-only `gh pr`, `gh issue`, `gh run`, and `gh repo` commands, including conservative `--json` and `--jq` support.
+- Add persisted cache hit/miss/bypass metrics, `GET /v1/pools/:pool/stats`, `octopool stats`, and dashboard top-route hit-rate views.
 
 ### Fixes
 

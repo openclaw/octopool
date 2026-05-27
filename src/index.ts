@@ -24,6 +24,7 @@ import { rootResponse } from "./landing";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import { ensurePublicGitHubRepo } from "./public-repos";
+import { parseStatsWindow, poolStats } from "./stats";
 import {
   finishGitHubWebLogin,
   logoutWebSession,
@@ -90,6 +91,12 @@ async function routeRequest(
   }
   if (request.method === "POST" && url.pathname === "/v1/login/github-cli") {
     return loginGitHubCLI(request, env);
+  }
+  if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/stats$/.test(url.pathname)) {
+    const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/stats$/, "pool");
+    const caller = await authenticateCaller(request, env, pool);
+    const window = parseStatsWindow(url.searchParams.get("since"));
+    return jsonResponse(await poolStats(env, pool, caller, window));
   }
   if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/health$/.test(url.pathname)) {
     const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/health$/, "pool");
@@ -173,6 +180,9 @@ async function dashboardUsage(env: Env, pool: string) {
     `SELECT
        COUNT(*) AS requests_24h,
        SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,
+       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits_24h,
+       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses_24h,
+       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass_24h,
        AVG(duration_ms) AS avg_duration_ms_24h,
        MAX(created_at) AS latest_seen_at
      FROM audit_events
@@ -183,12 +193,22 @@ async function dashboardUsage(env: Env, pool: string) {
     .first<{
       requests_24h: number;
       errors_24h: number | null;
+      cache_hits_24h: number | null;
+      cache_misses_24h: number | null;
+      cache_bypass_24h: number | null;
       avg_duration_ms_24h: number | null;
       latest_seen_at: string | null;
     }>();
+  const cacheHits = row?.cache_hits_24h ?? 0;
+  const cacheMisses = row?.cache_misses_24h ?? 0;
+  const cacheDenominator = cacheHits + cacheMisses;
   return {
     requests_24h: row?.requests_24h ?? 0,
     errors_24h: row?.errors_24h ?? 0,
+    cache_hits_24h: cacheHits,
+    cache_misses_24h: cacheMisses,
+    cache_bypass_24h: row?.cache_bypass_24h ?? 0,
+    cache_hit_rate_24h: cacheDenominator === 0 ? null : cacheHits / cacheDenominator,
     avg_duration_ms_24h: row?.avg_duration_ms_24h ?? null,
     latest_seen_at: row?.latest_seen_at ?? null,
   };
@@ -336,7 +356,13 @@ async function dashboardRecent(env: Env, pool: string) {
 
 async function dashboardRouteUsage(env: Env, pool: string) {
   const rows = await env.DB.prepare(
-    `SELECT route_kind, COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors
+    `SELECT
+       route_kind,
+       COUNT(*) AS requests,
+       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
+       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass
      FROM audit_events
      WHERE pool_id = ?1
        AND created_at >= datetime('now', '-24 hours')
@@ -345,8 +371,27 @@ async function dashboardRouteUsage(env: Env, pool: string) {
      LIMIT 12`,
   )
     .bind(pool)
-    .all<{ route_kind: string; requests: number; errors: number | null }>();
-  return rows.results.map((row) => ({ ...row, errors: row.errors ?? 0 }));
+    .all<{
+      route_kind: string;
+      requests: number;
+      errors: number | null;
+      cache_hits: number | null;
+      cache_misses: number | null;
+      cache_bypass: number | null;
+    }>();
+  return rows.results.map((row) => {
+    const cacheHits = row.cache_hits ?? 0;
+    const cacheMisses = row.cache_misses ?? 0;
+    const cacheDenominator = cacheHits + cacheMisses;
+    return {
+      ...row,
+      errors: row.errors ?? 0,
+      cache_hits: cacheHits,
+      cache_misses: cacheMisses,
+      cache_bypass: row.cache_bypass ?? 0,
+      cache_hit_rate: cacheDenominator === 0 ? null : cacheHits / cacheDenominator,
+    };
+  });
 }
 
 async function dashboardIdentityUsage(env: Env, pool: string) {
@@ -463,12 +508,16 @@ async function relayGitHub(
   }
   let route: ReturnType<typeof classifyRoute> | undefined;
   let identity: Identity | undefined;
+  let auditCacheStatus: "hit" | "miss" | "bypass" | "unknown" = "unknown";
+  let auditCacheable = false;
   try {
     route = classifyRoute(relayRequest, policy);
     const cacheEnabled = shouldUseGitHubCache(relayRequest, route);
     const cacheKey = cacheEnabled
       ? await githubCacheKey(relayRequest.pool, relayRequest, route)
       : undefined;
+    auditCacheable = cacheKey !== undefined;
+    auditCacheStatus = cacheKey === undefined ? "bypass" : "miss";
     if (cacheKey !== undefined) {
       const cached = await readGitHubCache(env, cacheKey);
       if (cached !== undefined) {
@@ -492,6 +541,8 @@ async function relayGitHub(
               status: cached.status,
               durationMs: Date.now() - started,
               identityId: cached.identity.id,
+              cacheStatus: "hit",
+              cacheable: true,
             }),
           );
           return jsonResponse({
@@ -547,6 +598,8 @@ async function relayGitHub(
           identityId: identity.id,
           status: github.status,
           durationMs: Date.now() - started,
+          cacheStatus: auditCacheStatus,
+          cacheable: auditCacheable,
         }),
         ...(cacheKey === undefined
           ? []
@@ -584,6 +637,8 @@ async function relayGitHub(
         status: audit.status,
         errorCode: audit.code,
         durationMs: Date.now() - started,
+        cacheStatus: auditCacheStatus,
+        cacheable: auditCacheable,
         ...(identity === undefined ? {} : { identityId: identity.id }),
       }),
     );

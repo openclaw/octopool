@@ -81,6 +81,10 @@ const DASHBOARD_HTML = `<!doctype html>
         <table><thead><tr><th>Route</th><th>Fresh</th><th>Total</th><th>Latest</th></tr></thead><tbody id="cache-routes"></tbody></table>
       </div>
       <div class="panel">
+        <div class="panel-head"><h2>Top Routes</h2><span class="section-label">24 hours</span></div>
+        <table><thead><tr><th>Route</th><th>Requests</th><th>Hit rate</th><th>Bypass</th><th>Errors</th></tr></thead><tbody id="route-usage"></tbody></table>
+      </div>
+      <div class="panel">
         <div class="panel-head"><h2>Who Uses It</h2><span class="section-label">7 days</span></div>
         <table><thead><tr><th>User</th><th>Requests</th><th>Errors</th><th>Avg ms</th><th>Last seen</th></tr></thead><tbody id="callers"></tbody></table>
       </div>
@@ -128,12 +132,13 @@ function render(data) {
   $("who").replaceChildren(el("strong", data.operator.github_login), el("span", data.pool + " · " + data.generated_at));
   $("tiles").replaceChildren(
     tile("Requests 24h", fmt(data.usage.requests_24h), data.usage.errors_24h + " errors"),
+    tile("Cache Hit 24h", pct(data.usage.cache_hit_rate_24h), data.usage.cache_misses_24h + " misses"),
     tile("Cache Fresh", fmt(data.cache.fresh_entries), fmt(data.cache.total_entries) + " total"),
-    tile("Cache Bytes", bytes(data.cache.body_bytes), data.cache.expired_entries + " expired"),
     tile("Identities", fmt(data.identities.active) + "/" + fmt(data.identities.total), data.coordinator.cooldowns.length + " cooldowns"),
   );
   renderRates(data);
   rows("cache-routes", data.cache.routes, (item) => [item.route_kind, item.fresh_entries, item.entries, rel(item.latest_created_at)]);
+  rows("route-usage", data.route_usage, (item) => [item.route_kind, item.requests, pct(item.cache_hit_rate), item.cache_bypass, item.errors]);
   rows("callers", data.users, (item) => [item.github_login, item.requests, item.errors, Math.round(item.avg_duration_ms || 0), rel(item.last_seen)]);
   rows("recent", data.recent, (item) => [rel(item.created_at), item.github_login, item.route_kind, statusPill(item.status), item.identity_id || "none"]);
 }
@@ -202,7 +207,7 @@ function resetDashboard() {
   $("tiles").replaceChildren();
   $("rates").replaceChildren();
   $("rate-count").textContent = "";
-  for (const id of ["cache-routes", "callers", "recent"]) $(id).replaceChildren();
+  for (const id of ["cache-routes", "route-usage", "callers", "recent"]) $(id).replaceChildren();
   $("error").style.display = "none";
 }
 function el(tag, text, cls) {
@@ -212,6 +217,10 @@ function el(tag, text, cls) {
   return node;
 }
 function fmt(value) { return Number(value || 0).toLocaleString(); }
+function pct(value) {
+  if (value === null || value === undefined) return "n/a";
+  return (Number(value) * 100).toFixed(1) + "%";
+}
 function bytes(value) {
   const n = Number(value || 0);
   if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MiB";

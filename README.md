@@ -55,6 +55,7 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 
 octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket
+octopool stats
 ```
 
 Symlink it as `gh` for a transparent shim — supported reads go through the pool, everything else (and any mutation) passes straight to the real GitHub CLI:
@@ -86,7 +87,7 @@ A Durable Object (`PoolCoordinator`, one per pool) holds per-identity rate snaps
 Each links to its page on [docs.octopool.dev](https://docs.octopool.dev):
 
 - **[GitHub read relay](https://docs.octopool.dev/relay.html)** — `POST /v1/github/request`, the supported route allowlist, response envelope, and safety caps.
-- **[Octopool CLI](https://docs.octopool.dev/cli.html)** — `octopool login`, the `gh` shim, and real-`gh` fallback.
+- **[Octopool CLI](https://docs.octopool.dev/cli.html)** — `octopool login`, the `gh` shim, cache stats, and real-`gh` fallback.
 - **[Pooled identities & routing](https://docs.octopool.dev/identities.html)** — PAT and GitHub App identities, scopes, and the coordinator's selection, leases, and cooldowns.
 - **[Cache & public-repo guard](https://docs.octopool.dev/cache.html)** — the D1 read-through cache and public-only visibility enforcement.
 - **[Auth & org membership](https://docs.octopool.dev/auth.html)** — caller auth, admin auth, website sessions, and the GitHub-CLI login exchange.

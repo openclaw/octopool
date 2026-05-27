@@ -47,6 +47,8 @@ D1 schema lives in `migrations/`:
 - `0003_github_app_public_cache.sql` — `installation_id` column and `github_public_repos`.
 - `0004_web_dashboard_sessions.sql` — dashboard role, OAuth states, and hashed website
   sessions.
+- `0005_audit_cache_metrics.sql` — per-request cache status and cacheability columns,
+  plus stats indexes for route and hit-rate aggregates.
 
 Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
 
@@ -77,5 +79,8 @@ Override the host/resolver with `OCTOPOOL_E2E_HOST` / `OCTOPOOL_E2E_RESOLVER`.
 ## Observability
 
 Observability is enabled at full sampling. Every routed request writes an `audit_events`
-row (caller, pool, route key/kind, identity, status, error code, duration); secrets and
-request bodies are never recorded.
+row (caller, pool, route key/kind, identity, status, error code, duration, cache
+hit/miss/bypass status); secrets and request bodies are never recorded.
+
+`GET /v1/pools/<pool>/stats?since=24h` returns pool-wide and caller-specific cache stats.
+The CLI wraps this as `octopool stats`.

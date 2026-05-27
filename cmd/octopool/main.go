@@ -76,6 +76,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return runGH(ctx, args[1:], stdout, stderr)
 	case "health":
 		return runHealth(ctx, args[1:], stdout)
+	case "stats":
+		return runStats(ctx, args[1:], stdout)
 	case "request":
 		return runRequest(ctx, args[1:], stdout)
 	case "admin":
@@ -288,12 +290,20 @@ func runAdminIdentity(ctx context.Context, args []string, stdout io.Writer) erro
 }
 
 func getJSON(ctx context.Context, stdout io.Writer, url string, token string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := getJSONRaw(ctx, url, token)
 	if err != nil {
 		return err
 	}
+	return writeJSONResponse(stdout, resp)
+}
+
+func getJSONRaw(ctx context.Context, url string, token string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("authorization", "Bearer "+token)
-	return do(stdout, req)
+	return httpClient.Do(req)
 }
 
 func postJSON(ctx context.Context, stdout io.Writer, url string, token string, body map[string]any) error {
@@ -461,5 +471,5 @@ func apiURL(base string, path string) string {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: octopool <login|gh|health|request|admin> [flags]")
+	fmt.Fprintln(w, "usage: octopool <login|gh|health|stats|request|admin> [flags]")
 }

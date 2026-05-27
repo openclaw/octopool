@@ -1,0 +1,203 @@
+import { HttpError } from "./http";
+import type { Caller } from "./types";
+
+const MAX_WINDOW_SECONDS = 30 * 24 * 60 * 60;
+
+export type StatsWindow = {
+  label: string;
+  seconds: number;
+};
+
+export type CacheAggregate = {
+  requests: number;
+  errors: number;
+  avg_duration_ms: number | null;
+  cache_hits: number;
+  cache_misses: number;
+  cache_bypass: number;
+  cache_unknown: number;
+  cacheable_requests: number;
+  cache_hit_rate: number | null;
+};
+
+export type AggregateRow = {
+  requests: number;
+  errors: number | null;
+  avg_duration_ms: number | null;
+  cache_hits: number | null;
+  cache_misses: number | null;
+  cache_bypass: number | null;
+  cache_unknown: number | null;
+  cacheable_requests: number | null;
+};
+
+type RouteRow = AggregateRow & {
+  route_kind: string;
+  latest_seen_at: string | null;
+};
+
+export function parseStatsWindow(raw: string | null): StatsWindow {
+  const fallback = { label: "24h", seconds: 24 * 60 * 60 };
+  if (raw === null || raw.trim() === "") {
+    return fallback;
+  }
+  const trimmed = raw.trim().toLowerCase();
+  const match = /^([1-9][0-9]*)(m|h|d)?$/.exec(trimmed);
+  if (match === null) {
+    throw new HttpError(400, "invalid_window", "since must look like 30m, 24h, or 7d");
+  }
+  const amount = Number.parseInt(match[1] ?? "", 10);
+  const unit = match[2] ?? "h";
+  const seconds = amount * unitSeconds(unit);
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_WINDOW_SECONDS) {
+    throw new HttpError(400, "invalid_window", "since must be between 1 minute and 30 days");
+  }
+  return { label: `${amount}${unit}`, seconds };
+}
+
+export async function poolStats(env: Env, pool: string, caller: Caller, window: StatsWindow) {
+  const [poolUsage, callerUsage, routes, callerRoutes, cache] = await Promise.all([
+    aggregateUsage(env, pool, window.seconds),
+    aggregateUsage(env, pool, window.seconds, caller.id),
+    routeUsage(env, pool, window.seconds),
+    routeUsage(env, pool, window.seconds, caller.id),
+    cacheTotals(env, pool),
+  ]);
+  return {
+    generated_at: new Date().toISOString(),
+    pool,
+    window,
+    operator: {
+      github_login: caller.github_login,
+    },
+    pool_usage: poolUsage,
+    caller_usage: callerUsage,
+    routes,
+    caller_routes: callerRoutes,
+    cache,
+  };
+}
+
+async function aggregateUsage(
+  env: Env,
+  pool: string,
+  windowSeconds: number,
+  callerId?: string,
+): Promise<CacheAggregate> {
+  const callerClause = callerId === undefined ? "" : "AND caller_id = ?3";
+  const statement = env.DB.prepare(
+    `SELECT
+       COUNT(*) AS requests,
+       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+       AVG(duration_ms) AS avg_duration_ms,
+       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
+       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
+       SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
+       SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests
+     FROM audit_events
+     WHERE pool_id = ?1
+       AND created_at >= datetime('now', ?2)
+       ${callerClause}`,
+  );
+  const bound =
+    callerId === undefined
+      ? statement.bind(pool, `-${windowSeconds} seconds`)
+      : statement.bind(pool, `-${windowSeconds} seconds`, callerId);
+  const row = await bound.first<AggregateRow>();
+  return normalizeAggregate(row);
+}
+
+async function routeUsage(
+  env: Env,
+  pool: string,
+  windowSeconds: number,
+  callerId?: string,
+): Promise<(CacheAggregate & { route_kind: string; latest_seen_at: string | null })[]> {
+  const callerClause = callerId === undefined ? "" : "AND caller_id = ?3";
+  const statement = env.DB.prepare(
+    `SELECT
+       route_kind,
+       COUNT(*) AS requests,
+       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+       AVG(duration_ms) AS avg_duration_ms,
+       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
+       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
+       SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
+       SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+       MAX(created_at) AS latest_seen_at
+     FROM audit_events
+     WHERE pool_id = ?1
+       AND created_at >= datetime('now', ?2)
+       ${callerClause}
+     GROUP BY route_kind
+     ORDER BY requests DESC, route_kind
+     LIMIT 12`,
+  );
+  const bound =
+    callerId === undefined
+      ? statement.bind(pool, `-${windowSeconds} seconds`)
+      : statement.bind(pool, `-${windowSeconds} seconds`, callerId);
+  const rows = await bound.all<RouteRow>();
+  return rows.results.map((row) => ({
+    route_kind: row.route_kind,
+    latest_seen_at: row.latest_seen_at,
+    ...normalizeAggregate(row),
+  }));
+}
+
+async function cacheTotals(env: Env, pool: string) {
+  const row = await env.DB.prepare(
+    `SELECT
+       COUNT(*) AS total_entries,
+       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
+       SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,
+       COALESCE(SUM(length(body_json)), 0) AS body_bytes
+     FROM github_cache_entries
+     WHERE pool_id = ?1`,
+  )
+    .bind(pool)
+    .first<{
+      total_entries: number;
+      fresh_entries: number | null;
+      expired_entries: number | null;
+      body_bytes: number | null;
+    }>();
+  return {
+    total_entries: row?.total_entries ?? 0,
+    fresh_entries: row?.fresh_entries ?? 0,
+    expired_entries: row?.expired_entries ?? 0,
+    body_bytes: row?.body_bytes ?? 0,
+  };
+}
+
+export function normalizeAggregate(row: AggregateRow | null): CacheAggregate {
+  const cacheHits = row?.cache_hits ?? 0;
+  const cacheMisses = row?.cache_misses ?? 0;
+  const denominator = cacheHits + cacheMisses;
+  return {
+    requests: row?.requests ?? 0,
+    errors: row?.errors ?? 0,
+    avg_duration_ms: row?.avg_duration_ms ?? null,
+    cache_hits: cacheHits,
+    cache_misses: cacheMisses,
+    cache_bypass: row?.cache_bypass ?? 0,
+    cache_unknown: row?.cache_unknown ?? 0,
+    cacheable_requests: row?.cacheable_requests ?? 0,
+    cache_hit_rate: denominator === 0 ? null : cacheHits / denominator,
+  };
+}
+
+function unitSeconds(unit: string): number {
+  switch (unit) {
+    case "m":
+      return 60;
+    case "h":
+      return 60 * 60;
+    case "d":
+      return 24 * 60 * 60;
+    default:
+      throw new HttpError(400, "invalid_window", "since unit must be m, h, or d");
+  }
+}

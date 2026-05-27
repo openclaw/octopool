@@ -82,12 +82,14 @@ export async function insertAudit(
     status: number;
     errorCode?: string;
     durationMs: number;
+    cacheStatus?: "hit" | "miss" | "bypass" | "unknown";
+    cacheable?: boolean;
   },
 ): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO audit_events
-       (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code, duration_ms)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+       (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code, duration_ms, cache_status, cacheable)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`,
   )
     .bind(
       event.requestId,
@@ -99,6 +101,8 @@ export async function insertAudit(
       event.status,
       event.errorCode ?? null,
       event.durationMs,
+      event.cacheStatus ?? "unknown",
+      event.cacheable === true ? 1 : 0,
     )
     .run();
 }

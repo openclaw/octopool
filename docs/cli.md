@@ -104,6 +104,27 @@ passed straight through to the real GitHub CLI, with its exit code preserved.
 Fetches `GET /v1/pools/<pool>/health` using the stored token. Returns identity counts and
 policy version.
 
+### `octopool stats [--pool <id>] [--since 24h] [--json]`
+
+Fetches `GET /v1/pools/<pool>/stats` using the stored token. The default human output
+shows the pool request count, cache hit rate, caller-specific usage, D1 cache entries,
+and top route kinds. `--since` accepts `30m`, `24h`, or `7d` style windows, capped at 30
+days.
+
+```sh
+octopool stats
+# pool: maintainers
+# cache: 82.4% hit (42 hits, 9 misses, 3 bypass)
+# top routes:
+#   pr_view: 31 req, 86.1% hit, 0 errors
+```
+
+Use `--json` for dashboards or scripts that want the raw aggregate:
+
+```sh
+octopool stats --since 7d --json
+```
+
 ### `octopool request --path <p> [--method GET] [--query k=v] [--header k=v]`
 
 Debug/admin raw wrapper over `POST /v1/github/request`. Prints the full relay envelope.

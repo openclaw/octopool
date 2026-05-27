@@ -42,7 +42,9 @@ A hit is only served if:
 - the repo's public-visibility proof still covers the entry (re-checked, with a small
   historical-proof allowance during GitHub outages / secondary-rate-limit — see below).
 
-Hits are still audited, with the cached identity attributed.
+Hits are still audited, with the cached identity attributed. Each audit row records cache
+status as `hit`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and the
+dashboard hit-rate/top-route views.
 
 ## Public-repo guard
 
@@ -70,6 +72,8 @@ private-repo block — a hard `404`/private response always denies.
   key/kind, status, response headers JSON, body JSON, body encoding, source identity,
   created/expires timestamps (migration `0002`).
 - `github_public_repos` — `owner`, `repo`, `checked_at`, `expires_at` (migration `0003`).
+- `audit_events.cache_status` / `audit_events.cacheable` — per-request cache metrics
+  (migration `0005`).
 
 Secret values are never written to the cache. R2 is deferred; current routes are bounded
 enough to live in D1, and large Actions logs skip the cache entirely.
