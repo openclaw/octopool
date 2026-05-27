@@ -53,6 +53,9 @@ route uses a pooled identity or a cache entry, `ensurePublicGitHubRepo` confirms
 is public.
 
 - An unauthenticated `GET /repos/{owner}/{repo}` is made against GitHub.
+- If `OCTOPOOL_GITHUB_ORG_TOKEN` is configured, that server-side token is used for the
+  check to avoid shared unauthenticated GitHub quota; Octopool still requires the
+  response body to say `private: false`.
 - `404` or `private !== false` → `403 repo_not_public`.
 - A successful public check is recorded in `github_public_repos` with a TTL
   (`PUBLIC_REPO_TTL_SECONDS`, default 30s); subsequent requests reuse the fresh proof

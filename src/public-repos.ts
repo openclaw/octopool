@@ -1,3 +1,4 @@
+import { envSecret } from "./auth";
 import { HttpError, parsePositiveInt } from "./http";
 import type { RouteInfo } from "./types";
 
@@ -25,11 +26,7 @@ export async function ensurePublicGitHubRepo(
   const response = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
     {
-      headers: {
-        accept: "application/vnd.github+json",
-        "user-agent": "octopool",
-        "x-github-api-version": "2022-11-28",
-      },
+      headers: publicRepoCheckHeaders(env),
       signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
     },
   );
@@ -67,6 +64,19 @@ export async function ensurePublicGitHubRepo(
   )
     .bind(owner, repo, `+${ttlSeconds} seconds`)
     .run();
+}
+
+function publicRepoCheckHeaders(env: Env): Record<string, string> {
+  const headers: Record<string, string> = {
+    accept: "application/vnd.github+json",
+    "user-agent": "octopool",
+    "x-github-api-version": "2022-11-28",
+  };
+  const token = envSecret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
+  if (token !== undefined && token.trim() !== "") {
+    headers.authorization = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 function publicCheckMayUseHistoricalProof(response: Response): boolean {

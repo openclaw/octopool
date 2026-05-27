@@ -31,7 +31,8 @@ Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
 - `OCTOPOOL_ADMIN_TOKEN` — admin API auth.
 - `GITHUB_OAUTH_CLIENT_SECRET` — website GitHub login.
-- `OCTOPOOL_GITHUB_ORG_TOKEN` — background org-membership verifier.
+- `OCTOPOOL_GITHUB_ORG_TOKEN` — background org-membership verifier and public-repo
+  proof fetcher.
 - `OCTOPOOL_GITHUB_APP_ID` — GitHub App id (for App identities).
 - One secret per identity `secret_ref` — PAT value, or the App private key as **PKCS#8**
   (`BEGIN PRIVATE KEY`) PEM. Keep a copy in 1Password.
