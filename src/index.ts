@@ -12,6 +12,7 @@ import { githubCacheKey, readGitHubCache, shouldUseGitHubCache, writeGitHubCache
 import { dashboardResponse } from "./dashboard";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, rateFromHeaders } from "./github";
+import { queries } from "./generated/sql";
 import {
   errorResponse,
   HttpError,
@@ -176,29 +177,15 @@ async function dashboardData(request: Request, env: Env): Promise<Response> {
 }
 
 async function dashboardUsage(env: Env, pool: string) {
-  const row = await env.DB.prepare(
-    `SELECT
-       COUNT(*) AS requests_24h,
-       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors_24h,
-       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits_24h,
-       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses_24h,
-       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass_24h,
-       AVG(duration_ms) AS avg_duration_ms_24h,
-       MAX(created_at) AS latest_seen_at
-     FROM audit_events
-     WHERE pool_id = ?1
-       AND created_at >= datetime('now', '-24 hours')`,
-  )
-    .bind(pool)
-    .first<{
-      requests_24h: number;
-      errors_24h: number | null;
-      cache_hits_24h: number | null;
-      cache_misses_24h: number | null;
-      cache_bypass_24h: number | null;
-      avg_duration_ms_24h: number | null;
-      latest_seen_at: string | null;
-    }>();
+  const row = await env.DB.prepare(queries.dashboardUsage).bind(pool).first<{
+    requests_24h: number;
+    errors_24h: number | null;
+    cache_hits_24h: number | null;
+    cache_misses_24h: number | null;
+    cache_bypass_24h: number | null;
+    avg_duration_ms_24h: number | null;
+    latest_seen_at: string | null;
+  }>();
   const cacheHits = row?.cache_hits_24h ?? 0;
   const cacheMisses = row?.cache_misses_24h ?? 0;
   const cacheDenominator = cacheHits + cacheMisses;
@@ -215,46 +202,27 @@ async function dashboardUsage(env: Env, pool: string) {
 }
 
 async function dashboardIdentities(env: Env, pool: string) {
-  const rows = await env.DB.prepare(
-    `SELECT id, kind, login, installation_id, status, weight, updated_at
-     FROM identities
-     WHERE pool_id = ?1
-     ORDER BY status = 'active' DESC, weight DESC, id`,
-  )
-    .bind(pool)
-    .all<{
-      id: string;
-      kind: string;
-      login: string;
-      installation_id: number | null;
-      status: string;
-      weight: number;
-      updated_at: string;
-    }>();
+  const rows = await env.DB.prepare(queries.dashboardIdentities).bind(pool).all<{
+    id: string;
+    kind: string;
+    login: string;
+    installation_id: number | null;
+    status: string;
+    weight: number;
+    updated_at: string;
+  }>();
   return rows.results;
 }
 
 async function dashboardCache(env: Env, pool: string) {
-  const row = await env.DB.prepare(
-    `SELECT
-       COUNT(*) AS total_entries,
-       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
-       SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,
-       COALESCE(SUM(length(body_json)), 0) AS body_bytes,
-       MIN(created_at) AS oldest_created_at,
-       MAX(created_at) AS newest_created_at
-     FROM github_cache_entries
-     WHERE pool_id = ?1`,
-  )
-    .bind(pool)
-    .first<{
-      total_entries: number;
-      fresh_entries: number | null;
-      expired_entries: number | null;
-      body_bytes: number | null;
-      oldest_created_at: string | null;
-      newest_created_at: string | null;
-    }>();
+  const row = await env.DB.prepare(queries.dashboardCache).bind(pool).first<{
+    total_entries: number;
+    fresh_entries: number | null;
+    expired_entries: number | null;
+    body_bytes: number | null;
+    oldest_created_at: string | null;
+    newest_created_at: string | null;
+  }>();
   return {
     total_entries: row?.total_entries ?? 0,
     fresh_entries: row?.fresh_entries ?? 0,
@@ -267,25 +235,12 @@ async function dashboardCache(env: Env, pool: string) {
 }
 
 async function dashboardCacheRoutes(env: Env, pool: string) {
-  const rows = await env.DB.prepare(
-    `SELECT
-       route_kind,
-       COUNT(*) AS entries,
-       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
-       MAX(created_at) AS latest_created_at
-     FROM github_cache_entries
-     WHERE pool_id = ?1
-     GROUP BY route_kind
-     ORDER BY entries DESC, route_kind
-     LIMIT 12`,
-  )
-    .bind(pool)
-    .all<{
-      route_kind: string;
-      entries: number;
-      fresh_entries: number | null;
-      latest_created_at: string | null;
-    }>();
+  const rows = await env.DB.prepare(queries.dashboardCacheRoutes).bind(pool).all<{
+    route_kind: string;
+    entries: number;
+    fresh_entries: number | null;
+    latest_created_at: string | null;
+  }>();
   return rows.results.map((row) => ({
     ...row,
     fresh_entries: row.fresh_entries ?? 0,
@@ -293,92 +248,41 @@ async function dashboardCacheRoutes(env: Env, pool: string) {
 }
 
 async function dashboardUsers(env: Env, pool: string) {
-  const rows = await env.DB.prepare(
-    `SELECT
-       callers.id,
-       callers.name,
-       callers.github_login,
-       COUNT(*) AS requests,
-       SUM(CASE WHEN audit_events.status >= 400 THEN 1 ELSE 0 END) AS errors,
-       AVG(audit_events.duration_ms) AS avg_duration_ms,
-       MAX(audit_events.created_at) AS last_seen
-     FROM audit_events
-     JOIN callers ON callers.id = audit_events.caller_id
-     WHERE audit_events.pool_id = ?1
-       AND audit_events.created_at >= datetime('now', '-7 days')
-     GROUP BY callers.id, callers.name, callers.github_login
-     ORDER BY requests DESC, last_seen DESC
-     LIMIT 20`,
-  )
-    .bind(pool)
-    .all<{
-      id: string;
-      name: string;
-      github_login: string;
-      requests: number;
-      errors: number | null;
-      avg_duration_ms: number | null;
-      last_seen: string | null;
-    }>();
+  const rows = await env.DB.prepare(queries.dashboardUsers).bind(pool).all<{
+    id: string;
+    name: string;
+    github_login: string;
+    requests: number;
+    errors: number | null;
+    avg_duration_ms: number | null;
+    last_seen: string | null;
+  }>();
   return rows.results.map((row) => ({ ...row, errors: row.errors ?? 0 }));
 }
 
 async function dashboardRecent(env: Env, pool: string) {
-  const rows = await env.DB.prepare(
-    `SELECT
-       audit_events.created_at,
-       callers.github_login,
-       audit_events.route_kind,
-       audit_events.route_key,
-       audit_events.identity_id,
-       audit_events.status,
-       audit_events.error_code,
-       audit_events.duration_ms
-     FROM audit_events
-     JOIN callers ON callers.id = audit_events.caller_id
-     WHERE audit_events.pool_id = ?1
-     ORDER BY audit_events.created_at DESC
-     LIMIT 20`,
-  )
-    .bind(pool)
-    .all<{
-      created_at: string;
-      github_login: string;
-      route_kind: string;
-      route_key: string;
-      identity_id: string | null;
-      status: number;
-      error_code: string | null;
-      duration_ms: number;
-    }>();
+  const rows = await env.DB.prepare(queries.dashboardRecent).bind(pool).all<{
+    created_at: string;
+    github_login: string;
+    route_kind: string;
+    route_key: string;
+    identity_id: string | null;
+    status: number;
+    error_code: string | null;
+    duration_ms: number;
+  }>();
   return rows.results;
 }
 
 async function dashboardRouteUsage(env: Env, pool: string) {
-  const rows = await env.DB.prepare(
-    `SELECT
-       route_kind,
-       COUNT(*) AS requests,
-       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
-       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
-       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
-       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass
-     FROM audit_events
-     WHERE pool_id = ?1
-       AND created_at >= datetime('now', '-24 hours')
-     GROUP BY route_kind
-     ORDER BY requests DESC
-     LIMIT 12`,
-  )
-    .bind(pool)
-    .all<{
-      route_kind: string;
-      requests: number;
-      errors: number | null;
-      cache_hits: number | null;
-      cache_misses: number | null;
-      cache_bypass: number | null;
-    }>();
+  const rows = await env.DB.prepare(queries.dashboardRouteUsage).bind(pool).all<{
+    route_kind: string;
+    requests: number;
+    errors: number | null;
+    cache_hits: number | null;
+    cache_misses: number | null;
+    cache_bypass: number | null;
+  }>();
   return rows.results.map((row) => {
     const cacheHits = row.cache_hits ?? 0;
     const cacheMisses = row.cache_misses ?? 0;
@@ -395,29 +299,14 @@ async function dashboardRouteUsage(env: Env, pool: string) {
 }
 
 async function dashboardIdentityUsage(env: Env, pool: string) {
-  const rows = await env.DB.prepare(
-    `SELECT identity_id, COUNT(*) AS requests, SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors
-     FROM audit_events
-     WHERE pool_id = ?1
-       AND created_at >= datetime('now', '-24 hours')
-       AND identity_id IS NOT NULL
-     GROUP BY identity_id
-     ORDER BY requests DESC
-     LIMIT 20`,
-  )
+  const rows = await env.DB.prepare(queries.dashboardIdentityUsage)
     .bind(pool)
     .all<{ identity_id: string; requests: number; errors: number | null }>();
   return rows.results.map((row) => ({ ...row, errors: row.errors ?? 0 }));
 }
 
 async function dashboardPublicRepos(env: Env) {
-  const row = await env.DB.prepare(
-    `SELECT
-       COUNT(*) AS total_entries,
-       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
-       MAX(checked_at) AS newest_checked_at
-     FROM github_public_repos`,
-  ).first<{
+  const row = await env.DB.prepare(queries.dashboardPublicRepos).first<{
     total_entries: number;
     fresh_entries: number | null;
     newest_checked_at: string | null;
@@ -672,13 +561,7 @@ async function selectIdentity(
 }
 
 async function poolHealth(env: Env, pool: string): Promise<Response> {
-  const identities = await env.DB.prepare(
-    `SELECT
-       COUNT(*) AS identities_total,
-       SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS identities_healthy
-     FROM identities
-     WHERE pool_id = ?1`,
-  )
+  const identities = await env.DB.prepare(queries.poolHealth)
     .bind(pool)
     .first<{ identities_total: number; identities_healthy: number | null }>();
   if (identities === null) {
@@ -700,32 +583,14 @@ async function loginGitHubCLI(request: Request, env: Env): Promise<Response> {
   const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
   await ensurePool(env, pool);
   const token = newToken("op");
-  const existing = await env.DB.prepare(
-    `SELECT callers.id
-     FROM callers
-     JOIN caller_pools ON caller_pools.caller_id = callers.id
-     WHERE callers.github_user_id = ?1
-       AND callers.org_login = ?2
-       AND callers.status = 'active'
-       AND caller_pools.pool_id = ?3
-     LIMIT 1`,
-  )
+  const existing = await env.DB.prepare(queries.loginExistingCaller)
     .bind(user.id, env.ALLOWED_GITHUB_ORG, pool)
     .first<{ id: string }>();
   if (existing === null) {
     throw new HttpError(403, "caller_not_provisioned", "Caller is not provisioned for this pool");
   }
   await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE callers
-       SET name = ?1,
-           token_hash = ?2,
-           github_login = ?3,
-           github_user_id = ?4,
-           org_verified_at = ?5,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?6`,
-    ).bind(
+    env.DB.prepare(queries.updateCallerLogin).bind(
       user.name ?? user.login,
       await hashToken(token),
       user.login,
@@ -773,10 +638,7 @@ async function createCaller(request: Request, env: Env): Promise<Response> {
   const githubUser = await githubUserByLogin(githubLogin);
   const token = newToken("op");
   const callerId = `caller_${crypto.randomUUID()}`;
-  await env.DB.prepare(
-    `INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')`,
-  )
+  await env.DB.prepare(queries.insertCaller)
     .bind(
       callerId,
       name,
@@ -787,9 +649,7 @@ async function createCaller(request: Request, env: Env): Promise<Response> {
       verifiedAt,
     )
     .run();
-  await env.DB.prepare("INSERT INTO caller_pools (caller_id, pool_id) VALUES (?1, ?2)")
-    .bind(callerId, pool)
-    .run();
+  await env.DB.prepare(queries.insertCallerPool).bind(callerId, pool).run();
   return jsonResponse(
     {
       caller: {
@@ -833,7 +693,7 @@ async function upsertIdentity(request: Request, env: Env, pool: string): Promise
     typeof body.weight === "number" && Number.isInteger(body.weight) ? body.weight : 100;
   const scopes = parseIdentityScopes(body.scopes);
   await ensurePool(env, pool);
-  const existing = await env.DB.prepare("SELECT pool_id, kind FROM identities WHERE id = ?1")
+  const existing = await env.DB.prepare(queries.getIdentityPoolKind)
     .bind(id)
     .first<{ pool_id: string; kind: string }>();
   if (existing !== null && (existing.pool_id !== pool || existing.kind !== kind)) {
@@ -844,23 +704,23 @@ async function upsertIdentity(request: Request, env: Env, pool: string): Promise
     );
   }
   const statements = [
-    env.DB.prepare(
-      `INSERT INTO identities (id, pool_id, kind, login, secret_ref, installation_id, status, weight)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7)
-       ON CONFLICT(id) DO UPDATE SET
-         login = excluded.login,
-         secret_ref = excluded.secret_ref,
-         installation_id = excluded.installation_id,
-         status = 'active',
-         weight = excluded.weight,
-         updated_at = CURRENT_TIMESTAMP`,
-    ).bind(id, pool, kind, login, secretRef, installationId, weight),
-    env.DB.prepare("DELETE FROM identity_scopes WHERE identity_id = ?1").bind(id),
+    env.DB.prepare(queries.upsertIdentity).bind(
+      id,
+      pool,
+      kind,
+      login,
+      secretRef,
+      installationId,
+      weight,
+    ),
+    env.DB.prepare(queries.deleteIdentityScopes).bind(id),
     ...scopes.map((scope) =>
-      env.DB.prepare(
-        `INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)
-         VALUES (?1, ?2, ?3, 'read', ?4)`,
-      ).bind(id, scope.owner, scope.repo, scope.allowPrivate),
+      env.DB.prepare(queries.insertIdentityScope).bind(
+        id,
+        scope.owner,
+        scope.repo,
+        scope.allowPrivate,
+      ),
     ),
   ];
   await env.DB.batch(statements);

@@ -107,6 +107,7 @@ pnpm test         # vitest only
 pnpm deploy       # wrangler deploy
 pnpm e2e          # smoke-test the live deployment
 pnpm docs:site    # build the docs site into dist/docs-site
+pnpm sql:generate # regenerate sqlc-backed query artifacts
 go build ./cmd/octopool
 ```
 

@@ -5,13 +5,15 @@
   "type": "module",
   "scripts": {
     "build": "wrangler types && tsc --noEmit",
-    "check": "pnpm format:check && pnpm lint && pnpm test && pnpm build && go test ./... && go vet ./...",
+    "check": "pnpm sql:check && pnpm format:check && pnpm lint && pnpm test && pnpm build && go test ./... && go vet ./...",
     "deploy": "wrangler deploy",
     "docs:site": "node scripts/build-docs-site.mjs",
     "e2e": "sh test/e2e.sh",
-    "format": "oxfmt . --write && gofmt -w cmd",
+    "format": "oxfmt . --write && gofmt -w cmd internal",
     "format:check": "oxfmt . --check",
     "lint": "oxlint --deny-warnings",
+    "sql:check": "pnpm sql:generate && git diff --exit-code -- internal/dbquery src/generated/sql.ts",
+    "sql:generate": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate && node scripts/generate-sql.mjs && oxfmt src/generated/sql.ts --write",
     "test": "vitest run",
     "types": "wrangler types"
   },

@@ -1,4 +1,5 @@
 import { HttpError, requestBearer } from "./http";
+import { queries } from "./generated/sql";
 import type { Caller } from "./types";
 
 type CallerRow = {
@@ -16,15 +17,7 @@ export async function authenticateCaller(
 ): Promise<Caller> {
   const token = requestBearer(request);
   const tokenHash = await hashToken(token);
-  const row = await env.DB.prepare(
-    `SELECT callers.id, callers.name, callers.github_login, callers.org_login, callers.org_verified_at
-     FROM callers
-     JOIN caller_pools ON caller_pools.caller_id = callers.id
-     WHERE callers.token_hash = ?1
-       AND callers.status = 'active'
-       AND caller_pools.pool_id = ?2
-     LIMIT 1`,
-  )
+  const row = await env.DB.prepare(queries.authenticateCaller)
     .bind(tokenHash, pool)
     .first<CallerRow>();
   if (row === null) {
@@ -205,11 +198,7 @@ export async function ensureFreshOrgMembership(env: Env, caller: CallerRow): Pro
     return;
   }
   const now = await verifyGitHubOrgMember(env, caller.github_login);
-  await env.DB.prepare(
-    "UPDATE callers SET org_verified_at = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
-  )
-    .bind(now, caller.id)
-    .run();
+  await env.DB.prepare(queries.updateCallerOrgVerifiedAt).bind(now, caller.id).run();
 }
 
 async function constantTimeEqual(left: string, right: string): Promise<boolean> {

@@ -1,4 +1,5 @@
 import { hashToken } from "./auth";
+import { queries } from "./generated/sql";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
 type CacheRow = {
@@ -44,14 +45,7 @@ export async function readGitHubCache(
   env: Env,
   cacheKey: string,
 ): Promise<CachedGitHubResponse | undefined> {
-  const row = await env.DB.prepare(
-    `SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at
-     FROM github_cache_entries
-     WHERE cache_key = ?1
-       AND expires_at > CURRENT_TIMESTAMP`,
-  )
-    .bind(cacheKey)
-    .first<CacheRow>();
+  const row = await env.DB.prepare(queries.readGitHubCache).bind(cacheKey).first<CacheRow>();
   if (row === null) {
     return undefined;
   }
@@ -80,21 +74,7 @@ export async function writeGitHubCache(
   }
   const ttlSeconds = cacheTTLSeconds(route);
   const expiresAt = sqliteTimestamp(new Date(Date.now() + ttlSeconds * 1000));
-  await env.DB.prepare(
-    `INSERT INTO github_cache_entries
-       (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,
-        status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, expires_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-     ON CONFLICT(cache_key) DO UPDATE SET
-       status = excluded.status,
-       response_headers_json = excluded.response_headers_json,
-       body_json = excluded.body_json,
-       body_encoding = excluded.body_encoding,
-       identity_id = excluded.identity_id,
-       identity_kind = excluded.identity_kind,
-       created_at = CURRENT_TIMESTAMP,
-       expires_at = excluded.expires_at`,
-  )
+  await env.DB.prepare(queries.writeGitHubCache)
     .bind(
       cacheKey,
       request.pool,

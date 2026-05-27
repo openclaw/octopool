@@ -66,6 +66,17 @@ pnpm e2e       # smoke-test the live deployment
 `pnpm check` is the full gate (TypeScript + Go). The Go CLI also builds/tests with
 `go build ./cmd/octopool` and `go test ./...`.
 
+## SQL catalog
+
+Runtime SQL lives in `sql/queries/*.sql` with sqlc annotations. `sqlc.yaml` points sqlc at
+the D1 migrations plus the Durable Object SQLite schema, and `pnpm sql:generate` updates:
+
+- `internal/dbquery/` — sqlc's generated Go package, used as a parser/typecheck artifact.
+- `src/generated/sql.ts` — generated D1/Durable Object query constants used by the Worker.
+
+Run `pnpm sql:generate` after changing query files. `pnpm check` runs `pnpm sql:check`
+first and fails if generated SQL artifacts are stale.
+
 ## Smoke test
 
 `test/e2e.sh` resolves `octopool.dev`, then asserts:

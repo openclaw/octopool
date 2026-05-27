@@ -6,6 +6,7 @@ import {
   newToken,
   verifyGitHubOrgMember,
 } from "./auth";
+import { queries } from "./generated/sql";
 import { HttpError, jsonResponse } from "./http";
 import type { WebSession } from "./types";
 
@@ -21,10 +22,7 @@ export async function startGitHubWebLogin(env: Env, url: URL): Promise<Response>
   }
   const state = newToken("state");
   const next = safeNextPath(url.searchParams.get("next"));
-  await env.DB.prepare(
-    `INSERT INTO oauth_states (state_hash, next_path, expires_at)
-     VALUES (?1, ?2, datetime('now', ?3))`,
-  )
+  await env.DB.prepare(queries.insertOAuthState)
     .bind(await hashToken(state), next, `+${STATE_TTL_SECONDS} seconds`)
     .run();
 
@@ -66,20 +64,10 @@ export async function finishGitHubWebLogin(
   }
 
   const stateHash = await hashToken(state);
-  const stateRow = await env.DB.prepare(
-    `SELECT next_path
-     FROM oauth_states
-     WHERE state_hash = ?1
-       AND expires_at > CURRENT_TIMESTAMP
-     LIMIT 1`,
-  )
+  const stateRow = await env.DB.prepare(queries.getOAuthState)
     .bind(stateHash)
     .first<{ next_path: string }>();
-  await env.DB.prepare(
-    "DELETE FROM oauth_states WHERE state_hash = ?1 OR expires_at <= CURRENT_TIMESTAMP",
-  )
-    .bind(stateHash)
-    .run();
+  await env.DB.prepare(queries.deleteOAuthStateAndExpired).bind(stateHash).run();
   if (stateRow === null) {
     throw new HttpError(401, "github_state_expired", "GitHub login state expired");
   }
@@ -88,16 +76,7 @@ export async function finishGitHubWebLogin(
   const user = await githubUserFromToken(githubToken);
   const verifiedAt = await verifyGitHubOrgMember(env, user.login);
   const pool = loginPool(env);
-  const caller = await env.DB.prepare(
-    `SELECT callers.id, callers.dashboard_role
-     FROM callers
-     JOIN caller_pools ON caller_pools.caller_id = callers.id
-     WHERE callers.github_user_id = ?1
-       AND callers.org_login = ?2
-       AND callers.status = 'active'
-       AND caller_pools.pool_id = ?3
-     LIMIT 1`,
-  )
+  const caller = await env.DB.prepare(queries.webLoginCaller)
     .bind(user.id, env.ALLOWED_GITHUB_ORG, pool)
     .first<{ id: string; dashboard_role: "none" | "admin" }>();
   if (caller === null) {
@@ -107,19 +86,14 @@ export async function finishGitHubWebLogin(
   const session = newToken("sess");
   const expires = sqliteTimestamp(Date.now() + SESSION_TTL_SECONDS * 1000);
   await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE callers
-       SET name = ?1,
-           github_login = ?2,
-           github_user_id = ?3,
-           org_verified_at = ?4,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?5`,
-    ).bind(user.name ?? user.login, user.login, user.id, verifiedAt, caller.id),
-    env.DB.prepare(
-      `INSERT INTO web_sessions (session_hash, caller_id, expires_at)
-       VALUES (?1, ?2, ?3)`,
-    ).bind(await hashToken(session), caller.id, expires),
+    env.DB.prepare(queries.updateCallerWebLogin).bind(
+      user.name ?? user.login,
+      user.login,
+      user.id,
+      verifiedAt,
+      caller.id,
+    ),
+    env.DB.prepare(queries.insertWebSession).bind(await hashToken(session), caller.id, expires),
   ]);
 
   return redirectWithCookies(safeNextPath(stateRow.next_path), [
@@ -137,7 +111,7 @@ export async function finishGitHubWebLogin(
 export async function logoutWebSession(request: Request, env: Env): Promise<Response> {
   const session = readCookie(request, SESSION_COOKIE);
   if (session !== undefined) {
-    await env.DB.prepare("DELETE FROM web_sessions WHERE session_hash = ?1")
+    await env.DB.prepare(queries.deleteWebSession)
       .bind(await hashToken(session))
       .run();
   }
@@ -153,40 +127,18 @@ export async function authenticateWebSession(
   if (session === undefined || session === "") {
     throw new HttpError(401, "missing_web_session", "Missing web session");
   }
-  const row = await env.DB.prepare(
-    `SELECT
-       callers.id,
-       callers.name,
-       callers.github_login,
-       callers.org_login,
-       callers.org_verified_at,
-       callers.dashboard_role,
-       web_sessions.expires_at
-     FROM web_sessions
-     JOIN callers ON callers.id = web_sessions.caller_id
-     WHERE web_sessions.session_hash = ?1
-       AND web_sessions.expires_at > CURRENT_TIMESTAMP
-       AND callers.status = 'active'
-       AND callers.org_login = ?2
-     LIMIT 1`,
-  )
+  const row = await env.DB.prepare(queries.getWebSession)
     .bind(await hashToken(session), env.ALLOWED_GITHUB_ORG)
     .first<WebSession>();
   if (row === null) {
     throw new HttpError(401, "invalid_web_session", "Invalid web session");
   }
   await ensureFreshOrgMembership(env, row);
-  const grant = await env.DB.prepare(
-    "SELECT 1 FROM caller_pools WHERE caller_id = ?1 AND pool_id = ?2 LIMIT 1",
-  )
-    .bind(row.id, pool)
-    .first();
+  const grant = await env.DB.prepare(queries.getCallerPoolGrant).bind(row.id, pool).first();
   if (grant === null) {
     throw new HttpError(403, "pool_denied", "Web session is not granted for this pool");
   }
-  await env.DB.prepare(
-    "UPDATE web_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE session_hash = ?1",
-  )
+  await env.DB.prepare(queries.touchWebSession)
     .bind(await hashToken(session))
     .run();
   return row;

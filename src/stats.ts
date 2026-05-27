@@ -1,4 +1,5 @@
 import { HttpError } from "./http";
+import { queries } from "./generated/sql";
 import type { Caller } from "./types";
 
 const MAX_WINDOW_SECONDS = 30 * 24 * 60 * 60;
@@ -84,21 +85,8 @@ async function aggregateUsage(
   windowSeconds: number,
   callerId?: string,
 ): Promise<CacheAggregate> {
-  const callerClause = callerId === undefined ? "" : "AND caller_id = ?3";
   const statement = env.DB.prepare(
-    `SELECT
-       COUNT(*) AS requests,
-       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
-       AVG(duration_ms) AS avg_duration_ms,
-       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
-       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
-       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
-       SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
-       SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests
-     FROM audit_events
-     WHERE pool_id = ?1
-       AND created_at >= datetime('now', ?2)
-       ${callerClause}`,
+    callerId === undefined ? queries.statsAggregatePool : queries.statsAggregateCaller,
   );
   const bound =
     callerId === undefined
@@ -114,26 +102,8 @@ async function routeUsage(
   windowSeconds: number,
   callerId?: string,
 ): Promise<(CacheAggregate & { route_kind: string; latest_seen_at: string | null })[]> {
-  const callerClause = callerId === undefined ? "" : "AND caller_id = ?3";
   const statement = env.DB.prepare(
-    `SELECT
-       route_kind,
-       COUNT(*) AS requests,
-       SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
-       AVG(duration_ms) AS avg_duration_ms,
-       SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
-       SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
-       SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
-       SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
-       SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
-       MAX(created_at) AS latest_seen_at
-     FROM audit_events
-     WHERE pool_id = ?1
-       AND created_at >= datetime('now', ?2)
-       ${callerClause}
-     GROUP BY route_kind
-     ORDER BY requests DESC, route_kind
-     LIMIT 12`,
+    callerId === undefined ? queries.statsRoutesPool : queries.statsRoutesCaller,
   );
   const bound =
     callerId === undefined
@@ -148,22 +118,12 @@ async function routeUsage(
 }
 
 async function cacheTotals(env: Env, pool: string) {
-  const row = await env.DB.prepare(
-    `SELECT
-       COUNT(*) AS total_entries,
-       SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
-       SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,
-       COALESCE(SUM(length(body_json)), 0) AS body_bytes
-     FROM github_cache_entries
-     WHERE pool_id = ?1`,
-  )
-    .bind(pool)
-    .first<{
-      total_entries: number;
-      fresh_entries: number | null;
-      expired_entries: number | null;
-      body_bytes: number | null;
-    }>();
+  const row = await env.DB.prepare(queries.statsCacheTotals).bind(pool).first<{
+    total_entries: number;
+    fresh_entries: number | null;
+    expired_entries: number | null;
+    body_bytes: number | null;
+  }>();
   return {
     total_entries: row?.total_entries ?? 0,
     fresh_entries: row?.fresh_entries ?? 0,

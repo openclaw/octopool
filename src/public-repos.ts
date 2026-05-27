@@ -1,4 +1,5 @@
 import { envSecret } from "./auth";
+import { queries } from "./generated/sql";
 import { HttpError, parsePositiveInt } from "./http";
 import type { RouteInfo } from "./types";
 
@@ -55,13 +56,7 @@ export async function ensurePublicGitHubRepo(
     (env as unknown as Record<string, string | undefined>).PUBLIC_REPO_TTL_SECONDS,
     30,
   );
-  await env.DB.prepare(
-    `INSERT INTO github_public_repos (owner, repo, checked_at, expires_at)
-     VALUES (?1, ?2, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?3))
-     ON CONFLICT(owner, repo) DO UPDATE SET
-       checked_at = excluded.checked_at,
-       expires_at = excluded.expires_at`,
-  )
+  await env.DB.prepare(queries.upsertPublicRepoProof)
     .bind(owner, repo, `+${ttlSeconds} seconds`)
     .run();
 }
@@ -89,14 +84,7 @@ async function cachedPublicGitHubRepoIsFresh(
   owner: string,
   repo: string,
 ): Promise<boolean> {
-  const row = await env.DB.prepare(
-    `SELECT 1
-     FROM github_public_repos
-     WHERE lower(owner) = ?1
-       AND lower(repo) = ?2
-       AND expires_at > CURRENT_TIMESTAMP
-     LIMIT 1`,
-  )
+  const row = await env.DB.prepare(queries.freshPublicRepoProof)
     .bind(owner, repo)
     .first<{ "1": number }>();
   return row !== null;
@@ -111,16 +99,10 @@ async function cachedPublicGitHubRepoCovers(
   if (route.owner === undefined || route.repo === undefined) {
     return true;
   }
-  const freshness = requireFresh ? "AND expires_at > CURRENT_TIMESTAMP" : "";
-  const row = await env.DB.prepare(
-    `SELECT 1
-     FROM github_public_repos
-     WHERE lower(owner) = ?1
-       AND lower(repo) = ?2
-       AND checked_at >= datetime(?3, '-5 seconds')
-       ${freshness}
-     LIMIT 1`,
-  )
+  const query = requireFresh
+    ? queries.freshCoveringPublicRepoProof
+    : queries.coveringPublicRepoProof;
+  const row = await env.DB.prepare(query)
     .bind(route.owner.toLowerCase(), route.repo.toLowerCase(), cacheCreatedAt)
     .first<{ "1": number }>();
   return row !== null;

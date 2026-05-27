@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { queries } from "./generated/sql";
 import type { CoordinatorSnapshot, RecordResult, SelectionRequest, SelectionResult } from "./types";
 
 type LeaseRow = {
@@ -15,28 +16,9 @@ export class PoolCoordinator extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.sql.exec(`
-        CREATE TABLE IF NOT EXISTS leases (
-          route_key TEXT PRIMARY KEY,
-          identity_id TEXT NOT NULL,
-          expires_at INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS rate_states (
-          identity_id TEXT NOT NULL,
-          resource TEXT NOT NULL,
-          remaining INTEGER NOT NULL,
-          reset_at INTEGER NOT NULL,
-          PRIMARY KEY (identity_id, resource)
-        );
-        CREATE TABLE IF NOT EXISTS cooldowns (
-          identity_id TEXT NOT NULL,
-          route_key TEXT NOT NULL,
-          status INTEGER NOT NULL,
-          reason TEXT NOT NULL,
-          expires_at INTEGER NOT NULL,
-          PRIMARY KEY (identity_id, route_key)
-        );
-      `);
+      this.ctx.storage.sql.exec(queries.createLeasesTable);
+      this.ctx.storage.sql.exec(queries.createRateStatesTable);
+      this.ctx.storage.sql.exec(queries.createCooldownsTable);
     });
   }
 
@@ -44,10 +26,7 @@ export class PoolCoordinator extends DurableObject<Env> {
     const now = Date.now();
     const candidateIds = new Set(request.candidates.map((candidate) => candidate.id));
     const lease = this.ctx.storage.sql
-      .exec<LeaseRow>(
-        "SELECT identity_id, expires_at FROM leases WHERE route_key = ?",
-        request.routeKey,
-      )
+      .exec<LeaseRow>(queries.getLease, request.routeKey)
       .toArray()[0];
     if (
       lease !== undefined &&
@@ -70,11 +49,7 @@ export class PoolCoordinator extends DurableObject<Env> {
         continue;
       }
       const rate = this.ctx.storage.sql
-        .exec<RateRow>(
-          "SELECT remaining, reset_at FROM rate_states WHERE identity_id = ? AND resource = ?",
-          candidate.id,
-          request.resource,
-        )
+        .exec<RateRow>(queries.getRateState, candidate.id, request.resource)
         .toArray()[0];
       if (rate !== undefined && rate.reset_at > now && rate.remaining <= 0) {
         continue;
@@ -91,14 +66,7 @@ export class PoolCoordinator extends DurableObject<Env> {
       throw new Error("all_identity_candidates_cooling_down");
     }
     const ttlMs = 10_000;
-    this.ctx.storage.sql.exec(
-      `INSERT INTO leases (route_key, identity_id, expires_at)
-       VALUES (?1, ?2, ?3)
-       ON CONFLICT(route_key) DO UPDATE SET identity_id = excluded.identity_id, expires_at = excluded.expires_at`,
-      request.routeKey,
-      best.id,
-      now + ttlMs,
-    );
+    this.ctx.storage.sql.exec(queries.upsertLease, request.routeKey, best.id, now + ttlMs);
     return {
       identityId: best.id,
       reason: bestScore === Number.NEGATIVE_INFINITY ? "fallback" : "highest_remaining",
@@ -109,10 +77,7 @@ export class PoolCoordinator extends DurableObject<Env> {
   recordResult(result: RecordResult): void {
     if (result.rate?.remaining !== undefined && result.rate.resetAt !== undefined) {
       this.ctx.storage.sql.exec(
-        `INSERT INTO rate_states (identity_id, resource, remaining, reset_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(identity_id, resource)
-         DO UPDATE SET remaining = excluded.remaining, reset_at = excluded.reset_at`,
+        queries.upsertRateState,
         result.identityId,
         result.resource,
         result.rate.remaining,
@@ -122,10 +87,7 @@ export class PoolCoordinator extends DurableObject<Env> {
     if (result.status === 401 || result.status === 403 || result.status === 429) {
       const cooldown = classifyCooldown(result);
       this.ctx.storage.sql.exec(
-        `INSERT INTO cooldowns (identity_id, route_key, status, reason, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(identity_id, route_key)
-         DO UPDATE SET status = excluded.status, reason = excluded.reason, expires_at = excluded.expires_at`,
+        queries.upsertCooldown,
         result.identityId,
         cooldown.key,
         result.status,
@@ -138,42 +100,20 @@ export class PoolCoordinator extends DurableObject<Env> {
   snapshot(): CoordinatorSnapshot {
     const now = Date.now();
     const rates = this.ctx.storage.sql
-      .exec<CoordinatorSnapshot["rates"][number]>(
-        `SELECT identity_id, resource, remaining, reset_at
-         FROM rate_states
-         WHERE reset_at > ?
-         ORDER BY identity_id, resource`,
-        now,
-      )
+      .exec<CoordinatorSnapshot["rates"][number]>(queries.coordinatorRates, now)
       .toArray();
     const cooldowns = this.ctx.storage.sql
-      .exec<CoordinatorSnapshot["cooldowns"][number]>(
-        `SELECT identity_id, route_key, status, reason, expires_at
-         FROM cooldowns
-         WHERE expires_at > ?
-         ORDER BY expires_at`,
-        now,
-      )
+      .exec<CoordinatorSnapshot["cooldowns"][number]>(queries.coordinatorCooldowns, now)
       .toArray();
     const leases = this.ctx.storage.sql
-      .exec<CoordinatorSnapshot["leases"][number]>(
-        `SELECT route_key, identity_id, expires_at
-         FROM leases
-         WHERE expires_at > ?
-         ORDER BY expires_at`,
-        now,
-      )
+      .exec<CoordinatorSnapshot["leases"][number]>(queries.coordinatorLeases, now)
       .toArray();
     return { rates, cooldowns, leases };
   }
 
   private cooldownExpiresAt(identityId: string, routeKey: string, now: number): number | undefined {
     const cooldown = this.ctx.storage.sql
-      .exec<{ expires_at: number }>(
-        "SELECT expires_at FROM cooldowns WHERE identity_id = ? AND route_key = ?",
-        identityId,
-        routeKey,
-      )
+      .exec<{ expires_at: number }>(queries.getCooldownExpiresAt, identityId, routeKey)
       .toArray()[0];
     return cooldown !== undefined && cooldown.expires_at > now ? cooldown.expires_at : undefined;
   }
@@ -188,11 +128,7 @@ export class PoolCoordinator extends DurableObject<Env> {
 
   private isQuotaExhausted(identityId: string, resource: string, now: number): boolean {
     const rate = this.ctx.storage.sql
-      .exec<RateRow>(
-        "SELECT remaining, reset_at FROM rate_states WHERE identity_id = ? AND resource = ?",
-        identityId,
-        resource,
-      )
+      .exec<RateRow>(queries.getRateState, identityId, resource)
       .toArray()[0];
     return rate !== undefined && rate.reset_at > now && rate.remaining <= 0;
   }
