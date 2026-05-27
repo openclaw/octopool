@@ -33,7 +33,7 @@ import {
   webMeResponse,
 } from "./web-session";
 import { shouldUseWebError, webErrorResponse } from "./web-error";
-import type { Identity, SelectionRequest } from "./types";
+import type { GitHubRelayResponse, Identity, RouteInfo, SelectionRequest } from "./types";
 
 export { PoolCoordinator };
 
@@ -384,6 +384,69 @@ async function dashboardPublicRepos(env: Env) {
   };
 }
 
+function sanitizeGitHubResponse(
+  route: RouteInfo,
+  response: GitHubRelayResponse,
+): GitHubRelayResponse {
+  if (route.kind !== "repo_view" || !isRecord(response.body)) {
+    return response;
+  }
+  const allowed = new Set([
+    "id",
+    "node_id",
+    "name",
+    "full_name",
+    "owner",
+    "private",
+    "html_url",
+    "description",
+    "fork",
+    "url",
+    "homepage",
+    "language",
+    "forks_count",
+    "stargazers_count",
+    "watchers_count",
+    "size",
+    "default_branch",
+    "open_issues_count",
+    "is_template",
+    "topics",
+    "visibility",
+    "archived",
+    "disabled",
+    "license",
+    "pushed_at",
+    "created_at",
+    "updated_at",
+    "clone_url",
+    "ssh_url",
+    "git_url",
+    "svn_url",
+    "mirror_url",
+    "has_issues",
+    "has_projects",
+    "has_downloads",
+    "has_wiki",
+    "has_pages",
+    "has_discussions",
+    "network_count",
+    "subscribers_count",
+    "organization",
+  ]);
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(response.body)) {
+    if (allowed.has(key)) {
+      body[key] = value;
+    }
+  }
+  return { ...response, body };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 async function relayGitHub(
   request: Request,
   env: Env,
@@ -463,7 +526,8 @@ async function relayGitHub(
     const selection = await selectIdentity(coordinator, selectionRequest);
     identity = findIdentity(identities, selection.identityId);
     await ensurePublicGitHubRepo(env, route);
-    const github = await callGitHub(env, identity, relayRequest, route);
+    const rawGitHub = await callGitHub(env, identity, relayRequest, route);
+    const github = sanitizeGitHubResponse(route, rawGitHub);
     const rate = rateFromHeaders(github.headers);
     ctx.waitUntil(
       Promise.all([

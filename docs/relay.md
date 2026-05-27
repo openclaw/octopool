@@ -69,6 +69,10 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 - `headers` are filtered to a safe allowlist (content negotiation, caching,
   rate-limit, request id). Authorization and cookies never leave the Worker.
 - `body_encoding` is `json`, `text`, or `base64`. Binary responses are base64-encoded.
+- `repo_view` returns a fixed public metadata subset before caching so token-specific
+  repository fields such as identity permissions are not shared.
+- Release routes are not relayed because authenticated draft visibility changes
+  list, lookup, and not-found semantics.
 - `cache` is `hit`, `miss`, or `bypass` (route not cacheable).
 - `lease_reason` is `sticky`, `highest_remaining`, or `fallback` — see
   [Identities & routing](identities.md).
@@ -79,11 +83,14 @@ Routes are classified in `src/policy.ts`. Only the following read-only shapes ar
 enabled; anything else returns `403 route_denied`:
 
 - `pr_view`, `pr_files`, `pr_review_comments`, `pr_reviews`
-- `commit_check_runs`, `commit_status`
+- `pr_list`
+- `commit_list`, `commit_view`, `commit_check_runs`, `commit_status`
 - `run_list`, `run_view`, `run_jobs`, `run_artifacts`
 - `job_view`, `job_logs`, `check_run_annotations`
-- `issue_view`, `issue_comments`, `issue_timeline`
+- `issue_list`, `issue_view`, `issue_comments`, `issue_timeline`
 - `branch_view`
+- `repo_view`
+- `workflow_list`, `workflow_view`
 - `rate_limit`
 
 `job_logs` is a large-payload, log-class route: it follows GitHub's signed redirect to

@@ -18,7 +18,11 @@ type RouteRule = {
 };
 
 const rules: RouteRule[] = [
+  route(`/repos/${owner}/${repo}`, "repo_view", "core"),
+  route(`/repos/${owner}/${repo}/commits`, "commit_list", "core"),
+  route(`/repos/${owner}/${repo}/commits/${sha}`, "commit_view", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}`, "pr_view", "core"),
+  route(`/repos/${owner}/${repo}/pulls`, "pr_list", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/files`, "pr_files", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/comments`, "pr_review_comments", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/reviews`, "pr_reviews", "core"),
@@ -35,9 +39,17 @@ const rules: RouteRule[] = [
   }),
   route(`/repos/${owner}/${repo}/check-runs/${id}/annotations`, "check_run_annotations", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}`, "issue_view", "core"),
+  route(`/repos/${owner}/${repo}/issues`, "issue_list", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/comments`, "issue_comments", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/timeline`, "issue_timeline", "core"),
   route(`/repos/${owner}/${repo}/branches/(?<branch>[^/?#]+)`, "branch_view", "core"),
+  route(`/repos/${owner}/${repo}/actions/workflows`, "workflow_list", "core"),
+  route(`/repos/${owner}/${repo}/actions/workflows/(?<workflow>[^/?#]+)`, "workflow_view", "core"),
+  route(
+    `/repos/${owner}/${repo}/actions/workflows/(?<workflow>[^/?#]+)/runs`,
+    "workflow_run_list",
+    "core",
+  ),
   route("/rate_limit", "rate_limit", "core"),
 ];
 
@@ -173,7 +185,9 @@ export function normalizeRouteKey(method: string, path: string): string {
     .replace(/\/commits\/[0-9A-Fa-f]{7,64}/g, "/commits/:sha")
     .replace(/\/actions\/runs\/[0-9]+/g, "/actions/runs/:id")
     .replace(/\/actions\/jobs\/[0-9]+/g, "/actions/jobs/:id")
-    .replace(/\/check-runs\/[0-9]+/g, "/check-runs/:id")}`;
+    .replace(/\/check-runs\/[0-9]+/g, "/check-runs/:id")
+    .replace(/\/actions\/workflows\/[^/]+\/runs/g, "/actions/workflows/:workflow/runs")
+    .replace(/\/actions\/workflows\/[^/]+/g, "/actions/workflows/:workflow")}`;
 }
 
 function requireText(value: unknown, field: string): string {

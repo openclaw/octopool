@@ -117,11 +117,22 @@ export async function writeGitHubCache(
 
 function cacheTTLSeconds(route: RouteInfo): number {
   switch (route.kind) {
+    case "repo_view":
+    case "workflow_list":
+    case "workflow_view":
+      return 300;
     case "pr_view":
+    case "pr_list":
     case "issue_view":
+    case "issue_list":
     case "branch_view":
       return 30;
+    case "commit_list":
+    case "commit_view":
+      return 120;
     case "run_view":
+    case "run_list":
+    case "workflow_run_list":
     case "run_jobs":
     case "commit_check_runs":
     case "commit_status":

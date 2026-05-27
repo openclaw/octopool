@@ -17,7 +17,11 @@ import (
 )
 
 var relayPathPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+/(files|comments|reviews)$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}/(check-runs|status)$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/runs$`),
@@ -27,8 +31,12 @@ var relayPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/jobs/[0-9]+/logs$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/check-runs/[0-9]+/annotations$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+/(comments|timeline)$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/branches/[^/?#]+$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows/[^/?#]+$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows/[^/?#]+/runs$`),
 	regexp.MustCompile(`^/rate_limit$`),
 }
 
@@ -42,9 +50,17 @@ type relayEnvelope struct {
 func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stdout, "usage: octopool gh api <GET path> [--jq expr]")
+		fmt.Fprintln(stdout, "       octopool gh pr|issue|run|repo|release ...")
 		return nil
 	}
 	if args[0] != "api" {
+		handled, err := runGHTopLevel(ctx, args, stdout)
+		if err != nil {
+			return err
+		}
+		if handled {
+			return nil
+		}
 		return execRealGH(ctx, args, stdout, stderr)
 	}
 	request, fallback, err := parseGHAPIArgs(args[1:])
@@ -60,30 +76,52 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 	if request.jq != "" && !jqAvailable() {
 		return execRealGH(ctx, args, stdout, stderr)
 	}
-	auth, err := loadAuth()
+	client, err := newGHRelayClient()
 	if err != nil {
 		return err
+	}
+	envelope, err := client.do(ctx, request)
+	if err != nil {
+		return err
+	}
+	return writeGHBody(ctx, stdout, envelope, request.jq)
+}
+
+type ghRelayClient struct {
+	token   string
+	baseURL string
+	pool    string
+}
+
+func newGHRelayClient() (ghRelayClient, error) {
+	auth, err := loadAuth()
+	if err != nil {
+		return ghRelayClient{}, err
 	}
 	token := strings.TrimSpace(os.Getenv("OCTOPOOL_TOKEN"))
 	if token == "" {
 		token = auth.Token
 	}
 	if token == "" {
-		return errors.New("not logged in; run: octopool login")
+		return ghRelayClient{}, errors.New("not logged in; run: octopool login")
 	}
 	baseURL := envDefault("OCTOPOOL_URL", auth.URL)
 	if baseURL == "" {
 		baseURL = defaultURL
 	}
 	if err := validateAuthURLForRequest(auth, baseURL, "OCTOPOOL_TOKEN"); err != nil {
-		return err
+		return ghRelayClient{}, err
 	}
 	pool := envDefault("OCTOPOOL_POOL", auth.Pool)
 	if pool == "" {
 		pool = "maintainers"
 	}
+	return ghRelayClient{token: token, baseURL: baseURL, pool: pool}, nil
+}
+
+func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
 	body := map[string]any{
-		"pool":   pool,
+		"pool":   client.pool,
 		"method": request.method,
 		"path":   request.path,
 	}
@@ -93,18 +131,18 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 	if len(request.headers) > 0 {
 		body["headers"] = request.headers
 	}
-	out, status, err := doRaw(ctx, apiURL(baseURL, "/v1/github/request"), token, body)
+	out, status, err := doRaw(ctx, apiURL(client.baseURL, "/v1/github/request"), client.token, body)
 	if err != nil {
-		return err
+		return relayEnvelope{}, err
 	}
 	if status >= 400 {
-		return fmt.Errorf("octopool request failed: %s", strings.TrimSpace(string(out)))
+		return relayEnvelope{}, fmt.Errorf("octopool request failed: %s", strings.TrimSpace(string(out)))
 	}
 	var envelope relayEnvelope
 	if err := json.Unmarshal(out, &envelope); err != nil {
-		return err
+		return relayEnvelope{}, err
 	}
-	return writeGHBody(ctx, stdout, envelope, request.jq)
+	return envelope, nil
 }
 
 type ghAPIRequest struct {

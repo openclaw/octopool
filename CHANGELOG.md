@@ -6,7 +6,13 @@
 
 - Document Homebrew installation from `openclaw/tap`.
 - Reposition README and primary docs around Octopool as a standalone GitHub relay.
+- Document top-level `gh pr`, `gh issue`, `gh run`, and `gh repo` shim coverage.
 - Remove the Gitcrawl migration page from Octopool docs; the migration notice belongs in Gitcrawl.
+
+### Features
+
+- Expand the relay allowlist to public repo metadata, PR and issue lists, commits, and workflow metadata.
+- Add cached top-level CLI translations for common read-only `gh pr`, `gh issue`, `gh run`, and `gh repo` commands, including conservative `--json` and `--jq` support.
 
 ### Fixes
 

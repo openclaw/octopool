@@ -59,6 +59,31 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 # 85341
 ```
 
+### `octopool gh pr|issue|run|repo ...`
+
+The shim also handles common top-level GitHub CLI read commands by translating them to
+safe relay routes:
+
+```sh
+octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
+octopool gh pr list -R openclaw/openclaw --state open --limit 20 --json number,title,url
+octopool gh pr diff 85341 -R openclaw/openclaw --patch
+octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket,link,workflow
+octopool gh issue view 80490 -R openclaw/openclaw --json number,title,state,url
+octopool gh issue list -R openclaw/openclaw --state open --label bug --limit 20 --json number,title,url
+octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,workflowName,status,conclusion,url
+octopool gh run view 26360397003 -R openclaw/openclaw --json databaseId,workflowName,status,conclusion,url
+octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
+```
+
+Top-level commands are relayed only for machine-readable `--json` shapes; normal human
+formatted commands stay on the real `gh`. Supported `--json` fields are intentionally
+conservative. Common `gh` field names are mapped where the REST API uses different
+names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
+`baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
+`--jq` runs after `--json` filtering, matching the usual agent workflow for small
+machine-readable reads.
+
 The command falls through to the real `gh` (no relay call) when any of these hold:
 
 - method is not `GET`, or mutating field flags are present (`-f`, `-F`, `--field`,
@@ -69,9 +94,10 @@ The command falls through to the real `gh` (no relay call) when any of these hol
 - a query key looks secret-bearing, or a header is outside the safe set
   (`accept`, `x-github-api-version`, `if-none-match`, `if-modified-since`).
 - `--jq` was requested but `jq` is not installed.
+- a top-level subcommand or flag is not one of the supported read-only shapes.
 
-Any other `gh` subcommand (`gh pr create`, `gh auth`, …) is passed straight through to
-the real GitHub CLI, with its exit code preserved.
+Any other `gh` subcommand (`gh pr create`, `gh auth`, unusual formatting flags, …) is
+passed straight through to the real GitHub CLI, with its exit code preserved.
 
 ### `octopool health [--pool <id>]`
 

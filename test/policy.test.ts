@@ -6,14 +6,27 @@ describe("route policy", () => {
 
   it("allows priority OpenClaw PR and CI routes", () => {
     const routes = [
+      "/repos/openclaw/openclaw",
+      "/repos/openclaw/openclaw/pulls?state=open",
+      "/repos/openclaw/openclaw/issues?state=open",
       "/repos/openclaw/openclaw/pulls/85341",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-runs",
       "/repos/openclaw/openclaw/actions/runs/26360397003/jobs",
       "/repos/openclaw/openclaw/actions/jobs/77594668516/logs",
       "/repos/openclaw/openclaw/issues/80490/comments",
+      "/repos/openclaw/openclaw/actions/workflows/ci.yml",
+      "/repos/openclaw/openclaw/actions/workflows/ci.yml/runs",
     ];
     for (const path of routes) {
-      const request = validateRelayRequest({ pool: "maintainers", method: "GET", path });
+      const [requestPath, rawQuery] = path.split("?");
+      const query =
+        rawQuery === undefined ? undefined : Object.fromEntries(new URLSearchParams(rawQuery));
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: requestPath,
+        query,
+      });
       expect(classifyRoute(request, policy).owner).toBe("openclaw");
     }
   });

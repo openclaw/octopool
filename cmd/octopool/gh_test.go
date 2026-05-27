@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestParseGHAPIArgs(t *testing.T) {
 	request, fallback, err := parseGHAPIArgs([]string{
@@ -72,6 +75,22 @@ func TestSafeRelayRequest(t *testing.T) {
 		t.Fatal("expected supported PR path")
 	}
 
+	for _, path := range []string{
+		"/repos/openclaw/octopool",
+		"/repos/openclaw/octopool/pulls?state=open",
+		"/repos/openclaw/octopool/issues?state=open",
+		"/repos/openclaw/octopool/actions/workflows/ci.yml",
+		"/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
+	} {
+		request, fallback, err = parseGHAPIArgs([]string{path})
+		if err != nil || fallback {
+			t.Fatalf("parse %s fallback=%v err=%v", path, fallback, err)
+		}
+		if !safeRelayRequest(request) {
+			t.Fatalf("expected supported path %s", path)
+		}
+	}
+
 	request, fallback, err = parseGHAPIArgs([]string{"/search/issues?q=repo:openclaw/openclaw"})
 	if err != nil || fallback {
 		t.Fatalf("parse fallback=%v err=%v", fallback, err)
@@ -107,6 +126,91 @@ func TestSafeRelayRequest(t *testing.T) {
 	}
 	if safeRelayRequest(request) {
 		t.Fatal("secret query should fall back")
+	}
+}
+
+func TestTopLevelRepoNumber(t *testing.T) {
+	opts := ghTopOptions{repo: "openclaw/openclaw", positionals: []string{"85341"}}
+	repo, number, ok := repoNumber(opts)
+	if !ok || repo != "openclaw/openclaw" || number != "85341" {
+		t.Fatalf("repoNumber = %q %q %v", repo, number, ok)
+	}
+
+	opts = ghTopOptions{positionals: []string{"https://github.com/openclaw/openclaw/pull/85341"}}
+	repo, number, ok = repoNumber(opts)
+	if !ok || repo != "openclaw/openclaw" || number != "85341" {
+		t.Fatalf("repoNumber URL = %q %q %v", repo, number, ok)
+	}
+
+	opts = ghTopOptions{repo: "cli/cli", positionals: []string{"1"}}
+	if _, _, ok = repoNumber(opts); ok {
+		t.Fatal("repo outside local allowlist should fall back")
+	}
+
+	opts = ghTopOptions{repo: "openclaw", positionals: []string{"1"}}
+	if _, _, ok = repoNumber(opts); ok {
+		t.Fatal("malformed explicit repo should fall back")
+	}
+}
+
+func TestParseGHTopOptions(t *testing.T) {
+	opts, fallback, err := parseGHTopOptions([]string{
+		"-R", "openclaw/openclaw",
+		"--json", "number,title,url",
+		"--jq", ".number",
+		"--limit", "50",
+		"--state=open",
+		"--label", "bug",
+		"85341",
+	})
+	if err != nil || fallback {
+		t.Fatalf("parse fallback=%v err=%v", fallback, err)
+	}
+	if opts.repo != "openclaw/openclaw" || opts.limit != "50" || opts.state != "open" {
+		t.Fatalf("opts = %#v", opts)
+	}
+	if len(opts.json) != 3 || opts.json[2] != "url" || opts.jq != ".number" {
+		t.Fatalf("opts = %#v", opts)
+	}
+	if len(opts.labels) != 1 || opts.labels[0] != "bug" {
+		t.Fatalf("opts = %#v", opts)
+	}
+	if len(opts.positionals) != 1 || opts.positionals[0] != "85341" {
+		t.Fatalf("opts = %#v", opts)
+	}
+}
+
+func TestFilterJSONFieldsUsesGHNames(t *testing.T) {
+	raw := []byte(`{"number":85341,"title":"fix","html_url":"https://example.test/pr","head":{"ref":"feature","sha":"abc1234"},"draft":true}`)
+	out, err := filterJSONFields(raw, []string{"number", "url", "headRefName", "headRefOid", "isDraft"}, fieldMapPR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["url"] != "https://example.test/pr" || got["headRefName"] != "feature" || got["headRefOid"] != "abc1234" || got["isDraft"] != true {
+		t.Fatalf("filtered = %#v", got)
+	}
+}
+
+func TestStatusItemsMapLegacyContexts(t *testing.T) {
+	envelope := relayEnvelope{
+		Status:       200,
+		BodyEncoding: "json",
+		Body:         []byte(`{"statuses":[{"context":"ci/external","state":"success","target_url":"https://example.test","created_at":"2026-05-27T00:00:00Z","updated_at":"2026-05-27T00:01:00Z"}]}`),
+	}
+	items, err := statusItems(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %#v", items)
+	}
+	item := items[0].(map[string]any)
+	if item["name"] != "ci/external" || item["conclusion"] != "success" || item["details_url"] != "https://example.test" {
+		t.Fatalf("item = %#v", item)
 	}
 }
 

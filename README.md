@@ -47,11 +47,14 @@ octopool login
 # logged in to https://octopool.dev as you for pool maintainers
 ```
 
-Use the CLI like `gh api` for supported read routes:
+Use the CLI like `gh` for supported read routes:
 
 ```sh
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 # 85341
+
+octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
+octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket
 ```
 
 Symlink it as `gh` for a transparent shim — supported reads go through the pool, everything else (and any mutation) passes straight to the real GitHub CLI:
