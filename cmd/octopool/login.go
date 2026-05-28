@@ -35,6 +35,7 @@ type apiErrorResponse struct {
 			GitHubRateLimitRemaining string `json:"github_rate_limit_remaining"`
 			GitHubRateLimitResource  string `json:"github_rate_limit_resource"`
 			GitHubRetryAfter         string `json:"github_retry_after"`
+			FallbackReason           string `json:"reason"`
 		} `json:"details"`
 	} `json:"error"`
 }

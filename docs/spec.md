@@ -14,7 +14,8 @@ It lets trusted users and agents share an explicitly managed pool of GitHub iden
 - avoid agent stampedes against the same GitHub endpoint
 - keep GitHub tokens out of logs, local config, and SQLite stores
 - expose compact quota, health, and audit state for maintainers
-- fall through to the real GitHub CLI when the local shim sees unsupported commands
+- fall through to the real GitHub CLI for unsafe commands locally, and for safe reads only
+  after the relay returns an explicit local-fallback signal
 
 ## Non-Goals
 
@@ -69,7 +70,8 @@ pool:<pool_id>:route:<owner>/<repo>
 ## Request Flow
 
 1. A caller uses `octopool gh api`, a `gh` symlink, or `POST /v1/github/request`.
-2. The CLI or API client sends a normalized read request to Octopool.
+2. The CLI sends safe read-shaped requests to Octopool before trying the local GitHub
+   token. Mutations and secret-bearing requests stay local.
 3. Worker authenticates caller and validates command policy.
 4. Worker verifies repo routes are public before cache or pooled identity use.
 5. Worker checks D1 for a fresh cache entry.
@@ -79,6 +81,9 @@ pool:<pool_id>:route:<owner>/<repo>
 9. GitHub App identities mint short-lived installation tokens server-side.
 10. Worker records rate-limit headers, status, route class, and redacted audit state.
 11. Worker writes eligible public responses to D1 and returns the GitHub-shaped body.
+12. If the read is safe but Octopool cannot serve it — unsupported route, owner denied,
+    private/unverified repo, no usable identity, or depleted identity pool — Worker
+    returns `fallback_local`; the CLI then runs the original command with real `gh`.
 
 ## API
 
@@ -289,7 +294,7 @@ OCTOPOOL_URL
 OCTOPOOL_TOKEN
 OCTOPOOL_POOL
 OCTOPOOL_GH_PATH
-OCTOPOOL_ALLOWED_OWNERS
+OCTOPOOL_NO_FALLBACK
 ```
 
 Modes:
@@ -300,10 +305,13 @@ Modes:
 
 Fallback:
 
-- unsupported or mutating commands: run the real GitHub CLI
-- non-allowed owners: run the real GitHub CLI before any relay call
-- relay unavailable: run the real GitHub CLI when the local command is safe to pass through
-- relay policy deny: fail closed and explain route/policy, not token identity
+- mutating commands, request bodies, unsafe headers, and secret-bearing queries: run the real
+  GitHub CLI before any relay call
+- safe read-shaped commands: try Octopool first, including owners and route shapes the
+  local CLI does not know about yet
+- relay returns `fallback_local`: run the original command with the real GitHub CLI
+- relay unavailable or misconfigured: fail loudly unless the local shim has no Octopool login
+  yet, in which case it runs the real GitHub CLI
 
 ## Supported v1 Routes
 

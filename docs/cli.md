@@ -110,17 +110,22 @@ names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
 
-The command falls through to the real `gh` (no relay call) when any of these hold:
+The command falls through to the real `gh` without contacting Octopool when any of these
+hold:
 
 - method is not `GET`, or mutating field flags are present (`-f`, `-F`, `--field`,
   `--raw-field`, `--paginate`, `--slurp`).
-- the path is not a relay-supported shape (see [Relay](relay.md#supported-routes)).
-- the repo owner is outside the local allowlist (`OCTOPOOL_ALLOWED_OWNERS`, default
-  `openclaw`). Ordinary non-OpenClaw reads stay on the real `gh`.
 - a query key looks secret-bearing, or a header is outside the safe set
   (`accept`, `x-github-api-version`, `if-none-match`, `if-modified-since`).
 - `--jq` was requested but `jq` is not installed.
 - a top-level subcommand or flag is not one of the supported read-only shapes.
+
+Safe read-shaped requests are sent to Octopool first. Octopool owns the route and pool
+policy decision; on a cache miss it uses the configured app/PAT identity pool, writes
+eligible public responses to the shared cache, and returns the GitHub-shaped body. If the
+server says the read should run locally — unsupported route, owner denied by pool policy,
+private/unverified repository, no usable identity, or identity pool depleted — the CLI
+runs the original command with the real `gh` and your local GitHub token.
 
 Any other `gh` subcommand (`gh pr create`, `gh auth`, unusual formatting flags, …) is
 passed straight through to the real GitHub CLI, with its exit code preserved.
@@ -166,7 +171,8 @@ Admin provisioning. Requires an admin token. See [Admin & provisioning](admin.md
   `octopool login` for that URL. This prevents leaking the token to an attacker-supplied
   endpoint.
 - Once a request reaches Octopool, relay policy denials fail closed; they are not
-  silently retried against the real `gh`.
+  silently retried against the real `gh` unless Octopool returns the explicit
+  `fallback_local` signal for a safe read.
 
 ## Environment variables
 
@@ -176,7 +182,8 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_TOKEN` — caller token override (required to use a non-saved URL).
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
-- `OCTOPOOL_ALLOWED_OWNERS` — local owner prefilter for the `gh` shim (default `openclaw`).
+- `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns
+  `fallback_local`, useful for proving relay/cache coverage.
 - `OCTOPOOL_ADMIN_TOKEN` — admin token for `octopool admin`.
 - `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` — permit non-HTTPS login for local dev.
 

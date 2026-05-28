@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -96,20 +97,23 @@ func TestSafeRelayRequest(t *testing.T) {
 		t.Fatalf("parse fallback=%v err=%v", fallback, err)
 	}
 	if safeRelayRequest(request) {
-		t.Fatal("search path should fall back")
+		t.Fatal("unknown query-bearing read should stay local")
+	}
+
+	request, fallback, err = parseGHAPIArgs([]string{"/search/issues"})
+	if err != nil || fallback {
+		t.Fatalf("parse fallback=%v err=%v", fallback, err)
+	}
+	if !safeRelayRequest(request) {
+		t.Fatal("queryless unknown read can ask octopool for a fallback decision")
 	}
 
 	request, fallback, err = parseGHAPIArgs([]string{"/repos/cli/cli/pulls/1"})
 	if err != nil || fallback {
 		t.Fatalf("parse fallback=%v err=%v", fallback, err)
 	}
-	if safeRelayRequest(request) {
-		t.Fatal("owner outside local allowlist should fall back")
-	}
-
-	t.Setenv("OCTOPOOL_ALLOWED_OWNERS", "openclaw,cli")
 	if !safeRelayRequest(request) {
-		t.Fatal("env allowlist owner should relay")
+		t.Fatal("owner policy should be decided by octopool")
 	}
 
 	request, fallback, err = parseGHAPIArgs([]string{"/repos/openclaw/openclaw/pulls/1?access_token=x"})
@@ -127,6 +131,14 @@ func TestSafeRelayRequest(t *testing.T) {
 	if safeRelayRequest(request) {
 		t.Fatal("secret query should fall back")
 	}
+
+	request, fallback, err = parseGHAPIArgs([]string{"/repos/openclaw/openclaw/compare/main...feature"})
+	if err != nil || fallback {
+		t.Fatalf("parse fallback=%v err=%v", fallback, err)
+	}
+	if safeRelayRequest(request) {
+		t.Fatal("canonicalizing path should stay local")
+	}
 }
 
 func TestTopLevelRepoNumber(t *testing.T) {
@@ -143,8 +155,9 @@ func TestTopLevelRepoNumber(t *testing.T) {
 	}
 
 	opts = ghTopOptions{repo: "cli/cli", positionals: []string{"1"}}
-	if _, _, ok = repoNumber(opts); ok {
-		t.Fatal("repo outside local allowlist should fall back")
+	repo, number, ok = repoNumber(opts)
+	if !ok || repo != "cli/cli" || number != "1" {
+		t.Fatalf("repoNumber outside default owner = %q %q %v", repo, number, ok)
 	}
 
 	opts = ghTopOptions{repo: "openclaw", positionals: []string{"1"}}
@@ -229,6 +242,43 @@ func TestWriteGHBodyAllowsNullTextBody(t *testing.T) {
 	if err := writeGHBody(t.Context(), discardWriter{}, envelope, ""); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestParseLocalFallback(t *testing.T) {
+	err, ok := parseLocalFallback([]byte(`{"error":{"code":"fallback_local","message":"Run locally","details":{"reason":"route_denied"}}}`))
+	if !ok {
+		t.Fatal("expected fallback")
+	}
+	if err.Reason != "route_denied" {
+		t.Fatalf("reason = %q", err.Reason)
+	}
+}
+
+func TestShouldRunRealGH(t *testing.T) {
+	if !shouldRunRealGH(localFallbackError{Reason: "route_denied"}) {
+		t.Fatal("fallback_local should run real gh")
+	}
+	if !shouldRunRealGH(errOctopoolNotLoggedIn) {
+		t.Fatal("missing octopool login should run real gh")
+	}
+	if shouldRunRealGH(assertAnError{}) {
+		t.Fatal("ordinary errors should not run real gh")
+	}
+}
+
+func TestNewGHRelayClientMissingLoginUsesFallbackSentinel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OCTOPOOL_TOKEN", "")
+	_, err := newGHRelayClient()
+	if !errors.Is(err, errOctopoolNotLoggedIn) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type assertAnError struct{}
+
+func (assertAnError) Error() string {
+	return "boom"
 }
 
 type discardWriter struct{}

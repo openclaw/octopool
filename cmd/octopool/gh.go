@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var relayPathPatterns = []*regexp.Regexp{
+var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}$`),
@@ -47,6 +47,8 @@ type relayEnvelope struct {
 	BodyEncoding string            `json:"body_encoding"`
 }
 
+var errOctopoolNotLoggedIn = errors.New("not logged in; run: octopool login")
+
 func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stdout, "usage: octopool gh api <GET path> [--jq expr]")
@@ -56,6 +58,9 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 	if args[0] != "api" {
 		handled, err := runGHTopLevel(ctx, args, stdout)
 		if err != nil {
+			if shouldRunRealGH(err) {
+				return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
+			}
 			return err
 		}
 		if handled {
@@ -78,10 +83,16 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 	}
 	client, err := newGHRelayClient()
 	if err != nil {
+		if shouldRunRealGH(err) {
+			return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
+		}
 		return err
 	}
 	envelope, err := client.do(ctx, request)
 	if err != nil {
+		if shouldRunRealGH(err) {
+			return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
+		}
 		return err
 	}
 	return writeGHBody(ctx, stdout, envelope, request.jq)
@@ -103,7 +114,7 @@ func newGHRelayClient() (ghRelayClient, error) {
 		token = auth.Token
 	}
 	if token == "" {
-		return ghRelayClient{}, errors.New("not logged in; run: octopool login")
+		return ghRelayClient{}, errOctopoolNotLoggedIn
 	}
 	baseURL := envDefault("OCTOPOOL_URL", auth.URL)
 	if baseURL == "" {
@@ -136,6 +147,9 @@ func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relay
 		return relayEnvelope{}, err
 	}
 	if status >= 400 {
+		if fallback, ok := parseLocalFallback(out); ok {
+			return relayEnvelope{}, fallback
+		}
 		return relayEnvelope{}, fmt.Errorf("octopool request failed: %s", strings.TrimSpace(string(out)))
 	}
 	var envelope relayEnvelope
@@ -251,10 +265,10 @@ func safeRelayHeader(header string) bool {
 }
 
 func safeRelayRequest(request ghAPIRequest) bool {
-	if !relaySupportedPath(request.path) {
+	if !safeRelayPath(request.path) {
 		return false
 	}
-	if owner, ok := relayPathOwner(request.path); ok && !localAllowedRelayOwner(owner) {
+	if len(request.query) > 0 && !relayQueryPath(request.path) {
 		return false
 	}
 	for key := range request.query {
@@ -263,6 +277,32 @@ func safeRelayRequest(request ghAPIRequest) bool {
 		}
 	}
 	return true
+}
+
+func safeRelayPath(path string) bool {
+	lower := strings.ToLower(path)
+	return strings.HasPrefix(path, "/") &&
+		!strings.Contains(path, "://") &&
+		!strings.Contains(path, "\\") &&
+		!strings.Contains(path, "?") &&
+		!strings.Contains(path, "#") &&
+		!strings.Contains(path, "..") &&
+		!hasDotSegment(path) &&
+		!strings.Contains(lower, "%2e") &&
+		!strings.Contains(lower, "%5c")
+}
+
+func hasDotSegment(path string) bool {
+	return path == "." || strings.Contains(path, "/./") || strings.HasSuffix(path, "/.")
+}
+
+func relayQueryPath(path string) bool {
+	for _, pattern := range relayQueryPathPatterns {
+		if pattern.MatchString(path) {
+			return true
+		}
+	}
+	return false
 }
 
 func sensitiveQueryKey(key string) bool {
@@ -275,33 +315,6 @@ func sensitiveQueryKey(key string) bool {
 		strings.Contains(lower, "apikey") ||
 		strings.Contains(lower, "access_key") ||
 		strings.Contains(lower, "private_key")
-}
-
-func relaySupportedPath(path string) bool {
-	for _, pattern := range relayPathPatterns {
-		if pattern.MatchString(path) {
-			return true
-		}
-	}
-	return false
-}
-
-func relayPathOwner(path string) (string, bool) {
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 || parts[1] != "repos" || parts[2] == "" {
-		return "", false
-	}
-	return strings.ToLower(parts[2]), true
-}
-
-func localAllowedRelayOwner(owner string) bool {
-	allowed := envDefault("OCTOPOOL_ALLOWED_OWNERS", "openclaw")
-	for _, item := range strings.Split(allowed, ",") {
-		if strings.EqualFold(strings.TrimSpace(item), owner) {
-			return true
-		}
-	}
-	return false
 }
 
 func writeGHBody(ctx context.Context, stdout io.Writer, envelope relayEnvelope, jq string) error {
@@ -348,6 +361,57 @@ func writeGHBody(ctx context.Context, stdout io.Writer, envelope relayEnvelope, 
 
 func rawJSONIsNull(value json.RawMessage) bool {
 	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
+}
+
+type localFallbackError struct {
+	Reason string
+}
+
+func (err localFallbackError) Error() string {
+	if err.Reason == "" {
+		return "octopool requested local gh fallback"
+	}
+	return "octopool requested local gh fallback: " + err.Reason
+}
+
+func isLocalFallback(err error) bool {
+	var fallback localFallbackError
+	return errors.As(err, &fallback)
+}
+
+func shouldRunRealGH(err error) bool {
+	return isLocalFallback(err) || errors.Is(err, errOctopoolNotLoggedIn)
+}
+
+func parseLocalFallback(out []byte) (localFallbackError, bool) {
+	var response apiErrorResponse
+	if err := json.Unmarshal(out, &response); err != nil {
+		return localFallbackError{}, false
+	}
+	if response.Error.Code != "fallback_local" {
+		return localFallbackError{}, false
+	}
+	reason := response.Error.Details.FallbackReason
+	if reason == "" {
+		reason = response.Error.Message
+	}
+	return localFallbackError{Reason: reason}, true
+}
+
+func execRealGHAfterLocalFallback(
+	ctx context.Context,
+	args []string,
+	stdout io.Writer,
+	stderr io.Writer,
+	reason error,
+) error {
+	if envDefault("OCTOPOOL_NO_FALLBACK", "") != "" {
+		return reason
+	}
+	if !errors.Is(reason, errOctopoolNotLoggedIn) {
+		fmt.Fprintf(stderr, "octopool: %v; falling back to real gh\n", reason)
+	}
+	return execRealGH(ctx, args, stdout, stderr)
 }
 
 func runJQ(ctx context.Context, stdout io.Writer, input []byte, expr string) error {

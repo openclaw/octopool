@@ -25,6 +25,7 @@ import {
 import { discoveryResponse } from "./discovery";
 import { isPublicRequest } from "./hosts";
 import { rootResponse } from "./landing";
+import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
 import { ensurePublicGitHubRepo } from "./public-repos";
@@ -417,65 +418,92 @@ async function relayGitHub(
       throw new HttpError(503, "no_identity", "No active identity can serve this route");
     }
     await ensurePublicGitHubRepo(env, route);
-    const selectionRequest: SelectionRequest = {
-      pool: relayRequest.pool,
-      routeKey: route.routeKey,
-      resource: route.resource,
-      candidates: identities.map((candidate) => ({ id: candidate.id, weight: candidate.weight })),
-    };
     const coordinator = env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`);
-    const selection = await selectIdentity(coordinator, selectionRequest);
-    identity = findIdentity(identities, selection.identityId);
-    const rawGitHub = await callGitHub(env, identity, relayRequest, route);
-    const github = sanitizeGitHubResponse(route, rawGitHub);
-    const rate = rateFromHeaders(github.headers);
-    ctx.waitUntil(
-      Promise.all([
-        coordinator.recordResult({
+    const attemptedIdentityIds = new Set<string>();
+    let fallbackReason = "identity_pool_depleted";
+    for (let attempt = 0; attempt < identities.length; attempt++) {
+      const candidates = identities
+        .filter((candidate) => !attemptedIdentityIds.has(candidate.id))
+        .map((candidate) => ({ id: candidate.id, weight: candidate.weight }));
+      if (candidates.length === 0) {
+        break;
+      }
+      const selectionRequest: SelectionRequest = {
+        pool: relayRequest.pool,
+        routeKey: route.routeKey,
+        resource: route.resource,
+        candidates,
+      };
+      const selection = await selectIdentity(coordinator, selectionRequest);
+      identity = findIdentity(identities, selection.identityId);
+      const rawGitHub = await callGitHub(env, identity, relayRequest, route);
+      const github = sanitizeGitHubResponse(route, rawGitHub);
+      const rate = rateFromHeaders(github.headers);
+      const localFallbackReason = githubResponseLocalFallbackReason(github.status, rate);
+      if (localFallbackReason !== undefined) {
+        attemptedIdentityIds.add(identity.id);
+        fallbackReason = localFallbackReason;
+        await coordinator.recordResult({
           identityId: identity.id,
           routeKey: route.routeKey,
           resource: route.resource,
           status: github.status,
           rate,
-        }),
-        insertAudit(env, {
-          requestId,
-          callerId: caller.id,
+        });
+        continue;
+      }
+      ctx.waitUntil(
+        Promise.all([
+          coordinator.recordResult({
+            identityId: identity.id,
+            routeKey: route.routeKey,
+            resource: route.resource,
+            status: github.status,
+            rate,
+          }),
+          insertAudit(env, {
+            requestId,
+            callerId: caller.id,
+            pool: relayRequest.pool,
+            routeKey: route.routeKey,
+            routeKind: route.kind,
+            identityId: identity.id,
+            status: github.status,
+            durationMs: Date.now() - started,
+            cacheStatus: auditCacheStatus,
+            cacheable: auditCacheable,
+          }),
+          ...(cacheKey === undefined
+            ? []
+            : [writeGitHubCache(env, cacheKey, relayRequest, route, github, identity)]),
+        ]),
+      );
+      return jsonResponse({
+        status: github.status,
+        headers: github.headers,
+        body: github.body,
+        body_encoding: github.body_encoding,
+        identity: {
+          id: identity.id,
+          kind: identity.kind,
+        },
+        relay: {
           pool: relayRequest.pool,
-          routeKey: route.routeKey,
-          routeKind: route.kind,
-          identityId: identity.id,
-          status: github.status,
-          durationMs: Date.now() - started,
-          cacheStatus: auditCacheStatus,
-          cacheable: auditCacheable,
-        }),
-        ...(cacheKey === undefined
-          ? []
-          : [writeGitHubCache(env, cacheKey, relayRequest, route, github, identity)]),
-      ]),
-    );
-    return jsonResponse({
-      status: github.status,
-      headers: github.headers,
-      body: github.body,
-      body_encoding: github.body_encoding,
-      identity: {
-        id: identity.id,
-        kind: identity.kind,
-      },
-      relay: {
-        pool: relayRequest.pool,
-        request_id: requestId,
-        cacheable: route.cacheable,
-        cache: cacheKey === undefined ? "bypass" : "miss",
-        stale_ok: false,
-        route_kind: route.kind,
-        lease_reason: selection.reason,
-      },
+          request_id: requestId,
+          cacheable: route.cacheable,
+          cache: cacheKey === undefined ? "bypass" : "miss",
+          stale_ok: false,
+          route_kind: route.kind,
+          lease_reason: selection.reason,
+        },
+      });
+    }
+    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+      reason: fallbackReason,
     });
   } catch (error) {
-    const audit = auditError(error);
+    const reported = localFallbackError(error) ?? error;
+    const audit = auditError(reported);
     ctx.waitUntil(
       insertAudit(env, {
         requestId,
@@ -491,7 +519,7 @@ async function relayGitHub(
         ...(identity === undefined ? {} : { identityId: identity.id }),
       }),
     );
-    throw error;
+    throw reported;
   }
 }
 

@@ -27,7 +27,7 @@ Octopool moves that traffic off individual machines and onto Cloudflare:
 - **Cache hits cost zero GitHub quota.** Fresh D1 hits return straight from Cloudflare without touching GitHub at all. Repeated maintainer reads stop consuming any pooled identity's budget.
 - **Tokens stay server-side.** Callers authenticate to octopool with a short caller token (issued in exchange for their `gh auth token`). The underlying PATs and App private keys never leave the Worker — not into responses, not into audit rows, not into the cache.
 - **Org-gated, public-repo only.** Only verified members of one GitHub org can mint a caller token, and every repo route is checked against GitHub's public-visibility endpoint before a pooled identity or cache entry is used. Private-repo callers fall back to their own `gh`.
-- **Fails open to real `gh`.** The CLI is a drop-in `gh` shim. Only the supported read shapes go through the relay; everything else (mutations, unusual flags, repos outside the org allowlist) runs your local `gh` with your own token.
+- **Fails open to real `gh`.** The CLI is a drop-in `gh` shim. Safe read-shaped calls try Octopool first, so the server owns cache, app/PAT routing, and pool policy. Mutations and secret-bearing requests stay local; safe reads run your real `gh` only when Octopool explicitly returns `fallback_local`.
 
 If you're not running a maintainer team and you don't care about GitHub rate limits, you don't need this.
 
@@ -67,7 +67,7 @@ octopool login https://octopool.your-org.dev    # self-hosted endpoint
 octopool whoami
 ```
 
-Use it like `gh` for the supported read shapes:
+Use it like `gh` for common read shapes:
 
 ```sh
 octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
@@ -78,7 +78,7 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 octopool stats
 ```
 
-Symlink it as `gh` for a transparent shim — supported reads go through octopool, everything else (mutations, unusual flags, repos outside the org allowlist) passes through to your local `gh`:
+Symlink it as `gh` for a transparent shim — safe reads try Octopool first, while mutations, unusual flags, and explicit server fallback signals pass through to your local `gh`:
 
 ```sh
 ln -s "$(command -v octopool)" ~/bin/gh

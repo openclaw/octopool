@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Route safe read-shaped `gh` calls through Octopool before local fallback, with an explicit server fallback signal when a route is unsupported, denied by pool policy, private, or the identity pool is depleted.
 - Route browser GitHub OAuth through the registered `octopool.dev` callback, then forward back to `octopool.openclaw.ai` so the authoritative website can log in without GitHub rejecting the redirect URI.
 
 ## 0.2.2 - 2026-05-28

@@ -188,7 +188,7 @@ func runGHRun(ctx context.Context, args []string, stdout io.Writer) (bool, error
 			return false, nil
 		}
 		repo, ok := repoFromOptionOrCurrent(opts.repo)
-		if !ok || !localAllowedRelayOwner(strings.Split(repo, "/")[0]) {
+		if !ok {
 			return false, nil
 		}
 		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "actions", "runs", opts.positionals[0])}, opts, fieldMapRun)
@@ -787,7 +787,7 @@ func repoNumber(opts ghTopOptions) (string, string, bool) {
 		}
 		repo = currentGitHubRepo()
 	}
-	if repo == "" || number == "" || !localAllowedRelayOwner(strings.Split(repo, "/")[0]) {
+	if repo == "" || number == "" {
 		return "", "", false
 	}
 	return repo, number, true
@@ -801,7 +801,7 @@ func repoOnly(opts ghTopOptions) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if repo == "" || !localAllowedRelayOwner(strings.Split(repo, "/")[0]) {
+	if repo == "" {
 		return "", false
 	}
 	return repo, true
