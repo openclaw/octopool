@@ -320,6 +320,23 @@ WHERE lower(owner) = ?1
   AND expires_at > CURRENT_TIMESTAMP
 LIMIT 1;
 
+-- name: FreshPRStateProof :one
+SELECT 1
+FROM github_pr_state_proofs
+WHERE lower(owner) = ?1
+  AND lower(repo) = ?2
+  AND number = ?3
+  AND state_hint = ?4
+  AND expires_at > CURRENT_TIMESTAMP
+LIMIT 1;
+
+-- name: UpsertPRStateProof :exec
+INSERT INTO github_pr_state_proofs (owner, repo, number, state_hint, checked_at, expires_at)
+VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?5))
+ON CONFLICT(owner, repo, number, state_hint) DO UPDATE SET
+  checked_at = excluded.checked_at,
+  expires_at = excluded.expires_at;
+
 -- name: StatsAggregatePool :one
 SELECT
   COUNT(*) AS requests,

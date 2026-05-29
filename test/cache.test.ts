@@ -86,6 +86,40 @@ describe("github cache policy", () => {
     );
   });
 
+  it("uses verified PR state hints as cache-key discriminators", async () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341/files",
+    });
+    const plain = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341/files",
+    });
+    const route = {
+      ...classifyRoute(request, policy),
+      state_hint: "pr-head:0123456789abcdef0123456789abcdef01234567",
+      state_hint_source: "live" as const,
+    };
+    await expect(githubCacheKey("maintainers", request, route)).resolves.not.toBe(
+      await githubCacheKey("maintainers", plain, classifyRoute(plain, policy)),
+    );
+  });
+
+  it("ignores malformed PR state hints", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341/files",
+      route_hint: {
+        pr_head_sha: "not-a-sha",
+        pr_state: "surprise",
+      },
+    });
+    expect(classifyRoute(request, policy).state_hint).toBeUndefined();
+  });
+
   it("bypasses conditional and rate-limit reads", () => {
     const pr = validateRelayRequest({
       pool: "maintainers",
@@ -142,6 +176,19 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(files, response([]))).toBe(60);
+    const stateAwareFiles = {
+      ...classifyRoute(
+        validateRelayRequest({
+          pool: "maintainers",
+          method: "GET",
+          path: "/repos/openclaw/openclaw/pulls/42/files",
+        }),
+        policy,
+      ),
+      state_hint: "pr-head:0123456789abcdef0123456789abcdef01234567",
+      state_hint_source: "live" as const,
+    };
+    expect(cacheTTLSeconds(stateAwareFiles, response([]))).toBe(300);
 
     const pr = classifyRoute(
       validateRelayRequest({

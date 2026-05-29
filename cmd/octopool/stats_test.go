@@ -13,12 +13,14 @@ func TestRenderStats(t *testing.T) {
 		Window:   statsWindow{Label: "24h", Seconds: 86400},
 		Operator: statsOperator{GitHubLogin: "steipete"},
 		PoolUsage: statsAggregate{
-			Requests:     12,
-			Errors:       1,
-			CacheHits:    5,
-			CacheMisses:  3,
-			CacheBypass:  4,
-			CacheHitRate: &rate,
+			Requests:         12,
+			Errors:           1,
+			CacheHits:        5,
+			CacheMisses:      3,
+			CacheBypass:      4,
+			CacheHitRate:     &rate,
+			SavedGitHubCalls: 5,
+			BackendRequests:  7,
 		},
 		CallerUsage: statsAggregate{
 			Requests:     8,
@@ -35,6 +37,8 @@ func TestRenderStats(t *testing.T) {
 			statsAggregate: statsAggregate{
 				Requests:     6,
 				Errors:       0,
+				CacheMisses:  1,
+				CacheBypass:  2,
 				CacheHitRate: &rate,
 			},
 		}},
@@ -49,8 +53,9 @@ func TestRenderStats(t *testing.T) {
 		"operator: steipete",
 		"cache: 62.5% hit (5 hits, 3 misses, 4 bypass, 0 unknown)",
 		"cacheable: 0/12 requests",
+		"github: 5 saved, 7 backend",
 		"entries: 7 fresh / 9 total, 2 expired, 1.5 KiB",
-		"  pr_view: 6 req, 62.5% hit, 0 errors",
+		"  pr_view: 6 req, 62.5% hit, 1 miss, 2 bypass, 0 errors",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in:\n%s", want, got)

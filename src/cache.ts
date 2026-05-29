@@ -29,6 +29,7 @@ export async function githubCacheKey(
     query: normalizedCacheQuery(request.query ?? {}),
     headers: stableRecord(cacheVaryHeaders(request.headers)),
     route_key: route.routeKey,
+    state: cacheStateDiscriminator(route),
   };
   return hashToken(JSON.stringify(stable));
 }
@@ -124,6 +125,8 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
     case "commit_status":
     case "job_view":
       return 15;
+    case "pr_files":
+      return stateAwarePRSubresource(route, response) ? 300 : 60;
     default:
       return 60;
   }
@@ -194,6 +197,28 @@ function closedPR(response?: GitHubRelayResponse): boolean {
 
 function closedIssue(response?: GitHubRelayResponse): boolean {
   return isRecord(response?.body) && response.body.state === "closed";
+}
+
+function stateAwarePRSubresource(route: RouteInfo, response?: GitHubRelayResponse): boolean {
+  if (!isRecord(response?.body) && !Array.isArray(response?.body)) {
+    return false;
+  }
+  return routeStateHint(route) !== undefined && route.state_hint_source === "live";
+}
+
+function cacheStateDiscriminator(route: RouteInfo): string | undefined {
+  if (!stateAwarePRRoute(route)) {
+    return undefined;
+  }
+  return routeStateHint(route);
+}
+
+function routeStateHint(route: RouteInfo): string | undefined {
+  return route.state_hint;
+}
+
+function stateAwarePRRoute(route: RouteInfo): boolean {
+  return route.kind === "pr_files";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

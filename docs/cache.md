@@ -15,10 +15,18 @@ performs the GitHub call and writes the result back.
 ### Cache key
 
 SHA-256 (base64url) over a stable, sorted JSON of: pool, method, path, normalized
-query, the vary headers, and the normalized route key. Default pagination
+query, the vary headers, the normalized route key, and any validated state discriminator.
+Default pagination
 (`page=1`, `per_page=30`) and default JSON `accept` variants are folded together; custom
 media types and non-default query values still produce distinct entries. The key is
 pool-scoped, so pools never share cache entries.
+
+PR file-list routes may include a validated
+`route_hint.pr_head_sha` or closed/merged `route_hint.pr_state` discriminator. Clients
+that already know the current PR state can use that to avoid mixing entries across head
+SHAs while letting Octopool keep `files` warm longer. Hints are first checked against
+GitHub and then cached briefly in `github_pr_state_proofs`, so repeated cache hits do not
+need to re-contact GitHub just to validate the hint.
 
 ### What is cached
 
@@ -33,6 +41,8 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 - workflow runs, run lists, job lists, checks, and commit statuses → 15s because
   completed CI can still change after a rerun
+- PR files with a validated state discriminator → 5m; PR reviews/comments and
+  undiscriminated PR files → 1m
 - closed PRs/issues → 1h; open PRs → 2m; open issues → 5m
 - immutable commit objects → 24h; commit lists → 5m
 - repo metadata → 10m; workflow metadata → 1h
@@ -80,6 +90,8 @@ private-repo block — a hard `404`/private response always denies.
   key/kind, status, response headers JSON, body JSON, body encoding, source identity,
   created/expires timestamps (migration `0002`).
 - `github_public_repos` — `owner`, `repo`, `checked_at`, `expires_at` (migration `0003`).
+- `github_pr_state_proofs` — short-lived validated PR head/state discriminators for
+  state-scoped PR subresource cache keys (migration `0006`).
 - `audit_events.cache_status` / `audit_events.cacheable` — per-request cache metrics
   (migration `0005`).
 

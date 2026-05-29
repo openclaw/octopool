@@ -10,6 +10,8 @@ export type RelayRequest = {
     owner?: string;
     repo?: string;
     kind?: string;
+    pr_head_sha?: string;
+    pr_state?: string;
   };
   cache_key?: string;
   idempotency_key?: string;
@@ -49,6 +51,8 @@ export type RouteInfo = {
   repo?: string;
   resource: string;
   routeKey: string;
+  state_hint?: string;
+  state_hint_source?: "cached" | "live";
   cacheable: boolean;
   largePayload: boolean;
   logs: boolean;

@@ -258,6 +258,12 @@ function normalizeRouteHint(
   if (typeof value.kind === "string") {
     hint.kind = value.kind;
   }
+  if (typeof value.pr_head_sha === "string" && /^[0-9a-fA-F]{40}$/.test(value.pr_head_sha)) {
+    hint.pr_head_sha = value.pr_head_sha.toLowerCase();
+  }
+  if (typeof value.pr_state === "string" && /^(open|closed|merged)$/i.test(value.pr_state)) {
+    hint.pr_state = value.pr_state.toLowerCase();
+  }
   return hint;
 }
 

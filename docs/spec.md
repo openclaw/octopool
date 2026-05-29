@@ -113,7 +113,8 @@ Request:
   "route_hint": {
     "owner": "openclaw",
     "repo": "openclaw",
-    "kind": "pr_view"
+    "kind": "pr_files",
+    "pr_head_sha": "0123456789abcdef0123456789abcdef01234567"
   },
   "cache_key": "github-rest:...",
   "idempotency_key": "..."

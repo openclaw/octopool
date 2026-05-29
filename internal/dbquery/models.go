@@ -70,6 +70,15 @@ type GithubCacheEntry struct {
 	ExpiresAt           string         `json:"expires_at"`
 }
 
+type GithubPrStateProof struct {
+	Owner     string `json:"owner"`
+	Repo      string `json:"repo"`
+	Number    int64  `json:"number"`
+	StateHint string `json:"state_hint"`
+	CheckedAt string `json:"checked_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
 type GithubPublicRepo struct {
 	Owner     string `json:"owner"`
 	Repo      string `json:"repo"`

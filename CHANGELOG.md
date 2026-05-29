@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Add validated PR state discriminators for PR subresource cache keys and richer stats that show saved GitHub calls plus backend request counts.
 - Raise cache hit rates with response-aware TTLs for closed PRs/issues, immutable commits, and normalized default GitHub query/header variants while keeping mutable CI reads short-lived.
 - Skip Octopool-backed `gh` wrapper scripts when falling back to the real GitHub CLI, avoiding duplicate fallback attempts and warnings.
 

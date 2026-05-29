@@ -532,6 +532,36 @@ func (q *Queries) FreshCoveringPublicRepoProof(ctx context.Context, arg FreshCov
 	return column_1, err
 }
 
+const freshPRStateProof = `-- name: FreshPRStateProof :one
+SELECT 1
+FROM github_pr_state_proofs
+WHERE lower(owner) = ?1
+  AND lower(repo) = ?2
+  AND number = ?3
+  AND state_hint = ?4
+  AND expires_at > CURRENT_TIMESTAMP
+LIMIT 1
+`
+
+type FreshPRStateProofParams struct {
+	Owner     string `json:"owner"`
+	Repo      string `json:"repo"`
+	Number    int64  `json:"number"`
+	StateHint string `json:"state_hint"`
+}
+
+func (q *Queries) FreshPRStateProof(ctx context.Context, arg FreshPRStateProofParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, freshPRStateProof,
+		arg.Owner,
+		arg.Repo,
+		arg.Number,
+		arg.StateHint,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const freshPublicRepoProof = `-- name: FreshPublicRepoProof :one
 SELECT 1
 FROM github_public_repos
@@ -1340,6 +1370,33 @@ func (q *Queries) UpsertIdentity(ctx context.Context, arg UpsertIdentityParams) 
 		arg.SecretRef,
 		arg.InstallationID,
 		arg.Weight,
+	)
+	return err
+}
+
+const upsertPRStateProof = `-- name: UpsertPRStateProof :exec
+INSERT INTO github_pr_state_proofs (owner, repo, number, state_hint, checked_at, expires_at)
+VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?5))
+ON CONFLICT(owner, repo, number, state_hint) DO UPDATE SET
+  checked_at = excluded.checked_at,
+  expires_at = excluded.expires_at
+`
+
+type UpsertPRStateProofParams struct {
+	Owner     string      `json:"owner"`
+	Repo      string      `json:"repo"`
+	Number    int64       `json:"number"`
+	StateHint string      `json:"state_hint"`
+	Datetime  interface{} `json:"datetime"`
+}
+
+func (q *Queries) UpsertPRStateProof(ctx context.Context, arg UpsertPRStateProofParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPRStateProof,
+		arg.Owner,
+		arg.Repo,
+		arg.Number,
+		arg.StateHint,
+		arg.Datetime,
 	)
 	return err
 }

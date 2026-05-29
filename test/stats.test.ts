@@ -34,6 +34,10 @@ describe("stats aggregates", () => {
       cache_unknown: 0,
       cacheable_requests: 0,
       cache_hit_rate: null,
+      cacheable_hit_rate: null,
+      bypass_rate: null,
+      saved_github_requests: 0,
+      backend_requests: 0,
     });
   });
 
@@ -59,6 +63,10 @@ describe("stats aggregates", () => {
       cache_unknown: 1,
       cacheable_requests: 10,
       cache_hit_rate: 0.7,
+      cacheable_hit_rate: 0.7,
+      bypass_rate: 2 / 13,
+      saved_github_requests: 7,
+      backend_requests: 5,
     });
   });
 });

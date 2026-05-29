@@ -28,6 +28,7 @@ import { rootResponse } from "./landing";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { PoolCoordinator } from "./pool-coordinator";
+import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import { ensurePublicGitHubRepo } from "./public-repos";
 import { httpsRedirect, secureResponse } from "./security";
 import { parseStatsWindow, poolStats } from "./stats";
@@ -360,9 +361,9 @@ async function relayGitHub(
   let auditCacheStatus: "hit" | "miss" | "bypass" | "unknown" = "unknown";
   let auditCacheable = false;
   try {
-    route = classifyRoute(relayRequest, policy);
+    route = await verifyPRStateHint(env, relayRequest, classifyRoute(relayRequest, policy));
     const cacheEnabled = shouldUseGitHubCache(relayRequest, route);
-    const cacheKey = cacheEnabled
+    let cacheKey = cacheEnabled
       ? await githubCacheKey(relayRequest.pool, relayRequest, route)
       : undefined;
     auditCacheable = cacheKey !== undefined;
@@ -410,6 +411,60 @@ async function relayGitHub(
               route_kind: route.kind,
             },
           });
+        }
+      }
+    }
+    if (cacheKey !== undefined && route.state_hint_source === "cached") {
+      route = await verifyPRStateHintLive(env, relayRequest, route);
+      cacheKey = cacheEnabled
+        ? await githubCacheKey(relayRequest.pool, relayRequest, route)
+        : undefined;
+      auditCacheable = cacheKey !== undefined;
+      auditCacheStatus = cacheKey === undefined ? "bypass" : "miss";
+      if (cacheKey !== undefined) {
+        const cached = await readGitHubCache(env, cacheKey);
+        if (cached !== undefined) {
+          const activeIdentities = await loadIdentities(env, relayRequest.pool, route);
+          if (activeIdentities.length === 0) {
+            throw new HttpError(503, "no_identity", "No active identity can serve this route");
+          }
+          const cachedIdentity =
+            cached.identity === undefined
+              ? undefined
+              : activeIdentities.find((candidate) => candidate.id === cached.identity?.id);
+          if (cached.identity !== undefined && cachedIdentity !== undefined) {
+            await ensurePublicGitHubRepo(env, route, cached.created_at);
+            const sanitizedCached = sanitizeGitHubResponse(route, cached);
+            ctx.waitUntil(
+              insertAudit(env, {
+                requestId,
+                callerId: caller.id,
+                pool: relayRequest.pool,
+                routeKey: route.routeKey,
+                routeKind: route.kind,
+                status: cached.status,
+                durationMs: Date.now() - started,
+                identityId: cached.identity.id,
+                cacheStatus: "hit",
+                cacheable: true,
+              }),
+            );
+            return jsonResponse({
+              status: sanitizedCached.status,
+              headers: sanitizedCached.headers,
+              body: sanitizedCached.body,
+              body_encoding: sanitizedCached.body_encoding,
+              identity: cached.identity,
+              relay: {
+                pool: relayRequest.pool,
+                request_id: requestId,
+                cacheable: route.cacheable,
+                cache: "hit",
+                stale_ok: false,
+                route_kind: route.kind,
+              },
+            });
+          }
         }
       }
     }

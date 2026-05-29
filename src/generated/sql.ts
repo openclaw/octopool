@@ -95,6 +95,10 @@ export const queries = {
     "SELECT 1\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\nLIMIT 1",
   freshCoveringPublicRepoProof:
     "SELECT 1\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
+  freshPRStateProof:
+    "SELECT 1\nFROM github_pr_state_proofs\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND number = ?3\n  AND state_hint = ?4\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
+  upsertPRStateProof:
+    "INSERT INTO github_pr_state_proofs (owner, repo, number, state_hint, checked_at, expires_at)\nVALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?5))\nON CONFLICT(owner, repo, number, state_hint) DO UPDATE SET\n  checked_at = excluded.checked_at,\n  expires_at = excluded.expires_at",
   statsAggregatePool:
     "SELECT\n  COUNT(*) AS requests,\n  SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,\n  AVG(duration_ms) AS avg_duration_ms,\n  SUM(CASE WHEN cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,\n  SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,\n  SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,\n  SUM(CASE WHEN cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,\n  SUM(CASE WHEN cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests\nFROM audit_events\nWHERE pool_id = ?1\n  AND created_at >= datetime('now', ?2)",
   statsAggregateCaller:

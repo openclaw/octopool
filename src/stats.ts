@@ -19,6 +19,10 @@ export type CacheAggregate = {
   cache_unknown: number;
   cacheable_requests: number;
   cache_hit_rate: number | null;
+  cacheable_hit_rate: number | null;
+  bypass_rate: number | null;
+  saved_github_requests: number;
+  backend_requests: number;
 };
 
 export type AggregateRow = {
@@ -136,16 +140,24 @@ export function normalizeAggregate(row: AggregateRow | null): CacheAggregate {
   const cacheHits = row?.cache_hits ?? 0;
   const cacheMisses = row?.cache_misses ?? 0;
   const denominator = cacheHits + cacheMisses;
+  const requests = row?.requests ?? 0;
+  const cacheBypass = row?.cache_bypass ?? 0;
+  const cacheUnknown = row?.cache_unknown ?? 0;
+  const cacheableRequests = row?.cacheable_requests ?? 0;
   return {
-    requests: row?.requests ?? 0,
+    requests,
     errors: row?.errors ?? 0,
     avg_duration_ms: row?.avg_duration_ms ?? null,
     cache_hits: cacheHits,
     cache_misses: cacheMisses,
-    cache_bypass: row?.cache_bypass ?? 0,
-    cache_unknown: row?.cache_unknown ?? 0,
-    cacheable_requests: row?.cacheable_requests ?? 0,
+    cache_bypass: cacheBypass,
+    cache_unknown: cacheUnknown,
+    cacheable_requests: cacheableRequests,
     cache_hit_rate: denominator === 0 ? null : cacheHits / denominator,
+    cacheable_hit_rate: cacheableRequests === 0 ? null : cacheHits / cacheableRequests,
+    bypass_rate: requests === 0 ? null : cacheBypass / requests,
+    saved_github_requests: cacheHits,
+    backend_requests: cacheMisses + cacheBypass,
   };
 }
 

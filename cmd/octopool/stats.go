@@ -41,6 +41,10 @@ type statsAggregate struct {
 	CacheUnknown      int      `json:"cache_unknown"`
 	CacheableRequests int      `json:"cacheable_requests"`
 	CacheHitRate      *float64 `json:"cache_hit_rate"`
+	CacheableHitRate  *float64 `json:"cacheable_hit_rate"`
+	BypassRate        *float64 `json:"bypass_rate"`
+	SavedGitHubCalls  int      `json:"saved_github_requests"`
+	BackendRequests   int      `json:"backend_requests"`
 }
 
 type statsRoute struct {
@@ -128,6 +132,11 @@ func renderStats(w io.Writer, stats statsResponse) error {
 			intFmt(stats.PoolUsage.Requests),
 		),
 		fmt.Sprintf(
+			"github: %s saved, %s backend",
+			intFmt(stats.PoolUsage.SavedGitHubCalls),
+			intFmt(stats.PoolUsage.BackendRequests),
+		),
+		fmt.Sprintf(
 			"caller: %s requests, %s hit",
 			intFmt(stats.CallerUsage.Requests),
 			percent(stats.CallerUsage.CacheHitRate),
@@ -155,10 +164,12 @@ func renderStats(w io.Writer, stats statsResponse) error {
 	for _, route := range stats.Routes {
 		if _, err := fmt.Fprintf(
 			w,
-			"  %s: %s req, %s hit, %s errors\n",
+			"  %s: %s req, %s hit, %s miss, %s bypass, %s errors\n",
 			route.RouteKind,
 			intFmt(route.Requests),
 			percent(route.CacheHitRate),
+			intFmt(route.CacheMisses),
+			intFmt(route.CacheBypass),
 			intFmt(route.Errors),
 		); err != nil {
 			return err

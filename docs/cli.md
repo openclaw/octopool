@@ -147,8 +147,9 @@ octopool stats
 # pool: maintainers
 # cache: 82.4% hit (42 hits, 9 misses, 3 bypass, 0 unknown)
 # cacheable: 51/54 requests
+# github: 42 saved, 12 backend
 # top routes:
-#   pr_view: 31 req, 86.1% hit, 0 errors
+#   pr_view: 31 req, 86.1% hit, 5 miss, 0 bypass, 0 errors
 ```
 
 Use `--json` for dashboards or scripts that want the raw aggregate:
@@ -157,9 +158,11 @@ Use `--json` for dashboards or scripts that want the raw aggregate:
 octopool stats --since 7d --json
 ```
 
-### `octopool request --path <p> [--method GET] [--query k=v] [--header k=v]`
+### `octopool request --path <p> [--method GET] [--query k=v] [--header k=v] [--route-hint k=v]`
 
 Debug/admin raw wrapper over `POST /v1/github/request`. Prints the full relay envelope.
+`--route-hint pr_head_sha=<sha>` or `--route-hint pr_state=closed` can be used for
+state-aware PR subresource cache probes.
 
 ### `octopool admin caller|identity ...`
 

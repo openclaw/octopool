@@ -168,6 +168,8 @@ D1 schema lives in `migrations/`:
   sessions.
 - `0005_audit_cache_metrics.sql` — per-request cache status and cacheability columns,
   plus stats indexes for route and hit-rate aggregates.
+- `0006_pr_state_proofs.sql` — short-lived validated PR state discriminators for
+  state-aware PR subresource cache keys.
 
 Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
 

@@ -173,8 +173,10 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	path := fs.String("path", "", "GitHub API path")
 	queryValues := multiFlag{}
 	headerValues := multiFlag{}
+	routeHintValues := multiFlag{}
 	fs.Var(&queryValues, "query", "query key=value, repeatable")
 	fs.Var(&headerValues, "header", "header key=value, repeatable")
+	fs.Var(&routeHintValues, "route-hint", "route hint key=value, repeatable")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -198,6 +200,9 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	if len(headerValues) > 0 {
 		body["headers"] = valuesMap(headerValues)
+	}
+	if len(routeHintValues) > 0 {
+		body["route_hint"] = valuesMap(routeHintValues)
 	}
 	return postJSON(ctx, stdout, apiURL(*url, "/v1/github/request"), token, body)
 }
