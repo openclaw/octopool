@@ -26,7 +26,7 @@ export async function githubCacheKey(
     pool,
     method: request.method,
     path: request.path,
-    query: stableRecord(request.query ?? {}),
+    query: normalizedCacheQuery(request.query ?? {}),
     headers: stableRecord(cacheVaryHeaders(request.headers)),
     route_key: route.routeKey,
   };
@@ -72,7 +72,7 @@ export async function writeGitHubCache(
   if (response.status !== 200) {
     return;
   }
-  const ttlSeconds = cacheTTLSeconds(route);
+  const ttlSeconds = cacheTTLSeconds(route, response);
   const expiresAt = sqliteTimestamp(new Date(Date.now() + ttlSeconds * 1000));
   await env.DB.prepare(queries.writeGitHubCache)
     .bind(
@@ -95,20 +95,26 @@ export async function writeGitHubCache(
     .run();
 }
 
-function cacheTTLSeconds(route: RouteInfo): number {
+export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
   switch (route.kind) {
     case "repo_view":
+      return 600;
+    case "commit_list":
+      return 300;
+    case "commit_view":
+      return 86_400;
     case "workflow_list":
     case "workflow_view":
-      return 300;
+      return 3_600;
     case "pr_view":
+      return closedPR(response) ? 3_600 : 120;
     case "pr_list":
+      return 60;
     case "issue_view":
+      return closedIssue(response) ? 3_600 : 300;
     case "issue_list":
+      return 60;
     case "branch_view":
-      return 30;
-    case "commit_list":
-    case "commit_view":
       return 120;
     case "run_view":
     case "run_list":
@@ -116,6 +122,7 @@ function cacheTTLSeconds(route: RouteInfo): number {
     case "run_jobs":
     case "commit_check_runs":
     case "commit_status":
+    case "job_view":
       return 15;
     default:
       return 60;
@@ -126,11 +133,25 @@ function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, stri
   const out: Record<string, string> = {};
   const accept = headers?.accept;
   const version = headers?.["x-github-api-version"];
-  if (accept !== undefined) {
-    out.accept = accept;
+  if (accept !== undefined && !defaultJSONAccept(accept)) {
+    out.accept = accept.toLowerCase();
   }
   if (version !== undefined) {
     out["x-github-api-version"] = version;
+  }
+  return out;
+}
+
+function normalizedCacheQuery(
+  input: Record<string, string | string[]>,
+): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const key of Object.keys(input).sort()) {
+    const value = input[key];
+    if (value === undefined || defaultQueryValue(key, value)) {
+      continue;
+    }
+    out[key] = Array.isArray(value) ? [...value] : value;
   }
   return out;
 }
@@ -146,6 +167,37 @@ function stableRecord(
     }
   }
   return out;
+}
+
+function defaultQueryValue(key: string, value: string | string[]): boolean {
+  if (Array.isArray(value)) {
+    return false;
+  }
+  return (key === "page" && value === "1") || (key === "per_page" && value === "30");
+}
+
+function defaultJSONAccept(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return (
+    normalized === "application/vnd.github+json" ||
+    normalized === "application/json" ||
+    normalized === "application/vnd.github.v3+json"
+  );
+}
+
+function closedPR(response?: GitHubRelayResponse): boolean {
+  if (!isRecord(response?.body)) {
+    return false;
+  }
+  return response.body.state === "closed" || typeof response.body.merged_at === "string";
+}
+
+function closedIssue(response?: GitHubRelayResponse): boolean {
+  return isRecord(response?.body) && response.body.state === "closed";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseJSONRecord(raw: string): Record<string, string> {

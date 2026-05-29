@@ -25,6 +25,20 @@ describe("public repo guard", () => {
     });
   });
 
+  it("keeps public proofs short by default", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ private: false })),
+    );
+    const run = vi.fn(async () => ({}));
+    const bind = vi.fn(() => ({ run }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await ensurePublicGitHubRepo({ ...env(), DB: { prepare } } as unknown as Env, route());
+
+    expect(bind).toHaveBeenCalledWith("openclaw", "octopool", "+30 seconds");
+  });
+
   it("retries public checks without the verifier token when the verifier is depleted", async () => {
     const fetchMock = vi
       .fn()

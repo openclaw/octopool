@@ -47,7 +47,8 @@ func TestRenderStats(t *testing.T) {
 	for _, want := range []string{
 		"pool: maintainers",
 		"operator: steipete",
-		"cache: 62.5% hit (5 hits, 3 misses, 4 bypass)",
+		"cache: 62.5% hit (5 hits, 3 misses, 4 bypass, 0 unknown)",
+		"cacheable: 0/12 requests",
 		"entries: 7 fresh / 9 total, 2 expired, 1.5 KiB",
 		"  pr_view: 6 req, 62.5% hit, 0 errors",
 	} {

@@ -115,11 +115,17 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		fmt.Sprintf("operator: %s", firstNonEmpty(stats.Operator.GitHubLogin, "unknown")),
 		fmt.Sprintf("requests: %s (%s errors)", intFmt(stats.PoolUsage.Requests), intFmt(stats.PoolUsage.Errors)),
 		fmt.Sprintf(
-			"cache: %s hit (%s hits, %s misses, %s bypass)",
+			"cache: %s hit (%s hits, %s misses, %s bypass, %s unknown)",
 			percent(stats.PoolUsage.CacheHitRate),
 			intFmt(stats.PoolUsage.CacheHits),
 			intFmt(stats.PoolUsage.CacheMisses),
 			intFmt(stats.PoolUsage.CacheBypass),
+			intFmt(stats.PoolUsage.CacheUnknown),
+		),
+		fmt.Sprintf(
+			"cacheable: %s/%s requests",
+			intFmt(stats.PoolUsage.CacheableRequests),
+			intFmt(stats.PoolUsage.Requests),
 		),
 		fmt.Sprintf(
 			"caller: %s requests, %s hit",

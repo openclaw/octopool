@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { githubCacheKey, shouldUseGitHubCache } from "../src/cache";
+import { cacheTTLSeconds, githubCacheKey, shouldUseGitHubCache } from "../src/cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import type { GitHubRelayResponse } from "../src/types";
 
 describe("github cache policy", () => {
   const policy = defaultPolicy("openclaw");
@@ -45,6 +46,46 @@ describe("github cache policy", () => {
     );
   });
 
+  it("normalizes default query and JSON accept variants in cache keys", async () => {
+    const left = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/actions/runs",
+      query: { page: "1", per_page: "30" },
+      headers: { accept: "application/vnd.github+json" },
+    });
+    const right = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/actions/runs",
+      headers: { accept: "application/json" },
+    });
+    const route = classifyRoute(left, policy);
+    await expect(githubCacheKey("maintainers", left, route)).resolves.toBe(
+      await githubCacheKey("maintainers", right, route),
+    );
+  });
+
+  it("keeps non-default pagination and media accepts distinct", async () => {
+    const left = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341/files",
+      query: { per_page: "100" },
+      headers: { accept: "application/vnd.github+json" },
+    });
+    const right = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341/files",
+      headers: { accept: "application/vnd.github.diff" },
+    });
+    const route = classifyRoute(left, policy);
+    await expect(githubCacheKey("maintainers", left, route)).resolves.not.toBe(
+      await githubCacheKey("maintainers", right, route),
+    );
+  });
+
   it("bypasses conditional and rate-limit reads", () => {
     const pr = validateRelayRequest({
       pool: "maintainers",
@@ -57,4 +98,68 @@ describe("github cache policy", () => {
     const rate = validateRelayRequest({ pool: "maintainers", method: "GET", path: "/rate_limit" });
     expect(shouldUseGitHubCache(rate, classifyRoute(rate, policy))).toBe(false);
   });
+
+  it("keeps mutable CI TTLs short and extends closed items", () => {
+    const run = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/runs/123",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(15);
+    expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(15);
+
+    const runList = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/runs",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(runList, response({ workflow_runs: [{ status: "completed" }] }))).toBe(
+      15,
+    );
+
+    const checks = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/commits/abc1234/check-runs",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(15);
+
+    const files = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/42/files",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(files, response([]))).toBe(60);
+
+    const pr = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/42",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(pr, response({ state: "closed", merged_at: null }))).toBe(3_600);
+    expect(cacheTTLSeconds(pr, response({ state: "open" }))).toBe(120);
+  });
 });
+
+function response(body: unknown): GitHubRelayResponse {
+  return {
+    status: 200,
+    headers: {},
+    body,
+  };
+}

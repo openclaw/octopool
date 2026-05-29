@@ -14,8 +14,10 @@ performs the GitHub call and writes the result back.
 
 ### Cache key
 
-SHA-256 (base64url) over a stable, sorted JSON of: pool, method, path, query, the
-vary headers (`accept`, `x-github-api-version`), and the normalized route key. The key is
+SHA-256 (base64url) over a stable, sorted JSON of: pool, method, path, normalized
+query, the vary headers, and the normalized route key. Default pagination
+(`page=1`, `per_page=30`) and default JSON `accept` variants are folded together; custom
+media types and non-default query values still produce distinct entries. The key is
 pool-scoped, so pools never share cache entries.
 
 ### What is cached
@@ -27,11 +29,14 @@ Only `200` responses on cacheable routes are stored. The cache is **bypassed** w
 
 ### TTLs
 
-Per route kind (`cacheTTLSeconds`):
+Per route kind and response state (`cacheTTLSeconds`):
 
-- `pr_view`, `issue_view`, `branch_view` → 30s
-- `run_view`, `run_jobs`, `commit_check_runs`, `commit_status` → 15s
-- everything else → 60s
+- workflow runs, run lists, job lists, checks, and commit statuses → 15s because
+  completed CI can still change after a rerun
+- closed PRs/issues → 1h; open PRs → 2m; open issues → 5m
+- immutable commit objects → 24h; commit lists → 5m
+- repo metadata → 10m; workflow metadata → 1h
+- large logs, explicit log routes, `rate_limit`, and conditional requests still bypass
 
 ### Cache-hit integrity
 

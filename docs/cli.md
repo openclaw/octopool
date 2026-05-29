@@ -145,7 +145,8 @@ days.
 ```sh
 octopool stats
 # pool: maintainers
-# cache: 82.4% hit (42 hits, 9 misses, 3 bypass)
+# cache: 82.4% hit (42 hits, 9 misses, 3 bypass, 0 unknown)
+# cacheable: 51/54 requests
 # top routes:
 #   pr_view: 31 req, 86.1% hit, 0 errors
 ```
