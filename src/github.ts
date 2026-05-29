@@ -35,7 +35,7 @@ export async function callGitHub(
   };
 }
 
-async function githubToken(env: Env, identity: Identity): Promise<string> {
+export async function githubToken(env: Env, identity: Identity): Promise<string> {
   switch (identity.kind) {
     case "pat":
       return githubSecret(env, identity.secret_ref);

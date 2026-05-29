@@ -68,6 +68,14 @@ export const queries = {
   insertCaller:
     "INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
   insertCallerPool: "INSERT INTO caller_pools (caller_id, pool_id)\nVALUES (?1, ?2)",
+  findCallerForGitPolicy:
+    "SELECT callers.id, callers.github_login\nFROM callers\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE lower(callers.github_login) = lower(?1)\n  AND callers.org_login = ?2\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?3\nLIMIT 1",
+  upsertCallerGitPolicy:
+    "INSERT INTO caller_git_policies\n  (caller_id, pool_id, owner, repo, allow_fetch, allow_push, push_branch_globs_json, expires_at)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)\nON CONFLICT(caller_id, pool_id, owner, repo) DO UPDATE SET\n  allow_fetch = excluded.allow_fetch,\n  allow_push = excluded.allow_push,\n  push_branch_globs_json = excluded.push_branch_globs_json,\n  expires_at = excluded.expires_at,\n  updated_at = CURRENT_TIMESTAMP",
+  deleteCallerGitPolicy:
+    "DELETE FROM caller_git_policies\nWHERE caller_id = ?1\n  AND pool_id = ?2\n  AND lower(owner) = lower(?3)\n  AND lower(repo) = lower(?4)",
+  getCallerGitPolicy:
+    "SELECT allow_fetch, allow_push, push_branch_globs_json, expires_at\nFROM caller_git_policies\nWHERE caller_id = ?1\n  AND pool_id = ?2\n  AND lower(owner) = lower(?3)\n  AND lower(repo) = lower(?4)\n  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)\nLIMIT 1",
   getIdentityPoolKind: "SELECT pool_id, kind\nFROM identities\nWHERE id = ?1",
   upsertIdentity:
     "INSERT INTO identities (id, pool_id, kind, login, secret_ref, installation_id, status, weight)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7)\nON CONFLICT(id) DO UPDATE SET\n  login = excluded.login,\n  secret_ref = excluded.secret_ref,\n  installation_id = excluded.installation_id,\n  status = 'active',\n  weight = excluded.weight,\n  updated_at = CURRENT_TIMESTAMP",

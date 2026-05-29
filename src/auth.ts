@@ -16,6 +16,14 @@ export async function authenticateCaller(
   pool: string,
 ): Promise<Caller> {
   const token = requestBearer(request);
+  return authenticateCallerToken(token, env, pool);
+}
+
+export async function authenticateCallerToken(
+  token: string,
+  env: Env,
+  pool: string,
+): Promise<Caller> {
   const tokenHash = await hashToken(token);
   const row = await env.DB.prepare(queries.authenticateCaller)
     .bind(tokenHash, pool)

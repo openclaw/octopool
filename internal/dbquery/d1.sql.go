@@ -473,6 +473,31 @@ func (q *Queries) DashboardUsers(ctx context.Context, poolID string) ([]Dashboar
 	return items, nil
 }
 
+const deleteCallerGitPolicy = `-- name: DeleteCallerGitPolicy :exec
+DELETE FROM caller_git_policies
+WHERE caller_id = ?1
+  AND pool_id = ?2
+  AND lower(owner) = lower(?3)
+  AND lower(repo) = lower(?4)
+`
+
+type DeleteCallerGitPolicyParams struct {
+	CallerID string `json:"caller_id"`
+	PoolID   string `json:"pool_id"`
+	LOWER    string `json:"LOWER"`
+	LOWER_2  string `json:"LOWER_2"`
+}
+
+func (q *Queries) DeleteCallerGitPolicy(ctx context.Context, arg DeleteCallerGitPolicyParams) error {
+	_, err := q.db.ExecContext(ctx, deleteCallerGitPolicy,
+		arg.CallerID,
+		arg.PoolID,
+		arg.LOWER,
+		arg.LOWER_2,
+	)
+	return err
+}
+
 const deleteIdentityScopes = `-- name: DeleteIdentityScopes :exec
 DELETE FROM identity_scopes
 WHERE identity_id = ?1
@@ -507,6 +532,35 @@ type EnsurePoolParams struct {
 func (q *Queries) EnsurePool(ctx context.Context, arg EnsurePoolParams) error {
 	_, err := q.db.ExecContext(ctx, ensurePool, arg.ID, arg.PolicyJson)
 	return err
+}
+
+const findCallerForGitPolicy = `-- name: FindCallerForGitPolicy :one
+SELECT callers.id, callers.github_login
+FROM callers
+JOIN caller_pools ON caller_pools.caller_id = callers.id
+WHERE lower(callers.github_login) = lower(?1)
+  AND callers.org_login = ?2
+  AND callers.status = 'active'
+  AND caller_pools.pool_id = ?3
+LIMIT 1
+`
+
+type FindCallerForGitPolicyParams struct {
+	LOWER    string `json:"LOWER"`
+	OrgLogin string `json:"org_login"`
+	PoolID   string `json:"pool_id"`
+}
+
+type FindCallerForGitPolicyRow struct {
+	ID          string `json:"id"`
+	GithubLogin string `json:"github_login"`
+}
+
+func (q *Queries) FindCallerForGitPolicy(ctx context.Context, arg FindCallerForGitPolicyParams) (FindCallerForGitPolicyRow, error) {
+	row := q.db.QueryRowContext(ctx, findCallerForGitPolicy, arg.LOWER, arg.OrgLogin, arg.PoolID)
+	var i FindCallerForGitPolicyRow
+	err := row.Scan(&i.ID, &i.GithubLogin)
+	return i, err
 }
 
 const freshCoveringPublicRepoProof = `-- name: FreshCoveringPublicRepoProof :one
@@ -551,6 +605,48 @@ func (q *Queries) FreshPublicRepoProof(ctx context.Context, arg FreshPublicRepoP
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const getCallerGitPolicy = `-- name: GetCallerGitPolicy :one
+SELECT allow_fetch, allow_push, push_branch_globs_json, expires_at
+FROM caller_git_policies
+WHERE caller_id = ?1
+  AND pool_id = ?2
+  AND lower(owner) = lower(?3)
+  AND lower(repo) = lower(?4)
+  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+LIMIT 1
+`
+
+type GetCallerGitPolicyParams struct {
+	CallerID string `json:"caller_id"`
+	PoolID   string `json:"pool_id"`
+	LOWER    string `json:"LOWER"`
+	LOWER_2  string `json:"LOWER_2"`
+}
+
+type GetCallerGitPolicyRow struct {
+	AllowFetch          int64          `json:"allow_fetch"`
+	AllowPush           int64          `json:"allow_push"`
+	PushBranchGlobsJson string         `json:"push_branch_globs_json"`
+	ExpiresAt           sql.NullString `json:"expires_at"`
+}
+
+func (q *Queries) GetCallerGitPolicy(ctx context.Context, arg GetCallerGitPolicyParams) (GetCallerGitPolicyRow, error) {
+	row := q.db.QueryRowContext(ctx, getCallerGitPolicy,
+		arg.CallerID,
+		arg.PoolID,
+		arg.LOWER,
+		arg.LOWER_2,
+	)
+	var i GetCallerGitPolicyRow
+	err := row.Scan(
+		&i.AllowFetch,
+		&i.AllowPush,
+		&i.PushBranchGlobsJson,
+		&i.ExpiresAt,
+	)
+	return i, err
 }
 
 const getCallerPoolGrant = `-- name: GetCallerPoolGrant :one
@@ -1305,6 +1401,43 @@ func (q *Queries) UpdateCallerWebLogin(ctx context.Context, arg UpdateCallerWebL
 		arg.GithubUserID,
 		arg.OrgVerifiedAt,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertCallerGitPolicy = `-- name: UpsertCallerGitPolicy :exec
+INSERT INTO caller_git_policies
+  (caller_id, pool_id, owner, repo, allow_fetch, allow_push, push_branch_globs_json, expires_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+ON CONFLICT(caller_id, pool_id, owner, repo) DO UPDATE SET
+  allow_fetch = excluded.allow_fetch,
+  allow_push = excluded.allow_push,
+  push_branch_globs_json = excluded.push_branch_globs_json,
+  expires_at = excluded.expires_at,
+  updated_at = CURRENT_TIMESTAMP
+`
+
+type UpsertCallerGitPolicyParams struct {
+	CallerID            string         `json:"caller_id"`
+	PoolID              string         `json:"pool_id"`
+	Owner               string         `json:"owner"`
+	Repo                string         `json:"repo"`
+	AllowFetch          int64          `json:"allow_fetch"`
+	AllowPush           int64          `json:"allow_push"`
+	PushBranchGlobsJson string         `json:"push_branch_globs_json"`
+	ExpiresAt           sql.NullString `json:"expires_at"`
+}
+
+func (q *Queries) UpsertCallerGitPolicy(ctx context.Context, arg UpsertCallerGitPolicyParams) error {
+	_, err := q.db.ExecContext(ctx, upsertCallerGitPolicy,
+		arg.CallerID,
+		arg.PoolID,
+		arg.Owner,
+		arg.Repo,
+		arg.AllowFetch,
+		arg.AllowPush,
+		arg.PushBranchGlobsJson,
+		arg.ExpiresAt,
 	)
 	return err
 }

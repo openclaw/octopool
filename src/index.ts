@@ -12,6 +12,7 @@ import { githubCacheKey, readGitHubCache, shouldUseGitHubCache, writeGitHubCache
 import { dashboardResponse } from "./dashboard";
 import { ensurePool, insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, rateFromHeaders } from "./github";
+import { deleteGitPolicy, handleGitRequest, upsertGitPolicy } from "./git-proxy";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { queries } from "./generated/sql";
 import {
@@ -130,9 +131,33 @@ async function routeRequest(
   if (request.method === "POST" && url.pathname === "/v1/github/request") {
     return relayGitHub(request, env, ctx, requestId);
   }
+  if (url.pathname.startsWith("/git/")) {
+    return handleGitRequest(request, env);
+  }
   if (request.method === "POST" && url.pathname === "/v1/admin/callers") {
     await authenticateAdmin(request, env);
     return createCaller(request, env);
+  }
+  if (request.method === "PUT" && /^\/v1\/admin\/pools\/[^/]+\/git-policies$/.test(url.pathname)) {
+    await authenticateAdmin(request, env);
+    const pool = routeParam(
+      url.pathname,
+      /^\/v1\/admin\/pools\/(?<pool>[^/]+)\/git-policies$/,
+      "pool",
+    );
+    return upsertGitPolicy(request, env, pool);
+  }
+  if (
+    request.method === "DELETE" &&
+    /^\/v1\/admin\/pools\/[^/]+\/git-policies$/.test(url.pathname)
+  ) {
+    await authenticateAdmin(request, env);
+    const pool = routeParam(
+      url.pathname,
+      /^\/v1\/admin\/pools\/(?<pool>[^/]+)\/git-policies$/,
+      "pool",
+    );
+    return deleteGitPolicy(request, env, pool);
   }
   if (request.method === "POST" && /^\/v1\/admin\/pools\/[^/]+\/identities$/.test(url.pathname)) {
     await authenticateAdmin(request, env);

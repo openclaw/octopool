@@ -76,6 +76,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return runWhoami(args[1:], stdout)
 	case "gh":
 		return runGH(ctx, args[1:], stdout, stderr)
+	case "git":
+		return runGit(ctx, args[1:], stdout, stderr)
 	case "health":
 		return runHealth(ctx, args[1:], stdout)
 	case "stats":
@@ -211,6 +213,8 @@ func runAdmin(ctx context.Context, args []string, stdout io.Writer) error {
 		return runAdminCaller(ctx, args[1:], stdout)
 	case "identity":
 		return runAdminIdentity(ctx, args[1:], stdout)
+	case "git-policy":
+		return runAdminGitPolicy(ctx, args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown admin subcommand %q", args[0])
 	}
@@ -371,6 +375,47 @@ func postJSONRaw(
 	return httpClient.Do(req)
 }
 
+func putJSON(ctx context.Context, stdout io.Writer, url string, token string, body map[string]any) error {
+	resp, err := jsonRaw(ctx, http.MethodPut, url, token, body)
+	if err != nil {
+		return err
+	}
+	return writeJSONResponse(stdout, resp)
+}
+
+func deleteJSON(ctx context.Context, stdout io.Writer, url string, token string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("authorization", "Bearer "+token)
+	}
+	return do(stdout, req)
+}
+
+func jsonRaw(
+	ctx context.Context,
+	method string,
+	url string,
+	token string,
+	body map[string]any,
+) (*http.Response, error) {
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, strings.NewReader(string(encoded)))
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("authorization", "Bearer "+token)
+	}
+	req.Header.Set("content-type", "application/json")
+	return httpClient.Do(req)
+}
+
 func do(stdout io.Writer, req *http.Request) error {
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -507,5 +552,5 @@ func apiURL(base string, path string) string {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: octopool <login|whoami|gh|health|stats|request|admin> [flags]")
+	fmt.Fprintln(w, "usage: octopool <login|whoami|gh|git|health|stats|request|admin> [flags]")
 }

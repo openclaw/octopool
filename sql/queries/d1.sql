@@ -209,6 +209,44 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active');
 INSERT INTO caller_pools (caller_id, pool_id)
 VALUES (?1, ?2);
 
+-- name: FindCallerForGitPolicy :one
+SELECT callers.id, callers.github_login
+FROM callers
+JOIN caller_pools ON caller_pools.caller_id = callers.id
+WHERE lower(callers.github_login) = lower(?1)
+  AND callers.org_login = ?2
+  AND callers.status = 'active'
+  AND caller_pools.pool_id = ?3
+LIMIT 1;
+
+-- name: UpsertCallerGitPolicy :exec
+INSERT INTO caller_git_policies
+  (caller_id, pool_id, owner, repo, allow_fetch, allow_push, push_branch_globs_json, expires_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+ON CONFLICT(caller_id, pool_id, owner, repo) DO UPDATE SET
+  allow_fetch = excluded.allow_fetch,
+  allow_push = excluded.allow_push,
+  push_branch_globs_json = excluded.push_branch_globs_json,
+  expires_at = excluded.expires_at,
+  updated_at = CURRENT_TIMESTAMP;
+
+-- name: DeleteCallerGitPolicy :exec
+DELETE FROM caller_git_policies
+WHERE caller_id = ?1
+  AND pool_id = ?2
+  AND lower(owner) = lower(?3)
+  AND lower(repo) = lower(?4);
+
+-- name: GetCallerGitPolicy :one
+SELECT allow_fetch, allow_push, push_branch_globs_json, expires_at
+FROM caller_git_policies
+WHERE caller_id = ?1
+  AND pool_id = ?2
+  AND lower(owner) = lower(?3)
+  AND lower(repo) = lower(?4)
+  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+LIMIT 1;
+
 -- name: GetIdentityPoolKind :one
 SELECT pool_id, kind
 FROM identities

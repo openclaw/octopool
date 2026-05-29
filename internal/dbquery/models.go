@@ -37,6 +37,19 @@ type Caller struct {
 	DashboardRole string         `json:"dashboard_role"`
 }
 
+type CallerGitPolicy struct {
+	CallerID            string         `json:"caller_id"`
+	PoolID              string         `json:"pool_id"`
+	Owner               string         `json:"owner"`
+	Repo                string         `json:"repo"`
+	AllowFetch          int64          `json:"allow_fetch"`
+	AllowPush           int64          `json:"allow_push"`
+	PushBranchGlobsJson string         `json:"push_branch_globs_json"`
+	ExpiresAt           sql.NullString `json:"expires_at"`
+	CreatedAt           string         `json:"created_at"`
+	UpdatedAt           string         `json:"updated_at"`
+}
+
 type CallerPool struct {
 	CallerID  string `json:"caller_id"`
 	PoolID    string `json:"pool_id"`
