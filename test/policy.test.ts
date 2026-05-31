@@ -12,10 +12,12 @@ describe("route policy", () => {
       "/repos/openclaw/openclaw/pulls?state=open",
       "/repos/openclaw/openclaw/issues?state=open",
       "/repos/openclaw/openclaw/pulls/85341",
+      "/repos/openclaw/openclaw/pulls/85341/commits",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-runs",
       "/repos/openclaw/openclaw/actions/runs/26360397003/jobs",
       "/repos/openclaw/openclaw/actions/jobs/77594668516/logs",
       "/repos/openclaw/openclaw/issues/80490/comments",
+      "/repos/openclaw/openclaw/issues/80490/events",
       "/repos/openclaw/openclaw/actions/workflows/ci.yml",
       "/repos/openclaw/openclaw/actions/workflows/ci.yml/runs",
     ];
@@ -123,14 +125,43 @@ describe("route policy", () => {
     }
   });
 
-  it("denies search routes until query scope parsing exists", () => {
+  it("gates search routes behind pool policy", () => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
       path: "/search/issues",
+      query: { q: "repo:openclaw/openclaw type:issue state:open cache" },
+    });
+    expect(() => classifyRoute(request, policy)).toThrow(/Search routes are disabled/);
+    expect(classifyRoute(request, { ...policy, allow_search: true })).toMatchObject({
+      kind: "search_issues",
+      owner: "openclaw",
+      repo: "openclaw",
+      resource: "search",
+    });
+  });
+
+  it("denies unscoped search routes even when search is enabled", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/issues",
+      query: { q: "cache regression" },
     });
     expect(() => classifyRoute(request, { ...policy, allow_search: true })).toThrow(
-      /Route is not enabled/,
+      /repo qualifier/,
+    );
+  });
+
+  it("denies broad search syntax outside the repo qualifier", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/issues",
+      query: { q: "repo:openclaw/openclaw cache OR org:other" },
+    });
+    expect(() => classifyRoute(request, { ...policy, allow_search: true })).toThrow(
+      /plain repo-scoped terms/,
     );
   });
 

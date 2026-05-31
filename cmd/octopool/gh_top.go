@@ -17,6 +17,7 @@ import (
 
 type ghTopOptions struct {
 	repo        string
+	repoCount   int
 	json        []string
 	jq          string
 	patch       bool
@@ -47,6 +48,8 @@ func runGHTopLevel(ctx context.Context, args []string, stdout io.Writer) (bool, 
 		return runGHRepo(ctx, args[1:], stdout)
 	case "release":
 		return runGHRelease(ctx, args[1:], stdout)
+	case "search":
+		return runGHSearch(ctx, args[1:], stdout)
 	default:
 		return false, nil
 	}
@@ -68,6 +71,9 @@ func runGHPR(ctx context.Context, args []string, stdout io.Writer) (bool, error)
 		repo, number, ok := repoNumber(opts)
 		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedPRFields) {
 			return false, nil
+		}
+		if needsHydratedPR(opts.json) {
+			return true, relayHydratedPRView(ctx, stdout, repo, number, opts)
 		}
 		return true, relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "pulls", number)}, opts, fieldMapPR)
 	case "list":
@@ -101,6 +107,58 @@ func runGHPR(ctx context.Context, args []string, stdout io.Writer) (bool, error)
 			return false, nil
 		}
 		return true, relayPRChecks(ctx, stdout, repo, number, opts)
+	default:
+		return false, nil
+	}
+}
+
+func runGHSearch(ctx context.Context, args []string, stdout io.Writer) (bool, error) {
+	if len(args) < 2 {
+		return false, nil
+	}
+	kind := args[0]
+	if kind != "issues" && kind != "prs" {
+		return false, nil
+	}
+	opts, fallback, err := parseGHTopOptions(args[1:])
+	if err != nil || fallback {
+		return !fallback, err
+	}
+	if topJQFallback(opts) {
+		return false, nil
+	}
+	repo, ok := repoFromOptionOrCurrent(opts.repo)
+	if !ok || repo == "" || opts.repoCount > 1 || !machineReadable(opts) || limitOverOnePage(opts) {
+		return false, nil
+	}
+	if opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" {
+		return false, nil
+	}
+	if opts.state != "" && opts.state != "open" && opts.state != "closed" {
+		return false, nil
+	}
+	queryParts := opts.positionals
+	for _, part := range queryParts {
+		if strings.ContainsAny(part, " \t\r\n") {
+			return false, nil
+		}
+	}
+	query := strings.TrimSpace(strings.Join(queryParts, " "))
+	if query == "" {
+		return false, nil
+	}
+	opts.positionals = nil
+	switch kind {
+	case "issues":
+		if !supportedJSONFields(opts, supportedIssueFields) {
+			return false, nil
+		}
+		return true, relaySearchIssues(ctx, stdout, repo, query, opts)
+	case "prs":
+		if !supportedJSONFields(opts, supportedPRSearchFields) {
+			return false, nil
+		}
+		return true, relaySearchPRs(ctx, stdout, repo, query, opts)
 	default:
 		return false, nil
 	}
@@ -278,8 +336,8 @@ func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {
 			name string
 			set  func(string)
 		}{
-			{"-R", func(value string) { opts.repo = value }},
-			{"--repo", func(value string) { opts.repo = value }},
+			{"-R", func(value string) { opts.repo = value; opts.repoCount++ }},
+			{"--repo", func(value string) { opts.repo = value; opts.repoCount++ }},
 			{"--json", func(value string) { opts.json = splitFields(value) }},
 			{"--jq", func(value string) { opts.jq = value }},
 			{"-q", func(value string) { opts.jq = value }},
@@ -379,44 +437,10 @@ func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number st
 	if !ok || sha == "" {
 		return errors.New("pull request response did not include head.sha")
 	}
-	checkRuns := []any{}
-	totalCheckRuns := 0
-	for page := 1; page <= 10; page++ {
-		request := ghAPIRequest{
-			method:  "GET",
-			path:    repoPath(repo, "commits", sha, "check-runs"),
-			query:   map[string]any{"per_page": "100", "page": strconv.Itoa(page)},
-			headers: liveHeaders,
-		}
-		checkRunsEnvelope, err := client.do(ctx, request)
-		if err != nil {
-			return err
-		}
-		items, total, err := checkRunItems(checkRunsEnvelope)
-		if err != nil {
-			return err
-		}
-		if page == 1 {
-			totalCheckRuns = total
-		}
-		checkRuns = append(checkRuns, items...)
-		if len(checkRuns) >= totalCheckRuns || len(items) < 100 {
-			break
-		}
-	}
-	statusEnvelope, err := client.do(ctx, ghAPIRequest{
-		method:  "GET",
-		path:    repoPath(repo, "commits", sha, "status"),
-		headers: liveHeaders,
-	})
+	items, err := prCheckItemsForSHA(ctx, client, repo, sha)
 	if err != nil {
 		return err
 	}
-	statuses, err := statusItems(statusEnvelope)
-	if err != nil {
-		return err
-	}
-	items := ghCheckItems(append(checkRuns, statuses...))
 	raw, err := json.Marshal(items)
 	if err != nil {
 		return err
@@ -431,6 +455,101 @@ func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number st
 		return err
 	}
 	return checkExitCode(items)
+}
+
+func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	prEnvelope, err := client.do(ctx, ghAPIRequest{method: "GET", path: repoPath(repo, "pulls", number)})
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(prEnvelope)
+	if err != nil {
+		return err
+	}
+	var pr map[string]any
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return err
+	}
+	for _, field := range opts.json {
+		switch field {
+		case "files":
+			files, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "files"))
+			if err != nil {
+				return err
+			}
+			pr["files"] = mapPRFiles(files)
+		case "commits":
+			commits, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "commits"))
+			if err != nil {
+				return err
+			}
+			pr["commits"] = mapPRCommits(commits)
+		case "comments":
+			comments, err := relayPagedArray(ctx, client, repoPath(repo, "issues", number, "comments"))
+			if err != nil {
+				return err
+			}
+			pr["comments"] = mapPRComments(comments)
+		case "reviews":
+			reviews, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "reviews"))
+			if err != nil {
+				return err
+			}
+			pr["reviews"] = mapPRReviews(reviews)
+		}
+	}
+	raw, err := json.Marshal(pr)
+	if err != nil {
+		return err
+	}
+	filtered, err := filterJSONFields(raw, opts.json, fieldMapPR)
+	if err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, filtered, opts.jq)
+}
+
+func prCheckItemsForSHA(ctx context.Context, client ghRelayClient, repo string, sha string) ([]any, error) {
+	checkRuns := []any{}
+	totalCheckRuns := 0
+	for page := 1; page <= 10; page++ {
+		request := ghAPIRequest{
+			method: "GET",
+			path:   repoPath(repo, "commits", sha, "check-runs"),
+			query:  map[string]any{"per_page": "100", "page": strconv.Itoa(page)},
+		}
+		checkRunsEnvelope, err := client.do(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		items, total, err := checkRunItems(checkRunsEnvelope)
+		if err != nil {
+			return nil, err
+		}
+		if page == 1 {
+			totalCheckRuns = total
+		}
+		checkRuns = append(checkRuns, items...)
+		if len(checkRuns) >= totalCheckRuns || len(items) < 100 {
+			break
+		}
+	}
+	statusEnvelope, err := client.do(ctx, ghAPIRequest{
+		method: "GET",
+		path:   repoPath(repo, "commits", sha, "status"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	statuses, err := statusItems(statusEnvelope)
+	if err != nil {
+		return nil, err
+	}
+	return ghCheckItems(append(checkRuns, statuses...)), nil
 }
 
 func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest, opts ghTopOptions) error {
@@ -481,6 +600,199 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 		}
 	}
 	return writeBytes(ctx, stdout, raw, opts.jq)
+}
+
+func relaySearchIssues(ctx context.Context, stdout io.Writer, repo string, rawQuery string, opts ghTopOptions) error {
+	if opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
+		return localFallbackError{Reason: "unsupported_search_filter"}
+	}
+	return relayGitHubSearch(ctx, stdout, repo, rawQuery, "issue", opts, fieldMapIssue)
+}
+
+func relaySearchPRs(ctx context.Context, stdout io.Writer, repo string, rawQuery string, opts ghTopOptions) error {
+	if opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
+		return localFallbackError{Reason: "unsupported_pr_search_filter"}
+	}
+	return relayGitHubSearch(ctx, stdout, repo, rawQuery, "pr", opts, fieldMapPR)
+}
+
+func relayGitHubSearch(
+	ctx context.Context,
+	stdout io.Writer,
+	repo string,
+	rawQuery string,
+	searchType string,
+	opts ghTopOptions,
+	fieldMap map[string][]string,
+) error {
+	terms, ok := searchTerms(rawQuery)
+	if !ok {
+		return localFallbackError{Reason: "unsupported_search_query"}
+	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	q := fmt.Sprintf("repo:%s type:%s", repo, searchType)
+	if opts.state != "" {
+		q += " state:" + opts.state
+	}
+	if len(terms) > 0 {
+		q += " " + strings.Join(terms, " ")
+	}
+	envelope, err := client.do(ctx, ghAPIRequest{
+		method: "GET",
+		path:   "/search/issues",
+		query:  map[string]any{"q": q, "per_page": strconv.Itoa(desiredLimit(opts))},
+	})
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return err
+	}
+	items, _ := response["items"].([]any)
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return err
+	}
+	if len(opts.json) > 0 {
+		raw, err = filterJSONFields(raw, opts.json, fieldMap)
+		if err != nil {
+			return err
+		}
+	}
+	return writeBytes(ctx, stdout, raw, opts.jq)
+}
+
+func relayPagedArray(ctx context.Context, client ghRelayClient, path string) ([]any, error) {
+	items := []any{}
+	for page := 1; page <= 10; page++ {
+		envelope, err := client.do(ctx, ghAPIRequest{
+			method: "GET",
+			path:   path,
+			query:  map[string]any{"per_page": "100", "page": strconv.Itoa(page)},
+		})
+		if err != nil {
+			return nil, err
+		}
+		body, err := envelopeBodyBytes(envelope)
+		if err != nil {
+			return nil, err
+		}
+		var pageItems []any
+		if err := json.Unmarshal(body, &pageItems); err != nil {
+			return nil, err
+		}
+		items = append(items, pageItems...)
+		if len(pageItems) < 100 {
+			break
+		}
+	}
+	return items, nil
+}
+
+func mapPRFiles(items []any) []any {
+	return mapObjects(items, func(item map[string]any) map[string]any {
+		return map[string]any{
+			"path":         firstString(item, "filename"),
+			"additions":    item["additions"],
+			"deletions":    item["deletions"],
+			"changeType":   item["status"],
+			"originalPath": firstString(item, "previous_filename"),
+		}
+	})
+}
+
+func mapPRCommits(items []any) []any {
+	return mapObjects(items, func(item map[string]any) map[string]any {
+		commit, _ := item["commit"].(map[string]any)
+		message := firstString(commit, "message")
+		headline, body, _ := strings.Cut(message, "\n\n")
+		if headline == "" {
+			headline = message
+		}
+		return map[string]any{
+			"oid":             firstString(item, "sha"),
+			"messageHeadline": headline,
+			"messageBody":     body,
+			"committedDate":   nestedStringValue(item, "commit", "committer", "date"),
+			"authoredDate":    nestedStringValue(item, "commit", "author", "date"),
+			"url":             firstString(item, "html_url"),
+			"authors":         commitAuthors(item),
+		}
+	})
+}
+
+func mapPRComments(items []any) []any {
+	return mapObjects(items, func(item map[string]any) map[string]any {
+		return map[string]any{
+			"author":    item["user"],
+			"body":      item["body"],
+			"createdAt": item["created_at"],
+			"updatedAt": item["updated_at"],
+			"url":       item["html_url"],
+		}
+	})
+}
+
+func mapPRReviews(items []any) []any {
+	return mapObjects(items, func(item map[string]any) map[string]any {
+		return map[string]any{
+			"author":      item["user"],
+			"body":        item["body"],
+			"state":       item["state"],
+			"submittedAt": item["submitted_at"],
+			"url":         item["html_url"],
+		}
+	})
+}
+
+func mapObjects(items []any, mapper func(map[string]any) map[string]any) []any {
+	out := make([]any, 0, len(items))
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		out = append(out, mapper(item))
+	}
+	return out
+}
+
+func commitAuthors(item map[string]any) []any {
+	login := nestedStringValue(item, "author", "login")
+	if login == "" {
+		login = nestedStringValue(item, "commit", "author", "name")
+	}
+	if login == "" {
+		return []any{}
+	}
+	return []any{map[string]any{"login": login}}
+}
+
+func searchTerms(raw string) ([]string, bool) {
+	fields := strings.Fields(strings.ToLower(raw))
+	terms := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if strings.Contains(field, ":") || strings.HasPrefix(field, "-") || field == "or" {
+			return nil, false
+		}
+		term := strings.Trim(field, `"'`)
+		if term == "" {
+			continue
+		}
+		if !allowedSearchTerm.MatchString(term) {
+			return nil, false
+		}
+		terms = append(terms, term)
+	}
+	return terms, true
 }
 
 func checkRunItems(envelope relayEnvelope) ([]any, int, error) {
@@ -711,6 +1023,16 @@ func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+func needsHydratedPR(fields []string) bool {
+	for _, field := range fields {
+		switch field {
+		case "files", "commits", "comments", "reviews":
+			return true
+		}
+	}
+	return false
 }
 
 func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
@@ -1040,12 +1362,18 @@ var fieldMapCheckRun = map[string][]string{
 var supportedPRFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
-	"additions", "deletions", "changedFiles", "mergeable", "merged",
+	"additions", "deletions", "changedFiles", "mergeable", "merged", "files", "commits", "comments",
+	"reviews",
 )
 
 var supportedPRListFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
+)
+
+var supportedPRSearchFields = supportedFields(
+	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
+	"labels",
 )
 
 var supportedIssueFields = supportedFields(
@@ -1071,6 +1399,8 @@ var supportedReleaseFields = supportedFields(
 var supportedCheckRunFields = supportedFields(
 	"bucket", "completedAt", "description", "event", "link", "name", "startedAt", "state", "workflow",
 )
+
+var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 func supportedFields(fields ...string) map[string]bool {
 	out := make(map[string]bool, len(fields))

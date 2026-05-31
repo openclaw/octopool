@@ -24,7 +24,7 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/contents/.+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls$`),
-	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+/(files|comments|reviews)$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/pulls/[0-9]+/(files|commits|comments|reviews)$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/commits/[0-9A-Fa-f]{7,64}/(check-runs|status)$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/runs$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/runs/[0-9]+$`),
@@ -34,7 +34,7 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/check-runs/[0-9]+/annotations$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues$`),
-	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+/(comments|timeline)$`),
+	regexp.MustCompile(`^/repos/[^/]+/[^/]+/issues/[0-9]+/(comments|events|timeline)$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/branches/[^/?#]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/actions/workflows/[^/?#]+$`),
@@ -43,6 +43,7 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/latest$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/tags/[^/?#]+$`),
 	regexp.MustCompile(`^/repos/[^/]+/[^/]+/releases/[0-9]+$`),
+	regexp.MustCompile(`^/search/(issues|code|commits)$`),
 	regexp.MustCompile(`^/rate_limit$`),
 }
 

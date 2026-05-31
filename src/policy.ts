@@ -27,6 +27,7 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/pulls/${number}`, "pr_view", "core"),
   route(`/repos/${owner}/${repo}/pulls`, "pr_list", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/files`, "pr_files", "core"),
+  route(`/repos/${owner}/${repo}/pulls/${number}/commits`, "pr_commits", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/comments`, "pr_review_comments", "core"),
   route(`/repos/${owner}/${repo}/pulls/${number}/reviews`, "pr_reviews", "core"),
   route(`/repos/${owner}/${repo}/commits/${sha}/check-runs`, "commit_check_runs", "core"),
@@ -44,6 +45,7 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/issues/${number}`, "issue_view", "core"),
   route(`/repos/${owner}/${repo}/issues`, "issue_list", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/comments`, "issue_comments", "core"),
+  route(`/repos/${owner}/${repo}/issues/${number}/events`, "issue_events", "core"),
   route(`/repos/${owner}/${repo}/issues/${number}/timeline`, "issue_timeline", "core"),
   route(`/repos/${owner}/${repo}/branches/(?<branch>[^/?#]+)`, "branch_view", "core"),
   route(`/repos/${owner}/${repo}/actions/workflows`, "workflow_list", "core"),
@@ -57,6 +59,9 @@ const rules: RouteRule[] = [
   route(`/repos/${owner}/${repo}/releases/latest`, "release_latest", "core"),
   route(`/repos/${owner}/${repo}/releases/tags/${tag}`, "release_view", "core"),
   route(`/repos/${owner}/${repo}/releases/${id}`, "release_view", "core"),
+  route("/search/issues", "search_issues", "search", { search: true }),
+  route("/search/code", "search_code", "search", { search: true }),
+  route("/search/commits", "search_commits", "search", { search: true }),
   route("/rate_limit", "rate_limit", "core"),
 ];
 
@@ -176,12 +181,13 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
         throw new HttpError(403, "route_denied", "Cross-repository compare routes are not enabled");
       }
     }
-    const routeOwner = match.groups?.owner?.toLowerCase();
+    const searchRepo = rule.search === true ? repoFromSearchQuery(request.query) : undefined;
+    const routeOwner = (match.groups?.owner ?? searchRepo?.owner)?.toLowerCase();
     const allowedOwner = routeOwner === undefined || policy.allowed_owners.includes(routeOwner);
     if (routeOwner !== undefined && !allowedOwner && !policy.allow_public_repos) {
       throw new HttpError(403, "owner_denied", `Owner ${routeOwner} is not allowed for this pool`);
     }
-    const routeRepo = match.groups?.repo;
+    const routeRepo = match.groups?.repo ?? searchRepo?.repo;
     const info: RouteInfo = {
       kind: rule.kind,
       resource: rule.resource,
@@ -200,6 +206,35 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     return info;
   }
   throw new HttpError(403, "route_denied", "Route is not enabled");
+}
+
+function repoFromSearchQuery(query: Record<string, string | string[]> | undefined): {
+  owner: string;
+  repo: string;
+} {
+  const q = query?.q;
+  if (typeof q !== "string") {
+    throw new HttpError(403, "search_denied", "Search routes require a repo-scoped q query");
+  }
+  const tokens = q.trim().split(/\s+/).filter(Boolean);
+  const matches = tokens
+    .map((token) => /^repo:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(token))
+    .filter((match): match is RegExpExecArray => match !== null);
+  if (matches.length !== 1 || matches[0]?.[1] === undefined || matches[0]?.[2] === undefined) {
+    throw new HttpError(403, "search_denied", "Search routes require exactly one repo qualifier");
+  }
+  for (const token of tokens) {
+    if (token.startsWith("repo:")) {
+      continue;
+    }
+    if (/^type:(issue|pr)$/.test(token) || /^state:(open|closed)$/.test(token)) {
+      continue;
+    }
+    if (!/^[A-Za-z0-9_.-]+$/.test(token) || token.toUpperCase() === "OR") {
+      throw new HttpError(403, "search_denied", "Search routes only allow plain repo-scoped terms");
+    }
+  }
+  return { owner: matches[0][1], repo: matches[0][2] };
 }
 
 export function normalizeRouteKey(method: string, path: string): string {

@@ -73,6 +73,7 @@ Use it like `gh` for common read shapes:
 
 ```sh
 octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
+octopool gh search issues cache regression -R openclaw/openclaw --state open --json number,title,url
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket
 octopool gh issue list -R openclaw/openclaw --state open --json number,title,url
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,status

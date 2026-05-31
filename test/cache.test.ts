@@ -184,6 +184,15 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(files, response([]))).toBe(60);
+    const commits = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/42/commits",
+      }),
+      policy,
+    );
+    expect(cacheTTLSeconds(commits, response([]))).toBe(300);
     const stateAwareFiles = {
       ...classifyRoute(
         validateRelayRequest({

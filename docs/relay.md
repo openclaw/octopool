@@ -96,16 +96,18 @@ traversal (`%2e`, `%5c`). The relay only ever talks to `api.github.com`.
 Routes are classified in `src/policy.ts`. Only the following read-only shapes are
 enabled; anything else returns `403 route_denied`:
 
-- `pr_view`, `pr_files`, `pr_review_comments`, `pr_reviews`
+- `pr_view`, `pr_files`, `pr_commits`, `pr_review_comments`, `pr_reviews`
 - `pr_list`
 - `commit_list`, `commit_view`, `compare`, `contents`, `commit_check_runs`, `commit_status`
 - `run_list`, `run_view`, `run_jobs`, `run_artifacts`
 - `job_view`, `job_logs`, `check_run_annotations`
-- `issue_list`, `issue_view`, `issue_comments`, `issue_timeline`
+- `issue_list`, `issue_view`, `issue_comments`, `issue_events`, `issue_timeline`
 - `branch_view`
 - `repo_view`
 - `release_list`, `release_latest`, `release_view`
 - `workflow_list`, `workflow_view`
+- `search_issues`, `search_code`, `search_commits` when `allow_search` is enabled
+  and `q` contains exactly one `repo:owner/name` qualifier plus plain terms only
 - `rate_limit`
 
 `job_logs` is a large-payload, log-class route: it follows GitHub's signed redirect to
@@ -122,7 +124,9 @@ gated by the pool's `allow_logs` policy.
   public-repo guard proves `private: false` (default `true`). These routes use broad PAT
   identities from the pool rather than repo-scoped GitHub App installation tokens.
 - `allow_logs` — log routes require it (default `true`), else `403 logs_denied`.
-- `allow_search` — search routes require it (default `false`), else `403 search_denied`.
+- `allow_search` — search routes require it (default `false`) and must be scoped by
+  exactly one `repo:owner/name` qualifier plus plain terms and optional
+  `type:issue|pr` / `state:open|closed`, else `403 search_denied`.
 
 Every repo route additionally passes a public-visibility check before a pooled identity
 or cache entry is used — see [Cache & public-repo guard](cache.md).

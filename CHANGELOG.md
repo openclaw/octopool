@@ -8,6 +8,7 @@
 - Fetch public PR diffs, commit/compare diff and patch media, and explicit-ref content files through token-free GitHub web/raw endpoints before spending pooled GitHub API budget, while still writing the shared D1 cache.
 - Serve bounded stale cache entries when pooled identities are depleted, cooling down, or rate-limited, and count those responses as saved GitHub requests in stats and dashboard aggregates.
 - Route GitHub release list/view reads through Octopool for REST paths and top-level `gh release` JSON commands.
+- Raise `gh` shim cache coverage with repo-scoped cached `gh search issues|prs`, hydrated PR detail fields (`files`, `commits`, `comments`, `reviews`), cacheable default `gh pr checks`, and extra PR/issue subresource routes.
 
 ### Fixes
 

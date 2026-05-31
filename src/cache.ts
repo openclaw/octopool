@@ -86,6 +86,9 @@ export function staleCacheSeconds(route: RouteInfo): number {
     case "pr_commits":
     case "pr_review_comments":
     case "pr_reviews":
+    case "issue_comments":
+    case "issue_events":
+    case "issue_timeline":
       return 3_600;
     case "repo_view":
     case "commit_list":
@@ -207,6 +210,18 @@ export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse
       return 15;
     case "pr_files":
       return stateAwarePRSubresource(route, response) ? 300 : 60;
+    case "pr_commits":
+    case "pr_review_comments":
+    case "pr_reviews":
+    case "issue_comments":
+    case "issue_events":
+    case "issue_timeline":
+      return 300;
+    case "search_issues":
+    case "search_code":
+    case "search_commits":
+    case "search_repositories":
+      return 120;
     default:
       return 60;
   }

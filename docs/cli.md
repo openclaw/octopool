@@ -92,9 +92,12 @@ safe relay routes:
 
 ```sh
 octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
+octopool gh pr view 85341 -R openclaw/openclaw --json number,files,commits,comments,reviews
 octopool gh pr list -R openclaw/openclaw --state open --limit 20 --json number,title,url
 octopool gh pr diff 85341 -R openclaw/openclaw --patch
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket,link,workflow
+octopool gh search issues cache regression -R openclaw/openclaw --state open --json number,title,url
+octopool gh search prs rate limit -R openclaw/openclaw --state open --json number,title,url
 octopool gh issue view 80490 -R openclaw/openclaw --json number,title,state,url
 octopool gh issue list -R openclaw/openclaw --state open --label bug --limit 20 --json number,title,url
 octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databaseId,workflowName,status,conclusion,url
@@ -110,6 +113,13 @@ formatted commands stay on the real `gh`. Supported `--json` fields are intentio
 conservative. Common `gh` field names are mapped where the REST API uses different
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
+`gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request
+for the common plain-term `-R owner/repo --state ... --json ...` shape. Cache hits cost
+zero GitHub Search quota; misses use the pool's search bucket. Qualified search syntax
+such as `author:` or custom sort/match flags falls through to the real `gh`. PR search
+supports the issue-like fields returned by GitHub Search; PR-list-only fields such as
+`headRefName` fall through. `gh pr checks` uses the shared cache by default; ask for raw
+`gh api` conditional requests only when freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
 

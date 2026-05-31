@@ -59,8 +59,10 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 - workflow runs, run lists, job lists, checks, and commit statuses → 15s while active;
   completed runs/checks get short extended TTLs
-- PR files with a validated state discriminator → 5m; PR reviews/comments and
-  undiscriminated PR files → 1m
+- PR files with a validated state discriminator → 5m; PR commits, reviews,
+  comments, issue comments/events/timeline, and undiscriminated PR files → 1m..5m
+- repository-scoped `gh search issues|prs` shim calls use cacheable GitHub Search
+  requests, with misses accounted against the search bucket
 - closed PRs/issues → 1h; open PRs → 2m; open issues → 5m
 - release lists/latest → 5m; release by tag/id → 1h
 - immutable commit objects → 24h; commit lists → 5m; contents → 1h

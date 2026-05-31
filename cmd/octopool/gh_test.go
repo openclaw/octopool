@@ -83,7 +83,9 @@ func TestSafeRelayRequest(t *testing.T) {
 	for _, path := range []string{
 		"/repos/openclaw/octopool",
 		"/repos/openclaw/octopool/pulls?state=open",
+		"/repos/openclaw/octopool/pulls/1/commits",
 		"/repos/openclaw/octopool/issues?state=open",
+		"/repos/openclaw/octopool/issues/1/events",
 		"/repos/openclaw/octopool/contents/README.md?ref=main",
 		"/repos/openclaw/octopool/compare/main...feature",
 		"/repos/openclaw/octopool/actions/workflows/ci.yml",
@@ -106,8 +108,8 @@ func TestSafeRelayRequest(t *testing.T) {
 	if err != nil || fallback {
 		t.Fatalf("parse fallback=%v err=%v", fallback, err)
 	}
-	if safeRelayRequest(request) {
-		t.Fatal("unknown query-bearing read should stay local")
+	if !safeRelayRequest(request) {
+		t.Fatal("search read can ask octopool for a policy decision")
 	}
 
 	request, fallback, err = parseGHAPIArgs([]string{"/search/issues"})
@@ -298,6 +300,264 @@ func TestRunGHReleaseViewEscapesSlashTagsOnce(t *testing.T) {
 		t.Fatalf("handled=%v err=%v", handled, err)
 	}
 	if got := out.String(); !strings.Contains(got, `"tagName":"release/1.0"`) {
+		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHSearchIssuesUsesScopedSearchRoute(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["path"] != "/search/issues" {
+			t.Fatalf("path = %v", body["path"])
+		}
+		query := body["query"].(map[string]any)
+		if query["per_page"] != "10" || query["q"] != "repo:openclaw/octopool type:issue cache regression" {
+			t.Fatalf("query = %#v", query)
+		}
+		return map[string]any{
+			"items": []map[string]any{{
+				"number":   1,
+				"title":    "cache hit regression",
+				"body":     "octopool should pool this",
+				"html_url": "https://github.com/openclaw/octopool/issues/1",
+			}},
+		}
+	})
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"-R", "openclaw/octopool",
+		"cache",
+		"regression",
+		"--json", "number,title,url",
+		"--limit", "10",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `"number":1`) {
+		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHSearchUsesExplicitStateOnly(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		query := body["query"].(map[string]any)
+		if query["q"] != "repo:openclaw/octopool type:issue state:open cache" {
+			t.Fatalf("query = %#v", query)
+		}
+		return map[string]any{"items": []map[string]any{}}
+	})
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"cache",
+		"-R", "openclaw/octopool",
+		"--state", "open",
+		"--json", "number,title,url",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchFallsBackForInvalidStateAll(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"cache",
+		"-R", "openclaw/octopool",
+		"--state", "all",
+		"--json", "number,title,url",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchFallsBackForUnimplementedSort(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"cache",
+		"-R", "openclaw/octopool",
+		"--sort", "created",
+		"--json", "number,title,url",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchFallsBackForQualifiedQuery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"author:alice",
+		"cache",
+		"-R", "openclaw/octopool",
+		"--json", "number,title,url",
+	}, &out)
+	if !handled || !isLocalFallback(err) {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchFallsBackForUnsupportedTerm(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"C++",
+		"-R", "openclaw/octopool",
+		"--json", "number,title,url",
+	}, &out)
+	if !handled || !isLocalFallback(err) {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchFallsBackForQuotedPhrase(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"cache regression",
+		"-R", "openclaw/octopool",
+		"--json", "number,title,url",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchPRsFallsBackForUnavailableFields(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"prs",
+		"cache",
+		"-R", "openclaw/octopool",
+		"--json", "number,headRefName,isDraft",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchFallsBackForMultipleRepos(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"issues",
+		"cache",
+		"-R", "openclaw/octopool",
+		"-R", "openclaw/openclaw",
+		"--json", "number,title,url",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHSearchFallsBackForNonSearchModifiers(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHSearch(t.Context(), []string{
+		"prs",
+		"cache",
+		"-R", "openclaw/octopool",
+		"--branch", "feature",
+		"--json", "number,title,url",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHPRViewHydratesDetails(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{
+				"number":   7,
+				"title":    "hydrate pr",
+				"html_url": "https://github.com/openclaw/octopool/pull/7",
+			}
+		case "/repos/openclaw/octopool/pulls/7/files":
+			return []map[string]any{{"filename": "cmd/octopool/gh.go"}}
+		case "/repos/openclaw/octopool/pulls/7/commits":
+			return []map[string]any{{"sha": "abc1234"}}
+		case "/repos/openclaw/octopool/issues/7/comments":
+			return []map[string]any{{"body": "looks good"}}
+		case "/repos/openclaw/octopool/pulls/7/reviews":
+			return []map[string]any{{"state": "APPROVED"}}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+	var out bytes.Buffer
+	handled, err := runGHPR(t.Context(), []string{
+		"view",
+		"7",
+		"-R", "openclaw/octopool",
+		"--json", "number,files,commits,comments,reviews",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	got := out.String()
+	for _, want := range []string{"cmd/octopool/gh.go", "abc1234", "looks good", "APPROVED"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("out missing %q: %s", want, got)
+		}
+	}
+}
+
+func TestRunGHPRViewFallsBackForStatusCheckRollup(t *testing.T) {
+	var out bytes.Buffer
+	handled, err := runGHPR(t.Context(), []string{
+		"view",
+		"7",
+		"-R", "openclaw/octopool",
+		"--json", "number,statusCheckRollup",
+	}, &out)
+	if err != nil || handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+}
+
+func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["path"] != "/repos/openclaw/octopool/pulls/7" {
+			if _, ok := body["headers"]; ok {
+				t.Fatalf("unexpected cache-bypass headers: %#v", body["headers"])
+			}
+		}
+		if body["path"] == "/repos/openclaw/octopool/pulls/7" && body["headers"] == nil {
+			t.Fatal("expected live PR head lookup header")
+		}
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+		case "/repos/openclaw/octopool/commits/abc1234/status":
+			return map[string]any{"statuses": []map[string]any{}}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+	var out bytes.Buffer
+	handled, err := runGHPR(t.Context(), []string{
+		"checks",
+		"7",
+		"-R", "openclaw/octopool",
+		"--json", "name,state",
+	}, &out)
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if got := out.String(); !strings.Contains(got, `"name":"CI"`) {
 		t.Fatalf("out = %s", got)
 	}
 }
