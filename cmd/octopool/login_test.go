@@ -28,7 +28,7 @@ func TestValidateLoginURLRequiresHTTPS(t *testing.T) {
 
 func TestFormatLoginFailureExplainsGitHub403(t *testing.T) {
 	t.Setenv("TZ", "UTC")
-	err := formatLoginFailure(401, []byte(`{"error":{"code":"github_auth_failed","message":"GitHub token check failed with 403","request_id":"req-123","details":{"github_rate_limit_reset":"1779928316","github_rate_limit_remaining":"0","github_rate_limit_resource":"core"}}}`), "/bin/gh")
+	err := formatLoginFailure(401, []byte(`{"error":{"code":"github_auth_failed","message":"GitHub token check failed with 403","request_id":"req-123","details":{"github_rate_limit_reset":"1779928316","github_rate_limit_remaining":"0","github_rate_limit_resource":"core"}}}`), "/bin/gh", "https://octopool.dev", "core")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -50,7 +50,7 @@ func TestFormatLoginFailureExplainsGitHub403(t *testing.T) {
 
 func TestFormatLoginFailureExplainsGitHub429(t *testing.T) {
 	t.Setenv("TZ", "UTC")
-	err := formatLoginFailure(401, []byte(`{"error":{"code":"github_auth_failed","message":"GitHub token check failed with 429","details":{"github_rate_limit_reset":"1779928316","github_retry_after":"60"}}}`), "/bin/gh")
+	err := formatLoginFailure(401, []byte(`{"error":{"code":"github_auth_failed","message":"GitHub token check failed with 429","details":{"github_rate_limit_reset":"1779928316","github_retry_after":"60"}}}`), "/bin/gh", "https://octopool.dev", "core")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -69,7 +69,7 @@ func TestFormatLoginFailureExplainsGitHub429(t *testing.T) {
 
 func TestFormatLoginFailureDoesNotTreatResetHeaderAsRateLimit(t *testing.T) {
 	t.Setenv("TZ", "UTC")
-	err := formatLoginFailure(401, []byte(`{"error":{"code":"github_auth_failed","message":"GitHub token check failed with 401","details":{"github_rate_limit_reset":"1779928316","github_rate_limit_remaining":"4999"}}}`), "/bin/gh")
+	err := formatLoginFailure(401, []byte(`{"error":{"code":"github_auth_failed","message":"GitHub token check failed with 401","details":{"github_rate_limit_reset":"1779928316","github_rate_limit_remaining":"4999"}}}`), "/bin/gh", "https://octopool.dev", "core")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -79,6 +79,41 @@ func TestFormatLoginFailureDoesNotTreatResetHeaderAsRateLimit(t *testing.T) {
 	}
 	if strings.Contains(got, "Retry after reset") {
 		t.Fatalf("did not expect rate-limit guidance:\n%s", got)
+	}
+}
+
+func TestFormatLoginFailureExplainsCallerProvisioning(t *testing.T) {
+	err := formatLoginFailure(403, []byte(`{"error":{"code":"caller_not_provisioned","message":"Caller is not provisioned for this pool","request_id":"req-123"}}`), "/bin/gh", "https://octopool.dev", "maintainers")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		`not provisioned for Octopool pool "maintainers"`,
+		"octopool admin caller --url 'https://octopool.dev' --pool 'maintainers' --github-login your-github-login",
+		"Then retry: octopool login 'https://octopool.dev'",
+		"req-123",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in error:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatLoginFailureQuotesProvisioningCommandArguments(t *testing.T) {
+	err := formatLoginFailure(403, []byte(`{"error":{"code":"caller_not_provisioned","message":"Caller is not provisioned for this pool"}}`), "/bin/gh", "https://octopool.dev/path;echo pwned", "maintainers'$(touch /tmp/pwned)")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"--url 'https://octopool.dev/path;echo pwned'",
+		"--pool 'maintainers'\"'\"'$(touch /tmp/pwned)'",
+		"Then retry: octopool login 'https://octopool.dev/path;echo pwned'",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in error:\n%s", want, got)
+		}
 	}
 }
 

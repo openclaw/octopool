@@ -69,6 +69,16 @@ octopool login https://octopool.your-org.dev    # self-hosted endpoint
 octopool whoami
 ```
 
+Your GitHub account must already be provisioned for that pool by an Octopool admin. If
+login says `caller_not_provisioned`, ask an admin to run:
+
+```sh
+OCTOPOOL_ADMIN_TOKEN=... octopool admin caller \
+  --url https://octopool.your-org.dev \
+  --pool <pool-name> \
+  --github-login your-github-login
+```
+
 Use it like `gh` for common read shapes:
 
 ```sh

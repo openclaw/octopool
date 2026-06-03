@@ -56,6 +56,15 @@ octopool login --server https://octopool.your-org.dev
   login, timestamp).
 - Octopool validates the GitHub identity and OpenClaw org membership during login, and
   binds the caller by immutable GitHub user id. See [Auth](auth.md).
+- Login does not self-provision access. If the CLI reports `caller_not_provisioned`, ask
+  an Octopool admin to grant your GitHub account to that pool:
+
+```sh
+OCTOPOOL_ADMIN_TOKEN=... octopool admin caller \
+  --url https://octopool.your-org.dev \
+  --pool <pool-name> \
+  --github-login your-github-login
+```
 
 ```sh
 octopool login
