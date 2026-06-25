@@ -5,662 +5,662 @@ import { PoolCoordinator } from "../../src/index";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import type { CoordinatorSnapshot } from "../../src/types";
 import {
-	bearer,
-	callWorker,
-	CALLER_TOKEN,
-	githubUpstream,
-	jsonResponse,
-	POOL,
-	rateHeaders,
-	relay,
-	seedAudit,
-	seedCaller,
-	seedPool,
-	seedWebSession,
+  bearer,
+  callWorker,
+  CALLER_TOKEN,
+  githubUpstream,
+  jsonResponse,
+  POOL,
+  rateHeaders,
+  relay,
+  seedAudit,
+  seedCaller,
+  seedPool,
+  seedWebSession,
 } from "./harness";
 
 type RelayEnvelope = {
-	status: number;
-	body: unknown;
-	identity?: { id: string; kind: string };
-	relay: {
-		backend?: string;
-		cache: string;
-		cacheable: boolean;
-		coalesced?: boolean;
-		route_kind: string;
-		stale_ok?: boolean;
-		stale_reason?: string;
-	};
+  status: number;
+  body: unknown;
+  identity?: { id: string; kind: string };
+  relay: {
+    backend?: string;
+    cache: string;
+    cacheable: boolean;
+    coalesced?: boolean;
+    route_kind: string;
+    stale_ok?: boolean;
+    stale_reason?: string;
+  };
 };
 
 type UsageEnvelope = {
-	requests: number;
-	errors: number;
-	fallbacks: number;
-	cache_hits: number;
-	cache_misses: number;
-	eligible_cache_hit_rate: number | null;
+  requests: number;
+  errors: number;
+  fallbacks: number;
+  cache_hits: number;
+  cache_misses: number;
+  eligible_cache_hit_rate: number | null;
 };
 
 type StatsEnvelope = {
-	pool: string;
-	operator: { github_login: string };
-	pool_usage: UsageEnvelope;
-	caller_usage: UsageEnvelope;
-	routes: (UsageEnvelope & { route_kind: string })[];
-	caller_routes: (UsageEnvelope & { route_kind: string })[];
-	cache: { total_entries: number };
+  pool: string;
+  operator: { github_login: string };
+  pool_usage: UsageEnvelope;
+  caller_usage: UsageEnvelope;
+  routes: (UsageEnvelope & { route_kind: string })[];
+  caller_routes: (UsageEnvelope & { route_kind: string })[];
+  cache: { total_entries: number };
 };
 
 type DashboardEnvelope = {
-	pool: string;
-	operator: { github_login: string; dashboard_role: string };
-	identities: { total: number; active: number };
-	usage: {
-		requests_24h: number;
-		fallbacks_24h: number;
-		denied_24h: number;
-		cache_hit_rate_24h: number | null;
-		eligible_cache_hit_rate_24h: number | null;
-	};
-	route_usage: { route_kind: string; eligible_cache_hit_rate: number | null }[];
-	cache: { total_entries: number };
-	coordinator: CoordinatorSnapshot;
+  pool: string;
+  operator: { github_login: string; dashboard_role: string };
+  identities: { total: number; active: number };
+  usage: {
+    requests_24h: number;
+    fallbacks_24h: number;
+    denied_24h: number;
+    cache_hit_rate_24h: number | null;
+    eligible_cache_hit_rate_24h: number | null;
+  };
+  route_usage: { route_kind: string; eligible_cache_hit_rate: number | null }[];
+  cache: { total_entries: number };
+  coordinator: CoordinatorSnapshot;
 };
 
 describe("Worker end-to-end relay", () => {
-	it("runs the real Worker, D1 migrations, and Durable Object through cache miss and hit", async () => {
-		await seedPool();
-		const upstream = githubUpstream({
-			primary: jsonResponse({ id: 1, full_name: "openclaw/octopool", private: false }),
-		});
-		vi.stubGlobal("fetch", upstream);
+  it("runs the real Worker, D1 migrations, and Durable Object through cache miss and hit", async () => {
+    await seedPool();
+    const upstream = githubUpstream({
+      primary: jsonResponse({ id: 1, full_name: "openclaw/octopool", private: false }),
+    });
+    vi.stubGlobal("fetch", upstream);
 
-		const first = await relay("/repos/openclaw/octopool");
-		expect(first.status).toBe(200);
-		const firstBody = await first.json<RelayEnvelope>();
-		expect(firstBody).toMatchObject({
-			status: 200,
-			body: { id: 1, full_name: "openclaw/octopool", private: false },
-			identity: { id: "primary", kind: "pat" },
-			relay: { cache: "miss", cacheable: true, route_kind: "repo_view" },
-		});
+    const first = await relay("/repos/openclaw/octopool");
+    expect(first.status).toBe(200);
+    const firstBody = await first.json<RelayEnvelope>();
+    expect(firstBody).toMatchObject({
+      status: 200,
+      body: { id: 1, full_name: "openclaw/octopool", private: false },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "miss", cacheable: true, route_kind: "repo_view" },
+    });
 
-		const second = await relay("/repos/openclaw/octopool");
-		expect(second.status).toBe(200);
-		const secondBody = await second.json<RelayEnvelope>();
-		expect(secondBody).toMatchObject({
-			status: 200,
-			identity: { id: "primary", kind: "pat" },
-			relay: { cache: "hit", cacheable: true, route_kind: "repo_view" },
-		});
-		expect(
-			upstream.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-primary-token",
-			),
-		).toHaveLength(1);
+    const second = await relay("/repos/openclaw/octopool");
+    expect(second.status).toBe(200);
+    const secondBody = await second.json<RelayEnvelope>();
+    expect(secondBody).toMatchObject({
+      status: 200,
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "hit", cacheable: true, route_kind: "repo_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
 
-		const audits = await env.DB.prepare(
-			"SELECT cache_status, identity_id, route_kind, status FROM audit_events",
-		).all<{
-			cache_status: string;
-			identity_id: string | null;
-			route_kind: string;
-			status: number;
-		}>();
-		expect(audits.results).toHaveLength(2);
-		expect(audits.results).toEqual(
-			expect.arrayContaining([
-				{ cache_status: "miss", identity_id: "primary", route_kind: "repo_view", status: 200 },
-				{ cache_status: "hit", identity_id: "primary", route_kind: "repo_view", status: 200 },
-			]),
-		);
-	});
+    const audits = await env.DB.prepare(
+      "SELECT cache_status, identity_id, route_kind, status FROM audit_events",
+    ).all<{
+      cache_status: string;
+      identity_id: string | null;
+      route_kind: string;
+      status: number;
+    }>();
+    expect(audits.results).toHaveLength(2);
+    expect(audits.results).toEqual(
+      expect.arrayContaining([
+        { cache_status: "miss", identity_id: "primary", route_kind: "repo_view", status: 200 },
+        { cache_status: "hit", identity_id: "primary", route_kind: "repo_view", status: 200 },
+      ]),
+    );
+  });
 
-	it("rejects a cached response from a disabled identity and uses an active replacement", async () => {
-		await seedPool({ secondary: true });
-		const upstream = githubUpstream({
-			primary: jsonResponse({ id: 1, private: false }),
-			secondary: jsonResponse({ id: 2, private: false }),
-		});
-		vi.stubGlobal("fetch", upstream);
+  it("rejects a cached response from a disabled identity and uses an active replacement", async () => {
+    await seedPool({ secondary: true });
+    const upstream = githubUpstream({
+      primary: jsonResponse({ id: 1, private: false }),
+      secondary: jsonResponse({ id: 2, private: false }),
+    });
+    vi.stubGlobal("fetch", upstream);
 
-		const primed = await relay("/repos/openclaw/octopool");
-		expect(primed.status).toBe(200);
-		expect(await primed.json<RelayEnvelope>()).toMatchObject({
-			body: { id: 1 },
-			identity: { id: "primary", kind: "pat" },
-			relay: { cache: "miss" },
-		});
-		await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'primary'").run();
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    expect(await primed.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 1 },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "miss" },
+    });
+    await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'primary'").run();
 
-		const replacement = await relay("/repos/openclaw/octopool");
-		expect(replacement.status).toBe(200);
-		expect(await replacement.json<RelayEnvelope>()).toMatchObject({
-			body: { id: 2 },
-			identity: { id: "secondary", kind: "pat" },
-			relay: { cache: "miss", route_kind: "repo_view" },
-		});
-		expect(
-			upstream.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-primary-token",
-			),
-		).toHaveLength(1);
-		expect(
-			upstream.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-secondary-token",
-			),
-		).toHaveLength(1);
-		const cacheIdentities = await env.DB.prepare(
-			"SELECT identity_id FROM github_cache_entries ORDER BY identity_id",
-		).all<{ identity_id: string }>();
-		expect(cacheIdentities.results).toEqual([
-			{ identity_id: "primary" },
-			{ identity_id: "secondary" },
-		]);
-		const audits = await env.DB.prepare(
-			"SELECT identity_id, cache_status, status FROM audit_events ORDER BY rowid",
-		).all<{ identity_id: string; cache_status: string; status: number }>();
-		expect(audits.results).toEqual([
-			{ identity_id: "primary", cache_status: "miss", status: 200 },
-			{ identity_id: "secondary", cache_status: "miss", status: 200 },
-		]);
-	});
+    const replacement = await relay("/repos/openclaw/octopool");
+    expect(replacement.status).toBe(200);
+    expect(await replacement.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 2 },
+      identity: { id: "secondary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "repo_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-secondary-token",
+      ),
+    ).toHaveLength(1);
+    const cacheIdentities = await env.DB.prepare(
+      "SELECT identity_id FROM github_cache_entries ORDER BY identity_id",
+    ).all<{ identity_id: string }>();
+    expect(cacheIdentities.results).toEqual([
+      { identity_id: "primary" },
+      { identity_id: "secondary" },
+    ]);
+    const audits = await env.DB.prepare(
+      "SELECT identity_id, cache_status, status FROM audit_events ORDER BY rowid",
+    ).all<{ identity_id: string; cache_status: string; status: number }>();
+    expect(audits.results).toEqual([
+      { identity_id: "primary", cache_status: "miss", status: 200 },
+      { identity_id: "secondary", cache_status: "miss", status: 200 },
+    ]);
+  });
 
-	it("retries a rate-limited identity and persists its coordinator cooldown", async () => {
-		await seedPool({ secondary: true });
-		const upstream = githubUpstream({
-			primary: jsonResponse(
-				{ message: "rate limited" },
-				429,
-				rateHeaders({ remaining: 0, retryAfter: 60 }),
-			),
-			secondary: jsonResponse(
-				{ id: 2, full_name: "openclaw/octopool", private: false },
-				200,
-				rateHeaders({ remaining: 4999 }),
-			),
-		});
-		vi.stubGlobal("fetch", upstream);
+  it("retries a rate-limited identity and persists its coordinator cooldown", async () => {
+    await seedPool({ secondary: true });
+    const upstream = githubUpstream({
+      primary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+      secondary: jsonResponse(
+        { id: 2, full_name: "openclaw/octopool", private: false },
+        200,
+        rateHeaders({ remaining: 4999 }),
+      ),
+    });
+    vi.stubGlobal("fetch", upstream);
 
-		const response = await relay("/repos/openclaw/octopool");
-		expect(response.status).toBe(200);
-		expect(await response.json<RelayEnvelope>()).toMatchObject({
-			status: 200,
-			identity: { id: "secondary", kind: "pat" },
-			relay: { cache: "miss", route_kind: "repo_view" },
-		});
-		const tokens = upstream.mock.calls
-			.map(([request, init]) => bearer(request, init))
-			.filter(Boolean);
-		expect(tokens).toContain("test-primary-token");
-		expect(tokens).toContain("test-secondary-token");
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      identity: { id: "secondary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "repo_view" },
+    });
+    const tokens = upstream.mock.calls
+      .map(([request, init]) => bearer(request, init))
+      .filter(Boolean);
+    expect(tokens).toContain("test-primary-token");
+    expect(tokens).toContain("test-secondary-token");
 
-		const coordinator = env.POOL_COORDINATOR.getByName(`pool:${POOL}`);
-		const snapshot = await runInDurableObject(
-			coordinator,
-			(instance: PoolCoordinator): CoordinatorSnapshot => instance.snapshot(),
-		);
-		expect(snapshot.cooldowns).toEqual([
-			expect.objectContaining({
-				identity_id: "primary",
-				route_key: "*",
-				status: 429,
-			}),
-		]);
-		expect(snapshot.rates).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ identity_id: "primary", limit_count: 5000, remaining: 0 }),
-				expect.objectContaining({ identity_id: "secondary", limit_count: 5000, remaining: 4999 }),
-			]),
-		);
-	});
+    const coordinator = env.POOL_COORDINATOR.getByName(`pool:${POOL}`);
+    const snapshot = await runInDurableObject(
+      coordinator,
+      (instance: PoolCoordinator): CoordinatorSnapshot => instance.snapshot(),
+    );
+    expect(snapshot.cooldowns).toEqual([
+      expect.objectContaining({
+        identity_id: "primary",
+        route_key: "*",
+        status: 429,
+      }),
+    ]);
+    expect(snapshot.rates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ identity_id: "primary", limit_count: 5000, remaining: 0 }),
+        expect.objectContaining({ identity_id: "secondary", limit_count: 5000, remaining: 4999 }),
+      ]),
+    );
+  });
 
-	it("serves fresh identity cache before excluding a rate-depleted identity", async () => {
-		await seedPool();
-		const upstream = githubUpstream({
-			primary: jsonResponse(
-				{ id: 3, full_name: "openclaw/octopool", private: false },
-				200,
-				rateHeaders({ remaining: 0 }),
-			),
-		});
-		vi.stubGlobal("fetch", upstream);
+  it("serves fresh identity cache before excluding a rate-depleted identity", async () => {
+    await seedPool();
+    const upstream = githubUpstream({
+      primary: jsonResponse(
+        { id: 3, full_name: "openclaw/octopool", private: false },
+        200,
+        rateHeaders({ remaining: 0 }),
+      ),
+    });
+    vi.stubGlobal("fetch", upstream);
 
-		const primed = await relay("/repos/openclaw/octopool");
-		expect(primed.status).toBe(200);
-		expect(await primed.json<RelayEnvelope>()).toMatchObject({
-			body: { id: 3 },
-			identity: { id: "primary", kind: "pat" },
-			relay: { cache: "miss", route_kind: "repo_view" },
-		});
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    expect(await primed.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 3 },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "repo_view" },
+    });
 
-		const cached = await relay("/repos/openclaw/octopool");
-		expect(cached.status).toBe(200);
-		expect(await cached.json<RelayEnvelope>()).toMatchObject({
-			body: { id: 3 },
-			identity: { id: "primary", kind: "pat" },
-			relay: { cache: "hit", route_kind: "repo_view" },
-		});
-		expect(
-			upstream.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-primary-token",
-			),
-		).toHaveLength(1);
-	});
+    const cached = await relay("/repos/openclaw/octopool");
+    expect(cached.status).toBe(200);
+    expect(await cached.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 3 },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "hit", route_kind: "repo_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+  });
 
-	it("coalesces concurrent cache misses into one authenticated GitHub request", async () => {
-		await seedPool();
-		let releasePrimary!: () => void;
-		let primaryStarted!: () => void;
-		const primaryGate = new Promise<void>((resolve) => {
-			releasePrimary = resolve;
-		});
-		const started = new Promise<void>((resolve) => {
-			primaryStarted = resolve;
-		});
-		const upstream = vi.fn<typeof fetch>(async (input, init) => {
-			const token = bearer(input, init);
-			if (token === "test-org-token") {
-				return jsonResponse({ private: false });
-			}
-			if (token === "test-primary-token") {
-				primaryStarted();
-				await primaryGate;
-				return jsonResponse({ id: 3, full_name: "openclaw/octopool", private: false });
-			}
-			return jsonResponse({ message: "public backend unavailable" }, 503);
-		});
-		vi.stubGlobal("fetch", upstream);
+  it("coalesces concurrent cache misses into one authenticated GitHub request", async () => {
+    await seedPool();
+    let releasePrimary!: () => void;
+    let primaryStarted!: () => void;
+    const primaryGate = new Promise<void>((resolve) => {
+      releasePrimary = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      primaryStarted = resolve;
+    });
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const token = bearer(input, init);
+      if (token === "test-org-token") {
+        return jsonResponse({ private: false });
+      }
+      if (token === "test-primary-token") {
+        primaryStarted();
+        await primaryGate;
+        return jsonResponse({ id: 3, full_name: "openclaw/octopool", private: false });
+      }
+      return jsonResponse({ message: "public backend unavailable" }, 503);
+    });
+    vi.stubGlobal("fetch", upstream);
 
-		const firstPromise = relay("/repos/openclaw/octopool");
-		await started;
-		const secondPromise = relay("/repos/openclaw/octopool");
-		await new Promise((resolve) => setTimeout(resolve, 150));
-		releasePrimary();
-		const envelopes = await Promise.all(
-			[firstPromise, secondPromise].map(async (responsePromise) => {
-				const response = await responsePromise;
-				expect(response.status).toBe(200);
-				return response.json<RelayEnvelope>();
-			}),
-		);
+    const firstPromise = relay("/repos/openclaw/octopool");
+    await started;
+    const secondPromise = relay("/repos/openclaw/octopool");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    releasePrimary();
+    const envelopes = await Promise.all(
+      [firstPromise, secondPromise].map(async (responsePromise) => {
+        const response = await responsePromise;
+        expect(response.status).toBe(200);
+        return response.json<RelayEnvelope>();
+      }),
+    );
 
-		expect(envelopes.map(({ relay: result }) => result.cache).sort()).toEqual(["hit", "miss"]);
-		expect(envelopes).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ relay: expect.objectContaining({ coalesced: true }) }),
-			]),
-		);
-		expect(
-			upstream.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-primary-token",
-			),
-		).toHaveLength(1);
-		const audits = await env.DB.prepare(
-			"SELECT cache_status, coalesced FROM audit_events ORDER BY cache_status",
-		).all<{ cache_status: string; coalesced: number }>();
-		expect(audits.results).toEqual([
-			{ cache_status: "hit", coalesced: 1 },
-			{ cache_status: "miss", coalesced: 0 },
-		]);
-	});
+    expect(envelopes.map(({ relay: result }) => result.cache).sort()).toEqual(["hit", "miss"]);
+    expect(envelopes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ relay: expect.objectContaining({ coalesced: true }) }),
+      ]),
+    );
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    const audits = await env.DB.prepare(
+      "SELECT cache_status, coalesced FROM audit_events ORDER BY cache_status",
+    ).all<{ cache_status: string; coalesced: number }>();
+    expect(audits.results).toEqual([
+      { cache_status: "hit", coalesced: 1 },
+      { cache_status: "miss", coalesced: 0 },
+    ]);
+  });
 
-	it("serves a stale cache entry when the only identity becomes rate limited", async () => {
-		await seedPool();
-		vi.stubGlobal(
-			"fetch",
-			githubUpstream({
-				primary: jsonResponse({ id: 4, full_name: "openclaw/octopool", private: false }),
-			}),
-		);
-		const primed = await relay("/repos/openclaw/octopool");
-		expect(primed.status).toBe(200);
-		const cacheRow = await env.DB.prepare(
-			"SELECT cache_key FROM github_cache_entries LIMIT 1",
-		).first<{ cache_key: string }>();
-		expect(cacheRow).not.toBeNull();
-		await env.DB.prepare(
-			`UPDATE github_cache_entries
+  it("serves a stale cache entry when the only identity becomes rate limited", async () => {
+    await seedPool();
+    vi.stubGlobal(
+      "fetch",
+      githubUpstream({
+        primary: jsonResponse({ id: 4, full_name: "openclaw/octopool", private: false }),
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
        SET expires_at = datetime('now', '-1 second'),
            stale_expires_at = datetime('now', '+1 hour')
        WHERE cache_key = ?`,
-		)
-			.bind(cacheRow!.cache_key)
-			.run();
-		await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
-		const limited = githubUpstream({
-			primary: jsonResponse(
-				{ message: "rate limited" },
-				429,
-				rateHeaders({ remaining: 0, retryAfter: 60 }),
-			),
-		});
-		vi.stubGlobal("fetch", limited);
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    const limited = githubUpstream({
+      primary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+    });
+    vi.stubGlobal("fetch", limited);
 
-		const response = await relay("/repos/openclaw/octopool");
-		expect(response.status).toBe(200);
-		expect(await response.json<RelayEnvelope>()).toMatchObject({
-			status: 200,
-			body: { id: 4, full_name: "openclaw/octopool", private: false },
-			identity: { id: "primary", kind: "pat" },
-			relay: {
-				cache: "stale",
-				route_kind: "repo_view",
-				stale_ok: true,
-				stale_reason: "github_rate_limited",
-			},
-		});
-		expect(
-			limited.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-primary-token",
-			),
-		).toHaveLength(1);
-		const audits = await env.DB.prepare(
-			"SELECT cache_status, status FROM audit_events ORDER BY created_at",
-		).all<{ cache_status: string; status: number }>();
-		expect(audits.results).toEqual([
-			{ cache_status: "miss", status: 200 },
-			{ cache_status: "stale", status: 200 },
-		]);
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: { id: 4, full_name: "openclaw/octopool", private: false },
+      identity: { id: "primary", kind: "pat" },
+      relay: {
+        cache: "stale",
+        route_kind: "repo_view",
+        stale_ok: true,
+        stale_reason: "github_rate_limited",
+      },
+    });
+    expect(
+      limited.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    const audits = await env.DB.prepare(
+      "SELECT cache_status, status FROM audit_events ORDER BY created_at",
+    ).all<{ cache_status: string; status: number }>();
+    expect(audits.results).toEqual([
+      { cache_status: "miss", status: 200 },
+      { cache_status: "stale", status: 200 },
+    ]);
 
-		const blocked = await relay("/repos/openclaw/octopool");
-		expect(blocked.status).toBe(200);
-		expect(await blocked.json<RelayEnvelope>()).toMatchObject({
-			body: { id: 4, full_name: "openclaw/octopool", private: false },
-			identity: { id: "primary", kind: "pat" },
-			relay: {
-				cache: "stale",
-				route_kind: "repo_view",
-				stale_ok: true,
-				stale_reason: "identities_cooling_down",
-			},
-		});
-		expect(
-			limited.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-primary-token",
-			),
-		).toHaveLength(1);
-	});
+    const blocked = await relay("/repos/openclaw/octopool");
+    expect(blocked.status).toBe(200);
+    expect(await blocked.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 4, full_name: "openclaw/octopool", private: false },
+      identity: { id: "primary", kind: "pat" },
+      relay: {
+        cache: "stale",
+        route_kind: "repo_view",
+        stale_ok: true,
+        stale_reason: "identities_cooling_down",
+      },
+    });
+    expect(
+      limited.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+  });
 
-	it("tries another identity before serving stale cache", async () => {
-		await seedPool({ secondary: true });
-		vi.stubGlobal(
-			"fetch",
-			githubUpstream({
-				primary: jsonResponse({ id: 6, full_name: "openclaw/octopool", private: false }),
-			}),
-		);
-		const primed = await relay("/repos/openclaw/octopool");
-		expect(primed.status).toBe(200);
-		const cacheRow = await env.DB.prepare(
-			"SELECT cache_key FROM github_cache_entries LIMIT 1",
-		).first<{ cache_key: string }>();
-		expect(cacheRow).not.toBeNull();
-		await env.DB.prepare(
-			`UPDATE github_cache_entries
+  it("tries another identity before serving stale cache", async () => {
+    await seedPool({ secondary: true });
+    vi.stubGlobal(
+      "fetch",
+      githubUpstream({
+        primary: jsonResponse({ id: 6, full_name: "openclaw/octopool", private: false }),
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
        SET expires_at = datetime('now', '-1 second'),
            stale_expires_at = datetime('now', '+1 hour')
        WHERE cache_key = ?`,
-		)
-			.bind(cacheRow!.cache_key)
-			.run();
-		await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
 
-		const upstream = githubUpstream({
-			primary: jsonResponse(
-				{ message: "rate limited" },
-				429,
-				rateHeaders({ remaining: 0, retryAfter: 60 }),
-			),
-			secondary: jsonResponse(
-				{ id: 7, full_name: "openclaw/octopool", private: false },
-				200,
-				rateHeaders({ remaining: 4998 }),
-			),
-		});
-		vi.stubGlobal("fetch", upstream);
+    const upstream = githubUpstream({
+      primary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+      secondary: jsonResponse(
+        { id: 7, full_name: "openclaw/octopool", private: false },
+        200,
+        rateHeaders({ remaining: 4998 }),
+      ),
+    });
+    vi.stubGlobal("fetch", upstream);
 
-		const response = await relay("/repos/openclaw/octopool");
-		expect(response.status).toBe(200);
-		expect(await response.json<RelayEnvelope>()).toMatchObject({
-			body: { id: 7 },
-			identity: { id: "secondary", kind: "pat" },
-			relay: { cache: "miss", route_kind: "repo_view" },
-		});
-		expect(
-			upstream.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-secondary-token",
-			),
-		).toHaveLength(1);
-	});
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 7 },
+      identity: { id: "secondary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "repo_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-secondary-token",
+      ),
+    ).toHaveLength(1);
+  });
 
-	it("serves stale cache from an earlier identity after all identities fail", async () => {
-		await seedPool({ secondary: true });
-		vi.stubGlobal(
-			"fetch",
-			githubUpstream({
-				primary: jsonResponse({ id: 8, full_name: "openclaw/octopool", private: false }),
-			}),
-		);
-		const primed = await relay("/repos/openclaw/octopool");
-		expect(primed.status).toBe(200);
-		const cacheRow = await env.DB.prepare(
-			"SELECT cache_key FROM github_cache_entries LIMIT 1",
-		).first<{ cache_key: string }>();
-		expect(cacheRow).not.toBeNull();
-		await env.DB.prepare(
-			`UPDATE github_cache_entries
+  it("serves stale cache from an earlier identity after all identities fail", async () => {
+    await seedPool({ secondary: true });
+    vi.stubGlobal(
+      "fetch",
+      githubUpstream({
+        primary: jsonResponse({ id: 8, full_name: "openclaw/octopool", private: false }),
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool");
+    expect(primed.status).toBe(200);
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string }>();
+    expect(cacheRow).not.toBeNull();
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
        SET expires_at = datetime('now', '-1 second'),
            stale_expires_at = datetime('now', '+1 hour')
        WHERE cache_key = ?`,
-		)
-			.bind(cacheRow!.cache_key)
-			.run();
-		await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
 
-		const upstream = githubUpstream({
-			primary: jsonResponse(
-				{ message: "rate limited" },
-				429,
-				rateHeaders({ remaining: 0, retryAfter: 60 }),
-			),
-			secondary: jsonResponse(
-				{ message: "rate limited" },
-				429,
-				rateHeaders({ remaining: 0, retryAfter: 60 }),
-			),
-		});
-		vi.stubGlobal("fetch", upstream);
+    const upstream = githubUpstream({
+      primary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+      secondary: jsonResponse(
+        { message: "rate limited" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      ),
+    });
+    vi.stubGlobal("fetch", upstream);
 
-		const response = await relay("/repos/openclaw/octopool");
-		expect(response.status).toBe(200);
-		expect(await response.json<RelayEnvelope>()).toMatchObject({
-			body: { id: 8 },
-			identity: { id: "primary", kind: "pat" },
-			relay: {
-				cache: "stale",
-				route_kind: "repo_view",
-				stale_ok: true,
-				stale_reason: "github_rate_limited",
-			},
-		});
-		expect(
-			upstream.mock.calls.filter(
-				([request, init]) => bearer(request, init) === "test-secondary-token",
-			),
-		).toHaveLength(1);
-	});
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 8 },
+      identity: { id: "primary", kind: "pat" },
+      relay: {
+        cache: "stale",
+        route_kind: "repo_view",
+        stale_ok: true,
+        stale_reason: "github_rate_limited",
+      },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) => bearer(request, init) === "test-secondary-token",
+      ),
+    ).toHaveLength(1);
+  });
 
-	it("serves stale anonymous cache after selected identities become rate limited", async () => {
-		await seedPool();
-		const publicResponse = {
-			type: "file",
-			encoding: "base64",
-			name: "README.md",
-			path: "README.md",
-			content: "IyBPY3RvcG9vbAo=",
-		};
-		vi.stubGlobal(
-			"fetch",
-			vi.fn<typeof fetch>(async (input, init) => {
-				const token = bearer(input, init);
-				if (token === undefined) {
-					return jsonResponse(publicResponse);
-				}
-				return jsonResponse({ message: "unexpected identity request" }, 500);
-			}),
-		);
-		const primed = await relay("/repos/openclaw/octopool/contents/README.md");
-		expect(primed.status).toBe(200);
-		expect(await primed.json<RelayEnvelope>()).toMatchObject({
-			body: publicResponse,
-			relay: { backend: "web", cache: "miss" },
-		});
+  it("serves stale anonymous cache after selected identities become rate limited", async () => {
+    await seedPool();
+    const publicResponse = {
+      type: "file",
+      encoding: "base64",
+      name: "README.md",
+      path: "README.md",
+      content: "IyBPY3RvcG9vbAo=",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const token = bearer(input, init);
+        if (token === undefined) {
+          return jsonResponse(publicResponse);
+        }
+        return jsonResponse({ message: "unexpected identity request" }, 500);
+      }),
+    );
+    const primed = await relay("/repos/openclaw/octopool/contents/README.md");
+    expect(primed.status).toBe(200);
+    expect(await primed.json<RelayEnvelope>()).toMatchObject({
+      body: publicResponse,
+      relay: { backend: "web", cache: "miss" },
+    });
 
-		const cacheRow = await env.DB.prepare(
-			"SELECT cache_key, identity_id FROM github_cache_entries LIMIT 1",
-		).first<{ cache_key: string; identity_id: string | null }>();
-		expect(cacheRow).toMatchObject({ identity_id: null });
-		await env.DB.prepare(
-			`UPDATE github_cache_entries
+    const cacheRow = await env.DB.prepare(
+      "SELECT cache_key, identity_id FROM github_cache_entries LIMIT 1",
+    ).first<{ cache_key: string; identity_id: string | null }>();
+    expect(cacheRow).toMatchObject({ identity_id: null });
+    await env.DB.prepare(
+      `UPDATE github_cache_entries
        SET expires_at = datetime('now', '-1 second'),
            stale_expires_at = datetime('now', '+1 hour')
        WHERE cache_key = ?`,
-		)
-			.bind(cacheRow!.cache_key)
-			.run();
-		await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    )
+      .bind(cacheRow!.cache_key)
+      .run();
+    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
 
-		const limited = vi.fn<typeof fetch>(async (input, init) => {
-			const token = bearer(input, init);
-			const url = new URL(new Request(input, init).url);
-			if (token === undefined) {
-				if (url.pathname === "/repos/openclaw/octopool") {
-					return jsonResponse({ private: false });
-				}
-				return jsonResponse({ message: "public unavailable" }, 503);
-			}
-			if (token === "test-primary-token") {
-				return jsonResponse(
-					{ message: "rate limited" },
-					429,
-					rateHeaders({ remaining: 0, retryAfter: 60 }),
-				);
-			}
-			return jsonResponse({ message: "unexpected request" }, 500);
-		});
-		vi.stubGlobal("fetch", limited);
+    const limited = vi.fn<typeof fetch>(async (input, init) => {
+      const token = bearer(input, init);
+      const url = new URL(new Request(input, init).url);
+      if (token === undefined) {
+        if (url.pathname === "/repos/openclaw/octopool") {
+          return jsonResponse({ private: false });
+        }
+        return jsonResponse({ message: "public unavailable" }, 503);
+      }
+      if (token === "test-primary-token") {
+        return jsonResponse(
+          { message: "rate limited" },
+          429,
+          rateHeaders({ remaining: 0, retryAfter: 60 }),
+        );
+      }
+      return jsonResponse({ message: "unexpected request" }, 500);
+    });
+    vi.stubGlobal("fetch", limited);
 
-		const response = await relay("/repos/openclaw/octopool/contents/README.md");
-		expect(response.status).toBe(200);
-		expect(await response.json<RelayEnvelope>()).toMatchObject({
-			body: publicResponse,
-			relay: {
-				backend: "web",
-				cache: "stale",
-				stale_ok: true,
-				stale_reason: "github_rate_limited",
-			},
-		});
-	});
+    const response = await relay("/repos/openclaw/octopool/contents/README.md");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: publicResponse,
+      relay: {
+        backend: "web",
+        cache: "stale",
+        stale_ok: true,
+        stale_reason: "github_rate_limited",
+      },
+    });
+  });
 
-	it("rejects invalid caller authentication before touching GitHub", async () => {
-		await seedPool();
-		const upstream = vi.fn<typeof fetch>();
-		vi.stubGlobal("fetch", upstream);
+  it("rejects invalid caller authentication before touching GitHub", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
 
-		const response = await relay("/repos/openclaw/octopool", "wrong-token");
-		expect(response.status).toBe(401);
-		expect(await response.json()).toMatchObject({ error: { code: "invalid_auth" } });
-		expect(upstream).not.toHaveBeenCalled();
-	});
+    const response = await relay("/repos/openclaw/octopool", "wrong-token");
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "invalid_auth" } });
+    expect(upstream).not.toHaveBeenCalled();
+  });
 });
 
 describe("Worker end-to-end read models", () => {
-	it("isolates pool and caller stats through the canonical usage queries", async () => {
-		await seedPool();
-		await seedCaller("other", "other-token", "other");
-		await seedAudit("request-1", "caller", "repo_view", "miss", 200);
-		await seedAudit("request-2", "caller", "repo_view", "hit", 200);
-		await seedAudit("request-3", "other", "actions_log", "unknown", 424, {
-			errorCode: "fallback_local",
-			fallbackReason: "owner_denied",
-			cacheable: 0,
-		});
+  it("isolates pool and caller stats through the canonical usage queries", async () => {
+    await seedPool();
+    await seedCaller("other", "other-token", "other");
+    await seedAudit("request-1", "caller", "repo_view", "miss", 200);
+    await seedAudit("request-2", "caller", "repo_view", "hit", 200);
+    await seedAudit("request-3", "other", "actions_log", "unknown", 424, {
+      errorCode: "fallback_local",
+      fallbackReason: "owner_denied",
+      cacheable: 0,
+    });
 
-		const response = await callWorker(`/v1/pools/${POOL}/stats?since=24h`, {
-			headers: { authorization: `Bearer ${CALLER_TOKEN}` },
-		});
-		expect(response.status).toBe(200);
-		const body = await response.json<StatsEnvelope>();
-		expect(body).toMatchObject({
-			pool: POOL,
-			operator: { github_login: "caller" },
-			pool_usage: {
-				requests: 3,
-				errors: 1,
-				fallbacks: 1,
-				cache_hits: 1,
-				cache_misses: 1,
-			},
-			caller_usage: {
-				requests: 2,
-				errors: 0,
-				fallbacks: 0,
-				cache_hits: 1,
-				cache_misses: 1,
-			},
-			cache: { total_entries: 0 },
-		});
-		expect(body.pool_usage.eligible_cache_hit_rate).toBe(0.5);
-		expect(body.caller_usage.eligible_cache_hit_rate).toBe(0.5);
-		expect(body.routes.map(({ route_kind }) => route_kind)).toEqual(["repo_view", "actions_log"]);
-		expect(body.caller_routes).toEqual([
-			expect.objectContaining({ route_kind: "repo_view", requests: 2 }),
-		]);
-	});
+    const response = await callWorker(`/v1/pools/${POOL}/stats?since=24h`, {
+      headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json<StatsEnvelope>();
+    expect(body).toMatchObject({
+      pool: POOL,
+      operator: { github_login: "caller" },
+      pool_usage: {
+        requests: 3,
+        errors: 1,
+        fallbacks: 1,
+        cache_hits: 1,
+        cache_misses: 1,
+      },
+      caller_usage: {
+        requests: 2,
+        errors: 0,
+        fallbacks: 0,
+        cache_hits: 1,
+        cache_misses: 1,
+      },
+      cache: { total_entries: 0 },
+    });
+    expect(body.pool_usage.eligible_cache_hit_rate).toBe(0.5);
+    expect(body.caller_usage.eligible_cache_hit_rate).toBe(0.5);
+    expect(body.routes.map(({ route_kind }) => route_kind)).toEqual(["repo_view", "actions_log"]);
+    expect(body.caller_routes).toEqual([
+      expect.objectContaining({ route_kind: "repo_view", requests: 2 }),
+    ]);
+  });
 
-	it("composes the authenticated dashboard from D1 and Durable Object state", async () => {
-		await seedPool();
-		const session = await seedWebSession();
-		await seedAudit("request-1", "caller", "repo_view", "miss", 200);
-		await seedAudit("request-2", "caller", "repo_view", "hit", 200);
-		await seedAudit("request-3", "caller", "actions_log", "unknown", 424, {
-			errorCode: "fallback_local",
-			fallbackReason: "owner_denied",
-			cacheable: 0,
-		});
+  it("composes the authenticated dashboard from D1 and Durable Object state", async () => {
+    await seedPool();
+    const session = await seedWebSession();
+    await seedAudit("request-1", "caller", "repo_view", "miss", 200);
+    await seedAudit("request-2", "caller", "repo_view", "hit", 200);
+    await seedAudit("request-3", "caller", "actions_log", "unknown", 424, {
+      errorCode: "fallback_local",
+      fallbackReason: "owner_denied",
+      cacheable: 0,
+    });
 
-		const response = await callWorker(`https://octopool.openclaw.ai/v1/dashboard?pool=${POOL}`, {
-			headers: { cookie: `octopool_session=${session}` },
-		});
-		expect(response.status).toBe(200);
-		const body = await response.json<DashboardEnvelope>();
-		expect(body).toMatchObject({
-			pool: POOL,
-			operator: { github_login: "caller", dashboard_role: "admin" },
-			identities: { total: 1, active: 1 },
-			usage: {
-				requests_24h: 3,
-				fallbacks_24h: 0,
-				denied_24h: 1,
-				cache_hit_rate_24h: 0.5,
-				eligible_cache_hit_rate_24h: 0.5,
-			},
-			cache: { total_entries: 0 },
-		});
-		expect(body.route_usage).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ route_kind: "repo_view", eligible_cache_hit_rate: 0.5 }),
-				expect.objectContaining({
-					route_kind: "actions_log",
-					eligible_cache_hit_rate: null,
-					fallbacks: 0,
-				}),
-			]),
-		);
-		expect(body.coordinator).toEqual({ rates: [], cooldowns: [], leases: [] });
-	});
+    const response = await callWorker(`https://octopool.openclaw.ai/v1/dashboard?pool=${POOL}`, {
+      headers: { cookie: `octopool_session=${session}` },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json<DashboardEnvelope>();
+    expect(body).toMatchObject({
+      pool: POOL,
+      operator: { github_login: "caller", dashboard_role: "admin" },
+      identities: { total: 1, active: 1 },
+      usage: {
+        requests_24h: 3,
+        fallbacks_24h: 0,
+        denied_24h: 1,
+        cache_hit_rate_24h: 0.5,
+        eligible_cache_hit_rate_24h: 0.5,
+      },
+      cache: { total_entries: 0 },
+    });
+    expect(body.route_usage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ route_kind: "repo_view", eligible_cache_hit_rate: 0.5 }),
+        expect.objectContaining({
+          route_kind: "actions_log",
+          eligible_cache_hit_rate: null,
+          fallbacks: 0,
+        }),
+      ]),
+    );
+    expect(body.coordinator).toEqual({ rates: [], cooldowns: [], leases: [] });
+  });
 });

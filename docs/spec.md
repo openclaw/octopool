@@ -91,14 +91,14 @@ Bearer-authenticated primary endpoint.
 
 ```json
 {
-	"pool": "maintainers",
-	"method": "GET",
-	"path": "/repos/openclaw/openclaw/pulls/123",
-	"query": { "per_page": "100" },
-	"headers": { "accept": "application/vnd.github+json" },
-	"route_hint": {
-		"pr_head_sha": "0123456789abcdef0123456789abcdef01234567"
-	}
+  "pool": "maintainers",
+  "method": "GET",
+  "path": "/repos/openclaw/openclaw/pulls/123",
+  "query": { "per_page": "100" },
+  "headers": { "accept": "application/vnd.github+json" },
+  "route_hint": {
+    "pr_head_sha": "0123456789abcdef0123456789abcdef01234567"
+  }
 }
 ```
 
@@ -112,20 +112,20 @@ subresource cache entries. Legacy `route_hint.owner/repo/kind`, `cache_key`, and
 
 ```json
 {
-	"status": 200,
-	"headers": { "content-type": "application/json" },
-	"body": {},
-	"body_encoding": "json",
-	"identity": { "id": "pat_primary", "kind": "pat" },
-	"relay": {
-		"pool": "maintainers",
-		"request_id": "...",
-		"cacheable": true,
-		"cache": "miss",
-		"stale_ok": false,
-		"route_kind": "pr_view",
-		"lease_reason": "highest_remaining"
-	}
+  "status": 200,
+  "headers": { "content-type": "application/json" },
+  "body": {},
+  "body_encoding": "json",
+  "identity": { "id": "pat_primary", "kind": "pat" },
+  "relay": {
+    "pool": "maintainers",
+    "request_id": "...",
+    "cacheable": true,
+    "cache": "miss",
+    "stale_ok": false,
+    "route_kind": "pr_view",
+    "lease_reason": "highest_remaining"
+  }
 }
 ```
 

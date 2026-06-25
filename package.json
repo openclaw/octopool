@@ -1,35 +1,35 @@
 {
-	"name": "octopool",
-	"version": "0.3.2",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"build": "wrangler types && tsc --noEmit -p tsconfig.src.json && tsc --noEmit -p tsconfig.test.json",
-		"check": "pnpm routes:check && pnpm sql:check && pnpm format:check && pnpm lint && pnpm test && pnpm test:e2e && pnpm build && go test ./... && go vet ./...",
-		"deploy": "wrangler deploy && wrangler deploy --config wrangler.openclaw-proxy.jsonc",
-		"docs:site": "node scripts/build-docs-site.mjs",
-		"e2e": "sh test/e2e.sh",
-		"format": "oxfmt . --write && gofmt -w $(git ls-files '*.go')",
-		"format:check": "oxfmt . --check && pnpm go:format:check",
-		"go:format:check": "test -z \"$(gofmt -l $(git ls-files '*.go'))\"",
-		"lint": "oxlint --deny-warnings",
-		"routes:check": "pnpm routes:generate && git diff --exit-code -- cmd/octopool/routes_generated.go docs/relay.md docs/token-free.md",
-		"routes:generate": "node scripts/generate-routes.mjs && gofmt -w cmd/octopool/routes_generated.go",
-		"sql:check": "pnpm sql:compile && pnpm sql:generate && git diff --exit-code -- src/generated/sql.ts",
-		"sql:compile": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 compile",
-		"sql:generate": "node scripts/generate-sql.mjs && oxfmt src/generated/sql.ts --write",
-		"test": "vitest run",
-		"test:e2e:cli-worker": "sh test/cli-worker-e2e.sh",
-		"test:e2e": "vitest run --config vitest.e2e.config.ts",
-		"types": "wrangler types"
-	},
-	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "^0.16.16",
-		"@types/node": "^25.9.2",
-		"oxfmt": "^0.54.0",
-		"oxlint": "^1.69.0",
-		"typescript": "^5.9.3",
-		"vitest": "^4.1.8",
-		"wrangler": "^4.99.0"
-	}
+  "name": "octopool",
+  "version": "0.3.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wrangler types && tsc --noEmit -p tsconfig.src.json && tsc --noEmit -p tsconfig.test.json",
+    "check": "pnpm routes:check && pnpm sql:check && pnpm format:check && pnpm lint && pnpm test && pnpm test:e2e && pnpm build && go test ./... && go vet ./...",
+    "deploy": "wrangler deploy && wrangler deploy --config wrangler.openclaw-proxy.jsonc",
+    "docs:site": "node scripts/build-docs-site.mjs",
+    "e2e": "sh test/e2e.sh",
+    "format": "oxfmt . --write && gofmt -w $(git ls-files '*.go')",
+    "format:check": "oxfmt . --check && pnpm go:format:check",
+    "go:format:check": "test -z \"$(gofmt -l $(git ls-files '*.go'))\"",
+    "lint": "oxlint --deny-warnings",
+    "routes:check": "pnpm routes:generate && git diff --exit-code -- cmd/octopool/routes_generated.go docs/relay.md docs/token-free.md",
+    "routes:generate": "node scripts/generate-routes.mjs && gofmt -w cmd/octopool/routes_generated.go",
+    "sql:check": "pnpm sql:compile && pnpm sql:generate && git diff --exit-code -- src/generated/sql.ts",
+    "sql:compile": "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 compile",
+    "sql:generate": "node scripts/generate-sql.mjs && oxfmt src/generated/sql.ts --write",
+    "test": "vitest run",
+    "test:e2e:cli-worker": "sh test/cli-worker-e2e.sh",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "types": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.16",
+    "@types/node": "^25.9.2",
+    "oxfmt": "^0.54.0",
+    "oxlint": "^1.69.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8",
+    "wrangler": "^4.99.0"
+  }
 }

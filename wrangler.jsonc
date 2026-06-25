@@ -1,51 +1,51 @@
 {
-	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "octopool",
-	"account_id": "de09342a728de2c25c85cc6b34d68739",
-	"main": "src/index.ts",
-	"compatibility_date": "2026-05-26",
-	"compatibility_flags": ["nodejs_compat"],
-	"observability": {
-		"enabled": true,
-		"head_sampling_rate": 1,
-	},
-	"vars": {
-		"ALLOWED_GITHUB_ORG": "openclaw",
-		"DEFAULT_ALLOWED_OWNERS": "openclaw",
-		"MAX_RESPONSE_BYTES": "2097152",
-		"REQUEST_TIMEOUT_MS": "15000",
-		"ORG_VERIFY_TTL_SECONDS": "86400",
-		"GITHUB_OAUTH_CLIENT_ID": "Iv23lilUVXPNTPhNhUmZ",
-		"GITHUB_OAUTH_CALLBACK_ORIGIN": "https://octopool.dev",
-	},
-	"routes": [
-		{
-			"pattern": "octopool.dev",
-			"custom_domain": true,
-		},
-	],
-	"triggers": {
-		"crons": ["17 * * * *"],
-	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "octopool",
-			"database_id": "15066240-b0c6-4f25-bcfb-136dc6ce1bff",
-		},
-	],
-	"durable_objects": {
-		"bindings": [
-			{
-				"name": "POOL_COORDINATOR",
-				"class_name": "PoolCoordinator",
-			},
-		],
-	},
-	"migrations": [
-		{
-			"tag": "v1",
-			"new_sqlite_classes": ["PoolCoordinator"],
-		},
-	],
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "octopool",
+  "account_id": "de09342a728de2c25c85cc6b34d68739",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "vars": {
+    "ALLOWED_GITHUB_ORG": "openclaw",
+    "DEFAULT_ALLOWED_OWNERS": "openclaw",
+    "MAX_RESPONSE_BYTES": "2097152",
+    "REQUEST_TIMEOUT_MS": "15000",
+    "ORG_VERIFY_TTL_SECONDS": "86400",
+    "GITHUB_OAUTH_CLIENT_ID": "Iv23lilUVXPNTPhNhUmZ",
+    "GITHUB_OAUTH_CALLBACK_ORIGIN": "https://octopool.dev",
+  },
+  "routes": [
+    {
+      "pattern": "octopool.dev",
+      "custom_domain": true,
+    },
+  ],
+  "triggers": {
+    "crons": ["17 * * * *"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "octopool",
+      "database_id": "15066240-b0c6-4f25-bcfb-136dc6ce1bff",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "POOL_COORDINATOR",
+        "class_name": "PoolCoordinator",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["PoolCoordinator"],
+    },
+  ],
 }

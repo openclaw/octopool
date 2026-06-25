@@ -1,31 +1,31 @@
 import { HttpError } from "./http";
 
 const TITLES: Record<string, string> = {
-	caller_not_provisioned: "Pool access unavailable",
-	dashboard_denied: "Dashboard access denied",
-	github_login_denied: "GitHub login cancelled",
-	github_state_expired: "Login expired",
-	github_state_invalid: "Login could not be verified",
-	org_member_denied: "Org membership required",
-	pool_denied: "Pool access denied",
+  caller_not_provisioned: "Pool access unavailable",
+  dashboard_denied: "Dashboard access denied",
+  github_login_denied: "GitHub login cancelled",
+  github_state_expired: "Login expired",
+  github_state_invalid: "Login could not be verified",
+  org_member_denied: "Org membership required",
+  pool_denied: "Pool access denied",
 };
 
 export function wantsJson(request: Request): boolean {
-	const accept = (request.headers.get("accept") ?? "").toLowerCase();
-	return accept.includes("application/json") && !accept.includes("text/html");
+  const accept = (request.headers.get("accept") ?? "").toLowerCase();
+  return accept.includes("application/json") && !accept.includes("text/html");
 }
 
 export function shouldUseWebError(request: Request): boolean {
-	const url = new URL(request.url);
-	return request.method === "GET" && !url.pathname.startsWith("/v1/") && !wantsJson(request);
+  const url = new URL(request.url);
+  return request.method === "GET" && !url.pathname.startsWith("/v1/") && !wantsJson(request);
 }
 
 export function webErrorResponse(error: unknown, requestId: string): Response {
-	const status = error instanceof HttpError ? error.status : 500;
-	const code = error instanceof HttpError ? error.code : "internal_error";
-	const message = webErrorMessage(error);
-	const title = TITLES[code] ?? (status >= 500 ? "Something broke" : "Request blocked");
-	const html = `<!doctype html>
+  const status = error instanceof HttpError ? error.status : 500;
+  const code = error instanceof HttpError ? error.code : "internal_error";
+  const message = webErrorMessage(error);
+  const title = TITLES[code] ?? (status >= 500 ? "Something broke" : "Request blocked");
+  const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -60,31 +60,31 @@ export function webErrorResponse(error: unknown, requestId: string): Response {
   </main>
 </body>
 </html>`;
-	return new Response(html, {
-		status,
-		headers: {
-			"content-type": "text/html; charset=utf-8",
-			"cache-control": "no-store",
-		},
-	});
+  return new Response(html, {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 function webErrorMessage(error: unknown): string {
-	if (!(error instanceof HttpError)) {
-		return "Octopool hit an internal error. Please try again, and include the request id if it keeps happening.";
-	}
-	if (error.code === "caller_not_provisioned") {
-		return "Your GitHub account is verified, but Octopool could not grant this pool automatically.";
-	}
-	if (error.code === "dashboard_denied") {
-		return "Your GitHub account can use Octopool, but it does not have dashboard admin access.";
-	}
-	if (error.code === "org_member_denied") {
-		return "Octopool is currently limited to verified OpenClaw GitHub org members.";
-	}
-	return error.message;
+  if (!(error instanceof HttpError)) {
+    return "Octopool hit an internal error. Please try again, and include the request id if it keeps happening.";
+  }
+  if (error.code === "caller_not_provisioned") {
+    return "Your GitHub account is verified, but Octopool could not grant this pool automatically.";
+  }
+  if (error.code === "dashboard_denied") {
+    return "Your GitHub account can use Octopool, but it does not have dashboard admin access.";
+  }
+  if (error.code === "org_member_denied") {
+    return "Octopool is currently limited to verified OpenClaw GitHub org members.";
+  }
+  return error.message;
 }
 
 function escapeHtml(value: string): string {
-	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }

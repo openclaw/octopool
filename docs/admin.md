@@ -42,12 +42,12 @@ PAT identity:
 
 ```json
 {
-	"id": "pat_steipete",
-	"kind": "pat",
-	"login": "steipete",
-	"secret_ref": "OCTOPOOL_PAT_STEIPETE",
-	"scopes": [{ "owner": "openclaw" }],
-	"weight": 100
+  "id": "pat_steipete",
+  "kind": "pat",
+  "login": "steipete",
+  "secret_ref": "OCTOPOOL_PAT_STEIPETE",
+  "scopes": [{ "owner": "openclaw" }],
+  "weight": 100
 }
 ```
 
@@ -55,12 +55,12 @@ GitHub App identity:
 
 ```json
 {
-	"id": "ghapp_openclaw_openclaw",
-	"kind": "github_app",
-	"login": "octopool-cache",
-	"secret_ref": "OCTOPOOL_GITHUB_APP_PRIVATE_KEY",
-	"installation_id": 135990630,
-	"scopes": [{ "owner": "openclaw", "repo": "openclaw" }]
+  "id": "ghapp_openclaw_openclaw",
+  "kind": "github_app",
+  "login": "octopool-cache",
+  "secret_ref": "OCTOPOOL_GITHUB_APP_PRIVATE_KEY",
+  "installation_id": 135990630,
+  "scopes": [{ "owner": "openclaw", "repo": "openclaw" }]
 }
 ```
 

@@ -4,242 +4,242 @@ import { queries } from "./generated/sql";
 import type { Caller } from "./types";
 
 type CallerRow = {
-	id: string;
-	name: string;
-	github_login: string;
-	org_login: string;
-	org_verified_at: string | null;
+  id: string;
+  name: string;
+  github_login: string;
+  org_login: string;
+  org_verified_at: string | null;
 };
 
 export async function authenticateCaller(
-	request: Request,
-	env: Env,
-	pool: string,
+  request: Request,
+  env: Env,
+  pool: string,
 ): Promise<Caller> {
-	const token = requestBearer(request);
-	const tokenHash = await hashToken(token);
-	const row = await env.DB.prepare(queries.authenticateCaller)
-		.bind(tokenHash, pool)
-		.first<CallerRow>();
-	if (row === null) {
-		throw new HttpError(401, "invalid_auth", "Invalid caller token");
-	}
-	const allowedOrg = env.ALLOWED_GITHUB_ORG.toLowerCase();
-	if (row.org_login.toLowerCase() !== allowedOrg) {
-		throw new HttpError(403, "org_denied", `Caller is not a ${allowedOrg} org user`);
-	}
-	await ensureFreshOrgMembership(env, row);
-	return row;
+  const token = requestBearer(request);
+  const tokenHash = await hashToken(token);
+  const row = await env.DB.prepare(queries.authenticateCaller)
+    .bind(tokenHash, pool)
+    .first<CallerRow>();
+  if (row === null) {
+    throw new HttpError(401, "invalid_auth", "Invalid caller token");
+  }
+  const allowedOrg = env.ALLOWED_GITHUB_ORG.toLowerCase();
+  if (row.org_login.toLowerCase() !== allowedOrg) {
+    throw new HttpError(403, "org_denied", `Caller is not a ${allowedOrg} org user`);
+  }
+  await ensureFreshOrgMembership(env, row);
+  return row;
 }
 
 export async function authenticateAdmin(request: Request, env: Env): Promise<void> {
-	const configured = envSecret(env, "OCTOPOOL_ADMIN_TOKEN");
-	if (configured === undefined || configured.trim() === "") {
-		throw new HttpError(503, "admin_unconfigured", "Admin token is not configured");
-	}
-	const token = requestBearer(request);
-	const ok = await constantTimeEqual(token, configured);
-	if (!ok) {
-		throw new HttpError(401, "invalid_admin_auth", "Invalid admin token");
-	}
+  const configured = envSecret(env, "OCTOPOOL_ADMIN_TOKEN");
+  if (configured === undefined || configured.trim() === "") {
+    throw new HttpError(503, "admin_unconfigured", "Admin token is not configured");
+  }
+  const token = requestBearer(request);
+  const ok = await constantTimeEqual(token, configured);
+  if (!ok) {
+    throw new HttpError(401, "invalid_admin_auth", "Invalid admin token");
+  }
 }
 
 export async function hashToken(token: string): Promise<string> {
-	const bytes = new TextEncoder().encode(token);
-	const digest = await crypto.subtle.digest("SHA-256", bytes);
-	return bytesToBase64URL(new Uint8Array(digest));
+  const bytes = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return bytesToBase64URL(new Uint8Array(digest));
 }
 
 export function newToken(prefix: string): string {
-	const bytes = new Uint8Array(32);
-	crypto.getRandomValues(bytes);
-	return `${prefix}_${bytesToBase64URL(bytes)}`;
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `${prefix}_${bytesToBase64URL(bytes)}`;
 }
 
 export async function githubUserFromToken(
-	env: Env,
-	token: string,
+  env: Env,
+  token: string,
 ): Promise<{
-	id: number;
-	login: string;
-	name?: string;
+  id: number;
+  login: string;
+  name?: string;
 }> {
-	const response = await fetch("https://api.github.com/user", {
-		headers: githubHeaders(token),
-		signal: githubRequestSignal(env),
-	});
-	if (!response.ok) {
-		throw new HttpError(
-			401,
-			"github_auth_failed",
-			`GitHub token check failed with ${response.status}`,
-			githubRateLimitDetails(response.headers),
-		);
-	}
-	const body: unknown = await response.json();
-	if (typeof body !== "object" || body === null || Array.isArray(body)) {
-		throw new HttpError(502, "github_auth_failed", "GitHub user response was invalid");
-	}
-	const login = (body as { login?: unknown }).login;
-	const id = (body as { id?: unknown }).id;
-	const name = (body as { name?: unknown }).name;
-	if (typeof login !== "string" || typeof id !== "number") {
-		throw new HttpError(502, "github_auth_failed", "GitHub user response was incomplete");
-	}
-	return {
-		id,
-		login,
-		...(typeof name === "string" && name.trim() !== "" ? { name } : {}),
-	};
+  const response = await fetch("https://api.github.com/user", {
+    headers: githubHeaders(token),
+    signal: githubRequestSignal(env),
+  });
+  if (!response.ok) {
+    throw new HttpError(
+      401,
+      "github_auth_failed",
+      `GitHub token check failed with ${response.status}`,
+      githubRateLimitDetails(response.headers),
+    );
+  }
+  const body: unknown = await response.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError(502, "github_auth_failed", "GitHub user response was invalid");
+  }
+  const login = (body as { login?: unknown }).login;
+  const id = (body as { id?: unknown }).id;
+  const name = (body as { name?: unknown }).name;
+  if (typeof login !== "string" || typeof id !== "number") {
+    throw new HttpError(502, "github_auth_failed", "GitHub user response was incomplete");
+  }
+  return {
+    id,
+    login,
+    ...(typeof name === "string" && name.trim() !== "" ? { name } : {}),
+  };
 }
 
 function githubRateLimitDetails(headers: Headers): Record<string, string> | undefined {
-	const details: Record<string, string> = {};
-	for (const [detailKey, headerKey] of [
-		["github_rate_limit_limit", "x-ratelimit-limit"],
-		["github_rate_limit_remaining", "x-ratelimit-remaining"],
-		["github_rate_limit_reset", "x-ratelimit-reset"],
-		["github_rate_limit_resource", "x-ratelimit-resource"],
-		["github_rate_limit_used", "x-ratelimit-used"],
-		["github_retry_after", "retry-after"],
-	] as const) {
-		const value = headers.get(headerKey);
-		if (value !== null && value.trim() !== "") {
-			details[detailKey] = value;
-		}
-	}
-	return Object.keys(details).length === 0 ? undefined : details;
+  const details: Record<string, string> = {};
+  for (const [detailKey, headerKey] of [
+    ["github_rate_limit_limit", "x-ratelimit-limit"],
+    ["github_rate_limit_remaining", "x-ratelimit-remaining"],
+    ["github_rate_limit_reset", "x-ratelimit-reset"],
+    ["github_rate_limit_resource", "x-ratelimit-resource"],
+    ["github_rate_limit_used", "x-ratelimit-used"],
+    ["github_retry_after", "retry-after"],
+  ] as const) {
+    const value = headers.get(headerKey);
+    if (value !== null && value.trim() !== "") {
+      details[detailKey] = value;
+    }
+  }
+  return Object.keys(details).length === 0 ? undefined : details;
 }
 
 export async function githubUserByLogin(
-	env: Env,
-	login: string,
+  env: Env,
+  login: string,
 ): Promise<{
-	id: number;
-	login: string;
+  id: number;
+  login: string;
 }> {
-	const response = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`, {
-		headers: githubHeaders(),
-		signal: githubRequestSignal(env),
-	});
-	if (!response.ok) {
-		throw new HttpError(
-			502,
-			"github_user_lookup_failed",
-			`GitHub user lookup failed with ${response.status}`,
-		);
-	}
-	const body: unknown = await response.json();
-	if (typeof body !== "object" || body === null || Array.isArray(body)) {
-		throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was invalid");
-	}
-	const resolvedLogin = (body as { login?: unknown }).login;
-	const id = (body as { id?: unknown }).id;
-	if (typeof resolvedLogin !== "string" || typeof id !== "number") {
-		throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was incomplete");
-	}
-	return { id, login: resolvedLogin };
+  const response = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`, {
+    headers: githubHeaders(),
+    signal: githubRequestSignal(env),
+  });
+  if (!response.ok) {
+    throw new HttpError(
+      502,
+      "github_user_lookup_failed",
+      `GitHub user lookup failed with ${response.status}`,
+    );
+  }
+  const body: unknown = await response.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was invalid");
+  }
+  const resolvedLogin = (body as { login?: unknown }).login;
+  const id = (body as { id?: unknown }).id;
+  if (typeof resolvedLogin !== "string" || typeof id !== "number") {
+    throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was incomplete");
+  }
+  return { id, login: resolvedLogin };
 }
 
 export async function verifyGitHubOrgMember(env: Env, login: string): Promise<string> {
-	const token = envSecret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
-	if (token === undefined || token.trim() === "") {
-		throw new HttpError(
-			503,
-			"org_verification_unavailable",
-			"GitHub org verifier token is not configured",
-		);
-	}
-	const org = env.ALLOWED_GITHUB_ORG;
-	const response = await fetch(
-		`https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
-		{
-			headers: githubHeaders(token),
-			signal: githubRequestSignal(env),
-		},
-	);
-	if (response.status === 204) {
-		return new Date().toISOString();
-	}
-	if (response.status === 404) {
-		throw new HttpError(
-			403,
-			"org_member_denied",
-			`${login} is not a public or token-visible ${org} member`,
-		);
-	}
-	throw new HttpError(
-		502,
-		"org_verification_failed",
-		`GitHub membership check failed with ${response.status}`,
-	);
+  const token = envSecret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
+  if (token === undefined || token.trim() === "") {
+    throw new HttpError(
+      503,
+      "org_verification_unavailable",
+      "GitHub org verifier token is not configured",
+    );
+  }
+  const org = env.ALLOWED_GITHUB_ORG;
+  const response = await fetch(
+    `https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
+    {
+      headers: githubHeaders(token),
+      signal: githubRequestSignal(env),
+    },
+  );
+  if (response.status === 204) {
+    return new Date().toISOString();
+  }
+  if (response.status === 404) {
+    throw new HttpError(
+      403,
+      "org_member_denied",
+      `${login} is not a public or token-visible ${org} member`,
+    );
+  }
+  throw new HttpError(
+    502,
+    "org_verification_failed",
+    `GitHub membership check failed with ${response.status}`,
+  );
 }
 
 export async function verifyGitHubOrgMemberWithToken(
-	env: Env,
-	token: string,
-	login: string,
+  env: Env,
+  token: string,
+  login: string,
 ): Promise<string> {
-	const org = env.ALLOWED_GITHUB_ORG;
-	const response = await fetch(
-		`https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
-		{
-			headers: githubHeaders(token),
-			signal: githubRequestSignal(env),
-		},
-	);
-	if (response.status === 204) {
-		return new Date().toISOString();
-	}
-	if (response.status === 404) {
-		throw new HttpError(403, "org_member_denied", `${login} is not a ${org} org member`);
-	}
-	throw new HttpError(
-		502,
-		"org_verification_failed",
-		`GitHub membership check failed with ${response.status}`,
-	);
+  const org = env.ALLOWED_GITHUB_ORG;
+  const response = await fetch(
+    `https://api.github.com/orgs/${encodeURIComponent(org)}/members/${encodeURIComponent(login)}`,
+    {
+      headers: githubHeaders(token),
+      signal: githubRequestSignal(env),
+    },
+  );
+  if (response.status === 204) {
+    return new Date().toISOString();
+  }
+  if (response.status === 404) {
+    throw new HttpError(403, "org_member_denied", `${login} is not a ${org} org member`);
+  }
+  throw new HttpError(
+    502,
+    "org_verification_failed",
+    `GitHub membership check failed with ${response.status}`,
+  );
 }
 
 export async function ensureFreshOrgMembership(env: Env, caller: CallerRow): Promise<void> {
-	const ttlSeconds = Number.parseInt(env.ORG_VERIFY_TTL_SECONDS, 10);
-	const ttlMs = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds * 1000 : 86_400_000;
-	const verifiedAt = caller.org_verified_at === null ? 0 : Date.parse(caller.org_verified_at);
-	if (Number.isFinite(verifiedAt) && Date.now() - verifiedAt < ttlMs) {
-		return;
-	}
-	const now = await verifyGitHubOrgMember(env, caller.github_login);
-	await env.DB.prepare(queries.updateCallerOrgVerifiedAt).bind(now, caller.id).run();
+  const ttlSeconds = Number.parseInt(env.ORG_VERIFY_TTL_SECONDS, 10);
+  const ttlMs = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds * 1000 : 86_400_000;
+  const verifiedAt = caller.org_verified_at === null ? 0 : Date.parse(caller.org_verified_at);
+  if (Number.isFinite(verifiedAt) && Date.now() - verifiedAt < ttlMs) {
+    return;
+  }
+  const now = await verifyGitHubOrgMember(env, caller.github_login);
+  await env.DB.prepare(queries.updateCallerOrgVerifiedAt).bind(now, caller.id).run();
 }
 
 async function constantTimeEqual(left: string, right: string): Promise<boolean> {
-	const leftHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(left));
-	const rightHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(right));
-	const leftBytes = new Uint8Array(leftHash);
-	const rightBytes = new Uint8Array(rightHash);
-	if (leftBytes.length !== rightBytes.length) {
-		return false;
-	}
-	let diff = 0;
-	for (let index = 0; index < leftBytes.length; index += 1) {
-		diff |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
-	}
-	return diff === 0;
+  const leftHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(left));
+  const rightHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(right));
+  const leftBytes = new Uint8Array(leftHash);
+  const rightBytes = new Uint8Array(rightHash);
+  if (leftBytes.length !== rightBytes.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    diff |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
+  }
+  return diff === 0;
 }
 
 export function envSecret(env: Env, name: string): string | undefined {
-	return (env as unknown as Record<string, string | undefined>)[name];
+  return (env as unknown as Record<string, string | undefined>)[name];
 }
 
 function githubHeaders(token?: string): Record<string, string> {
-	return {
-		accept: "application/vnd.github+json",
-		...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
-		"user-agent": "octopool",
-		"x-github-api-version": "2022-11-28",
-	};
+  return {
+    accept: "application/vnd.github+json",
+    ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+    "user-agent": "octopool",
+    "x-github-api-version": "2022-11-28",
+  };
 }
 
 function githubRequestSignal(env: Env): AbortSignal {
-	return AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000));
+  return AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000));
 }

@@ -345,10 +345,10 @@ function showError(message) {
 </html>`;
 
 export function dashboardResponse(): Response {
-	return new Response(DASHBOARD_HTML, {
-		headers: {
-			"content-type": "text/html; charset=utf-8",
-			"cache-control": "no-store",
-		},
-	});
+  return new Response(DASHBOARD_HTML, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
 }

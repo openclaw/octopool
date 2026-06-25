@@ -1,13 +1,13 @@
 {
-	"extends": "./tsconfig.base.json",
-	"compilerOptions": {
-		"types": ["node", "@cloudflare/vitest-pool-workers/types"]
-	},
-	"include": [
-		"src/**/*.ts",
-		"test/**/*.ts",
-		"vitest.config.ts",
-		"vitest.e2e.config.ts",
-		"worker-configuration.d.ts"
-	]
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/vitest-pool-workers/types"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "vitest.config.ts",
+    "vitest.e2e.config.ts",
+    "worker-configuration.d.ts"
+  ]
 }

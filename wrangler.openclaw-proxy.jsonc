@@ -1,20 +1,20 @@
 {
-	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "octopool-openclaw-proxy",
-	"account_id": "91b59577e757131d68d55a471fe32aca",
-	"main": "src/openclaw-proxy.ts",
-	"compatibility_date": "2026-05-26",
-	"observability": {
-		"enabled": true,
-		"head_sampling_rate": 1,
-	},
-	"vars": {
-		"OCTOPOOL_ORIGIN": "https://octopool.dev",
-	},
-	"routes": [
-		{
-			"pattern": "octopool.openclaw.ai",
-			"custom_domain": true,
-		},
-	],
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "octopool-openclaw-proxy",
+  "account_id": "91b59577e757131d68d55a471fe32aca",
+  "main": "src/openclaw-proxy.ts",
+  "compatibility_date": "2026-05-26",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "vars": {
+    "OCTOPOOL_ORIGIN": "https://octopool.dev",
+  },
+  "routes": [
+    {
+      "pattern": "octopool.openclaw.ai",
+      "custom_domain": true,
+    },
+  ],
 }

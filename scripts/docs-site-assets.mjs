@@ -1,7 +1,7 @@
 // Octopus-themed docs site assets for octopool. Dark-first to match octopool.dev.
 
 export function css() {
-	return `
+  return `
 :root{
   --ink:#15101a;
   --text:#3a3340;
@@ -202,7 +202,7 @@ body:not(.home) .doc>h1:first-child{display:none}
 }
 
 export function js() {
-	return `
+  return `
 const themeRoot=document.documentElement;
 function applyTheme(mode){themeRoot.dataset.theme=mode;document.querySelectorAll('[data-theme-toggle]').forEach(b=>b.setAttribute('aria-pressed',mode==='dark'?'true':'false'))}
 function storedTheme(){try{return localStorage.getItem('theme')}catch(e){return null}}
@@ -260,11 +260,11 @@ if(tocLinks.length){const map=new Map();tocLinks.forEach(a=>{const id=a.getAttri
 }
 
 export function preThemeScript() {
-	return `(function(){var s;try{s=localStorage.getItem('theme')}catch(e){}document.documentElement.dataset.theme=s==='light'?'light':'dark'})();`;
+  return `(function(){var s;try{s=localStorage.getItem('theme')}catch(e){}document.documentElement.dataset.theme=s==='light'?'light':'dark'})();`;
 }
 
 export function themeToggleHtml() {
-	return `<button class="theme-toggle" type="button" aria-label="Toggle dark mode" aria-pressed="false" data-theme-toggle>
+  return `<button class="theme-toggle" type="button" aria-label="Toggle dark mode" aria-pressed="false" data-theme-toggle>
     <svg class="theme-icon-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M14.6 12.1A6.5 6.5 0 0 1 7.4 2.7a6.5 6.5 0 1 0 7.2 9.4z" fill="currentColor"/></svg>
     <svg class="theme-icon-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="10" y1="2" x2="10" y2="4"/><line x1="10" y1="16" x2="10" y2="18"/><line x1="2" y1="10" x2="4" y2="10"/><line x1="16" y1="10" x2="18" y2="10"/><line x1="4.2" y1="4.2" x2="5.6" y2="5.6"/><line x1="14.4" y1="14.4" x2="15.8" y2="15.8"/><line x1="4.2" y1="15.8" x2="5.6" y2="14.4"/><line x1="14.4" y1="5.6" x2="15.8" y2="4.2"/></g></svg>
   </button>`;
@@ -272,7 +272,7 @@ export function themeToggleHtml() {
 
 // Compact angry-octopus mark, matching the octopool.dev landing octopus.
 export function octoMarkSvg() {
-	return `<svg class="mark" viewBox="0 0 420 500" role="img" aria-label="octopool" xmlns="http://www.w3.org/2000/svg">
+  return `<svg class="mark" viewBox="0 0 420 500" role="img" aria-label="octopool" xmlns="http://www.w3.org/2000/svg">
 <defs>
 <linearGradient id="ob" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4d6d"/><stop offset=".55" stop-color="#d61f5c"/><stop offset="1" stop-color="#7a0f43"/></linearGradient>
 <linearGradient id="oa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e21e5e"/><stop offset="1" stop-color="#5e0a36"/></linearGradient>
@@ -295,7 +295,7 @@ export function octoMarkSvg() {
 
 // Angry-octopus tile favicon, matching docs/assets/favicon.svg (the rasterized source).
 export function faviconSvg() {
-	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="octopool">
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="octopool">
 <defs>
 <linearGradient id="fbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16111f"/><stop offset="1" stop-color="#07070b"/></linearGradient>
 <linearGradient id="fbody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff5a78"/><stop offset=".55" stop-color="#d61f5c"/><stop offset="1" stop-color="#7a0f43"/></linearGradient>

@@ -3,12 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
-	css,
-	faviconSvg,
-	js,
-	octoMarkSvg,
-	preThemeScript,
-	themeToggleHtml,
+  css,
+  faviconSvg,
+  js,
+  octoMarkSvg,
+  preThemeScript,
+  themeToggleHtml,
 } from "./docs-site-assets.mjs";
 
 const root = process.cwd();
@@ -22,7 +22,7 @@ const siteBase = cname ? `https://${cname}` : "";
 const productName = "octopool";
 const productTagline = "A shared GitHub read relay";
 const productDescription =
-	"Octopool is a Cloudflare-hosted, org-authenticated GitHub read relay and shared cache. Trusted OpenClaw members and agents share a pool of GitHub identities for read-heavy maintainer automation, keeping tokens off developer machines.";
+  "Octopool is a Cloudflare-hosted, org-authenticated GitHub read relay and shared cache. Trusted OpenClaw members and agents share a pool of GitHub identities for read-heavy maintainer automation, keeping tokens off developer machines.";
 const installCommand = "brew install openclaw/tap/octopool";
 
 // Inline-code placeholder sentinel. NUL never appears in markdown and survives escapeHtml.
@@ -32,11 +32,11 @@ const MARK_RE = new RegExp(`${MARK}(\\d+)${MARK}`, "g");
 const STASH_RE = new RegExp("[\\uE000-\\uF8FF]", "g");
 
 const sections = [
-	["Start", ["index.md", "cli.md", "relay.md", "token-free.md"]],
-	["Core", ["identities.md", "cache.md", "auth.md", "admin.md"]],
-	["Web", ["landing.md", "dashboard.md"]],
-	["Operations", ["operations.md"]],
-	["Reference", ["spec.md"]],
+  ["Start", ["index.md", "cli.md", "relay.md", "token-free.md"]],
+  ["Core", ["identities.md", "cache.md", "auth.md", "admin.md"]],
+  ["Web", ["landing.md", "dashboard.md"]],
+  ["Operations", ["operations.md"]],
+  ["Reference", ["spec.md"]],
 ];
 
 const buildExcludes = [];
@@ -45,45 +45,45 @@ fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
 const allPages = allMarkdown(docsDir).map((file) => {
-	const rel = path.relative(docsDir, file).replaceAll(path.sep, "/");
-	const raw = fs.readFileSync(file, "utf8");
-	const { frontmatter, body } = parseFrontmatter(raw);
-	const cleaned = stripStrayDirectives(body);
-	const title = frontmatter.title || firstHeading(cleaned) || titleize(path.basename(rel, ".md"));
-	return { file, rel, title, outRel: outPath(rel, frontmatter), markdown: cleaned, frontmatter };
+  const rel = path.relative(docsDir, file).replaceAll(path.sep, "/");
+  const raw = fs.readFileSync(file, "utf8");
+  const { frontmatter, body } = parseFrontmatter(raw);
+  const cleaned = stripStrayDirectives(body);
+  const title = frontmatter.title || firstHeading(cleaned) || titleize(path.basename(rel, ".md"));
+  return { file, rel, title, outRel: outPath(rel, frontmatter), markdown: cleaned, frontmatter };
 });
 
 const pages = allPages.filter((page) => !buildExcludes.some((re) => re.test(page.rel)));
 const pageMap = new Map(pages.map((page) => [page.rel, page]));
 const permalinkMap = new Map();
 for (const page of pages) {
-	if (page.frontmatter.permalink) {
-		permalinkMap.set(normalizePermalink(page.frontmatter.permalink), page);
-	}
+  if (page.frontmatter.permalink) {
+    permalinkMap.set(normalizePermalink(page.frontmatter.permalink), page);
+  }
 }
 
 const nav = sections
-	.map(([name, rels]) => ({
-		name,
-		pages: rels.map((rel) => pageMap.get(rel)).filter(Boolean),
-	}))
-	.filter((section) => section.pages.length);
+  .map(([name, rels]) => ({
+    name,
+    pages: rels.map((rel) => pageMap.get(rel)).filter(Boolean),
+  }))
+  .filter((section) => section.pages.length);
 
 const sectionByRel = new Map();
 for (const section of nav)
-	for (const page of section.pages) sectionByRel.set(page.rel, section.name);
+  for (const page of section.pages) sectionByRel.set(page.rel, section.name);
 const orderedPages = nav.flatMap((s) => s.pages);
 
 for (const page of pages) {
-	const html = markdownToHtml(page.markdown, page.rel);
-	const toc = tocFromHtml(html);
-	const idx = orderedPages.findIndex((p) => p.rel === page.rel);
-	const prev = idx > 0 ? orderedPages[idx - 1] : null;
-	const next = idx >= 0 && idx < orderedPages.length - 1 ? orderedPages[idx + 1] : null;
-	const sectionName = sectionByRel.get(page.rel) || "Reference";
-	const pageOut = path.join(outDir, page.outRel);
-	fs.mkdirSync(path.dirname(pageOut), { recursive: true });
-	fs.writeFileSync(pageOut, layout({ page, html, toc, prev, next, sectionName }), "utf8");
+  const html = markdownToHtml(page.markdown, page.rel);
+  const toc = tocFromHtml(html);
+  const idx = orderedPages.findIndex((p) => p.rel === page.rel);
+  const prev = idx > 0 ? orderedPages[idx - 1] : null;
+  const next = idx >= 0 && idx < orderedPages.length - 1 ? orderedPages[idx + 1] : null;
+  const sectionName = sectionByRel.get(page.rel) || "Reference";
+  const pageOut = path.join(outDir, page.outRel);
+  fs.mkdirSync(path.dirname(pageOut), { recursive: true });
+  fs.writeFileSync(pageOut, layout({ page, html, toc, prev, next, sectionName }), "utf8");
 }
 
 fs.writeFileSync(path.join(outDir, "favicon.svg"), faviconSvg(), "utf8");
@@ -96,373 +96,373 @@ fs.writeFileSync(path.join(outDir, "llms.txt"), llmsTxt(), "utf8");
 console.log(`built docs site: ${path.relative(root, outDir)} (${pages.length} pages)`);
 
 function llmsTxt() {
-	const origin = siteBase.replace(/\/$/, "");
-	const docPages = orderedPages.map((page) => `- ${page.title}: ${pageUrl(origin, page.outRel)}`);
-	const lines = [
-		`# ${productName}`,
-		"",
-		productDescription,
-		"",
-		"Canonical documentation:",
-		...docPages,
-	];
-	lines.push("", "Install:", `- ${installCommand}`);
-	lines.push("", `Source: ${repoBase}`);
-	lines.push(
-		"",
-		"Guidance for agents:",
-		"- Prefer the canonical documentation URLs above over README excerpts or package metadata.",
-		"- Fetch only the pages needed for the current task; this is an index, not a full-site corpus.",
-	);
-	return `${lines.join("\n")}\n`;
+  const origin = siteBase.replace(/\/$/, "");
+  const docPages = orderedPages.map((page) => `- ${page.title}: ${pageUrl(origin, page.outRel)}`);
+  const lines = [
+    `# ${productName}`,
+    "",
+    productDescription,
+    "",
+    "Canonical documentation:",
+    ...docPages,
+  ];
+  lines.push("", "Install:", `- ${installCommand}`);
+  lines.push("", `Source: ${repoBase}`);
+  lines.push(
+    "",
+    "Guidance for agents:",
+    "- Prefer the canonical documentation URLs above over README excerpts or package metadata.",
+    "- Fetch only the pages needed for the current task; this is an index, not a full-site corpus.",
+  );
+  return `${lines.join("\n")}\n`;
 }
 
 function pageUrl(origin, outRel) {
-	const normalized =
-		outRel === "index.html"
-			? ""
-			: outRel.replace(/(?:^|\/)index\.html$/, (match) => (match === "index.html" ? "" : "/"));
-	if (!origin) return normalized || "index.html";
-	return normalized ? `${origin}/${normalized}` : `${origin}/`;
+  const normalized =
+    outRel === "index.html"
+      ? ""
+      : outRel.replace(/(?:^|\/)index\.html$/, (match) => (match === "index.html" ? "" : "/"));
+  if (!origin) return normalized || "index.html";
+  return normalized ? `${origin}/${normalized}` : `${origin}/`;
 }
 
 function readCname() {
-	for (const candidate of [path.join(docsDir, "CNAME"), path.join(root, "CNAME")]) {
-		if (fs.existsSync(candidate)) return fs.readFileSync(candidate, "utf8").trim();
-	}
-	return "";
+  for (const candidate of [path.join(docsDir, "CNAME"), path.join(root, "CNAME")]) {
+    if (fs.existsSync(candidate)) return fs.readFileSync(candidate, "utf8").trim();
+  }
+  return "";
 }
 
 function copyAssets() {
-	const source = path.join(docsDir, "assets");
-	if (!fs.existsSync(source)) return;
-	fs.cpSync(source, path.join(outDir, "assets"), { recursive: true });
+  const source = path.join(docsDir, "assets");
+  if (!fs.existsSync(source)) return;
+  fs.cpSync(source, path.join(outDir, "assets"), { recursive: true });
 }
 
 // Browsers auto-request /favicon.ico at the site root regardless of <link> tags.
 function copyToRoot(name) {
-	const source = path.join(docsDir, "assets", name);
-	if (fs.existsSync(source)) fs.copyFileSync(source, path.join(outDir, name));
+  const source = path.join(docsDir, "assets", name);
+  if (fs.existsSync(source)) fs.copyFileSync(source, path.join(outDir, name));
 }
 
 function parseFrontmatter(raw) {
-	const match = raw.match(/^---\n([\s\S]*?)\n---\n?/);
-	if (!match) return { frontmatter: {}, body: raw };
-	const fm = {};
-	for (const line of match[1].split("\n")) {
-		const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*?)\s*$/);
-		if (!m) continue;
-		let value = m[2];
-		if (
-			(value.startsWith('"') && value.endsWith('"')) ||
-			(value.startsWith("'") && value.endsWith("'"))
-		) {
-			value = value.slice(1, -1);
-		}
-		fm[m[1]] = value;
-	}
-	return { frontmatter: fm, body: raw.slice(match[0].length) };
+  const match = raw.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!match) return { frontmatter: {}, body: raw };
+  const fm = {};
+  for (const line of match[1].split("\n")) {
+    const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*?)\s*$/);
+    if (!m) continue;
+    let value = m[2];
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    fm[m[1]] = value;
+  }
+  return { frontmatter: fm, body: raw.slice(match[0].length) };
 }
 
 function stripStrayDirectives(body) {
-	return body
-		.replace(/\r\n/g, "\n")
-		.split("\n")
-		.filter((line) => !/^\s*\{:\s*[^}]*\}\s*$/.test(line))
-		.map((line) => line.replace(/\s*\{:\s*[^}]*\}\s*$/, ""))
-		.join("\n");
+  return body
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !/^\s*\{:\s*[^}]*\}\s*$/.test(line))
+    .map((line) => line.replace(/\s*\{:\s*[^}]*\}\s*$/, ""))
+    .join("\n");
 }
 
 function normalizePermalink(value) {
-	let v = value.trim();
-	if (!v) return "/";
-	if (!v.startsWith("/")) v = `/${v}`;
-	if (v.length > 1 && v.endsWith("/")) v = v.slice(0, -1);
-	return v;
+  let v = value.trim();
+  if (!v) return "/";
+  if (!v.startsWith("/")) v = `/${v}`;
+  if (v.length > 1 && v.endsWith("/")) v = v.slice(0, -1);
+  return v;
 }
 
 function allMarkdown(dir) {
-	return fs
-		.readdirSync(dir, { withFileTypes: true })
-		.flatMap((entry) => {
-			const full = path.join(dir, entry.name);
-			if (entry.isDirectory()) return allMarkdown(full);
-			return entry.name.endsWith(".md") ? [full] : [];
-		})
-		.sort();
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return allMarkdown(full);
+      return entry.name.endsWith(".md") ? [full] : [];
+    })
+    .sort();
 }
 
 function outPath(rel, frontmatter = {}) {
-	if (frontmatter.permalink) {
-		const permalink = normalizePermalink(frontmatter.permalink);
-		if (permalink === "/") return "index.html";
-		return `${permalink.slice(1)}/index.html`;
-	}
-	if (rel === "index.md") return "index.html";
-	if (rel === "README.md") return "index.html";
-	if (rel.endsWith("/README.md")) return rel.replace(/README\.md$/, "index.html");
-	return rel.replace(/\.md$/, ".html");
+  if (frontmatter.permalink) {
+    const permalink = normalizePermalink(frontmatter.permalink);
+    if (permalink === "/") return "index.html";
+    return `${permalink.slice(1)}/index.html`;
+  }
+  if (rel === "index.md") return "index.html";
+  if (rel === "README.md") return "index.html";
+  if (rel.endsWith("/README.md")) return rel.replace(/README\.md$/, "index.html");
+  return rel.replace(/\.md$/, ".html");
 }
 
 function firstHeading(markdown) {
-	return markdown.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  return markdown.match(/^#\s+(.+)$/m)?.[1]?.trim();
 }
 
 function titleize(input) {
-	return input.replaceAll("-", " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  return input.replaceAll("-", " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function markdownToHtml(markdown, currentRel) {
-	const lines = markdown.replace(/\r\n/g, "\n").split("\n");
-	const html = [];
-	let paragraph = [];
-	let list = null;
-	let listItem = [];
-	let fence = null;
-	let blockquote = [];
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const html = [];
+  let paragraph = [];
+  let list = null;
+  let listItem = [];
+  let fence = null;
+  let blockquote = [];
 
-	const flushParagraph = () => {
-		if (!paragraph.length) return;
-		html.push(`<p>${inline(paragraph.join(" "), currentRel)}</p>`);
-		paragraph = [];
-	};
-	const flushListItem = () => {
-		if (!listItem.length) return;
-		html.push(`<li>${inline(listItem.join(" "), currentRel)}</li>`);
-		listItem = [];
-	};
-	const closeList = () => {
-		if (!list) return;
-		flushListItem();
-		html.push(`</${list}>`);
-		list = null;
-	};
-	const flushBlockquote = () => {
-		if (!blockquote.length) return;
-		const inner = markdownToHtml(blockquote.join("\n"), currentRel);
-		html.push(`<blockquote>${inner}</blockquote>`);
-		blockquote = [];
-	};
-	const splitRow = (line) => {
-		let trimmed = line.trim();
-		if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
-		if (trimmed.endsWith("|") && !trimmed.endsWith("\\|")) trimmed = trimmed.slice(0, -1);
-		const cells = [];
-		let current = "";
-		for (let idx = 0; idx < trimmed.length; idx++) {
-			const char = trimmed[idx];
-			if (char === "\\" && trimmed[idx + 1] === "|") {
-				current += "\\|";
-				idx += 1;
-				continue;
-			}
-			if (char === "|") {
-				cells.push(current.trim().replace(/\\\|/g, "|"));
-				current = "";
-				continue;
-			}
-			current += char;
-		}
-		cells.push(current.trim().replace(/\\\|/g, "|"));
-		return cells;
-	};
-	const isDivider = (line) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    html.push(`<p>${inline(paragraph.join(" "), currentRel)}</p>`);
+    paragraph = [];
+  };
+  const flushListItem = () => {
+    if (!listItem.length) return;
+    html.push(`<li>${inline(listItem.join(" "), currentRel)}</li>`);
+    listItem = [];
+  };
+  const closeList = () => {
+    if (!list) return;
+    flushListItem();
+    html.push(`</${list}>`);
+    list = null;
+  };
+  const flushBlockquote = () => {
+    if (!blockquote.length) return;
+    const inner = markdownToHtml(blockquote.join("\n"), currentRel);
+    html.push(`<blockquote>${inner}</blockquote>`);
+    blockquote = [];
+  };
+  const splitRow = (line) => {
+    let trimmed = line.trim();
+    if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+    if (trimmed.endsWith("|") && !trimmed.endsWith("\\|")) trimmed = trimmed.slice(0, -1);
+    const cells = [];
+    let current = "";
+    for (let idx = 0; idx < trimmed.length; idx++) {
+      const char = trimmed[idx];
+      if (char === "\\" && trimmed[idx + 1] === "|") {
+        current += "\\|";
+        idx += 1;
+        continue;
+      }
+      if (char === "|") {
+        cells.push(current.trim().replace(/\\\|/g, "|"));
+        current = "";
+        continue;
+      }
+      current += char;
+    }
+    cells.push(current.trim().replace(/\\\|/g, "|"));
+    return cells;
+  };
+  const isDivider = (line) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
 
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
-		const fenceMatch = line.match(/^```([\w+-]+)?\s*$/);
-		if (fenceMatch) {
-			flushParagraph();
-			closeList();
-			flushBlockquote();
-			if (fence) {
-				const body = highlightCode(fence.lines.join("\n"), fence.lang);
-				html.push(`<pre><code class="language-${escapeAttr(fence.lang)}">${body}</code></pre>`);
-				fence = null;
-			} else {
-				fence = { lang: fenceMatch[1] || "text", lines: [] };
-			}
-			continue;
-		}
-		if (fence) {
-			fence.lines.push(line);
-			continue;
-		}
-		if (/^>\s?/.test(line)) {
-			flushParagraph();
-			closeList();
-			blockquote.push(line.replace(/^>\s?/, ""));
-			continue;
-		}
-		flushBlockquote();
-		if (!line.trim()) {
-			flushParagraph();
-			closeList();
-			continue;
-		}
-		if (/^\s*---+\s*$/.test(line)) {
-			flushParagraph();
-			closeList();
-			html.push("<hr>");
-			continue;
-		}
-		const heading = line.match(/^(#{1,4})\s+(.+)$/);
-		if (heading) {
-			flushParagraph();
-			closeList();
-			const level = heading[1].length;
-			const text = heading[2].trim();
-			const id = slug(text);
-			const inner = inline(text, currentRel);
-			if (level === 1) {
-				html.push(`<h1 id="${id}">${inner}</h1>`);
-			} else {
-				html.push(
-					`<h${level} id="${id}"><a class="anchor" href="#${id}" aria-label="Anchor link">#</a>${inner}</h${level}>`,
-				);
-			}
-			continue;
-		}
-		if (
-			line.trimStart().startsWith("|") &&
-			line.includes("|", line.indexOf("|") + 1) &&
-			isDivider(lines[i + 1] || "")
-		) {
-			flushParagraph();
-			closeList();
-			const header = splitRow(line);
-			const aligns = splitRow(lines[i + 1]).map((cell) => {
-				const left = cell.startsWith(":");
-				const right = cell.endsWith(":");
-				return right && left ? "center" : right ? "right" : left ? "left" : "";
-			});
-			i += 1;
-			const rows = [];
-			while (i + 1 < lines.length && lines[i + 1].trimStart().startsWith("|")) {
-				i += 1;
-				rows.push(splitRow(lines[i]));
-			}
-			const th = header
-				.map(
-					(c, idx) =>
-						`<th${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel)}</th>`,
-				)
-				.join("");
-			const tb = rows
-				.map(
-					(r) =>
-						`<tr>${r.map((c, idx) => `<td${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel)}</td>`).join("")}</tr>`,
-				)
-				.join("");
-			html.push(`<table><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table>`);
-			continue;
-		}
-		const bullet = line.match(/^\s*-\s+(.+)$/);
-		const numbered = line.match(/^\s*\d+\.\s+(.+)$/);
-		if (bullet || numbered) {
-			flushParagraph();
-			const tag = bullet ? "ul" : "ol";
-			if (list && list !== tag) closeList();
-			if (!list) {
-				list = tag;
-				html.push(`<${tag}>`);
-			}
-			flushListItem();
-			listItem = [(bullet || numbered)[1].trim()];
-			continue;
-		}
-		if (list && listItem.length && /^\s{2,}\S/.test(line)) {
-			listItem.push(line.trim());
-			continue;
-		}
-		closeList();
-		paragraph.push(line.trim());
-	}
-	flushParagraph();
-	closeList();
-	flushBlockquote();
-	return html.join("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fenceMatch = line.match(/^```([\w+-]+)?\s*$/);
+    if (fenceMatch) {
+      flushParagraph();
+      closeList();
+      flushBlockquote();
+      if (fence) {
+        const body = highlightCode(fence.lines.join("\n"), fence.lang);
+        html.push(`<pre><code class="language-${escapeAttr(fence.lang)}">${body}</code></pre>`);
+        fence = null;
+      } else {
+        fence = { lang: fenceMatch[1] || "text", lines: [] };
+      }
+      continue;
+    }
+    if (fence) {
+      fence.lines.push(line);
+      continue;
+    }
+    if (/^>\s?/.test(line)) {
+      flushParagraph();
+      closeList();
+      blockquote.push(line.replace(/^>\s?/, ""));
+      continue;
+    }
+    flushBlockquote();
+    if (!line.trim()) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+    if (/^\s*---+\s*$/.test(line)) {
+      flushParagraph();
+      closeList();
+      html.push("<hr>");
+      continue;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      const level = heading[1].length;
+      const text = heading[2].trim();
+      const id = slug(text);
+      const inner = inline(text, currentRel);
+      if (level === 1) {
+        html.push(`<h1 id="${id}">${inner}</h1>`);
+      } else {
+        html.push(
+          `<h${level} id="${id}"><a class="anchor" href="#${id}" aria-label="Anchor link">#</a>${inner}</h${level}>`,
+        );
+      }
+      continue;
+    }
+    if (
+      line.trimStart().startsWith("|") &&
+      line.includes("|", line.indexOf("|") + 1) &&
+      isDivider(lines[i + 1] || "")
+    ) {
+      flushParagraph();
+      closeList();
+      const header = splitRow(line);
+      const aligns = splitRow(lines[i + 1]).map((cell) => {
+        const left = cell.startsWith(":");
+        const right = cell.endsWith(":");
+        return right && left ? "center" : right ? "right" : left ? "left" : "";
+      });
+      i += 1;
+      const rows = [];
+      while (i + 1 < lines.length && lines[i + 1].trimStart().startsWith("|")) {
+        i += 1;
+        rows.push(splitRow(lines[i]));
+      }
+      const th = header
+        .map(
+          (c, idx) =>
+            `<th${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel)}</th>`,
+        )
+        .join("");
+      const tb = rows
+        .map(
+          (r) =>
+            `<tr>${r.map((c, idx) => `<td${aligns[idx] ? ` style="text-align:${aligns[idx]}"` : ""}>${inline(c, currentRel)}</td>`).join("")}</tr>`,
+        )
+        .join("");
+      html.push(`<table><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table>`);
+      continue;
+    }
+    const bullet = line.match(/^\s*-\s+(.+)$/);
+    const numbered = line.match(/^\s*\d+\.\s+(.+)$/);
+    if (bullet || numbered) {
+      flushParagraph();
+      const tag = bullet ? "ul" : "ol";
+      if (list && list !== tag) closeList();
+      if (!list) {
+        list = tag;
+        html.push(`<${tag}>`);
+      }
+      flushListItem();
+      listItem = [(bullet || numbered)[1].trim()];
+      continue;
+    }
+    if (list && listItem.length && /^\s{2,}\S/.test(line)) {
+      listItem.push(line.trim());
+      continue;
+    }
+    closeList();
+    paragraph.push(line.trim());
+  }
+  flushParagraph();
+  closeList();
+  flushBlockquote();
+  return html.join("\n");
 }
 
 function inline(text, currentRel) {
-	const stash = [];
-	let out = text.replace(/`([^`]+)`/g, (_, code) => {
-		stash.push(`<code>${escapeHtml(code)}</code>`);
-		return `${MARK}${stash.length - 1}${MARK}`;
-	});
-	out = escapeHtml(out)
-		.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-		.replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
-		.replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>")
-		.replace(
-			/\[([^\]]+)\]\(([^)]+)\)/g,
-			(_, label, href) => `<a href="${escapeAttr(rewriteHref(href, currentRel))}">${label}</a>`,
-		)
-		.replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, '<a href="$1">$1</a>');
-	out = out.replace(/\\\|/g, "|");
-	out = out.replace(/&lt;br&gt;/g, "<br>");
-	return out.replace(MARK_RE, (_, i) => stash[Number(i)]);
+  const stash = [];
+  let out = text.replace(/`([^`]+)`/g, (_, code) => {
+    stash.push(`<code>${escapeHtml(code)}</code>`);
+    return `${MARK}${stash.length - 1}${MARK}`;
+  });
+  out = escapeHtml(out)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/(^|[^_])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>")
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      (_, label, href) => `<a href="${escapeAttr(rewriteHref(href, currentRel))}">${label}</a>`,
+    )
+    .replace(/&lt;(https?:\/\/[^\s<>]+)&gt;/g, '<a href="$1">$1</a>');
+  out = out.replace(/\\\|/g, "|");
+  out = out.replace(/&lt;br&gt;/g, "<br>");
+  return out.replace(MARK_RE, (_, i) => stash[Number(i)]);
 }
 
 function rewriteHref(href, currentRel) {
-	if (/^(https?:|mailto:|tel:|#)/.test(href)) return href;
-	const [raw, hash = ""] = href.split("#");
-	if (!raw) return hash ? `#${hash}` : "";
-	if (raw.startsWith("/")) {
-		const target = permalinkMap.get(normalizePermalink(raw));
-		if (target) {
-			const currentOut = pageMap.get(currentRel)?.outRel || outPath(currentRel);
-			const out = hrefToOutRel(target.outRel, currentOut);
-			return hash ? `${out}#${hash}` : out;
-		}
-		return href;
-	}
-	if (!raw.endsWith(".md")) return href;
-	const from = path.posix.dirname(currentRel);
-	const target = path.posix.normalize(path.posix.join(from, raw));
-	let rewritten = pageMap.get(target)?.outRel || outPath(target);
-	const currentOut = pageMap.get(currentRel)?.outRel || outPath(currentRel);
-	rewritten = hrefToOutRel(rewritten, currentOut);
-	return `${rewritten}${hash ? `#${hash}` : ""}`;
+  if (/^(https?:|mailto:|tel:|#)/.test(href)) return href;
+  const [raw, hash = ""] = href.split("#");
+  if (!raw) return hash ? `#${hash}` : "";
+  if (raw.startsWith("/")) {
+    const target = permalinkMap.get(normalizePermalink(raw));
+    if (target) {
+      const currentOut = pageMap.get(currentRel)?.outRel || outPath(currentRel);
+      const out = hrefToOutRel(target.outRel, currentOut);
+      return hash ? `${out}#${hash}` : out;
+    }
+    return href;
+  }
+  if (!raw.endsWith(".md")) return href;
+  const from = path.posix.dirname(currentRel);
+  const target = path.posix.normalize(path.posix.join(from, raw));
+  let rewritten = pageMap.get(target)?.outRel || outPath(target);
+  const currentOut = pageMap.get(currentRel)?.outRel || outPath(currentRel);
+  rewritten = hrefToOutRel(rewritten, currentOut);
+  return `${rewritten}${hash ? `#${hash}` : ""}`;
 }
 
 function tocFromHtml(html) {
-	const items = [];
-	const re = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g;
-	let m;
-	while ((m = re.exec(html))) {
-		const text = m[3]
-			.replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")
-			.replace(/<[^>]+>/g, "")
-			.trim();
-		items.push({ level: Number(m[1]), id: m[2], text });
-	}
-	if (items.length < 2) return "";
-	return `<nav class="toc" aria-label="On this page"><h2>On this page</h2>${items
-		.map((i) => `<a class="toc-l${i.level}" href="#${i.id}">${escapeHtml(i.text)}</a>`)
-		.join("")}</nav>`;
+  const items = [];
+  const re = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g;
+  let m;
+  while ((m = re.exec(html))) {
+    const text = m[3]
+      .replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")
+      .replace(/<[^>]+>/g, "")
+      .trim();
+    items.push({ level: Number(m[1]), id: m[2], text });
+  }
+  if (items.length < 2) return "";
+  return `<nav class="toc" aria-label="On this page"><h2>On this page</h2>${items
+    .map((i) => `<a class="toc-l${i.level}" href="#${i.id}">${escapeHtml(i.text)}</a>`)
+    .join("")}</nav>`;
 }
 
 function isHomePage(page) {
-	if (page.frontmatter.permalink && normalizePermalink(page.frontmatter.permalink) === "/")
-		return true;
-	return page.rel === "index.md" || page.rel === "README.md";
+  if (page.frontmatter.permalink && normalizePermalink(page.frontmatter.permalink) === "/")
+    return true;
+  return page.rel === "index.md" || page.rel === "README.md";
 }
 
 function homeHero(page) {
-	const description = page.frontmatter.description || productDescription;
-	const startRel = pageMap.get("cli.md")
-		? hrefToOutRel(pageMap.get("cli.md").outRel, page.outRel)
-		: "cli.html";
-	const features = [
-		"Read relay",
-		"Shared cache",
-		"Pooled identities",
-		"GitHub App tokens",
-		"Org-gated auth",
-		"Cloudflare Workers",
-	];
-	return `<header class="home-hero">
+  const description = page.frontmatter.description || productDescription;
+  const startRel = pageMap.get("cli.md")
+    ? hrefToOutRel(pageMap.get("cli.md").outRel, page.outRel)
+    : "cli.html";
+  const features = [
+    "Read relay",
+    "Shared cache",
+    "Pooled identities",
+    "GitHub App tokens",
+    "Org-gated auth",
+    "Cloudflare Workers",
+  ];
+  return `<header class="home-hero">
         <div class="octo-glow" aria-hidden="true"></div>
         <p class="eyebrow">GitHub relay</p>
         <h1>${escapeHtml(productTagline)}</h1>
@@ -482,7 +482,7 @@ function homeHero(page) {
 }
 
 function standardHero(page, sectionName, editUrl) {
-	return `<header class="hero">
+  return `<header class="hero">
         <div class="hero-text">
           <p class="eyebrow">${escapeHtml(sectionName)}</p>
           <h1>${escapeHtml(page.title)}</h1>
@@ -495,42 +495,42 @@ function standardHero(page, sectionName, editUrl) {
 }
 
 function layout({ page, html, toc, prev, next, sectionName }) {
-	const depth = page.outRel.split("/").length - 1;
-	const rootPrefix = depth ? "../".repeat(depth) : "";
-	const editUrl = `${repoEditBase}/${page.rel}`;
-	const home = isHomePage(page);
-	const prevNext = !home && (prev || next) ? pageNavHtml(prev, next, page.outRel) : "";
-	const heroBlock = home ? homeHero(page) : standardHero(page, sectionName, editUrl);
-	const articleClass = home ? "doc doc-home" : "doc";
-	const tocBlock = home ? "" : toc;
-	const titleSuffix = home
-		? `${productName} - ${productTagline}`
-		: `${page.title} - ${productName}`;
-	const description =
-		page.frontmatter.description ||
-		(home ? productDescription : `${page.title} - ${productName} documentation.`);
-	const canonicalUrl = pageCanonicalUrl(page);
-	const socialImage = siteBase
-		? `${siteBase}/assets/og-card.png`
-		: `${rootPrefix}assets/og-card.png`;
-	const socialMeta = [
-		["link", "rel", "canonical", "href", canonicalUrl],
-		["meta", "property", "og:type", "content", "website"],
-		["meta", "property", "og:site_name", "content", productName],
-		["meta", "property", "og:title", "content", titleSuffix],
-		["meta", "property", "og:description", "content", description],
-		["meta", "property", "og:url", "content", canonicalUrl],
-		["meta", "property", "og:image", "content", socialImage],
-		["meta", "property", "og:image:width", "content", "1200"],
-		["meta", "property", "og:image:height", "content", "630"],
-		["meta", "name", "twitter:card", "content", "summary_large_image"],
-		["meta", "name", "twitter:title", "content", titleSuffix],
-		["meta", "name", "twitter:description", "content", description],
-		["meta", "name", "twitter:image", "content", socialImage],
-	]
-		.map(tagHtml)
-		.join("\n  ");
-	return `<!doctype html>
+  const depth = page.outRel.split("/").length - 1;
+  const rootPrefix = depth ? "../".repeat(depth) : "";
+  const editUrl = `${repoEditBase}/${page.rel}`;
+  const home = isHomePage(page);
+  const prevNext = !home && (prev || next) ? pageNavHtml(prev, next, page.outRel) : "";
+  const heroBlock = home ? homeHero(page) : standardHero(page, sectionName, editUrl);
+  const articleClass = home ? "doc doc-home" : "doc";
+  const tocBlock = home ? "" : toc;
+  const titleSuffix = home
+    ? `${productName} - ${productTagline}`
+    : `${page.title} - ${productName}`;
+  const description =
+    page.frontmatter.description ||
+    (home ? productDescription : `${page.title} - ${productName} documentation.`);
+  const canonicalUrl = pageCanonicalUrl(page);
+  const socialImage = siteBase
+    ? `${siteBase}/assets/og-card.png`
+    : `${rootPrefix}assets/og-card.png`;
+  const socialMeta = [
+    ["link", "rel", "canonical", "href", canonicalUrl],
+    ["meta", "property", "og:type", "content", "website"],
+    ["meta", "property", "og:site_name", "content", productName],
+    ["meta", "property", "og:title", "content", titleSuffix],
+    ["meta", "property", "og:description", "content", description],
+    ["meta", "property", "og:url", "content", canonicalUrl],
+    ["meta", "property", "og:image", "content", socialImage],
+    ["meta", "property", "og:image:width", "content", "1200"],
+    ["meta", "property", "og:image:height", "content", "630"],
+    ["meta", "name", "twitter:card", "content", "summary_large_image"],
+    ["meta", "name", "twitter:title", "content", titleSuffix],
+    ["meta", "name", "twitter:description", "content", description],
+    ["meta", "name", "twitter:image", "content", socialImage],
+  ]
+    .map(tagHtml)
+    .join("\n  ");
+  return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -579,283 +579,283 @@ function layout({ page, html, toc, prev, next, sectionName }) {
 }
 
 function pageCanonicalUrl(page) {
-	if (!siteBase) return page.outRel;
-	if (page.outRel === "index.html") return `${siteBase}/`;
-	const rel = page.outRel.endsWith("/index.html")
-		? page.outRel.slice(0, -"index.html".length)
-		: page.outRel;
-	return `${siteBase}/${rel}`;
+  if (!siteBase) return page.outRel;
+  if (page.outRel === "index.html") return `${siteBase}/`;
+  const rel = page.outRel.endsWith("/index.html")
+    ? page.outRel.slice(0, -"index.html".length)
+    : page.outRel;
+  return `${siteBase}/${rel}`;
 }
 
 function tagHtml([tag, k1, v1, k2, v2]) {
-	return tag === "link"
-		? `<link ${k1}="${escapeAttr(v1)}" ${k2}="${escapeAttr(v2)}">`
-		: `<meta ${k1}="${escapeAttr(v1)}" ${k2}="${escapeAttr(v2)}">`;
+  return tag === "link"
+    ? `<link ${k1}="${escapeAttr(v1)}" ${k2}="${escapeAttr(v2)}">`
+    : `<meta ${k1}="${escapeAttr(v1)}" ${k2}="${escapeAttr(v2)}">`;
 }
 
 function pageNavHtml(prev, next, currentOutRel) {
-	const cell = (page, dir) => {
-		if (!page) return "";
-		return `<a class="page-nav-${dir}" href="${hrefToOutRel(page.outRel, currentOutRel)}"><small>${dir === "prev" ? "Previous" : "Next"}</small><span>${escapeHtml(page.title)}</span></a>`;
-	};
-	return `<nav class="page-nav" aria-label="Pager">${cell(prev, "prev")}${cell(next, "next")}</nav>`;
+  const cell = (page, dir) => {
+    if (!page) return "";
+    return `<a class="page-nav-${dir}" href="${hrefToOutRel(page.outRel, currentOutRel)}"><small>${dir === "prev" ? "Previous" : "Next"}</small><span>${escapeHtml(page.title)}</span></a>`;
+  };
+  return `<nav class="page-nav" aria-label="Pager">${cell(prev, "prev")}${cell(next, "next")}</nav>`;
 }
 
 function navHtml(currentPage) {
-	return nav
-		.map(
-			(section) =>
-				`<section><h2>${escapeHtml(section.name)}</h2>${section.pages
-					.map((page) => {
-						const href = hrefToOutRel(page.outRel, currentPage.outRel);
-						const active = page.rel === currentPage.rel ? " active" : "";
-						return `<a class="nav-link${active}" href="${href}">${escapeHtml(navTitle(page))}</a>`;
-					})
-					.join("")}</section>`,
-		)
-		.join("");
+  return nav
+    .map(
+      (section) =>
+        `<section><h2>${escapeHtml(section.name)}</h2>${section.pages
+          .map((page) => {
+            const href = hrefToOutRel(page.outRel, currentPage.outRel);
+            const active = page.rel === currentPage.rel ? " active" : "";
+            return `<a class="nav-link${active}" href="${href}">${escapeHtml(navTitle(page))}</a>`;
+          })
+          .join("")}</section>`,
+    )
+    .join("");
 }
 
 function navTitle(page) {
-	if (page.rel === "index.md") return "Overview";
-	return page.title;
+  if (page.rel === "index.md") return "Overview";
+  return page.title;
 }
 
 function hrefToOutRel(targetOutRel, currentOutRel) {
-	const currentDir = path.posix.dirname(currentOutRel);
-	if (targetOutRel.endsWith("/index.html")) {
-		const targetDir = targetOutRel.slice(0, -"index.html".length);
-		const rel = path.posix.relative(currentDir, targetDir || ".") || ".";
-		return rel.endsWith("/") ? rel : `${rel}/`;
-	}
-	if (targetOutRel === "index.html") {
-		const rel = path.posix.relative(currentDir, ".") || ".";
-		return rel.endsWith("/") ? rel : `${rel}/`;
-	}
-	return path.posix.relative(currentDir, targetOutRel) || path.posix.basename(targetOutRel);
+  const currentDir = path.posix.dirname(currentOutRel);
+  if (targetOutRel.endsWith("/index.html")) {
+    const targetDir = targetOutRel.slice(0, -"index.html".length);
+    const rel = path.posix.relative(currentDir, targetDir || ".") || ".";
+    return rel.endsWith("/") ? rel : `${rel}/`;
+  }
+  if (targetOutRel === "index.html") {
+    const rel = path.posix.relative(currentDir, ".") || ".";
+    return rel.endsWith("/") ? rel : `${rel}/`;
+  }
+  return path.posix.relative(currentDir, targetOutRel) || path.posix.basename(targetOutRel);
 }
 
 function slug(text) {
-	return text
-		.toLowerCase()
-		.replace(/`/g, "")
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "");
+  return text
+    .toLowerCase()
+    .replace(/`/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function escapeHtml(value) {
-	return String(value ?? "").replace(
-		/[&<>"']/g,
-		(char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
-	);
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
+  );
 }
 
 function escapeAttr(value) {
-	return escapeHtml(value);
+  return escapeHtml(value);
 }
 
 function highlightCode(code, lang) {
-	const language = (lang || "text").toLowerCase();
-	if (
-		language === "bash" ||
-		language === "sh" ||
-		language === "shell" ||
-		language === "zsh" ||
-		language === "console"
-	) {
-		return highlightShell(code);
-	}
-	if (language === "json" || language === "json5" || language === "jsonc")
-		return highlightJson(code);
-	if (
-		language === "ts" ||
-		language === "typescript" ||
-		language === "js" ||
-		language === "javascript" ||
-		language === "tsx" ||
-		language === "jsx"
-	) {
-		return highlightJs(code);
-	}
-	if (language === "go" || language === "golang") return highlightGo(code);
-	if (language === "yaml" || language === "yml") return highlightYaml(code);
-	return escapeHtml(code);
+  const language = (lang || "text").toLowerCase();
+  if (
+    language === "bash" ||
+    language === "sh" ||
+    language === "shell" ||
+    language === "zsh" ||
+    language === "console"
+  ) {
+    return highlightShell(code);
+  }
+  if (language === "json" || language === "json5" || language === "jsonc")
+    return highlightJson(code);
+  if (
+    language === "ts" ||
+    language === "typescript" ||
+    language === "js" ||
+    language === "javascript" ||
+    language === "tsx" ||
+    language === "jsx"
+  ) {
+    return highlightJs(code);
+  }
+  if (language === "go" || language === "golang") return highlightGo(code);
+  if (language === "yaml" || language === "yml") return highlightYaml(code);
+  return escapeHtml(code);
 }
 
 function stashToken(idx) {
-	return String.fromCharCode(0xe000 + idx);
+  return String.fromCharCode(0xe000 + idx);
 }
 
 function restoreStashTokens(value, stash) {
-	return value.replace(STASH_RE, (token) => {
-		const idx = token.charCodeAt(0) - 0xe000;
-		return stash[idx] ?? "";
-	});
+  return value.replace(STASH_RE, (token) => {
+    const idx = token.charCodeAt(0) - 0xe000;
+    return stash[idx] ?? "";
+  });
 }
 
 function withStash(code, patterns) {
-	const stash = [];
-	let working = code;
-	for (const [re, cls] of patterns) {
-		working = working.replace(re, (match) => {
-			const idx = stash.length;
-			stash.push(`<span class="${cls}">${escapeHtml(match)}</span>`);
-			return stashToken(idx);
-		});
-	}
-	return restoreStashTokens(escapeHtml(working), stash);
+  const stash = [];
+  let working = code;
+  for (const [re, cls] of patterns) {
+    working = working.replace(re, (match) => {
+      const idx = stash.length;
+      stash.push(`<span class="${cls}">${escapeHtml(match)}</span>`);
+      return stashToken(idx);
+    });
+  }
+  return restoreStashTokens(escapeHtml(working), stash);
 }
 
 function highlightShell(code) {
-	return code
-		.split("\n")
-		.map((line) => {
-			if (/^\s*#/.test(line)) return `<span class="hl-c">${escapeHtml(line)}</span>`;
-			const promptMatch = line.match(/^(\s*)([$#>])(\s+)(.*)$/);
-			if (promptMatch) {
-				const [, lead, sym, gap, rest] = promptMatch;
-				return `${escapeHtml(lead)}<span class="hl-p">${escapeHtml(sym)}</span>${escapeHtml(gap)}${highlightShellLine(rest)}`;
-			}
-			return highlightShellLine(line);
-		})
-		.join("\n");
+  return code
+    .split("\n")
+    .map((line) => {
+      if (/^\s*#/.test(line)) return `<span class="hl-c">${escapeHtml(line)}</span>`;
+      const promptMatch = line.match(/^(\s*)([$#>])(\s+)(.*)$/);
+      if (promptMatch) {
+        const [, lead, sym, gap, rest] = promptMatch;
+        return `${escapeHtml(lead)}<span class="hl-p">${escapeHtml(sym)}</span>${escapeHtml(gap)}${highlightShellLine(rest)}`;
+      }
+      return highlightShellLine(line);
+    })
+    .join("\n");
 }
 
 function highlightShellLine(line) {
-	const stash = [];
-	const stashAdd = (match, cls) => {
-		const idx = stash.length;
-		stash.push(`<span class="${cls}">${escapeHtml(match)}</span>`);
-		return stashToken(idx);
-	};
-	let working = line;
-	working = working.replace(/(?:'[^']*'|"[^"]*")/g, (m) => stashAdd(m, "hl-s"));
-	working = working.replace(/\s#.*$/g, (m) => stashAdd(m, "hl-c"));
-	working = working.replace(
-		/(^|\s)(--?[A-Za-z][A-Za-z0-9-]*)/g,
-		(_, lead, flag) => `${escapeHtml(lead)}${stashAdd(flag, "hl-f")}`,
-	);
-	working = working.replace(
-		/\b(octopool|gh|brew|go|git|make|sudo|cd|export|cat|curl|jq|ls|mv|cp|rm|mkdir|wrangler|pnpm|npm|node|dig)\b/g,
-		(m) => stashAdd(m, "hl-cmd"),
-	);
-	working = working.replace(/\b(\d+(?:\.\d+)?)\b/g, (m) => stashAdd(m, "hl-n"));
-	return restoreStashTokens(escapeHtml(working), stash);
+  const stash = [];
+  const stashAdd = (match, cls) => {
+    const idx = stash.length;
+    stash.push(`<span class="${cls}">${escapeHtml(match)}</span>`);
+    return stashToken(idx);
+  };
+  let working = line;
+  working = working.replace(/(?:'[^']*'|"[^"]*")/g, (m) => stashAdd(m, "hl-s"));
+  working = working.replace(/\s#.*$/g, (m) => stashAdd(m, "hl-c"));
+  working = working.replace(
+    /(^|\s)(--?[A-Za-z][A-Za-z0-9-]*)/g,
+    (_, lead, flag) => `${escapeHtml(lead)}${stashAdd(flag, "hl-f")}`,
+  );
+  working = working.replace(
+    /\b(octopool|gh|brew|go|git|make|sudo|cd|export|cat|curl|jq|ls|mv|cp|rm|mkdir|wrangler|pnpm|npm|node|dig)\b/g,
+    (m) => stashAdd(m, "hl-cmd"),
+  );
+  working = working.replace(/\b(\d+(?:\.\d+)?)\b/g, (m) => stashAdd(m, "hl-n"));
+  return restoreStashTokens(escapeHtml(working), stash);
 }
 
 function highlightJson(code) {
-	return withStash(code, [
-		[/"(?:\\.|[^"\\])*"\s*:/g, "hl-k"],
-		[/"(?:\\.|[^"\\])*"/g, "hl-s"],
-		[/\b(true|false|null)\b/g, "hl-m"],
-		[/-?\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b/gi, "hl-n"],
-	]);
+  return withStash(code, [
+    [/"(?:\\.|[^"\\])*"\s*:/g, "hl-k"],
+    [/"(?:\\.|[^"\\])*"/g, "hl-s"],
+    [/\b(true|false|null)\b/g, "hl-m"],
+    [/-?\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b/gi, "hl-n"],
+  ]);
 }
 
 function highlightJs(code) {
-	return withStash(code, [
-		[/\/\/[^\n]*/g, "hl-c"],
-		[/\/\*[\s\S]*?\*\//g, "hl-c"],
-		[/`(?:\\.|[^`\\])*`/g, "hl-s"],
-		[/"(?:\\.|[^"\\])*"/g, "hl-s"],
-		[/'(?:\\.|[^'\\])*'/g, "hl-s"],
-		[
-			/\b(const|let|var|function|return|if|else|for|while|switch|case|break|continue|class|extends|new|import|from|export|default|async|await|try|catch|finally|throw|typeof|instanceof|interface|type|enum|as|of|in|null|undefined|true|false|this)\b/g,
-			"hl-k",
-		],
-		[/\b(\d+(?:\.\d+)?)\b/g, "hl-n"],
-	]);
+  return withStash(code, [
+    [/\/\/[^\n]*/g, "hl-c"],
+    [/\/\*[\s\S]*?\*\//g, "hl-c"],
+    [/`(?:\\.|[^`\\])*`/g, "hl-s"],
+    [/"(?:\\.|[^"\\])*"/g, "hl-s"],
+    [/'(?:\\.|[^'\\])*'/g, "hl-s"],
+    [
+      /\b(const|let|var|function|return|if|else|for|while|switch|case|break|continue|class|extends|new|import|from|export|default|async|await|try|catch|finally|throw|typeof|instanceof|interface|type|enum|as|of|in|null|undefined|true|false|this)\b/g,
+      "hl-k",
+    ],
+    [/\b(\d+(?:\.\d+)?)\b/g, "hl-n"],
+  ]);
 }
 
 function highlightGo(code) {
-	return withStash(code, [
-		[/\/\/[^\n]*/g, "hl-c"],
-		[/\/\*[\s\S]*?\*\//g, "hl-c"],
-		[/`[^`]*`/g, "hl-s"],
-		[/"(?:\\.|[^"\\])*"/g, "hl-s"],
-		[
-			/\b(package|import|func|return|if|else|for|range|switch|case|break|continue|default|type|struct|interface|map|chan|go|defer|select|var|const|nil|true|false|iota)\b/g,
-			"hl-k",
-		],
-		[/\b(\d+(?:\.\d+)?)\b/g, "hl-n"],
-	]);
+  return withStash(code, [
+    [/\/\/[^\n]*/g, "hl-c"],
+    [/\/\*[\s\S]*?\*\//g, "hl-c"],
+    [/`[^`]*`/g, "hl-s"],
+    [/"(?:\\.|[^"\\])*"/g, "hl-s"],
+    [
+      /\b(package|import|func|return|if|else|for|range|switch|case|break|continue|default|type|struct|interface|map|chan|go|defer|select|var|const|nil|true|false|iota)\b/g,
+      "hl-k",
+    ],
+    [/\b(\d+(?:\.\d+)?)\b/g, "hl-n"],
+  ]);
 }
 
 function highlightYaml(code) {
-	return code
-		.split("\n")
-		.map((line) => {
-			if (/^\s*#/.test(line)) return `<span class="hl-c">${escapeHtml(line)}</span>`;
-			const m = line.match(/^(\s*-?\s*)([A-Za-z0-9_.-]+)(\s*:)(.*)$/);
-			if (m) {
-				const [, lead, key, colon, rest] = m;
-				return `${escapeHtml(lead)}<span class="hl-k">${escapeHtml(key)}</span>${escapeHtml(colon)}${highlightYamlValue(rest)}`;
-			}
-			return escapeHtml(line);
-		})
-		.join("\n");
+  return code
+    .split("\n")
+    .map((line) => {
+      if (/^\s*#/.test(line)) return `<span class="hl-c">${escapeHtml(line)}</span>`;
+      const m = line.match(/^(\s*-?\s*)([A-Za-z0-9_.-]+)(\s*:)(.*)$/);
+      if (m) {
+        const [, lead, key, colon, rest] = m;
+        return `${escapeHtml(lead)}<span class="hl-k">${escapeHtml(key)}</span>${escapeHtml(colon)}${highlightYamlValue(rest)}`;
+      }
+      return escapeHtml(line);
+    })
+    .join("\n");
 }
 
 function highlightYamlValue(rest) {
-	if (!rest.trim()) return escapeHtml(rest);
-	const trimmed = rest.trim();
-	if (/^["'].*["']$/.test(trimmed)) {
-		return (
-			escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-s">${escapeHtml(trimmed)}</span>`
-		);
-	}
-	if (/^(true|false|null|~)$/i.test(trimmed)) {
-		return (
-			escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-m">${escapeHtml(trimmed)}</span>`
-		);
-	}
-	if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-		return (
-			escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-n">${escapeHtml(trimmed)}</span>`
-		);
-	}
-	return escapeHtml(rest);
+  if (!rest.trim()) return escapeHtml(rest);
+  const trimmed = rest.trim();
+  if (/^["'].*["']$/.test(trimmed)) {
+    return (
+      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-s">${escapeHtml(trimmed)}</span>`
+    );
+  }
+  if (/^(true|false|null|~)$/i.test(trimmed)) {
+    return (
+      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-m">${escapeHtml(trimmed)}</span>`
+    );
+  }
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    return (
+      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-n">${escapeHtml(trimmed)}</span>`
+    );
+  }
+  return escapeHtml(rest);
 }
 
 function validateLinks(outputDir) {
-	const failures = [];
-	for (const file of allHtml(outputDir)) {
-		const html = fs.readFileSync(file, "utf8");
-		for (const match of html.matchAll(/href="([^"]+)"/g)) {
-			const href = match[1];
-			if (/^(#|https?:|mailto:|tel:|javascript:)/.test(href)) continue;
-			const [rawPath, anchor = ""] = href.split("#");
-			const targetPath = rawPath ? path.resolve(path.dirname(file), rawPath) : file;
-			const target =
-				fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()
-					? path.join(targetPath, "index.html")
-					: targetPath;
-			if (!fs.existsSync(target)) {
-				failures.push(
-					`${path.relative(outputDir, file)}: ${href} -> missing ${path.relative(outputDir, target)}`,
-				);
-				continue;
-			}
-			if (anchor) {
-				const targetHtml = fs.readFileSync(target, "utf8");
-				if (!targetHtml.includes(`id="${anchor}"`) && !targetHtml.includes(`name="${anchor}"`)) {
-					failures.push(`${path.relative(outputDir, file)}: ${href} -> missing anchor`);
-				}
-			}
-		}
-	}
-	if (failures.length) {
-		throw new Error(`broken docs links:\n${failures.join("\n")}`);
-	}
+  const failures = [];
+  for (const file of allHtml(outputDir)) {
+    const html = fs.readFileSync(file, "utf8");
+    for (const match of html.matchAll(/href="([^"]+)"/g)) {
+      const href = match[1];
+      if (/^(#|https?:|mailto:|tel:|javascript:)/.test(href)) continue;
+      const [rawPath, anchor = ""] = href.split("#");
+      const targetPath = rawPath ? path.resolve(path.dirname(file), rawPath) : file;
+      const target =
+        fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()
+          ? path.join(targetPath, "index.html")
+          : targetPath;
+      if (!fs.existsSync(target)) {
+        failures.push(
+          `${path.relative(outputDir, file)}: ${href} -> missing ${path.relative(outputDir, target)}`,
+        );
+        continue;
+      }
+      if (anchor) {
+        const targetHtml = fs.readFileSync(target, "utf8");
+        if (!targetHtml.includes(`id="${anchor}"`) && !targetHtml.includes(`name="${anchor}"`)) {
+          failures.push(`${path.relative(outputDir, file)}: ${href} -> missing anchor`);
+        }
+      }
+    }
+  }
+  if (failures.length) {
+    throw new Error(`broken docs links:\n${failures.join("\n")}`);
+  }
 }
 
 function allHtml(dir) {
-	return fs
-		.readdirSync(dir, { withFileTypes: true })
-		.flatMap((entry) => {
-			const full = path.join(dir, entry.name);
-			if (entry.isDirectory()) return allHtml(full);
-			return entry.name.endsWith(".html") ? [full] : [];
-		})
-		.sort();
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) return allHtml(full);
+      return entry.name.endsWith(".html") ? [full] : [];
+    })
+    .sort();
 }

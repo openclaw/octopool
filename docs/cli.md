@@ -259,17 +259,17 @@ Response shape:
 
 ```json
 {
-	"service": "octopool",
-	"version": 1,
-	"api_base": "https://octopool.your-org.dev",
-	"app_base": "https://octopool.your-org.dev",
-	"default_pool": "maintainers",
-	"allowed_org": "your-org",
-	"auth": {
-		"cli_github_token": true,
-		"web_login": true
-	},
-	"min_cli_version": "0.2.2"
+  "service": "octopool",
+  "version": 1,
+  "api_base": "https://octopool.your-org.dev",
+  "app_base": "https://octopool.your-org.dev",
+  "default_pool": "maintainers",
+  "allowed_org": "your-org",
+  "auth": {
+    "cli_github_token": true,
+    "web_login": true
+  },
+  "min_cli_version": "0.2.2"
 }
 ```
 

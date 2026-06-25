@@ -320,33 +320,33 @@ const BREW_INSTALL_ACTION = `<div class="install-command">
 
 const APP_LINKS = '<a href="/dashboard">Dashboard</a><a href="https://docs.octopool.dev/">Docs</a>';
 const PUBLIC_LINKS =
-	'<a href="https://docs.octopool.dev/">Docs</a><a href="https://github.com/openclaw/octopool">GitHub</a>';
+  '<a href="https://docs.octopool.dev/">Docs</a><a href="https://github.com/openclaw/octopool">GitHub</a>';
 
 function landingResponse(request: Request, env?: unknown): Response {
-	const appSite = !isPublicRequest(request, env);
-	return new Response(landingHTML(appSite), {
-		headers: {
-			"content-type": "text/html; charset=utf-8",
-			"cache-control": "public, max-age=300",
-			vary: "Accept",
-		},
-	});
+  const appSite = !isPublicRequest(request, env);
+  return new Response(landingHTML(appSite), {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "public, max-age=300",
+      vary: "Accept",
+    },
+  });
 }
 
 export function rootResponse(request: Request, requestId: string, env?: unknown): Response {
-	if (wantsJson(request)) {
-		return jsonResponse({ ok: true, service: "octopool", request_id: requestId }, 200, {
-			vary: "Accept",
-		});
-	}
-	return landingResponse(request, env);
+  if (wantsJson(request)) {
+    return jsonResponse({ ok: true, service: "octopool", request_id: requestId }, 200, {
+      vary: "Accept",
+    });
+  }
+  return landingResponse(request, env);
 }
 
 function landingHTML(appSite: boolean): string {
-	return LANDING_HTML.replace("{{ACTION}}", appSite ? GITHUB_LOGIN_ACTION : BREW_INSTALL_ACTION)
-		.replace("{{QUICK_LINKS}}", appSite ? APP_LINKS : PUBLIC_LINKS)
-		.replace(
-			'<meta property="og:url" content="https://octopool.dev/">',
-			`<meta property="og:url" content="${appSite ? APP_ORIGIN : "https://octopool.dev"}/">`,
-		);
+  return LANDING_HTML.replace("{{ACTION}}", appSite ? GITHUB_LOGIN_ACTION : BREW_INSTALL_ACTION)
+    .replace("{{QUICK_LINKS}}", appSite ? APP_LINKS : PUBLIC_LINKS)
+    .replace(
+      '<meta property="og:url" content="https://octopool.dev/">',
+      `<meta property="og:url" content="${appSite ? APP_ORIGIN : "https://octopool.dev"}/">`,
+    );
 }

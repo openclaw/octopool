@@ -1,9 +1,9 @@
 {
-	"env": {
-		"es2024": true
-	},
-	"rules": {
-		"eqeqeq": "error",
-		"no-console": "off"
-	}
+  "env": {
+    "es2024": true
+  },
+  "rules": {
+    "eqeqeq": "error",
+    "no-console": "off"
+  }
 }
