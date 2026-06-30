@@ -24,12 +24,12 @@
     "types": "wrangler types"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.16",
+    "@cloudflare/vitest-pool-workers": "^0.16.20",
     "@types/node": "^25.9.2",
     "oxfmt": "^0.54.0",
     "oxlint": "^1.69.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.8",
-    "wrangler": "^4.99.0"
+    "vitest": "^4.1.9",
+    "wrangler": "^4.105.0"
   }
 }

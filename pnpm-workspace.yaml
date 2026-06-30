@@ -2,6 +2,8 @@ allowBuilds:
   esbuild: true
   sharp: false
   workerd: true
+overrides:
+  vite: 8.0.16
 minimumReleaseAgeExclude:
   - miniflare@4.20260609.0
   - wrangler@4.99.0
