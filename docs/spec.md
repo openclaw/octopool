@@ -80,7 +80,9 @@ Durable Object partition key: `pool:<pool_id>`.
 12. Always release an owned cache-fill lease.
 
 Conditional, log, large-payload, `rate_limit`, and otherwise non-cacheable requests bypass
-cache. Route-specific bounded stale entries may be served for quota/depletion/cooldown
+cache. A `cache-control: max-age=N` request directive instead treats fresh entries older
+than `N` seconds as coalesced misses whose refills write through to the shared cache.
+Route-specific bounded stale entries may be served for quota/depletion/cooldown
 failures after the same identity and public-proof checks.
 
 ## Relay API

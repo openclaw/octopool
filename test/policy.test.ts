@@ -27,6 +27,25 @@ describe("route policy", () => {
     });
   });
 
+  it("keeps cache-control in the filtered request headers", () => {
+    expect(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/pulls/1",
+        headers: {
+          "Cache-Control": "max-age=20",
+          "x-unexpected": "dropped",
+        },
+      }),
+    ).toEqual({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls/1",
+      headers: { "cache-control": "max-age=20" },
+    });
+  });
+
   it("allows public user reads", () => {
     for (const path of [
       "/users/openperf",

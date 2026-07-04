@@ -41,6 +41,12 @@ Only `200` responses on cacheable routes are stored. The cache is **bypassed** w
 - the route is a log route, large-payload route, or `rate_limit`, or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).
 
+Cacheable requests can instead bound acceptable staleness with a
+`cache-control: max-age=N` header. A fresh entry older than `N` seconds is treated as a
+miss and refetched, and the refill writes through to the shared cache, so concurrent
+bounded-freshness readers coalesce onto one upstream request rather than each bypassing
+the cache. The CLI's `gh pr checks` resolves the PR head SHA this way with `max-age=20`.
+
 ### Token-free GitHub reads
 
 Before spending a pooled identity, Octopool can use anonymous GitHub API, public page/raw,

@@ -32,7 +32,12 @@ Request body:
 - `query` values are strings or string arrays. Keys are rejected if they look
   secret-bearing (`token`, `secret`, `password`, `api_key`, …).
 - `headers` are filtered down to `accept`, `x-github-api-version`, `if-none-match`,
-  `if-modified-since`. Everything else is dropped.
+  `if-modified-since`, `cache-control`. Everything else is dropped.
+- A `cache-control: max-age=N` request directive bounds acceptable cache staleness: a
+  fresh shared-cache entry older than `N` seconds is treated as a miss and refilled, and
+  the refill writes through to the shared cache, unlike conditional headers, which bypass
+  it. Other `cache-control` directives are ignored, and the header never varies the cache
+  key or reaches GitHub.
 - `route_hint.pr_head_sha` and closed/merged `route_hint.pr_state` are validated cache
   discriminators for PR file lists.
 - Legacy `route_hint.owner`, `route_hint.repo`, `route_hint.kind`, `cache_key`, and

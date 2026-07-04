@@ -16,6 +16,7 @@ export async function coalesceGitHubCacheMiss(
   options: {
     waitMs?: number;
     pollMs?: number;
+    maxAgeSeconds?: number;
     sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<{ leaseToken?: string; cached?: CachedGitHubResponse }> {
@@ -29,7 +30,7 @@ export async function coalesceGitHubCacheMiss(
   const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     await wait(pollMs);
-    const cached = await readGitHubCache(env, cacheKey);
+    const cached = await readGitHubCache(env, cacheKey, undefined, options.maxAgeSeconds);
     if (cached !== undefined) {
       return { cached };
     }

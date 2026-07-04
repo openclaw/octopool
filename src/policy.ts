@@ -290,6 +290,7 @@ function normalizeHeaders(value: unknown): Record<string, string> | undefined {
     "x-github-api-version",
     "if-none-match",
     "if-modified-since",
+    "cache-control",
     "x-octopool-public-shape",
   ]);
   const out: Record<string, string> = {};

@@ -153,8 +153,11 @@ for the common plain-term `-R owner/repo --state ... --json ...` shape. Cache hi
 zero GitHub Search quota; misses use the pool's search bucket. Qualified search syntax
 such as `author:` or custom sort/match flags falls through to the real `gh`. PR search
 supports the issue-like fields returned by GitHub Search; PR-list-only fields such as
-`headRefName` fall through. `gh pr checks` uses the shared cache by default; ask for raw
-`gh api` conditional requests only when freshness matters more than quota.
+`headRefName` fall through. `gh pr checks` uses the shared cache throughout: its PR
+head-SHA lookup sends `cache-control: max-age=20` so concurrent CI-polling sessions share
+one upstream PR read at most 20 seconds old, and the check/status reads for that SHA use
+the normal cache TTLs. Ask for raw `gh api` conditional requests only when instant
+freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
 

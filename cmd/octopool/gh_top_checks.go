@@ -9,16 +9,23 @@ import (
 	"strings"
 )
 
+// prChecksMaxPRAgeSeconds bounds how old a relay-cached PR record may be when
+// resolving the head SHA for `gh pr checks`.
+const prChecksMaxPRAgeSeconds = 20
+
 func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
 	client, err := newGHRelayClient()
 	if err != nil {
 		return err
 	}
-	liveHeaders := map[string]string{"if-none-match": `"octopool-live"`}
+	// Bound the PR lookup's staleness instead of forcing a live read: concurrent
+	// CI-polling sessions coalesce onto one shared-cache fill while the head SHA
+	// stays at most a few seconds behind a push.
+	freshHeaders := map[string]string{"cache-control": "max-age=" + strconv.Itoa(prChecksMaxPRAgeSeconds)}
 	prEnvelope, err := client.do(ctx, ghAPIRequest{
 		method:  "GET",
 		path:    repoPath(repo, "pulls", number),
-		headers: liveHeaders,
+		headers: freshHeaders,
 	})
 	if err != nil {
 		return err

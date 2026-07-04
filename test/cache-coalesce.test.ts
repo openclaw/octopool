@@ -44,6 +44,36 @@ describe("cache miss coalescing", () => {
     });
   });
 
+  it("ignores published entries older than the requested max-age while waiting", async () => {
+    const coordinator = {
+      claimCacheFill: vi.fn(async () => null),
+      finishCacheFill: vi.fn(async () => undefined),
+    };
+    const aged = {
+      status: 200,
+      response_headers_json: "{}",
+      body_json: '{"head":{"sha":"old"}}',
+      body_encoding: "json",
+      identity_id: null,
+      identity_kind: null,
+      created_at: sqliteUTC(Date.now() - 60_000),
+      expires_at: sqliteUTC(Date.now() + 60_000),
+    };
+    const result = await coalesceGitHubCacheMiss(
+      env([aged, aged, aged]),
+      coordinator as never,
+      "cache-key",
+      {
+        waitMs: 3,
+        pollMs: 1,
+        maxAgeSeconds: 20,
+        sleep: async () => undefined,
+      },
+    );
+
+    expect(result).toEqual({});
+  });
+
   it("only releases fills owned by the current request", async () => {
     const coordinator = {
       claimCacheFill: vi.fn(async () => "leader-token"),
@@ -76,6 +106,13 @@ describe("cache miss coalescing", () => {
     consoleError.mockRestore();
   });
 });
+
+function sqliteUTC(ms: number): string {
+  return new Date(ms)
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d{3}Z$/, "");
+}
 
 function env(rows: unknown[]): Env {
   let index = 0;

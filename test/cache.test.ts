@@ -5,6 +5,7 @@ import {
   pruneExpiredGitHubCache,
   readGitHubCache,
   readStaleGitHubCache,
+  requestCacheMaxAgeSeconds,
   shouldUseGitHubCache,
   staleCacheSeconds,
   writeGitHubCache,
@@ -168,6 +169,115 @@ describe("github cache policy", () => {
     await expect(githubCacheKey("maintainers", request, route)).resolves.not.toBe(
       await githubCacheKey("maintainers", request, route, { id: "primary", kind: "pat" }),
     );
+  });
+
+  it("keeps max-age requests cacheable with an unchanged cache key", async () => {
+    const bounded = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341",
+      headers: { "cache-control": "max-age=20" },
+    });
+    const plain = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341",
+    });
+    const route = classifyRoute(bounded, policy);
+    expect(shouldUseGitHubCache(bounded, route)).toBe(true);
+    await expect(githubCacheKey("maintainers", bounded, route)).resolves.toBe(
+      await githubCacheKey("maintainers", plain, classifyRoute(plain, policy)),
+    );
+  });
+
+  it("parses the max-age request directive", () => {
+    const request = (headers?: Record<string, string>) =>
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/pulls/85341",
+        ...(headers === undefined ? {} : { headers }),
+      });
+    expect(requestCacheMaxAgeSeconds(request())).toBeUndefined();
+    expect(requestCacheMaxAgeSeconds(request({ "cache-control": "max-age=20" }))).toBe(20);
+    expect(requestCacheMaxAgeSeconds(request({ "cache-control": "public, max-age=0" }))).toBe(0);
+    expect(requestCacheMaxAgeSeconds(request({ "cache-control": "no-cache" }))).toBeUndefined();
+    expect(requestCacheMaxAgeSeconds(request({ "cache-control": "max-age=oops" }))).toBeUndefined();
+  });
+
+  it("treats fresh entries beyond the requested max-age as misses", async () => {
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put: vi.fn(async () => undefined),
+        delete: vi.fn(async () => true),
+      },
+    });
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              status: 200,
+              response_headers_json: "{}",
+              body_json: '{"head":{"sha":"abc"}}',
+              body_encoding: "json",
+              identity_id: null,
+              identity_kind: null,
+              created_at: sqliteUTC(Date.now() - 30_000),
+              expires_at: sqliteUTC(Date.now() + 60_000),
+            }),
+          }),
+        }),
+      },
+    } as unknown as Env;
+
+    await expect(readGitHubCache(env, "cache-key", undefined, 60)).resolves.toMatchObject({
+      body: { head: { sha: "abc" } },
+    });
+    await expect(readGitHubCache(env, "cache-key", undefined, 15)).resolves.toBeUndefined();
+  });
+
+  it("falls through a too-old edge entry to a newer D1 fill without evicting it", async () => {
+    const edgeEntry = {
+      status: 200,
+      headers: {},
+      body: { head: { sha: "old" } },
+      body_encoding: "json",
+      created_at: sqliteUTC(Date.now() - 30_000),
+      expires_at: sqliteUTC(Date.now() + 60_000),
+    };
+    const edgeDelete = vi.fn(async () => true);
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => Response.json(edgeEntry)),
+        put: vi.fn(async () => undefined),
+        delete: edgeDelete,
+      },
+    });
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              status: 200,
+              response_headers_json: "{}",
+              body_json: '{"head":{"sha":"new"}}',
+              body_encoding: "json",
+              identity_id: null,
+              identity_kind: null,
+              created_at: sqliteUTC(Date.now() - 1_000),
+              expires_at: sqliteUTC(Date.now() + 90_000),
+            }),
+          }),
+        }),
+      },
+    } as unknown as Env;
+
+    await expect(readGitHubCache(env, "cache-key", undefined, 15)).resolves.toMatchObject({
+      body: { head: { sha: "new" } },
+    });
+    expect(edgeDelete).not.toHaveBeenCalled();
   });
 
   it("bypasses conditional and rate-limit reads", () => {

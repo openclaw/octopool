@@ -60,24 +60,50 @@ export function shouldUseGitHubCache(request: RelayRequest, route: RouteInfo): b
   return headers["if-none-match"] === undefined && headers["if-modified-since"] === undefined;
 }
 
+export function requestCacheMaxAgeSeconds(request: RelayRequest): number | undefined {
+  const cacheControl = request.headers?.["cache-control"];
+  if (cacheControl === undefined) {
+    return undefined;
+  }
+  const match = /(?:^|[,\s])max-age=(\d{1,9})(?:[,\s]|$)/i.exec(cacheControl);
+  return match?.[1] === undefined ? undefined : Number.parseInt(match[1], 10);
+}
+
 export async function readGitHubCache(
   env: Env,
   cacheKey: string,
   ctx?: ExecutionContext,
+  maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
   const edge = await readEdgeJSON<CachedGitHubResponse>(EDGE_CACHE_NAMESPACE, cacheKey);
   if (edge !== undefined) {
     if (freshCachedResponse(edge)) {
-      return edge;
+      if (withinRequestedMaxAge(edge, maxAgeSeconds)) {
+        return edge;
+      }
+      // Keep the still-fresh edge copy; another data center may have refilled
+      // D1 more recently, so fall through instead of evicting.
+    } else {
+      await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey);
     }
-    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey);
   }
   const row = await env.DB.prepare(queries.readGitHubCache).bind(cacheKey).first<CacheRow>();
   const cached = cacheRowResponse(row);
-  if (cached !== undefined && ctx !== undefined) {
+  if (cached === undefined || !withinRequestedMaxAge(cached, maxAgeSeconds)) {
+    return undefined;
+  }
+  if (ctx !== undefined) {
     ctx.waitUntil(writeEdgeCachedResponse(cacheKey, cached));
   }
   return cached;
+}
+
+function withinRequestedMaxAge(cached: CachedGitHubResponse, maxAgeSeconds?: number): boolean {
+  if (maxAgeSeconds === undefined) {
+    return true;
+  }
+  const createdAt = parseSQLiteTimestamp(cached.created_at);
+  return Number.isFinite(createdAt) && Date.now() - createdAt <= maxAgeSeconds * 1000;
 }
 
 export async function readStaleGitHubCache(

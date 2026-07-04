@@ -4,6 +4,7 @@ import {
   githubCacheKey,
   readGitHubCache,
   readStaleGitHubCache,
+  requestCacheMaxAgeSeconds,
   shouldUseGitHubCache,
   writeGitHubCache,
 } from "./cache";
@@ -47,6 +48,7 @@ type RelayBase = {
 type ActiveRelay = RelayBase & {
   route: RouteInfo;
   cacheEnabled: boolean;
+  maxAgeSeconds: number | undefined;
   sharedCacheKey: string | undefined;
   cacheKey: string | undefined;
   attemptedIdentityCacheKeys: { cacheKey: string; identity: Pick<Identity, "id" | "kind"> }[];
@@ -124,6 +126,7 @@ async function prepareRelay(
     ...base,
     route,
     cacheEnabled,
+    maxAgeSeconds: cacheEnabled ? requestCacheMaxAgeSeconds(base.request) : undefined,
     sharedCacheKey: cacheKey,
     cacheKey,
     attemptedIdentityCacheKeys: [],
@@ -202,7 +205,7 @@ async function readCacheEntry(
   cacheKey: string,
   identity: Identity | undefined,
 ): Promise<CachedGitHubResponse | undefined> {
-  const cached = await readGitHubCache(state.env, cacheKey, state.ctx);
+  const cached = await readGitHubCache(state.env, cacheKey, state.ctx, state.maxAgeSeconds);
   if (
     cached === undefined ||
     !(await cachedResponseAvailable(
@@ -225,7 +228,12 @@ async function coalesceRelayCacheMiss(
   if (state.cacheKey === undefined) {
     return undefined;
   }
-  const fill = await coalesceGitHubCacheMiss(state.env, state.coordinator, state.cacheKey);
+  const fill = await coalesceGitHubCacheMiss(
+    state.env,
+    state.coordinator,
+    state.cacheKey,
+    state.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: state.maxAgeSeconds },
+  );
   state.cacheFillToken = fill.leaseToken;
   if (
     fill.cached === undefined ||

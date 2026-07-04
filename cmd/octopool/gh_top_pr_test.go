@@ -66,8 +66,14 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 				t.Fatalf("unexpected cache-bypass headers: %#v", body["headers"])
 			}
 		}
-		if body["path"] == "/repos/openclaw/octopool/pulls/7" && body["headers"] == nil {
-			t.Fatal("expected live PR head lookup header")
+		if body["path"] == "/repos/openclaw/octopool/pulls/7" {
+			headers, _ := body["headers"].(map[string]any)
+			if headers["cache-control"] != "max-age=20" {
+				t.Fatalf("expected bounded-freshness PR lookup header, got %#v", body["headers"])
+			}
+			if _, ok := headers["if-none-match"]; ok {
+				t.Fatalf("unexpected cache-bypass header: %#v", headers)
+			}
 		}
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":

@@ -12,6 +12,10 @@
 - Extend the active workflow-run-list cache TTL from 30s to 45s so concurrent CI polling sessions share cache entries.
 - Relay `commits/{ref}` reads (commit view, check-runs, check-suites, status, statuses) for branch and tag names instead of denying non-SHA refs to the personal-token fallback, with short ref-scoped cache TTLs while SHA-shaped paths keep their long immutable TTLs.
 
+### Fixes
+
+- Stop `gh pr checks` from bypassing the shared cache on its PR head-SHA lookup: the relay now honors a `cache-control: max-age=N` request directive that treats fresh entries older than `N` seconds as coalesced misses whose refills write through to the shared cache, and the checks flow uses `max-age=20` so concurrent CI-polling sessions share one upstream PR read instead of each forcing a live fetch.
+
 ## 0.4.2 - 2026-07-04
 
 ### Fixes
