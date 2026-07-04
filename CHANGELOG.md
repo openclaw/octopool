@@ -4,6 +4,8 @@
 
 ### Changes
 
+- Move the OpenClaw deployment to the OpenClaw Foundation Cloudflare account (new D1 database and Worker); temporarily served from workers.dev until the `octopool.dev` zone moves accounts.
+
 - Relay `GET /user` as the caller's public profile served token-free, so `gh api user` identity probes stop bouncing to local tokens as `route_denied`.
 - Retry transient pool-exhaustion fallbacks (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`, `github_rate_limited`) against the relay with short backoff before running real `gh`; tune with `OCTOPOOL_RELAY_RETRIES`.
 - Serve bounded stale cache entries for token-free-only routes when their public backend is unavailable (`web_only_unavailable`) instead of forcing a local fallback.

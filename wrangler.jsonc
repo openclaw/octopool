@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "octopool",
-  "account_id": "de09342a728de2c25c85cc6b34d68739",
+  "account_id": "91b59577e757131d68d55a471fe32aca",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-26",
   "compatibility_flags": ["nodejs_compat"],
@@ -18,12 +18,10 @@
     "GITHUB_OAUTH_CLIENT_ID": "Iv23lilUVXPNTPhNhUmZ",
     "GITHUB_OAUTH_CALLBACK_ORIGIN": "https://octopool.dev",
   },
-  "routes": [
-    {
-      "pattern": "octopool.dev",
-      "custom_domain": true,
-    },
-  ],
+  "workers_dev": true,
+  // TODO(octopool.dev cutover): restore the custom-domain route once the zone
+  // moves to this account:
+  // "routes": [{ "pattern": "octopool.dev", "custom_domain": true }],
   "triggers": {
     "crons": ["17 * * * *"],
   },
@@ -31,7 +29,7 @@
     {
       "binding": "DB",
       "database_name": "octopool",
-      "database_id": "15066240-b0c6-4f25-bcfb-136dc6ce1bff",
+      "database_id": "28122808-8a3c-4524-a1c0-70b5984744b7",
     },
   ],
   "durable_objects": {
