@@ -67,6 +67,7 @@ function section(input: string, name: string): string {
 
 function normalizeRoute(value: string): string {
   const names: Record<string, string> = {
+    commitRef: "ref",
     compare: "comparison",
     contentPath: "path",
     gistId: "gist",

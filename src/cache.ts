@@ -1,5 +1,9 @@
 import { hashToken } from "./auth";
-import { cachePolicyForRouteKind, isStateAwarePRRoute } from "./cache-policy";
+import {
+  type CacheFreshStrategy,
+  cachePolicyForRouteKind,
+  isStateAwarePRRoute,
+} from "./cache-policy";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { defaultGitHubJSONAccept } from "./github-response";
@@ -206,7 +210,16 @@ function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse)
 }
 
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
-  const strategy = cachePolicyForRouteKind(route.kind).fresh;
+  const policy = cachePolicyForRouteKind(route.kind);
+  const seconds = freshTTLSeconds(policy.fresh, route, response);
+  return policy.freshCapSeconds === undefined ? seconds : Math.min(policy.freshCapSeconds, seconds);
+}
+
+function freshTTLSeconds(
+  strategy: CacheFreshStrategy,
+  route: RouteInfo,
+  response?: GitHubRelayResponse,
+): number {
   switch (strategy.kind) {
     case "static":
       return strategy.seconds;

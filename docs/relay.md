@@ -139,10 +139,12 @@ following read-only shapes are enabled. A safe CLI-shaped request outside this s
 - `repo_view`
 - `commit_list`
 - `commit_view`
+- `commit_view_ref`
 - `commit_comments`
 - `commit_pulls`
 - `commit_branches_where_head`
 - `commit_statuses`
+- `commit_statuses_ref`
 - `repo_comment`
 - `compare`
 - `contents`
@@ -160,8 +162,11 @@ following read-only shapes are enabled. A safe CLI-shaped request outside this s
 - `pr_review_comments_for_review`
 - `pr_requested_reviewers`
 - `commit_check_runs`
+- `commit_check_runs_ref`
 - `commit_check_suites`
+- `commit_check_suites_ref`
 - `commit_status`
+- `commit_status_ref`
 - `ref_statuses`
 - `run_list`
 - `run_view`

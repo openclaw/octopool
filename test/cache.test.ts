@@ -335,6 +335,44 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(gitRef, response({ ref: "refs/heads/main" }))).toBe(120);
   });
 
+  it("caps ref-named commit route TTLs because refs move", () => {
+    const classify = (path: string) =>
+      classifyRoute(validateRelayRequest({ pool: "maintainers", method: "GET", path }), policy);
+
+    const view = classify("/repos/openclaw/openclaw/commits/main");
+    expect(view.kind).toBe("commit_view_ref");
+    expect(cacheTTLSeconds(view, response({ sha: "abc" }))).toBe(120);
+
+    const shaView = classify(
+      "/repos/openclaw/openclaw/commits/0123456789abcdef0123456789abcdef01234567",
+    );
+    expect(shaView.kind).toBe("commit_view");
+    expect(cacheTTLSeconds(shaView, response({ sha: "abc" }))).toBe(86_400);
+
+    const checks = classify("/repos/openclaw/openclaw/commits/main/check-runs");
+    expect(cacheTTLSeconds(checks, response({ check_runs: [{ status: "completed" }] }))).toBe(120);
+    expect(cacheTTLSeconds(checks, response({ check_runs: [] }))).toBe(30);
+
+    const checkSuites = classify("/repos/openclaw/openclaw/commits/main/check-suites");
+    expect(
+      cacheTTLSeconds(checkSuites, response({ check_suites: [{ status: "completed" }] })),
+    ).toBe(120);
+    expect(cacheTTLSeconds(checkSuites, response({ check_suites: [] }))).toBe(30);
+
+    const status = classify("/repos/openclaw/openclaw/commits/main/status");
+    expect(cacheTTLSeconds(status, response({ statuses: [{ state: "success" }] }))).toBe(120);
+    expect(cacheTTLSeconds(status, response({ statuses: [{ state: "pending" }] }))).toBe(30);
+
+    const statuses = classify("/repos/openclaw/openclaw/commits/main/statuses");
+    expect(cacheTTLSeconds(statuses, response([{ state: "success" }]))).toBe(120);
+    expect(cacheTTLSeconds(statuses, response([{ state: "pending" }]))).toBe(30);
+
+    // Capped fresh TTLs stay below the terminal-CI detection threshold, so the
+    // long terminal stale window never applies to ref-named routes.
+    expect(staleCacheSeconds(checks, 120)).toBe(300);
+    expect(staleCacheSeconds(view, 120)).toBe(300);
+  });
+
   it("keeps bounded stale windows per route family", () => {
     const run = classifyRoute(
       validateRelayRequest({

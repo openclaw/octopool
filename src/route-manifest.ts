@@ -41,6 +41,10 @@ const routeParameters = {
   login: "[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?(?:\\[bot\\]|%5[Bb]bot%5[Dd])?",
   number: "[0-9]+",
   sha: "[0-9A-Fa-f]{7,64}",
+  // Branch/tag names for commit endpoints that also accept refs upstream. Kept
+  // disjoint from sha without lookaheads (the Go allowlist uses RE2): all-hex
+  // values of SHA length stay on the sha routes and their long TTLs.
+  commitRef: "(?:[0-9A-Fa-f]{1,6}|[0-9A-Fa-f]{65,}|[^/?#]*[^/?#0-9A-Fa-f][^/?#]*)",
   id: "[0-9]+",
   tag: "[^/?#]+",
   gistId: "[0-9A-Fa-f]+",
@@ -62,6 +66,7 @@ const routeParameterExamples: Record<RouteParameter, string> = {
   login: "octocat",
   number: "42",
   sha: "0123456789abcdef0123456789abcdef01234567",
+  commitRef: "main",
   id: "42",
   tag: "v1.2.3",
   gistId: "abc123",
@@ -124,6 +129,7 @@ function normalizeRouteKeyTemplate(template: string): string {
     .replace(/\/issues\/\{number\}/g, "/issues/:number")
     .replace(/\/comments\/\{id\}/g, "/comments/:id")
     .replace(/\/commits\/\{sha\}/g, "/commits/:sha")
+    .replace(/\/commits\/\{commitRef\}/g, "/commits/:ref")
     .replace(/\/actions\/runs\/\{id\}/g, "/actions/runs/:id")
     .replace(/\/actions\/jobs\/\{id\}/g, "/actions/jobs/:id")
     .replace(/\/check-runs\/\{id\}/g, "/check-runs/:id")
@@ -208,10 +214,12 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}", "repo_view"),
   route("/repos/{owner}/{repo}/commits", "commit_list"),
   route("/repos/{owner}/{repo}/commits/{sha}", "commit_view"),
+  route("/repos/{owner}/{repo}/commits/{commitRef}", "commit_view_ref"),
   route("/repos/{owner}/{repo}/commits/{sha}/comments", "commit_comments"),
   route("/repos/{owner}/{repo}/commits/{sha}/pulls", "commit_pulls"),
   route("/repos/{owner}/{repo}/commits/{sha}/branches-where-head", "commit_branches_where_head"),
   route("/repos/{owner}/{repo}/commits/{sha}/statuses", "commit_statuses"),
+  route("/repos/{owner}/{repo}/commits/{commitRef}/statuses", "commit_statuses_ref"),
   route("/repos/{owner}/{repo}/comments/{id}", "repo_comment"),
   route("/repos/{owner}/{repo}/compare/{compare}", "compare"),
   route("/repos/{owner}/{repo}/contents/{contentPath}", "contents"),
@@ -233,8 +241,11 @@ export const ROUTES = [
   ),
   route("/repos/{owner}/{repo}/pulls/{number}/requested_reviewers", "pr_requested_reviewers"),
   route("/repos/{owner}/{repo}/commits/{sha}/check-runs", "commit_check_runs"),
+  route("/repos/{owner}/{repo}/commits/{commitRef}/check-runs", "commit_check_runs_ref"),
   route("/repos/{owner}/{repo}/commits/{sha}/check-suites", "commit_check_suites"),
+  route("/repos/{owner}/{repo}/commits/{commitRef}/check-suites", "commit_check_suites_ref"),
   route("/repos/{owner}/{repo}/commits/{sha}/status", "commit_status"),
+  route("/repos/{owner}/{repo}/commits/{commitRef}/status", "commit_status_ref"),
   route("/repos/{owner}/{repo}/statuses/{sha}", "ref_statuses"),
   route("/repos/{owner}/{repo}/actions/runs", "run_list", "core", {
     fullResponseCap: true,

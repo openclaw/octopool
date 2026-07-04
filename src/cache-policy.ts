@@ -16,6 +16,7 @@ export type CacheFreshStrategy =
 
 export type RouteCachePolicy = {
   fresh: CacheFreshStrategy;
+  freshCapSeconds?: number;
   staleSeconds: number;
   terminalStaleSeconds?: number;
 };
@@ -23,6 +24,7 @@ export type RouteCachePolicy = {
 export function cachePolicyForRouteKind(kind: RouteKind): RouteCachePolicy {
   return {
     fresh: freshCacheStrategy(kind),
+    ...(refNamedCommitRoute(kind) ? { freshCapSeconds: 120 } : {}),
     staleSeconds: staleCacheSeconds(kind),
     ...(terminalCIRoute(kind) ? { terminalStaleSeconds: 86_400 } : {}),
   };
@@ -132,6 +134,7 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
       return { kind: "issue" };
     case "branch_list":
     case "branch_view":
+    case "commit_view_ref":
     case "git_ref":
     case "git_matching_refs":
       return staticCache(120);
@@ -143,12 +146,16 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
     case "run_jobs":
       return { kind: "jobs" };
     case "commit_check_runs":
+    case "commit_check_runs_ref":
       return { kind: "checks" };
     case "commit_check_suites":
+    case "commit_check_suites_ref":
       return { kind: "check_suites" };
     case "commit_status":
+    case "commit_status_ref":
       return { kind: "status" };
     case "commit_statuses":
+    case "commit_statuses_ref":
     case "ref_statuses":
       return { kind: "status_list" };
     case "job_view":
@@ -177,9 +184,14 @@ function staleCacheSeconds(kind: RouteKind): number {
     case "workflow_run_list":
     case "run_jobs":
     case "commit_check_runs":
+    case "commit_check_runs_ref":
     case "commit_check_suites":
+    case "commit_check_suites_ref":
     case "commit_status":
+    case "commit_status_ref":
     case "commit_statuses":
+    case "commit_statuses_ref":
+    case "commit_view_ref":
     case "ref_statuses":
     case "job_view":
     case "git_ref":
@@ -290,6 +302,22 @@ function staleCacheSeconds(kind: RouteKind): number {
       return 1_800;
     default:
       return assertNever(kind);
+  }
+}
+
+// Ref-named commit routes re-resolve to a new SHA whenever the ref moves, so
+// even "completed" CI payloads stay fresh for at most two minutes and never
+// earn the terminal long-stale window.
+function refNamedCommitRoute(kind: RouteKind): boolean {
+  switch (kind) {
+    case "commit_view_ref":
+    case "commit_check_runs_ref":
+    case "commit_check_suites_ref":
+    case "commit_status_ref":
+    case "commit_statuses_ref":
+      return true;
+    default:
+      return false;
   }
 }
 

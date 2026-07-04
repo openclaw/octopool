@@ -149,10 +149,12 @@ GET /gitignore/templates/{template}
 GET /repos/{owner}/{repo}
 GET /repos/{owner}/{repo}/commits
 GET /repos/{owner}/{repo}/commits/{sha}
+GET /repos/{owner}/{repo}/commits/{ref}
 GET /repos/{owner}/{repo}/commits/{sha}/comments
 GET /repos/{owner}/{repo}/commits/{sha}/pulls
 GET /repos/{owner}/{repo}/commits/{sha}/branches-where-head
 GET /repos/{owner}/{repo}/commits/{sha}/statuses
+GET /repos/{owner}/{repo}/commits/{ref}/statuses
 GET /repos/{owner}/{repo}/comments/{id}
 GET /repos/{owner}/{repo}/compare/{comparison}
 GET /repos/{owner}/{repo}/contents/{path}
@@ -171,8 +173,11 @@ GET /repos/{owner}/{repo}/pulls/{number}/reviews/{id}
 GET /repos/{owner}/{repo}/pulls/{number}/reviews/{id}/comments
 GET /repos/{owner}/{repo}/pulls/{number}/requested_reviewers
 GET /repos/{owner}/{repo}/commits/{sha}/check-runs
+GET /repos/{owner}/{repo}/commits/{ref}/check-runs
 GET /repos/{owner}/{repo}/commits/{sha}/check-suites
+GET /repos/{owner}/{repo}/commits/{ref}/check-suites
 GET /repos/{owner}/{repo}/commits/{sha}/status
+GET /repos/{owner}/{repo}/commits/{ref}/status
 GET /repos/{owner}/{repo}/statuses/{sha}
 GET /repos/{owner}/{repo}/actions/runs
 GET /repos/{owner}/{repo}/actions/runs/{id}

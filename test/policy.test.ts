@@ -135,6 +135,12 @@ describe("route policy", () => {
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-suites",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/pulls",
       "/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351/branches-where-head",
+      "/repos/openclaw/openclaw/commits/main",
+      "/repos/openclaw/openclaw/commits/main/statuses",
+      "/repos/openclaw/openclaw/commits/main/check-runs",
+      "/repos/openclaw/openclaw/commits/main/check-suites",
+      "/repos/openclaw/openclaw/commits/main/status",
+      "/repos/openclaw/openclaw/commits/v1.2.3",
       "/repos/openclaw/openclaw/statuses/ac49d8e2295a093f168baa45312e1e29238c0351",
       "/repos/openclaw/openclaw/actions/runs/26360397003/jobs",
       "/repos/openclaw/openclaw/actions/jobs/77594668516/logs",
@@ -191,6 +197,27 @@ describe("route policy", () => {
       });
       expect(classifyRoute(request, policy).owner).toBe("openclaw");
     }
+  });
+
+  it("routes ref-named commit reads separately from SHA-named ones", () => {
+    const classify = (path: string) =>
+      classifyRoute(validateRelayRequest({ pool: "maintainers", method: "GET", path }), policy);
+    expect(classify("/repos/openclaw/openclaw/commits/main")).toMatchObject({
+      kind: "commit_view_ref",
+      routeKey: "GET /repos/openclaw/openclaw/commits/:ref",
+    });
+    expect(
+      classify("/repos/openclaw/openclaw/commits/ac49d8e2295a093f168baa45312e1e29238c0351"),
+    ).toMatchObject({
+      kind: "commit_view",
+      routeKey: "GET /repos/openclaw/openclaw/commits/:sha",
+    });
+    expect(classify("/repos/openclaw/openclaw/commits/abc1234").kind).toBe("commit_view");
+    expect(classify("/repos/openclaw/openclaw/commits/dead").kind).toBe("commit_view_ref");
+    expect(classify("/repos/openclaw/openclaw/commits/main/check-runs")).toMatchObject({
+      kind: "commit_check_runs_ref",
+      routeKey: "GET /repos/openclaw/openclaw/commits/:ref/check-runs",
+    });
   });
 
   it("uses the configured response cap for cacheable Actions run lists", () => {

@@ -8,6 +8,7 @@
 - Retry transient pool-exhaustion fallbacks (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`, `github_rate_limited`) against the relay with short backoff before running real `gh`; tune with `OCTOPOOL_RELAY_RETRIES`.
 - Serve bounded stale cache entries for token-free-only routes when their public backend is unavailable (`web_only_unavailable`) instead of forcing a local fallback.
 - Extend the active workflow-run-list cache TTL from 30s to 45s so concurrent CI polling sessions share cache entries.
+- Relay `commits/{ref}` reads (commit view, check-runs, check-suites, status, statuses) for branch and tag names instead of denying non-SHA refs to the personal-token fallback, with short ref-scoped cache TTLs while SHA-shaped paths keep their long immutable TTLs.
 
 ## 0.4.2 - 2026-07-04
 

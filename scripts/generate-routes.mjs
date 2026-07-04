@@ -71,6 +71,7 @@ async function replaceSection(file, name, content) {
 
 function docsTemplate(template) {
   const names = {
+    commitRef: "ref",
     compare: "comparison",
     contentPath: "path",
     gistId: "gist",
