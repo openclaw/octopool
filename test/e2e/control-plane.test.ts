@@ -146,6 +146,17 @@ describe("Worker end-to-end control plane", () => {
     expect(await denied.json()).toMatchObject({ error: { code: "pool_denied" } });
     expect(upstream).not.toHaveBeenCalled();
 
+    const invalidClient = await postJSON("/v1/login/github-cli", {
+      github_token: "github-user-token",
+      pool: POOL,
+      client_name: "not a hostname",
+    });
+    expect(invalidClient.status).toBe(400);
+    expect(await invalidClient.json()).toMatchObject({
+      error: { code: "client_name_invalid" },
+    });
+    expect(upstream).not.toHaveBeenCalled();
+
     const response = await postJSON("/v1/login/github-cli", {
       github_token: "github-user-token",
       pool: POOL,
@@ -201,6 +212,35 @@ describe("Worker end-to-end control plane", () => {
       { client_name: "cli-mac-studio" },
       { client_name: "cli-macbook" },
     ]);
+
+    let newestToken = "";
+    for (let index = 0; index < 15; index += 1) {
+      const extraResponse = await postJSON("/v1/login/github-cli", {
+        github_token: "github-user-token",
+        pool: POOL,
+        client_name: `ephemeral-${index}`,
+      });
+      expect(extraResponse.status).toBe(201);
+      newestToken = (await extraResponse.json<{ token: string }>()).token;
+    }
+    const bounded = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM caller_tokens WHERE caller_id = (SELECT id FROM callers WHERE github_login = 'cli-user')",
+    ).first<{ count: number }>();
+    expect(bounded?.count).toBe(16);
+    const [retiredStudio, preservedMacBook, newestClient] = await Promise.all([
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${studio.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${rotated.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${newestToken}` },
+      }),
+    ]);
+    expect(retiredStudio.status).toBe(401);
+    expect(preservedMacBook.status).toBe(200);
+    expect(newestClient.status).toBe(200);
   });
 
   it("enforces dashboard host, session, role, and pool-grant boundaries", async () => {
