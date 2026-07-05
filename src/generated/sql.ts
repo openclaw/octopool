@@ -86,7 +86,9 @@ export const queries = {
   insertCaller:
     "INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
   upsertCallerToken:
-    "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name)\nVALUES (?1, ?2, ?3, ?4)\nON CONFLICT(caller_id, client_name) DO UPDATE SET\n  token_hash = excluded.token_hash,\n  updated_at = CURRENT_TIMESTAMP",
+    "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at)\nVALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%d %H:%M:%f', 'now'))\nON CONFLICT(caller_id, client_name) DO UPDATE SET\n  token_hash = excluded.token_hash,\n  updated_at = excluded.updated_at",
+  pruneCallerTokens:
+    "DELETE FROM caller_tokens\nWHERE caller_tokens.caller_id = ?1\n  AND caller_tokens.client_name <> ?2\n  AND caller_tokens.id NOT IN (\n    SELECT kept.id\n    FROM caller_tokens AS kept\n    WHERE kept.caller_id = ?3 AND kept.client_name <> ?4\n    ORDER BY julianday(kept.updated_at) DESC, kept.rowid DESC\n    LIMIT 15\n  )",
   insertCallerPool: "INSERT OR IGNORE INTO caller_pools (caller_id, pool_id)\nVALUES (?1, ?2)",
   getIdentityPoolKind: "SELECT pool_id, kind\nFROM identities\nWHERE id = ?1",
   upsertIdentity:
