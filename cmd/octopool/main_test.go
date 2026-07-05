@@ -63,6 +63,7 @@ func TestWhoamiPrintsSavedLogin(t *testing.T) {
 		Pool:      "core",
 		Token:     "op_test",
 		Login:     "alice",
+		Client:    "alice-macbook",
 		CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -77,6 +78,7 @@ func TestWhoamiPrintsSavedLogin(t *testing.T) {
 		"server: https://octopool.example.com",
 		"pool: core",
 		"login: alice",
+		"client: alice-macbook",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in %q", want, got)
@@ -91,6 +93,7 @@ func TestWhoamiJSON(t *testing.T) {
 		Pool:      "core",
 		Token:     "op_test",
 		Login:     "alice",
+		Client:    "alice-macbook",
 		CreatedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
@@ -104,7 +107,7 @@ func TestWhoamiJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["server"] != "https://octopool.example.com" || got["pool"] != "core" || got["login"] != "alice" {
+	if got["server"] != "https://octopool.example.com" || got["pool"] != "core" || got["login"] != "alice" || got["client"] != "alice-macbook" {
 		t.Fatalf("whoami JSON = %#v", got)
 	}
 }

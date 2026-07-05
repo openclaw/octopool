@@ -60,6 +60,9 @@ export async function seedPool(options: { secondary?: boolean } = {}): Promise<v
       "caller",
       POOL,
     ),
+    env.DB.prepare(
+      "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name) VALUES (?, ?, ?, ?)",
+    ).bind("caller-client-token", "caller", await hashToken(CALLER_TOKEN), "test-mac"),
     identity("primary", "TEST_PAT_PRIMARY", 200),
     scope("primary"),
     ...(options.secondary === true
@@ -76,6 +79,9 @@ export async function seedCaller(id: string, token: string, login: string): Prom
       ) VALUES (?, ?, ?, ?, 'openclaw', CURRENT_TIMESTAMP, 'active', ?)`,
     ).bind(id, login, await hashToken(token), login, id === "other" ? 43 : 44),
     env.DB.prepare("INSERT INTO caller_pools (caller_id, pool_id) VALUES (?, ?)").bind(id, POOL),
+    env.DB.prepare(
+      "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name) VALUES (?, ?, ?, ?)",
+    ).bind(`${id}-client-token`, id, await hashToken(token), `${login}-mac`),
   ]);
 }
 
@@ -100,17 +106,21 @@ export async function seedAudit(
     errorCode?: string;
     fallbackReason?: string;
     cacheable?: number;
+    callerTokenId?: string;
+    clientName?: string;
   } = {},
 ): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO audit_events (
-      request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code,
-      fallback_reason, duration_ms, cache_status, cacheable, coalesced
-    ) VALUES (?, ?, ?, ?, ?, 'primary', ?, ?, ?, 10, ?, ?, 0)`,
+      request_id, caller_id, caller_token_id, client_name, pool_id, route_key, route_kind, identity_id, status,
+      error_code, fallback_reason, duration_ms, cache_status, cacheable, coalesced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'primary', ?, ?, ?, 10, ?, ?, 0)`,
   )
     .bind(
       requestId,
       callerId,
+      options.callerTokenId ?? `${callerId}-client-token`,
+      options.clientName ?? (callerId === "caller" ? "test-mac" : `${callerId}-mac`),
       POOL,
       `${routeKind}:fixture`,
       routeKind,

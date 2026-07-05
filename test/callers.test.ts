@@ -13,6 +13,7 @@ describe("caller grants", () => {
       { id: 123, login: "alice", name: "Alice" },
       "2026-06-03T12:00:00.000Z",
       "op_plain",
+      "alice-macbook",
     );
 
     expect(caller).toMatchObject({
@@ -20,6 +21,7 @@ describe("caller grants", () => {
       github_login: "alice",
       org_login: "openclaw",
       pool: "maintainers",
+      client_name: "alice-macbook",
     });
     expect(caller.id).toMatch(/^caller_/);
     expect(statements.some((statement) => statement.query.includes("INSERT INTO callers"))).toBe(
@@ -29,6 +31,9 @@ describe("caller grants", () => {
       statements.some((statement) =>
         statement.query.includes("INSERT OR IGNORE INTO caller_pools"),
       ),
+    ).toBe(true);
+    expect(
+      statements.some((statement) => statement.query.includes("INSERT INTO caller_tokens")),
     ).toBe(true);
     expect(env.DB.batch).toHaveBeenCalledWith(expect.arrayContaining([expect.any(Object)]));
   });

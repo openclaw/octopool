@@ -143,11 +143,13 @@ deferred.
 ### Other APIs
 
 - `POST /v1/login/github-cli`: validate a local GitHub token/org membership and mint a
-  one-time plaintext caller token; only its SHA-256 hash is stored.
+  one-time plaintext token for a named client; only its SHA-256 hash is stored, and
+  rotating one client does not invalidate the caller's other clients. Each caller retains
+  at most 16 named clients; a new name retires the least recently updated other session.
 - `GET /v1/pools/:pool/health`: `pool`, `identities_total`, `identities_healthy`,
   `policy_version`.
-- `GET /v1/pools/:pool/stats`: pool/caller request, outcome, cache, coalescing, and route
-  aggregates for a bounded time window.
+- `GET /v1/pools/:pool/stats`: pool/caller/client request, outcome, cache, coalescing, and
+  route aggregates for a bounded time window.
 - `POST /v1/admin/callers`: verify/provision a caller and pool grant.
 - `POST /v1/admin/pools/:pool/identities`: create/update identity metadata and replace scopes.
 - `/login/github`, callback, logout, `/dashboard`, `/v1/dashboard`: signed OAuth state,
@@ -168,7 +170,7 @@ secondary-limit, retry-after, and quota failures. Selection reasons are `sticky`
 
 D1 tables:
 
-- `pools`, `callers`, `caller_pools`
+- `pools`, `callers`, `caller_pools`, `caller_tokens`
 - `identities`, `identity_scopes`
 - `oauth_states`, `web_sessions`
 - `github_cache_entries`, `github_public_repos`, `github_pr_state_proofs`
@@ -188,14 +190,15 @@ stored in either database.
 
 ## Authentication and authorization
 
-- Caller API: bearer token hash, active caller, matching org, fresh membership, pool grant.
+- Caller API: per-client bearer token hash, active caller, matching org, fresh membership,
+  pool grant.
 - Admin API: separate constant-time-compared `OCTOPOOL_ADMIN_TOKEN`.
 - Browser: signed OAuth state plus opaque, hashed, expiring `octopool_session`; dashboard
   additionally requires `dashboard_role = 'admin'`.
 - GitHub: PAT secret or App PKCS#8 private-key secret; short-lived App tokens minted in Worker.
 
 Audit starts after request validation, caller authentication, and pool lookup. Each later
-success/failure records caller, pool, normalized route, identity when used, status, error/
+success/failure records caller, client, pool, normalized route, identity when used, status, error/
 fallback reason, duration, cache state, cacheability, and coalescing. Parse/auth/missing-pool
 failures occur before audit context exists. Bodies, credentials, and raw tokens are excluded.
 
@@ -218,7 +221,7 @@ Configuration: `OCTOPOOL_URL`, `OCTOPOOL_TOKEN`, `OCTOPOOL_POOL`, `OCTOPOOL_GH_P
 
 The stats API and dashboard expose request/error/fallback counts, cache hit/miss/stale/
 bypass metrics, successful-eligible hit rate, coalesced fills, top routes, normalized route
-patterns, outcome causes, per-caller use, identity health, rate snapshots, cooldowns, leases,
+patterns, outcome causes, per-caller/client use, identity health, rate snapshots, cooldowns, leases,
 cache size, and public-proof counts.
 
 Hourly maintenance deletes cache entries after persisted route-specific stale deadlines and

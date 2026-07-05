@@ -18,7 +18,9 @@ type statsResponse struct {
 	Operator    statsOperator  `json:"operator"`
 	PoolUsage   statsAggregate `json:"pool_usage"`
 	CallerUsage statsAggregate `json:"caller_usage"`
+	ClientUsage statsAggregate `json:"client_usage"`
 	Routes      []statsRoute   `json:"routes"`
+	Clients     []statsClient  `json:"clients"`
 	Cache       statsCache     `json:"cache"`
 }
 
@@ -29,6 +31,7 @@ type statsWindow struct {
 
 type statsOperator struct {
 	GitHubLogin string `json:"github_login"`
+	ClientName  string `json:"client_name"`
 }
 
 type statsAggregate struct {
@@ -55,6 +58,12 @@ type statsAggregate struct {
 
 type statsRoute struct {
 	RouteKind    string `json:"route_kind"`
+	LatestSeenAt string `json:"latest_seen_at"`
+	statsAggregate
+}
+
+type statsClient struct {
+	ClientName   string `json:"client_name"`
 	LatestSeenAt string `json:"latest_seen_at"`
 	statsAggregate
 }
@@ -123,6 +132,7 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		"pool: " + stats.Pool,
 		"window: " + firstNonEmpty(stats.Window.Label, "24h"),
 		fmt.Sprintf("operator: %s", firstNonEmpty(stats.Operator.GitHubLogin, "unknown")),
+		fmt.Sprintf("client: %s", firstNonEmpty(stats.Operator.ClientName, "legacy")),
 		fmt.Sprintf(
 			"requests: %s (%s service errors, %s local fallbacks)",
 			intFmt(stats.PoolUsage.Requests),
@@ -156,6 +166,12 @@ func renderStats(w io.Writer, stats statsResponse) error {
 			percent(stats.CallerUsage.CacheHitRate),
 		),
 		fmt.Sprintf(
+			"this client: %s requests, %s saved, %s backend",
+			intFmt(stats.ClientUsage.Requests),
+			intFmt(stats.ClientUsage.SavedGitHubCalls),
+			intFmt(stats.ClientUsage.BackendRequests),
+		),
+		fmt.Sprintf(
 			"entries: %s fresh / %s total, %s expired, %s",
 			intFmt(stats.Cache.FreshEntries),
 			intFmt(stats.Cache.TotalEntries),
@@ -172,21 +188,43 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		return err
 	}
 	if len(stats.Routes) == 0 {
+		if _, err := fmt.Fprintln(w, "  none"); err != nil {
+			return err
+		}
+	} else {
+		for _, route := range stats.Routes {
+			if _, err := fmt.Fprintf(
+				w,
+				"  %s: %s req, %s eligible hit, %s stale, %s miss, %s bypass, %s errors, %s fallback\n",
+				route.RouteKind,
+				intFmt(route.Requests),
+				percent(route.EligibleHitRate),
+				intFmt(route.CacheStale),
+				intFmt(route.CacheMisses),
+				intFmt(route.CacheBypass),
+				intFmt(route.ServiceErrors),
+				intFmt(route.Fallbacks),
+			); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := fmt.Fprintln(w, "clients:"); err != nil {
+		return err
+	}
+	if len(stats.Clients) == 0 {
 		_, err := fmt.Fprintln(w, "  none")
 		return err
 	}
-	for _, route := range stats.Routes {
+	for _, client := range stats.Clients {
 		if _, err := fmt.Fprintf(
 			w,
-			"  %s: %s req, %s eligible hit, %s stale, %s miss, %s bypass, %s errors, %s fallback\n",
-			route.RouteKind,
-			intFmt(route.Requests),
-			percent(route.EligibleHitRate),
-			intFmt(route.CacheStale),
-			intFmt(route.CacheMisses),
-			intFmt(route.CacheBypass),
-			intFmt(route.ServiceErrors),
-			intFmt(route.Fallbacks),
+			"  %s: %s req, %s saved, %s backend, %s fallback\n",
+			client.ClientName,
+			intFmt(client.Requests),
+			intFmt(client.SavedGitHubCalls),
+			intFmt(client.BackendRequests),
+			intFmt(client.Fallbacks),
 		); err != nil {
 			return err
 		}

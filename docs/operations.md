@@ -182,6 +182,7 @@ D1 schema lives in `migrations/`:
 - `0009_audit_outcomes.sql` — local-fallback reasons and coalesced-fill telemetry.
 - `0010_audit_retention.sql` — audit timestamp index for bounded retention cleanup.
 - `0011_cache_stale_retention.sql` — per-entry stale deadlines and indexed cache cleanup.
+- `0012_caller_clients.sql` — concurrent per-client caller tokens and audit attribution.
 
 Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
 
@@ -235,7 +236,7 @@ Override the host/resolver with `OCTOPOOL_E2E_HOST` / `OCTOPOOL_E2E_RESOLVER`.
 ## Observability
 
 Observability is enabled at full sampling. Every validated request from an authenticated
-caller to an existing pool writes an `audit_events` row (caller, pool, route key/kind,
+caller to an existing pool writes an `audit_events` row (caller, client, pool, route key/kind,
 identity, status, error/fallback classification, duration, cache hit/miss/bypass status,
 and coalesced-fill marker); parse, authentication, and pool-lookup failures occur before
 that boundary. Secrets and request bodies are never recorded.
@@ -245,8 +246,8 @@ cache entries after each entry's route-specific stale deadline and audit rows ol
 30 days; this retains every configured stale window and the full supported stats window
 without unbounded D1 growth.
 
-`GET /v1/pools/<pool>/stats?since=24h` returns pool-wide and caller-specific cache stats.
+`GET /v1/pools/<pool>/stats?since=24h` returns pool-, caller-, and client-specific cache stats.
 The CLI wraps this as `octopool stats`. The browser dashboard at `/dashboard` exposes the
 same data plus identity health, live leases, seven-day normalized request patterns and
-outcome causes, and per-caller usage — see
+outcome causes, and per-caller/client usage — see
 [Dashboard](dashboard.md).

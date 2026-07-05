@@ -21,6 +21,7 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
     cache,
     usage,
     users,
+    clients,
     recent,
     routeUsage,
     routeKeys7d,
@@ -33,6 +34,7 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
     dashboardCache(env, pool),
     dashboardUsage(env, pool),
     dashboardUsers(env, pool),
+    dashboardClients(env, pool),
     dashboardRecent(env, pool),
     dashboardRouteUsage(env, pool),
     dashboardRouteKeys7d(env, pool),
@@ -57,6 +59,7 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
     cache,
     usage,
     users,
+    clients,
     recent,
     route_usage: routeUsage,
     route_keys_7d: routeKeys7d,
@@ -69,7 +72,7 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
 
 async function dashboardUsage(env: Env, pool: string) {
   const row = await env.DB.prepare(queries.usageAggregate)
-    .bind(pool, "-24 hours", "")
+    .bind(pool, "-24 hours", "", "")
     .first<UsageAggregateRow>();
   const cache = normalizeCacheActivity(row);
   return {
@@ -139,10 +142,29 @@ async function dashboardUsers(env: Env, pool: string) {
   return rows.results.map((row) => ({ ...row, errors: row.errors ?? 0 }));
 }
 
+async function dashboardClients(env: Env, pool: string) {
+  const rows = await env.DB.prepare(queries.dashboardClients).bind(pool).all<{
+    github_login: string;
+    client_name: string;
+    requests: number;
+    errors: number | null;
+    saved_github_requests: number | null;
+    backend_requests: number | null;
+    last_seen: string | null;
+  }>();
+  return rows.results.map((row) => ({
+    ...row,
+    errors: row.errors ?? 0,
+    saved_github_requests: row.saved_github_requests ?? 0,
+    backend_requests: row.backend_requests ?? 0,
+  }));
+}
+
 async function dashboardRecent(env: Env, pool: string) {
   const rows = await env.DB.prepare(queries.dashboardRecent).bind(pool).all<{
     created_at: string;
     github_login: string;
+    client_name: string | null;
     route_kind: string;
     route_key: string;
     identity_id: string | null;
@@ -156,7 +178,7 @@ async function dashboardRecent(env: Env, pool: string) {
 
 async function dashboardRouteUsage(env: Env, pool: string) {
   const rows = await env.DB.prepare(queries.usageRoutes)
-    .bind(pool, "-24 hours", "")
+    .bind(pool, "-24 hours", "", "")
     .all<UsageAggregateRow & { route_kind: string }>();
   return rows.results.map((row) => {
     const cache = normalizeCacheActivity(row);

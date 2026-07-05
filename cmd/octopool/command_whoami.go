@@ -32,12 +32,16 @@ func runWhoami(args []string, stdout io.Writer) error {
 			"server": auth.URL,
 			"pool":   auth.Pool,
 			"login":  auth.Login,
+			"client": auth.Client,
 		})
 	}
 	fmt.Fprintf(stdout, "server: %s\n", auth.URL)
 	fmt.Fprintf(stdout, "pool: %s\n", auth.Pool)
 	if auth.Login != "" {
 		fmt.Fprintf(stdout, "login: %s\n", auth.Login)
+	}
+	if auth.Client != "" {
+		fmt.Fprintf(stdout, "client: %s\n", auth.Client)
 	}
 	return nil
 }

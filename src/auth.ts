@@ -9,6 +9,8 @@ type CallerRow = {
   github_login: string;
   org_login: string;
   org_verified_at: string | null;
+  caller_token_id: string;
+  client_name: string;
 };
 
 export async function authenticateCaller(

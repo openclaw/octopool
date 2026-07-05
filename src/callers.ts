@@ -14,6 +14,7 @@ type LoginCaller = {
   github_login: string;
   org_login: string;
   pool: string;
+  client_name?: string;
 };
 
 export async function ensureCliCaller(
@@ -22,8 +23,9 @@ export async function ensureCliCaller(
   user: GitHubLoginUser,
   verifiedAt: string,
   token: string,
+  clientName: string,
 ): Promise<LoginCaller> {
-  return ensureCaller(env, pool, user, verifiedAt, token);
+  return ensureCaller(env, pool, user, verifiedAt, { token, clientName });
 }
 
 export async function ensureWebCaller(
@@ -40,36 +42,50 @@ async function ensureCaller(
   pool: string,
   user: GitHubLoginUser,
   verifiedAt: string,
-  loginToken?: string,
+  client?: { token: string; clientName: string },
 ): Promise<LoginCaller> {
   await ensurePool(env, pool);
   const name = user.name ?? user.login;
   const existing = await findLoginCaller(env, pool, user.id);
   if (existing === null) {
-    return insertCaller(env, pool, user, name, verifiedAt, loginToken);
+    return insertCaller(env, pool, user, name, verifiedAt, client);
   }
 
   const statements = [
-    loginToken === undefined
-      ? env.DB.prepare(queries.updateCallerWebLogin).bind(
-          name,
-          user.login,
-          user.id,
-          verifiedAt,
-          existing.id,
-        )
-      : env.DB.prepare(queries.updateCallerLogin).bind(
-          name,
-          await hashToken(loginToken),
-          user.login,
-          user.id,
-          verifiedAt,
-          existing.id,
-        ),
+    env.DB.prepare(queries.updateCallerWebLogin).bind(
+      name,
+      user.login,
+      user.id,
+      verifiedAt,
+      existing.id,
+    ),
     env.DB.prepare(queries.insertCallerPool).bind(existing.id, pool),
+    ...(client === undefined
+      ? []
+      : [
+          env.DB.prepare(queries.upsertCallerToken).bind(
+            `caller_token_${crypto.randomUUID()}`,
+            existing.id,
+            await hashToken(client.token),
+            client.clientName,
+          ),
+          env.DB.prepare(queries.pruneCallerTokens).bind(
+            existing.id,
+            client.clientName,
+            existing.id,
+            client.clientName,
+          ),
+        ]),
   ];
   await env.DB.batch(statements);
-  return loginCaller(existing.id, name, user.login, env.ALLOWED_GITHUB_ORG, pool);
+  return loginCaller(
+    existing.id,
+    name,
+    user.login,
+    env.ALLOWED_GITHUB_ORG,
+    pool,
+    client?.clientName,
+  );
 }
 
 async function findLoginCaller(
@@ -94,11 +110,11 @@ async function insertCaller(
   user: GitHubLoginUser,
   name: string,
   verifiedAt: string,
-  loginToken?: string,
+  client?: { token: string; clientName: string },
 ): Promise<LoginCaller> {
   const callerId = `caller_${crypto.randomUUID()}`;
-  const tokenHash = await hashToken(loginToken ?? newToken("op"));
-  await env.DB.batch([
+  const tokenHash = await hashToken(client?.token ?? newToken("op"));
+  const statements = [
     env.DB.prepare(queries.insertCaller).bind(
       callerId,
       name,
@@ -109,8 +125,25 @@ async function insertCaller(
       verifiedAt,
     ),
     env.DB.prepare(queries.insertCallerPool).bind(callerId, pool),
-  ]);
-  return loginCaller(callerId, name, user.login, env.ALLOWED_GITHUB_ORG, pool);
+    ...(client === undefined
+      ? []
+      : [
+          env.DB.prepare(queries.upsertCallerToken).bind(
+            `caller_token_${crypto.randomUUID()}`,
+            callerId,
+            tokenHash,
+            client.clientName,
+          ),
+          env.DB.prepare(queries.pruneCallerTokens).bind(
+            callerId,
+            client.clientName,
+            callerId,
+            client.clientName,
+          ),
+        ]),
+  ];
+  await env.DB.batch(statements);
+  return loginCaller(callerId, name, user.login, env.ALLOWED_GITHUB_ORG, pool, client?.clientName);
 }
 
 function loginCaller(
@@ -119,6 +152,7 @@ function loginCaller(
   githubLogin: string,
   orgLogin: string,
   pool: string,
+  clientName?: string,
 ): LoginCaller {
   return {
     id,
@@ -126,5 +160,6 @@ function loginCaller(
     github_login: githubLogin,
     org_login: orgLogin,
     pool,
+    ...(clientName === undefined ? {} : { client_name: clientName }),
   };
 }

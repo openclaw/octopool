@@ -45,9 +45,11 @@ type UsageEnvelope = {
 
 type StatsEnvelope = {
   pool: string;
-  operator: { github_login: string };
+  operator: { github_login: string; client_name: string };
   pool_usage: UsageEnvelope;
   caller_usage: UsageEnvelope;
+  client_usage: UsageEnvelope;
+  clients: (UsageEnvelope & { client_name: string })[];
   routes: (UsageEnvelope & { route_kind: string })[];
   caller_routes: (UsageEnvelope & { route_kind: string })[];
   cache: { total_entries: number };
@@ -594,7 +596,7 @@ describe("Worker end-to-end read models", () => {
     const body = await response.json<StatsEnvelope>();
     expect(body).toMatchObject({
       pool: POOL,
-      operator: { github_login: "caller" },
+      operator: { github_login: "caller", client_name: "test-mac" },
       pool_usage: {
         requests: 3,
         errors: 1,
@@ -609,10 +611,20 @@ describe("Worker end-to-end read models", () => {
         cache_hits: 1,
         cache_misses: 1,
       },
+      client_usage: {
+        requests: 2,
+        errors: 0,
+        fallbacks: 0,
+        cache_hits: 1,
+        cache_misses: 1,
+      },
       cache: { total_entries: 0 },
     });
     expect(body.pool_usage.eligible_cache_hit_rate).toBe(0.5);
     expect(body.caller_usage.eligible_cache_hit_rate).toBe(0.5);
+    expect(body.clients).toEqual([
+      expect.objectContaining({ client_name: "test-mac", requests: 2 }),
+    ]);
     expect(body.routes.map(({ route_kind }) => route_kind)).toEqual(["repo_view", "actions_log"]);
     expect(body.caller_routes).toEqual([
       expect.objectContaining({ route_kind: "repo_view", requests: 2 }),

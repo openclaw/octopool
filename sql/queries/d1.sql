@@ -1,8 +1,10 @@
 -- name: AuthenticateCaller :one
-SELECT callers.id, callers.name, callers.github_login, callers.org_login, callers.org_verified_at
-FROM callers
+SELECT callers.id, callers.name, callers.github_login, callers.org_login, callers.org_verified_at,
+       caller_tokens.id AS caller_token_id, caller_tokens.client_name
+FROM caller_tokens
+JOIN callers ON callers.id = caller_tokens.caller_id
 JOIN caller_pools ON caller_pools.caller_id = callers.id
-WHERE callers.token_hash = ?1
+WHERE caller_tokens.token_hash = ?1
   AND callers.status = 'active'
   AND caller_pools.pool_id = ?2
 LIMIT 1;
@@ -53,9 +55,10 @@ WHERE identities.pool_id = ?1
 
 -- name: InsertAudit :exec
 INSERT INTO audit_events
-  (request_id, caller_id, pool_id, route_key, route_kind, identity_id, status, error_code,
-   fallback_reason, duration_ms, cache_status, cacheable, coalesced)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);
+  (request_id, caller_id, caller_token_id, client_name, pool_id, route_key, route_kind, identity_id, status,
+   error_code, fallback_reason, duration_ms, cache_status, cacheable, coalesced)
+VALUES (?1, ?2, (SELECT id FROM caller_tokens WHERE id = ?3), ?4, ?5, ?6, ?7, ?8,
+        ?9, ?10, ?11, ?12, ?13, ?14, ?15);
 
 -- name: ReadGitHubCache :one
 SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
@@ -153,10 +156,28 @@ GROUP BY callers.id, callers.name, callers.github_login
 ORDER BY requests DESC, last_seen DESC
 LIMIT 20;
 
+-- name: DashboardClients :many
+SELECT
+  callers.github_login,
+  audit_events.client_name,
+  COUNT(*) AS requests,
+  SUM(CASE WHEN audit_events.status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE WHEN audit_events.cache_status IN ('hit', 'stale') THEN 1 ELSE 0 END) AS saved_github_requests,
+  SUM(CASE WHEN audit_events.cache_status IN ('miss', 'bypass') THEN 1 ELSE 0 END) AS backend_requests,
+  MAX(audit_events.created_at) AS last_seen
+FROM audit_events
+JOIN callers ON callers.id = audit_events.caller_id
+WHERE audit_events.pool_id = ?1
+  AND audit_events.created_at >= datetime('now', '-7 days')
+GROUP BY callers.github_login, audit_events.client_name
+ORDER BY requests DESC, last_seen DESC
+LIMIT 40;
+
 -- name: DashboardRecent :many
 SELECT
   audit_events.created_at,
   callers.github_login,
+  audit_events.client_name,
   audit_events.route_kind,
   audit_events.route_key,
   audit_events.identity_id,
@@ -253,19 +274,28 @@ WHERE github_user_id = ?1
   AND status = 'active'
 LIMIT 1;
 
--- name: UpdateCallerLogin :exec
-UPDATE callers
-SET name = ?1,
-    token_hash = ?2,
-    github_login = ?3,
-    github_user_id = ?4,
-    org_verified_at = ?5,
-    updated_at = CURRENT_TIMESTAMP
-WHERE id = ?6;
-
 -- name: InsertCaller :exec
 INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active');
+
+-- name: UpsertCallerToken :exec
+INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at)
+VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%d %H:%M:%f', 'now'))
+ON CONFLICT(caller_id, client_name) DO UPDATE SET
+  token_hash = excluded.token_hash,
+  updated_at = excluded.updated_at;
+
+-- name: PruneCallerTokens :exec
+DELETE FROM caller_tokens
+WHERE caller_tokens.caller_id = ?1
+  AND caller_tokens.client_name <> ?2
+  AND caller_tokens.id NOT IN (
+    SELECT kept.id
+    FROM caller_tokens AS kept
+    WHERE kept.caller_id = ?3 AND kept.client_name <> ?4
+    ORDER BY julianday(kept.updated_at) DESC, kept.rowid DESC
+    LIMIT 15
+  );
 
 -- name: InsertCallerPool :exec
 INSERT OR IGNORE INTO caller_pools (caller_id, pool_id)
@@ -442,7 +472,8 @@ SELECT
 FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2)
-  AND (?3 = '' OR caller_id = ?3);
+  AND (?3 = '' OR caller_id = ?3)
+  AND (?4 = '' OR client_name = ?4);
 
 -- name: UsageRoutes :many
 SELECT
@@ -483,6 +514,42 @@ FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2)
   AND (?3 = '' OR caller_id = ?3)
+  AND (?4 = '' OR client_name = ?4)
 GROUP BY route_kind
 ORDER BY requests DESC, route_kind
 LIMIT 12;
+
+-- name: UsageClients :many
+SELECT
+  audit_events.client_name,
+  COUNT(*) AS requests,
+  SUM(CASE WHEN audit_events.status >= 400 THEN 1 ELSE 0 END) AS errors,
+  SUM(CASE
+    WHEN audit_events.status >= 400 AND COALESCE(audit_events.error_code, '') <> 'fallback_local'
+    THEN 1 ELSE 0
+  END) AS service_errors,
+  SUM(CASE WHEN audit_events.error_code = 'fallback_local' THEN 1 ELSE 0 END) AS fallbacks,
+  AVG(audit_events.duration_ms) AS avg_duration_ms,
+  SUM(CASE WHEN audit_events.cache_status = 'hit' THEN 1 ELSE 0 END) AS cache_hits,
+  SUM(CASE WHEN audit_events.cache_status = 'stale' THEN 1 ELSE 0 END) AS cache_stale,
+  SUM(CASE WHEN audit_events.cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
+  SUM(CASE WHEN audit_events.cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
+  SUM(CASE WHEN audit_events.cache_status = 'unknown' THEN 1 ELSE 0 END) AS cache_unknown,
+  SUM(CASE WHEN audit_events.cacheable = 1 THEN 1 ELSE 0 END) AS cacheable_requests,
+  SUM(CASE
+    WHEN audit_events.status < 400 AND audit_events.cache_status IN ('hit', 'stale', 'miss')
+    THEN 1 ELSE 0
+  END) AS eligible_cache_requests,
+  SUM(CASE
+    WHEN audit_events.status < 400 AND audit_events.cache_status IN ('hit', 'stale')
+    THEN 1 ELSE 0
+  END) AS eligible_cache_hits,
+  SUM(CASE WHEN audit_events.coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
+  MAX(audit_events.created_at) AS latest_seen_at
+FROM audit_events
+WHERE audit_events.pool_id = ?1
+  AND audit_events.caller_id = ?2
+  AND audit_events.created_at >= datetime('now', ?3)
+GROUP BY audit_events.client_name
+ORDER BY requests DESC, latest_seen_at DESC
+LIMIT 40;

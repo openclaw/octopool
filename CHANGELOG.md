@@ -2,6 +2,10 @@
 
 ## 0.4.4 - Unreleased
 
+### Changes
+
+- Keep up to 16 caller sessions per named client so logging in on a second machine no longer invalidates the first, retire the least recently updated stale session as new client names appear, and attribute relay usage by client in CLI stats and the operator dashboard.
+
 ## 0.4.3 - 2026-07-04
 
 ### Changes

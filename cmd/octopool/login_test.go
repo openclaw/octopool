@@ -146,11 +146,11 @@ func TestLoginAcceptsPositionalServerAndStoresDiscoveredAuth(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body["github_token"] != "gh_test" || body["pool"] != "core" {
+			if body["github_token"] != "gh_test" || body["pool"] != "core" || body["client_name"] != "test-mac" {
 				t.Fatalf("login body = %#v", body)
 			}
 			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"caller":{"github_login":"alice","pool":"core"},"token":"op_test"}`))
+			_, _ = w.Write([]byte(`{"caller":{"github_login":"alice","pool":"core","client_name":"test-mac"},"token":"op_test"}`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -158,10 +158,10 @@ func TestLoginAcceptsPositionalServerAndStoresDiscoveredAuth(t *testing.T) {
 	defer server.Close()
 
 	var stdout bytes.Buffer
-	if err := runLogin(t.Context(), []string{server.URL}, &stdout); err != nil {
+	if err := runLogin(t.Context(), []string{server.URL, "--client", "test-mac"}, &stdout); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "logged in to "+server.URL+" as alice for pool core") {
+	if !strings.Contains(stdout.String(), "logged in to "+server.URL+" as alice for pool core from test-mac") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	authFilePath, err := authPath()
@@ -176,7 +176,7 @@ func TestLoginAcceptsPositionalServerAndStoresDiscoveredAuth(t *testing.T) {
 	if err := json.Unmarshal(data, &auth); err != nil {
 		t.Fatal(err)
 	}
-	if auth.URL != server.URL || auth.Pool != "core" || auth.Token != "op_test" || auth.Login != "alice" {
+	if auth.URL != server.URL || auth.Pool != "core" || auth.Token != "op_test" || auth.Login != "alice" || auth.Client != "test-mac" {
 		t.Fatalf("auth = %#v", auth)
 	}
 }

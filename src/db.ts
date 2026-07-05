@@ -58,6 +58,8 @@ export async function insertAudit(
   event: {
     requestId: string;
     callerId: string;
+    callerTokenId: string;
+    clientName: string;
     pool: string;
     routeKey: string;
     routeKind: string;
@@ -75,6 +77,8 @@ export async function insertAudit(
     .bind(
       event.requestId,
       event.callerId,
+      event.callerTokenId,
+      event.clientName,
       event.pool,
       event.routeKey,
       event.routeKind,

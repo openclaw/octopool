@@ -12,8 +12,9 @@ Source: `src/auth.ts`, `src/callers.ts`, `src/web-session.ts`, `src/provisioning
 
 Relay and health requests send `Authorization: Bearer <octopool_caller_token>`.
 
-- The token is hashed (SHA-256, base64url) and matched against `callers.token_hash`.
-  Raw tokens are never stored.
+- The token is hashed (SHA-256, base64url) and matched against `caller_tokens.token_hash`.
+  Raw tokens are never stored. Each caller can hold one rotating token per named client,
+  capped at 16 active clients; a new name retires the least recently updated stale session.
 - The caller must be `active` and granted the requested pool (`caller_pools`).
 - The caller's `org_login` must equal `ALLOWED_GITHUB_ORG`, else `403 org_denied`.
 - Org membership is re-verified on use once it goes stale (`ORG_VERIFY_TTL_SECONDS`,
@@ -58,14 +59,22 @@ Flow:
 
 1. The CLI discovers the server with `GET /.well-known/octopool`, then chooses the
    discovered `api_base` and `default_pool` unless flags override them.
-2. Body carries `github_token` (the user's `gh auth token`) and an optional `pool`.
+2. Body carries `github_token` (the user's `gh auth token`), a hostname-derived
+   `client_name`, and an optional `pool`.
 3. The Worker resolves the GitHub user (`GET /user`) and verifies that user is a member
    of `ALLOWED_GITHUB_ORG` using the supplied token.
 4. The caller row and requested default-pool grant are created or refreshed by immutable
    GitHub **user id**, org, active status, and pool.
-5. A new caller token (`op_…`) is generated, hashed, and stored; the row is refreshed
-   with the current login, user id, and verification time.
+5. A new caller token (`op_…`) is generated and hashed. It replaces only the token for
+   the same caller and client name; sessions for the caller's other machines remain valid.
+   Callers retain at most 16 named sessions, with least-recently-updated sessions retired
+   as new client names are added.
+   The caller row is refreshed with the current login, user id, and verification time.
 6. The plaintext token is returned once, for the CLI to store locally.
+
+Clients are 1-80 hostname-safe characters. New CLI versions send the local hostname and
+can override it with `--client`; older clients use `legacy`. Audit rows retain the matched
+caller-token id so stats can separate machines without storing caller token values.
 
 ### Pool restriction
 

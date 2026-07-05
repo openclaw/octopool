@@ -149,8 +149,12 @@ const DASHBOARD_HTML = `<!doctype html>
         <div class="table-wrap"><table><thead><tr><th>User</th><th>Requests</th><th>Errors</th><th>Avg ms</th><th>Last seen</th></tr></thead><tbody id="callers"></tbody></table></div>
       </div>
       <div class="panel">
+        <div class="panel-head"><h2>Client Sessions</h2><span class="section-label">7 days</span></div>
+        <div class="table-wrap"><table><thead><tr><th>User</th><th>Client</th><th>Requests</th><th>Saved</th><th>Backend</th><th>Errors</th><th>Last seen</th></tr></thead><tbody id="clients"></tbody></table></div>
+      </div>
+      <div class="panel">
         <div class="panel-head"><h2>Recent Traffic</h2><span class="section-label">latest 20</span></div>
-        <div class="table-wrap"><table><thead><tr><th>When</th><th>Caller</th><th>Route</th><th>Status</th><th>Identity</th></tr></thead><tbody id="recent"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>When</th><th>Caller</th><th>Client</th><th>Route</th><th>Status</th><th>Identity</th></tr></thead><tbody id="recent"></tbody></table></div>
       </div>
     </section>
   </div>
@@ -227,7 +231,8 @@ function render(data) {
   rows("route-keys", data.route_keys_7d, (item) => [item.route_key, item.requests, item.cache_hits, item.cache_misses, item.coalesced, item.fallbacks, rel(item.latest_seen_at)], 7);
   rows("error-codes", data.error_codes_7d, (item) => [item.outcome, item.route_kind, item.requests, rel(item.latest_seen_at)], 4);
   rows("callers", data.users, (item) => [item.github_login, item.requests, item.errors, Math.round(item.avg_duration_ms || 0), rel(item.last_seen)]);
-  rows("recent", data.recent, (item) => [rel(item.created_at), item.github_login, item.route_kind, statusPill(item.status, item.fallback_reason || item.error_code), item.identity_id || "none"]);
+  rows("clients", data.clients, (item) => [item.github_login, item.client_name, item.requests, item.saved_github_requests, item.backend_requests, item.errors, rel(item.last_seen)], 7);
+  rows("recent", data.recent, (item) => [rel(item.created_at), item.github_login, item.client_name || "legacy", item.route_kind, statusPill(item.status, item.fallback_reason || item.error_code), item.identity_id || "none"], 6);
 }
 
 function renderRates(data) {
@@ -305,7 +310,7 @@ function resetDashboard() {
   $("tiles").replaceChildren();
   $("rates").replaceChildren();
   $("rate-count").textContent = "";
-  for (const id of ["cache-routes", "route-usage", "route-keys", "error-codes", "callers", "recent"]) $(id).replaceChildren();
+  for (const id of ["cache-routes", "route-usage", "route-keys", "error-codes", "callers", "clients", "recent"]) $(id).replaceChildren();
   $("error").style.display = "none";
 }
 function el(tag, text, cls) {

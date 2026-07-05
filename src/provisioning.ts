@@ -14,11 +14,12 @@ import { HttpError, jsonResponse, parseJsonObject, requireString } from "./http"
 export async function loginGitHubCLI(request: Request, env: Env): Promise<Response> {
   const body = await parseJsonObject(request);
   const githubToken = requireString(body.github_token, "github_token");
+  const clientName = parseClientName(body.client_name);
   const pool = requestedLoginPool(env, body.pool);
   const user = await githubUserFromToken(env, githubToken);
   const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
   const token = newToken("op");
-  const caller = await ensureCliCaller(env, pool, user, verifiedAt, token);
+  const caller = await ensureCliCaller(env, pool, user, verifiedAt, token, clientName);
   return jsonResponse(
     {
       caller,
@@ -38,7 +39,14 @@ export async function createCaller(request: Request, env: Env): Promise<Response
   const verifiedAt = await verifyGitHubOrgMember(env, githubLogin);
   const githubUser = await githubUserByLogin(env, githubLogin);
   const token = newToken("op");
-  const caller = await ensureCliCaller(env, pool, { ...githubUser, name }, verifiedAt, token);
+  const caller = await ensureCliCaller(
+    env,
+    pool,
+    { ...githubUser, name },
+    verifiedAt,
+    token,
+    "admin",
+  );
   return jsonResponse(
     {
       caller,
@@ -46,6 +54,24 @@ export async function createCaller(request: Request, env: Env): Promise<Response
     },
     201,
   );
+}
+
+function parseClientName(value: unknown): string {
+  if (value === undefined) {
+    return "legacy";
+  }
+  if (typeof value !== "string") {
+    throw new HttpError(400, "client_name_invalid", "client_name must be a string");
+  }
+  const clientName = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(clientName)) {
+    throw new HttpError(
+      400,
+      "client_name_invalid",
+      "client_name must be 1-80 hostname-safe characters",
+    );
+  }
+  return clientName;
 }
 
 export async function upsertIdentity(request: Request, env: Env, pool: string): Promise<Response> {

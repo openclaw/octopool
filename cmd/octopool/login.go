@@ -20,6 +20,7 @@ type loginResponse struct {
 	Caller struct {
 		GitHubLogin string `json:"github_login"`
 		Pool        string `json:"pool"`
+		ClientName  string `json:"client_name"`
 	} `json:"caller"`
 	Token string `json:"token"`
 }
@@ -30,6 +31,7 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	urlFlag := fs.String("url", "", "Octopool base URL")
 	serverFlag := fs.String("server", "", "Octopool server URL")
 	pool := fs.String("pool", "", "pool id")
+	client := fs.String("client", defaultClientName(), "client name for per-device stats")
 	ghPath := fs.String("gh-path", envDefault("OCTOPOOL_GH_PATH", "gh"), "GitHub CLI path")
 	trustRedirect := fs.Bool("trust-discovery-redirect", false, "allow discovery api_base on a different host")
 	if err := fs.Parse(normalizeLoginArgs(args)); err != nil {
@@ -50,6 +52,7 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	body := map[string]any{
 		"github_token": token,
 		"pool":         server.Pool,
+		"client_name":  strings.TrimSpace(*client),
 	}
 	out, status, err := doRaw(ctx, apiURL(server.APIBase, "/v1/login/github-cli"), "", body)
 	if err != nil {
@@ -65,23 +68,45 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	if response.Token == "" {
 		return errors.New("login response did not include a caller token")
 	}
+	resolvedClient := firstNonEmpty(response.Caller.ClientName, strings.TrimSpace(*client))
 	if err := saveAuth(authFile{
 		URL:       server.APIBase,
 		Pool:      server.Pool,
 		Token:     response.Token,
 		Login:     response.Caller.GitHubLogin,
+		Client:    resolvedClient,
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "logged in to %s as %s for pool %s\n", server.APIBase, response.Caller.GitHubLogin, server.Pool)
+	fmt.Fprintf(
+		stdout,
+		"logged in to %s as %s for pool %s from %s\n",
+		server.APIBase,
+		response.Caller.GitHubLogin,
+		server.Pool,
+		resolvedClient,
+	)
 	return nil
+}
+
+func defaultClientName() string {
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		return "unknown"
+	}
+	hostname = strings.TrimSpace(hostname)
+	if len(hostname) > 80 {
+		return hostname[:80]
+	}
+	return hostname
 }
 
 func normalizeLoginArgs(args []string) []string {
 	flags := make([]string, 0, len(args))
 	positionals := []string{}
 	valueFlags := map[string]bool{
+		"client":  true,
 		"gh-path": true,
 		"pool":    true,
 		"server":  true,

@@ -21,6 +21,11 @@ type RouteRow = UsageAggregateRow & {
   latest_seen_at: string;
 };
 
+type ClientRow = UsageAggregateRow & {
+  client_name: string;
+  latest_seen_at: string;
+};
+
 export function parseStatsWindow(raw: string | null): StatsWindow {
   const fallback = { label: "24h", seconds: 24 * 60 * 60 };
   if (raw === null || raw.trim() === "") {
@@ -41,11 +46,23 @@ export function parseStatsWindow(raw: string | null): StatsWindow {
 }
 
 export async function poolStats(env: Env, pool: string, caller: Caller, window: StatsWindow) {
-  const [poolUsage, callerUsage, routes, callerRoutes, cache] = await Promise.all([
+  const [
+    poolUsage,
+    callerUsage,
+    currentClientUsage,
+    routes,
+    callerRoutes,
+    clientRoutes,
+    clients,
+    cache,
+  ] = await Promise.all([
     aggregateUsage(env, pool, window.seconds),
     aggregateUsage(env, pool, window.seconds, caller.id),
+    aggregateUsage(env, pool, window.seconds, caller.id, caller.client_name),
     routeUsage(env, pool, window.seconds),
     routeUsage(env, pool, window.seconds, caller.id),
+    routeUsage(env, pool, window.seconds, caller.id, caller.client_name),
+    loadClientUsage(env, pool, window.seconds, caller.id),
     cacheTotals(env, pool),
   ]);
   return {
@@ -54,11 +71,15 @@ export async function poolStats(env: Env, pool: string, caller: Caller, window: 
     window,
     operator: {
       github_login: caller.github_login,
+      client_name: caller.client_name,
     },
     pool_usage: poolUsage,
     caller_usage: callerUsage,
+    client_usage: currentClientUsage,
     routes,
     caller_routes: callerRoutes,
+    client_routes: clientRoutes,
+    clients,
     cache,
   };
 }
@@ -68,9 +89,10 @@ async function aggregateUsage(
   pool: string,
   windowSeconds: number,
   callerId?: string,
+  clientName?: string,
 ): Promise<CacheAggregate> {
   const row = await env.DB.prepare(queries.usageAggregate)
-    .bind(pool, `-${windowSeconds} seconds`, callerId ?? "")
+    .bind(pool, `-${windowSeconds} seconds`, callerId ?? "", clientName ?? "")
     .first<UsageAggregateRow>();
   return normalizeAggregate(row);
 }
@@ -80,12 +102,24 @@ async function routeUsage(
   pool: string,
   windowSeconds: number,
   callerId?: string,
+  clientName?: string,
 ): Promise<(CacheAggregate & { route_kind: string; latest_seen_at: string | null })[]> {
   const rows = await env.DB.prepare(queries.usageRoutes)
-    .bind(pool, `-${windowSeconds} seconds`, callerId ?? "")
+    .bind(pool, `-${windowSeconds} seconds`, callerId ?? "", clientName ?? "")
     .all<RouteRow>();
   return rows.results.map((row) => ({
     route_kind: row.route_kind,
+    latest_seen_at: row.latest_seen_at,
+    ...normalizeAggregate(row),
+  }));
+}
+
+async function loadClientUsage(env: Env, pool: string, windowSeconds: number, callerId: string) {
+  const rows = await env.DB.prepare(queries.usageClients)
+    .bind(pool, callerId, `-${windowSeconds} seconds`)
+    .all<ClientRow>();
+  return rows.results.map((row) => ({
+    client_name: row.client_name,
     latest_seen_at: row.latest_seen_at,
     ...normalizeAggregate(row),
   }));

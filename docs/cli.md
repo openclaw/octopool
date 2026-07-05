@@ -65,6 +65,7 @@ passed as a positional argument, `--server`, or the older `--url` flag:
 octopool login
 octopool login https://octopool.your-org.dev
 octopool login --server https://octopool.your-org.dev
+octopool login --client build-mac
 ```
 
 - If `gh auth token` fails, the CLI prints the exact real-`gh` web reauthentication and
@@ -78,7 +79,11 @@ octopool login --server https://octopool.your-org.dev
   `--trust-discovery-redirect` is passed. This keeps a mistyped or compromised discovery
   host from silently receiving your local GitHub token.
 - The token is stored 0600 at `<user-config-dir>/octopool/auth.json` (URL, pool, token,
-  login, timestamp).
+  login, client, timestamp).
+- The default client name is the local hostname. `--client` overrides it; re-login rotates
+  only that named client's caller token and leaves the user's other clients active.
+- Each caller retains up to 16 named clients. Adding another retires the least recently
+  updated session, which bounds abandoned hostname and ephemeral-runner credentials.
 - Octopool validates the GitHub identity and OpenClaw org membership during login, and
   binds the caller by immutable GitHub user id. See [Auth](auth.md).
 - Verified members of `ALLOWED_GITHUB_ORG` self-enroll into `DEFAULT_LOGIN_POOL`.
@@ -86,7 +91,7 @@ octopool login --server https://octopool.your-org.dev
 
 ```sh
 octopool login
-# logged in to https://octopool.dev as steipete for pool maintainers
+# logged in to https://octopool.dev as steipete for pool maintainers from steipete-mbp.local
 ```
 
 ### `octopool whoami [--json]`
@@ -98,6 +103,7 @@ octopool whoami
 # server: https://octopool.dev
 # pool: maintainers
 # login: steipete
+# client: steipete-mbp.local
 ```
 
 Use `--json` for scripts.
@@ -206,20 +212,24 @@ policy version.
 
 Fetches `GET /v1/pools/<pool>/stats` using the stored token. The default human output
 shows the pool request count, service errors, expected local fallbacks, raw and
-successful-eligible cache hit rates, coalesced duplicate misses, caller-specific usage,
-D1 cache entries, and top route kinds. `--since` accepts `30m`, `24h`, or `7d` style
-windows, capped at 30 days.
+successful-eligible cache hit rates, coalesced duplicate misses, caller- and client-specific
+usage, all of the caller's active client usage, D1 cache entries, and top route kinds.
+`--since` accepts `30m`, `24h`, or `7d` style windows, capped at 30 days.
 
 ```sh
 octopool stats
 # pool: maintainers
+# client: steipete-mbp.local
 # requests: 54 (1 service errors, 2 local fallbacks)
 # cache: 82.4% hit (40 hits, 2 stale, 9 misses, 3 bypass, 0 unknown)
 # eligible: 49/54 requests, 85.7% hit
 # coalesced: 4 duplicate misses
 # github: 42 saved, 12 backend
+# this client: 38 requests, 31 saved, 7 backend
 # top routes:
 #   pr_view: 31 req, 86.1% eligible hit, 1 stale, 5 miss, 0 bypass, 0 errors, 1 fallback
+# clients:
+#   steipete-mbp.local: 38 req, 31 saved, 7 backend, 1 fallback
 ```
 
 Use `--json` for dashboards or scripts that want the raw aggregate:

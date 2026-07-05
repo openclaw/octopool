@@ -13,6 +13,7 @@ type authFile struct {
 	Pool      string    `json:"pool"`
 	Token     string    `json:"token"`
 	Login     string    `json:"login,omitempty"`
+	Client    string    `json:"client,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

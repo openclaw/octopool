@@ -30,7 +30,8 @@ non-admin org members cannot load dashboard data.
   fallbacks, and service errors
 - seven-day normalized route-key traffic and fallback/failure outcome tables
 - public-repo proof count
-- per-caller usage for the last seven days
-- recent audit traffic with route kind, status, fallback reason, identity, and duration
+- per-caller and per-client usage for the last seven days
+- recent audit traffic with caller client, route kind, status, fallback reason, identity,
+  and duration
 
 Secrets, raw caller tokens, PAT values, and GitHub App private keys are never returned.

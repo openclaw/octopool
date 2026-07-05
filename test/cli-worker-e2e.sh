@@ -25,7 +25,7 @@ if ! pnpm exec wrangler d1 migrations apply octopool \
   exit 1
 fi
 
-seed_sql="INSERT INTO pools (id, name, policy_json) VALUES ('maintainers', 'maintainers', '{\"allowed_owners\":[\"openclaw\"],\"allow_public_repos\":true,\"allow_search\":true,\"allow_logs\":true}'); INSERT INTO callers (id, name, token_hash, github_login, org_login, org_verified_at, status, github_user_id) VALUES ('cli-e2e', 'CLI E2E', '$caller_hash', 'cli-e2e', 'openclaw', CURRENT_TIMESTAMP, 'active', 424242); INSERT INTO caller_pools (caller_id, pool_id) VALUES ('cli-e2e', 'maintainers');"
+seed_sql="INSERT INTO pools (id, name, policy_json) VALUES ('maintainers', 'maintainers', '{\"allowed_owners\":[\"openclaw\"],\"allow_public_repos\":true,\"allow_search\":true,\"allow_logs\":true}'); INSERT INTO callers (id, name, token_hash, github_login, org_login, org_verified_at, status, github_user_id) VALUES ('cli-e2e', 'CLI E2E', '$caller_hash', 'cli-e2e', 'openclaw', CURRENT_TIMESTAMP, 'active', 424242); INSERT INTO caller_tokens (id, caller_id, token_hash, client_name) VALUES ('cli-e2e-token', 'cli-e2e', '$caller_hash', 'cli-e2e'); INSERT INTO caller_pools (caller_id, pool_id) VALUES ('cli-e2e', 'maintainers');"
 pnpm exec wrangler d1 execute octopool \
   --local --persist-to "$state_dir" --command "$seed_sql" --json >/dev/null
 

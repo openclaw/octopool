@@ -42,6 +42,8 @@ type RelayBase = {
   started: number;
   request: RelayRequest;
   callerId: string;
+  callerTokenId: string;
+  clientName: string;
   coordinator: DurableObjectStub<PoolCoordinator>;
 };
 
@@ -94,6 +96,8 @@ export async function relayGitHub(
     started,
     request: relayRequest,
     callerId: caller.id,
+    callerTokenId: caller.caller_token_id,
+    clientName: caller.client_name,
     coordinator: env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`),
   };
   let active: ActiveRelay | undefined;
@@ -392,6 +396,8 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     insertAudit(state.env, {
       requestId: state.requestId,
       callerId: state.callerId,
+      callerTokenId: state.callerTokenId,
+      clientName: state.clientName,
       pool: state.request.pool,
       routeKey: state.route.routeKey,
       routeKind: state.route.kind,
@@ -465,6 +471,8 @@ async function handleRelayError(
     insertAudit(base.env, {
       requestId: base.requestId,
       callerId: base.callerId,
+      callerTokenId: base.callerTokenId,
+      clientName: base.clientName,
       pool: base.request.pool,
       routeKey: active?.route.routeKey ?? normalizeRouteKey(base.request.method, base.request.path),
       routeKind: active?.route.kind ?? "denied",
@@ -562,6 +570,8 @@ function cachedResponseParams(
   return {
     requestId: state.requestId,
     callerId: state.callerId,
+    callerTokenId: state.callerTokenId,
+    clientName: state.clientName,
     pool: state.request.pool,
     route: state.route,
     cached,
@@ -592,6 +602,8 @@ async function serveCachedGitHubResponse(
   params: {
     requestId: string;
     callerId: string;
+    callerTokenId: string;
+    clientName: string;
     pool: string;
     route: RouteInfo;
     cached: GitHubRelayResponse & {
@@ -610,6 +622,8 @@ async function serveCachedGitHubResponse(
     insertAudit(env, {
       requestId: params.requestId,
       callerId: params.callerId,
+      callerTokenId: params.callerTokenId,
+      clientName: params.clientName,
       pool: params.pool,
       routeKey: params.route.routeKey,
       routeKind: params.route.kind,
