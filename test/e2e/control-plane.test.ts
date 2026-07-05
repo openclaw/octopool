@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { insertAudit } from "../../src/db";
 import { poolHealth } from "../../src/health";
 import {
   bearer,
@@ -212,6 +213,10 @@ describe("Worker end-to-end control plane", () => {
       { client_name: "cli-mac-studio" },
       { client_name: "cli-macbook" },
     ]);
+    const studioSession = await env.DB.prepare(
+      "SELECT id, caller_id FROM caller_tokens WHERE client_name = 'cli-mac-studio'",
+    ).first<{ id: string; caller_id: string }>();
+    expect(studioSession).not.toBeNull();
 
     let newestToken = "";
     for (let index = 0; index < 15; index += 1) {
@@ -241,6 +246,22 @@ describe("Worker end-to-end control plane", () => {
     expect(retiredStudio.status).toBe(401);
     expect(preservedMacBook.status).toBe(200);
     expect(newestClient.status).toBe(200);
+
+    await insertAudit(env, {
+      requestId: "retired-studio-request",
+      callerId: studioSession!.caller_id,
+      callerTokenId: studioSession!.id,
+      clientName: "cli-mac-studio",
+      pool: POOL,
+      routeKey: "health:retired-client",
+      routeKind: "repo_view",
+      status: 200,
+      durationMs: 1,
+    });
+    const retiredAudit = await env.DB.prepare(
+      "SELECT caller_token_id, client_name FROM audit_events WHERE request_id = 'retired-studio-request'",
+    ).first<{ caller_token_id: string | null; client_name: string }>();
+    expect(retiredAudit).toEqual({ caller_token_id: null, client_name: "cli-mac-studio" });
   });
 
   it("enforces dashboard host, session, role, and pool-grant boundaries", async () => {
