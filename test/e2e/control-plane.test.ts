@@ -124,7 +124,7 @@ describe("Worker end-to-end control plane", () => {
     expect(health.status).toBe(200);
   });
 
-  it("limits CLI login to the configured pool and creates a usable caller", async () => {
+  it("keeps different CLI clients active while rotating only a re-logged client", async () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
@@ -149,16 +149,58 @@ describe("Worker end-to-end control plane", () => {
     const response = await postJSON("/v1/login/github-cli", {
       github_token: "github-user-token",
       pool: POOL,
+      client_name: "cli-macbook",
     });
     expect(response.status).toBe(201);
-    const body = await response.json<{ caller: { github_login: string }; token: string }>();
-    expect(body.caller.github_login).toBe("cli-user");
+    const body = await response.json<{
+      caller: { github_login: string; client_name: string };
+      token: string;
+    }>();
+    expect(body.caller).toMatchObject({ github_login: "cli-user", client_name: "cli-macbook" });
     expect(upstream).toHaveBeenCalledTimes(2);
-    const health = await callWorker(`/v1/pools/${POOL}/health`, {
+    const firstHealth = await callWorker(`/v1/pools/${POOL}/health`, {
       headers: { authorization: `Bearer ${body.token}` },
     });
-    expect(health.status).toBe(200);
-    expect(await health.json()).toMatchObject({ identities_total: 0, identities_healthy: 0 });
+    expect(firstHealth.status).toBe(200);
+
+    const studioResponse = await postJSON("/v1/login/github-cli", {
+      github_token: "github-user-token",
+      pool: POOL,
+      client_name: "cli-mac-studio",
+    });
+    const studio = await studioResponse.json<{ token: string }>();
+    expect(studioResponse.status).toBe(201);
+
+    const rotatedResponse = await postJSON("/v1/login/github-cli", {
+      github_token: "github-user-token",
+      pool: POOL,
+      client_name: "cli-macbook",
+    });
+    const rotated = await rotatedResponse.json<{ token: string }>();
+    expect(rotatedResponse.status).toBe(201);
+
+    const [oldMacBook, macStudio, newMacBook] = await Promise.all([
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${body.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${studio.token}` },
+      }),
+      callWorker(`/v1/pools/${POOL}/health`, {
+        headers: { authorization: `Bearer ${rotated.token}` },
+      }),
+    ]);
+    expect(oldMacBook.status).toBe(401);
+    expect(macStudio.status).toBe(200);
+    expect(newMacBook.status).toBe(200);
+
+    const tokens = await env.DB.prepare(
+      "SELECT client_name FROM caller_tokens ORDER BY client_name",
+    ).all<{ client_name: string }>();
+    expect(tokens.results).toEqual([
+      { client_name: "cli-mac-studio" },
+      { client_name: "cli-macbook" },
+    ]);
   });
 
   it("enforces dashboard host, session, role, and pool-grant boundaries", async () => {
