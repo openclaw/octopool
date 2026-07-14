@@ -9,6 +9,7 @@ const (
 	publicShapeActionsJobs        = "actions-jobs-v1"
 	publicShapeIssueSummary       = "issue-summary-v1"
 	publicShapeIssueList          = "issue-list-v1"
+	publicShapeIssueSearch        = "issue-search-v1"
 	publicShapePullRequestList    = "pr-list-v1"
 	publicShapePullRequestSummary = "pr-summary-v1"
 	publicShapeLabelList          = "label-list-v1"

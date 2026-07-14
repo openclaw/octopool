@@ -96,6 +96,21 @@ async function refreshPublicGitHubRepoProof(
   route: RouteInfo,
   cacheCreatedAt?: string,
 ): Promise<void> {
+  if (route.tokenFreeOnly) {
+    const pageProof = await fetchPublicRepoPageProof(env, owner, repo);
+    if (pageProof === false) {
+      throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
+    }
+    if (pageProof === undefined) {
+      throw new HttpError(
+        502,
+        "repo_public_check_failed",
+        "GitHub public repository page check failed",
+      );
+    }
+    await storePublicRepoProof(env, owner, repo);
+    return;
+  }
   let response = await fetchPublicRepoProof(env, owner, repo, true);
   let historicalProofEligibleResponse: Response | undefined;
   if (!response.ok && publicCheckMayRetryUnauthenticated(response)) {

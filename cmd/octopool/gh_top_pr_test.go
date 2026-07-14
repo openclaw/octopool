@@ -14,8 +14,13 @@ func TestRunGHPRViewHydratesDetails(t *testing.T) {
 				"number":   7,
 				"title":    "hydrate pr",
 				"html_url": "https://github.com/openclaw/octopool/pull/7",
+				"head":     map[string]any{"sha": "0123456789abcdef0123456789abcdef01234567"},
 			}
 		case "/repos/openclaw/octopool/pulls/7/files":
+			hint := body["route_hint"].(map[string]any)
+			if hint["pr_head_sha"] != "0123456789abcdef0123456789abcdef01234567" {
+				t.Fatalf("route hint = %#v", hint)
+			}
 			return []map[string]any{{"filename": "cmd/octopool/gh.go"}}
 		case "/repos/openclaw/octopool/pulls/7/commits":
 			return []map[string]any{{"sha": "abc1234"}}

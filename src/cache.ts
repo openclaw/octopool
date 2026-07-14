@@ -7,6 +7,7 @@ import {
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { defaultGitHubJSONAccept } from "./github-response";
+import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
@@ -285,7 +286,7 @@ function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, stri
   if (version !== undefined) {
     out["x-github-api-version"] = version;
   }
-  if (publicShape !== undefined) {
+  if (publicShape !== undefined && publicShape !== PUBLIC_SHAPES.issueSearch) {
     out["x-octopool-public-shape"] = publicShape;
   }
   return out;

@@ -184,6 +184,107 @@ describe("Worker end-to-end relay backends", () => {
     });
   });
 
+  it("serves policy-disabled repo search from anonymous API and shared cache", async () => {
+    await seedPool();
+    await env.DB.prepare("UPDATE pools SET policy_json = ? WHERE id = 'maintainers'")
+      .bind(
+        JSON.stringify({
+          allowed_owners: ["openclaw"],
+          allow_public_repos: true,
+          allow_search: false,
+          allow_logs: true,
+        }),
+      )
+      .run();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(bearer(request)).toBeUndefined();
+      if (request.url.startsWith("https://api.github.com/search/issues?")) {
+        return jsonResponse(
+          {
+            total_count: 1,
+            incomplete_results: false,
+            items: [{ number: 5, title: "Cache regression", state: "open" }],
+          },
+          200,
+          publicRateHeaders(),
+        );
+      }
+      if (request.url === "https://github.com/openclaw/octopool") {
+        return new Response(
+          '<meta name="octolytics-dimension-repository_public" content="true" />',
+        );
+      }
+      throw new Error(`unexpected upstream ${request.url}`);
+    });
+    vi.stubGlobal("fetch", upstream);
+    const options = {
+      query: {
+        q: "repo:openclaw/octopool type:issue state:open cache",
+        per_page: "10",
+      },
+      headers: { "x-octopool-public-shape": "issue-search-v1" },
+    };
+
+    const first = await relay("/search/issues", undefined, options);
+    expect(await first.json<RelayEnvelope>()).toMatchObject({
+      body: { total_count: 1, items: [{ number: 5, title: "Cache regression" }] },
+      relay: { backend: "web", cache: "miss", route_kind: "search_issues" },
+    });
+    const second = await relay("/search/issues", undefined, options);
+    expect(await second.json<RelayEnvelope>()).toMatchObject({
+      relay: { backend: "web", cache: "hit", route_kind: "search_issues" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_events WHERE identity_id IS NOT NULL",
+      ).first(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("never spends a pooled identity when token-free repo search is unavailable", async () => {
+    await seedPool();
+    await env.DB.prepare("UPDATE pools SET policy_json = ? WHERE id = 'maintainers'")
+      .bind(
+        JSON.stringify({
+          allowed_owners: ["openclaw"],
+          allow_public_repos: true,
+          allow_search: false,
+          allow_logs: true,
+        }),
+      )
+      .run();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(bearer(request)).toBeUndefined();
+      return jsonResponse({ message: "unavailable" }, 503);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/search/issues", undefined, {
+      query: {
+        q: "repo:openclaw/octopool type:issue state:open cache",
+        per_page: "10",
+      },
+      headers: { "x-octopool-public-shape": "issue-search-v1" },
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "token_free_unavailable" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_events WHERE identity_id IS NOT NULL",
+      ).first(),
+    ).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT status, error_code, fallback_reason FROM audit_events").first(),
+    ).toEqual({ status: 503, error_code: "token_free_unavailable", fallback_reason: null });
+  });
+
   it("normalizes policy denial to local fallback and records a denied audit", async () => {
     await seedPool();
     await env.DB.prepare("UPDATE pools SET policy_json = ? WHERE id = 'maintainers'")

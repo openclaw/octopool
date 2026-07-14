@@ -120,6 +120,9 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	if len(request.headers) > 0 {
 		body["headers"] = request.headers
 	}
+	if len(request.routeHint) > 0 {
+		body["route_hint"] = request.routeHint
+	}
 	out, status, err := doRaw(ctx, apiURL(client.baseURL, "/v1/github/request"), client.token, body)
 	if err != nil {
 		return relayEnvelope{}, err

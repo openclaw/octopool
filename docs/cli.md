@@ -157,10 +157,14 @@ Run views also support the nested `jobs` field; Octopool composes its job/step m
 the cache, exact API responses, or bounded public GitHub pages.
 `gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request
 for the common plain-term `-R owner/repo --state ... --json ...` shape. Cache hits cost
-zero GitHub Search quota; misses use the pool's search bucket. Qualified search syntax
+zero GitHub Search quota. All supported search fields use the anonymous GitHub Search API;
+this path remains available when pooled search is disabled and never uses a pooled identity
+or local token. Qualified search syntax
 such as `author:` or custom sort/match flags falls through to the real `gh`. PR search
 supports the issue-like fields returned by GitHub Search; PR-list-only fields such as
-`headRefName` fall through. `gh pr checks` uses the shared cache throughout: its PR
+`headRefName` fall through. Hydrated `gh pr view --json files,...` requests send the
+verified PR head SHA, allowing file pages to share a five-minute state-scoped cache.
+`gh pr checks` uses the shared cache throughout: its PR
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share
 one upstream PR read at most 60 seconds old, and the check/status reads for that SHA use
 the normal cache TTLs. Ask for raw `gh api` conditional requests only when instant

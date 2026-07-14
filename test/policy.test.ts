@@ -437,6 +437,42 @@ describe("route policy", () => {
     });
   });
 
+  it("allows shaped repo search only through token-free backends", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/issues",
+      query: { q: "repo:openclaw/openclaw type:issue state:open cache" },
+      headers: { "x-octopool-public-shape": "issue-search-v1" },
+    });
+    expect(classifyRoute(request, policy)).toMatchObject({
+      kind: "search_issues",
+      owner: "openclaw",
+      repo: "openclaw",
+      tokenFreeOnly: true,
+    });
+    expect(classifyRoute(request, { ...policy, allow_search: true })).not.toHaveProperty(
+      "tokenFreeOnly",
+    );
+
+    for (const query of [
+      { q: "repo:openclaw/openclaw cache" },
+      { q: "repo:openclaw/openclaw type:issue cache", page: "2" },
+      { q: "repo:openclaw/openclaw type:issue cache", per_page: "1e2" },
+      { q: "repo:openclaw/openclaw type:issue cache", sort: "updated" },
+      { q: "repo:openclaw/openclaw type:issue author:octocat cache" },
+    ]) {
+      const invalid = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/search/issues",
+        query,
+        headers: { "x-octopool-public-shape": "issue-search-v1" },
+      });
+      expect(() => classifyRoute(invalid, policy)).toThrow();
+    }
+  });
+
   it("allows plain repository search when search is enabled", () => {
     const request = validateRelayRequest({
       pool: "maintainers",

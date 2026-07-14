@@ -2,6 +2,10 @@
 
 ## 0.4.6 - Unreleased
 
+### Changes
+
+- Keep common repo-scoped `gh search issues|prs` reads on the token-free anonymous API and shared cache even when pooled search is disabled, and key hydrated PR file lists by the verified head SHA for longer cache reuse.
+
 ## 0.4.5 - 2026-07-13
 
 ### Changes

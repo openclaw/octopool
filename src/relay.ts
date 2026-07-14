@@ -165,6 +165,14 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
     return web;
   }
 
+  if (state.route.tokenFreeOnly) {
+    const stale = await serveStaleRelayCache(state, "web_only_unavailable");
+    if (stale !== undefined) {
+      return stale;
+    }
+    throw new HttpError(503, "token_free_unavailable", "Token-free GitHub search is unavailable");
+  }
+
   await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
   const fallback = capabilitiesForRouteKind(state.route.kind).fallback;
   if (fallback === "local") {

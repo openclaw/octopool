@@ -110,25 +110,29 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 	for _, field := range opts.json {
 		switch field {
 		case "files":
-			files, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "files"))
+			routeHint := map[string]string{}
+			if sha := nestedStringValue(pr, "head", "sha"); sha != "" {
+				routeHint["pr_head_sha"] = sha
+			}
+			files, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "files"), routeHint)
 			if err != nil {
 				return err
 			}
 			pr["files"] = mapPRFiles(files)
 		case "commits":
-			commits, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "commits"))
+			commits, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "commits"), nil)
 			if err != nil {
 				return err
 			}
 			pr["commits"] = mapPRCommits(commits)
 		case "comments":
-			comments, err := relayPagedArray(ctx, client, repoPath(repo, "issues", number, "comments"))
+			comments, err := relayPagedArray(ctx, client, repoPath(repo, "issues", number, "comments"), nil)
 			if err != nil {
 				return err
 			}
 			pr["comments"] = mapPRComments(comments)
 		case "reviews":
-			reviews, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "reviews"))
+			reviews, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "reviews"), nil)
 			if err != nil {
 				return err
 			}
@@ -146,14 +150,15 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 	return writeBytes(ctx, stdout, filtered, opts.jq)
 }
 
-func relayPagedArray(ctx context.Context, client ghRelayClient, path string) ([]any, error) {
+func relayPagedArray(ctx context.Context, client ghRelayClient, path string, routeHint map[string]string) ([]any, error) {
 	items := []any{}
 	complete := false
 	for page := 1; page <= maxRelayPages; page++ {
 		envelope, err := client.do(ctx, ghAPIRequest{
-			method: "GET",
-			path:   path,
-			query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
+			method:    "GET",
+			path:      path,
+			query:     map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
+			routeHint: routeHint,
 		})
 		if err != nil {
 			return nil, err

@@ -150,9 +150,10 @@ func relayGitHubSearch(
 		q += " " + strings.Join(terms, " ")
 	}
 	envelope, err := client.do(ctx, ghAPIRequest{
-		method: "GET",
-		path:   "/search/issues",
-		query:  map[string]any{"q": q, "per_page": strconv.Itoa(desiredLimit(opts))},
+		method:  "GET",
+		path:    "/search/issues",
+		query:   map[string]any{"q": q, "per_page": strconv.Itoa(desiredLimit(opts))},
+		headers: map[string]string{"x-octopool-public-shape": publicShapeIssueSearch},
 	})
 	if err != nil {
 		return err

@@ -119,6 +119,32 @@ describe("github cache policy", () => {
     );
   });
 
+  it("shares exact search cache entries across the token-free policy shape", async () => {
+    const shaped = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/issues",
+      query: { q: "repo:openclaw/openclaw type:issue cache", per_page: "10" },
+      headers: { "x-octopool-public-shape": "issue-search-v1" },
+    });
+    const exact = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/issues",
+      query: { q: "repo:openclaw/openclaw type:issue cache", per_page: "10" },
+    });
+
+    await expect(
+      githubCacheKey("maintainers", shaped, classifyRoute(shaped, policy)),
+    ).resolves.toBe(
+      await githubCacheKey(
+        "maintainers",
+        exact,
+        classifyRoute(exact, { ...policy, allow_search: true }),
+      ),
+    );
+  });
+
   it("uses verified PR state hints as cache-key discriminators", async () => {
     const request = validateRelayRequest({
       pool: "maintainers",

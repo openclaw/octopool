@@ -1,4 +1,5 @@
 import { HttpError } from "./http";
+import { isPublicIssueSearchQuery, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
 import { ROUTES, routeKeyForMatch, type RouteManifestEntry } from "./route-manifest";
 import type { PoolPolicy, RelayRequest, RouteInfo } from "./types";
@@ -86,9 +87,6 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     if (match === null) {
       continue;
     }
-    if (rule.search === true && !policy.allow_search) {
-      throw new HttpError(403, "search_denied", "Search routes are disabled for this pool");
-    }
     if (rule.logs === true && !policy.allow_logs) {
       throw new HttpError(403, "logs_denied", "Log routes are disabled for this pool");
     }
@@ -105,6 +103,10 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
       }
     }
     const searchRepo = searchRepoForRule(rule, request.query);
+    const tokenFreeOnly = !policy.allow_search && tokenFreeSearchRequest(rule, request, searchRepo);
+    if (rule.search === true && !policy.allow_search && !tokenFreeOnly) {
+      throw new HttpError(403, "search_denied", "Search routes are disabled for this pool");
+    }
     if (rule.kind === "search_repositories" && !policy.allow_public_repos) {
       throw new HttpError(
         403,
@@ -132,6 +134,7 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
       kind: rule.kind,
       resource: rule.resource,
       routeKey: routeKeyForMatch(request.method, rule, match),
+      ...(tokenFreeOnly ? { tokenFreeOnly: true } : {}),
       publicOnly: !allowedOwner,
       cacheable: rule.cacheable,
       largePayload: rule.largePayload === true,
@@ -147,6 +150,19 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     return info;
   }
   throw new HttpError(403, "route_denied", "Route is not enabled");
+}
+
+function tokenFreeSearchRequest(
+  rule: RouteRule,
+  request: RelayRequest,
+  searchRepo: { owner: string; repo: string } | undefined,
+): boolean {
+  return (
+    rule.kind === "search_issues" &&
+    request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.issueSearch &&
+    searchRepo !== undefined &&
+    isPublicIssueSearchQuery(request.query, searchRepo.owner, searchRepo.repo)
+  );
 }
 
 function repoFromSearchQuery(query: Record<string, string | string[]> | undefined): {

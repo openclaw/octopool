@@ -15,6 +15,10 @@ func TestRunGHSearchIssuesUsesScopedSearchRoute(t *testing.T) {
 		if query["per_page"] != "10" || query["q"] != "repo:openclaw/octopool type:issue cache regression" {
 			t.Fatalf("query = %#v", query)
 		}
+		headers := body["headers"].(map[string]any)
+		if headers["x-octopool-public-shape"] != "issue-search-v1" {
+			t.Fatalf("headers = %#v", headers)
+		}
 		return map[string]any{
 			"items": []map[string]any{{
 				"number":   1,
@@ -39,6 +43,26 @@ func TestRunGHSearchIssuesUsesScopedSearchRoute(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, `"number":1`) {
 		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHSearchUsesTokenFreeShapeForExactRESTFields(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		headers := body["headers"].(map[string]any)
+		if headers["x-octopool-public-shape"] != "issue-search-v1" {
+			t.Fatalf("headers = %#v", headers)
+		}
+		return map[string]any{"items": []map[string]any{}}
+	})
+	var out bytes.Buffer
+	result := handleGHSearch(t.Context(), []string{
+		"issues",
+		"cache",
+		"-R", "openclaw/octopool",
+		"--json", "number,title,body",
+	}, &out)
+	if result.err != nil || result.action != ghComplete {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }
 

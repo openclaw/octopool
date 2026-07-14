@@ -7,11 +7,12 @@ import (
 )
 
 type ghAPIRequest struct {
-	method  string
-	path    string
-	query   map[string]any
-	headers map[string]string
-	jq      string
+	method    string
+	path      string
+	query     map[string]any
+	headers   map[string]string
+	routeHint map[string]string
+	jq        string
 }
 
 func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {

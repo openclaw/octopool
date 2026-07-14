@@ -28,6 +28,10 @@ Cache hits are separate: a fresh D1 cache hit contacts no GitHub endpoint.
 - Shaped page fallbacks require an internal `x-octopool-public-shape` header generated
   by supported top-level CLI commands. Raw `gh api` requests do not opt into these
   reduced page shapes.
+- Supported repo-scoped `gh search issues|prs` shapes stay token-free-only when pooled
+  search is disabled: Octopool uses anonymous API and the shared cache, but never a
+  pooled identity or the caller's local token. If anonymous API and bounded stale cache
+  are unavailable, the read fails closed.
 - Only `GET` with the default JSON accept variants is eligible for anonymous API JSON
   fallback.
 
@@ -113,6 +117,10 @@ The guard normally checks `GET https://api.github.com/repos/{owner}/{repo}`. If 
 proof is rate-limited or unavailable, Octopool can inspect
 `https://github.com/{owner}/{repo}` for GitHub's public-repository marker. This proves
 visibility only; it does not provide a relay response.
+Token-free-only shaped search always uses this page-marker proof and never a configured
+verification token.
+Its `issue-search-v1` CLI shape gates an exact first-page anonymous API request; it is not
+a reduced public-page response shape.
 
 ## Anonymous API routes
 

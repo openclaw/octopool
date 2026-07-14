@@ -51,8 +51,10 @@ the cache. The CLI's `gh pr checks` resolves the PR head SHA this way with `max-
 
 Before spending a pooled identity, Octopool can use anonymous GitHub API, public page/raw,
 and Git smart HTTP endpoints. Successful direct repository-resource responses are themselves
-a public visibility proof; ambiguous search responses still require the explicit repository
-guard. The canonical route-by-route inventory is
+a public visibility proof; ambiguous search responses still require an explicit repository
+guard. Token-free-only shaped repo search uses the public repository page marker for that
+proof, avoiding both pooled identities and the configured verification token. The canonical
+route-by-route inventory is
 [Token-Free GitHub Endpoints](token-free.md).
 
 The main transport classes are:
@@ -103,8 +105,8 @@ Per route kind and response state (`cacheTTLSeconds`):
   remain mutable because new runs can appear
 - PR files with a validated state discriminator → 5m; PR commits, reviews,
   comments, issue comments/events/timeline, and undiscriminated PR files → 1m..5m
-- repository-scoped `gh search issues|prs` shim calls use cacheable GitHub Search
-  requests, with misses accounted against the search bucket
+- supported repository-scoped `gh search issues|prs` shim calls use anonymous API before
+  any allowed search-bucket identity
 - closed PRs/issues → 1h; open PRs → 2m; open issues → 5m
 - release lists/latest → 5m; release by tag/id → 1h
 - immutable commit objects → 24h; commit lists → 5m; contents → 1h
@@ -158,8 +160,9 @@ is public.
   can prove visibility from GitHub's public repository page marker without an API token.
 - A successful anonymous request for a direct repository resource is also accepted as the
   live public proof, so a cache miss does not need a second GitHub metadata request. Search
-  responses still run the explicit visibility check because an empty result does not prove
-  that a `repo:` qualifier names a public repository.
+  responses still run an explicit visibility check because an empty result does not prove
+  that a `repo:` qualifier names a public repository; token-free-only shaped search uses
+  the public repository page marker directly.
 - A successful public check is recorded in `github_public_repos` with a TTL
   (`PUBLIC_REPO_TTL_SECONDS`, default 30s) and the edge cache; subsequent cache hits reuse
   the fresh proof instead of re-hitting GitHub.
