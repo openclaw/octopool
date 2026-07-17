@@ -250,6 +250,28 @@ func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
 	}
 }
 
+func TestGHPRChecksWatchErrorsOnNoChecks(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
+			return map[string]any{"total_count": 0, "check_runs": []any{}}
+		case "/repos/openclaw/octopool/commits/abc1234/status":
+			return map[string]any{"total_count": 0, "statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", body["path"])
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	if result.err == nil || !strings.Contains(result.err.Error(), "no checks reported") {
+		t.Fatalf("zero checks must not read as green: err=%v", result.err)
+	}
+}
+
 func TestGHWatchShapeLastWatchValueWins(t *testing.T) {
 	if isGHWatchShape([]string{"pr", "checks", "7", "--watch", "--watch=false"}) {
 		t.Fatal("--watch --watch=false must not count as a watch shape")

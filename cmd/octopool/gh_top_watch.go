@@ -392,6 +392,11 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		if err != nil {
 			return watchError(err, progressPrinted)
 		}
+		// Zero registered checks must not read as green: real gh errors out
+		// instead of watching (push-then-watch races land here).
+		if len(items) == 0 {
+			return fmt.Errorf("no checks reported on pull request #%s", opts.number)
+		}
 		pending, passing, failing, cancelled := checkWatchCounts(items)
 		counts := fmt.Sprintf("%d/%d/%d/%d", pending, passing, failing, cancelled)
 		if counts != previousCounts {
