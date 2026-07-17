@@ -272,6 +272,63 @@ func TestGHPRChecksWatchErrorsOnNoChecks(t *testing.T) {
 	}
 }
 
+func TestGHPRChecksWatchCachedEmptyRevalidatesFresh(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		switch path := body["path"].(string); {
+		case path == "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case strings.HasSuffix(path, "/check-runs"):
+			h, _ := body["headers"].(map[string]any)
+			if h["cache-control"] != "max-age=0" {
+				// Stale shared-cache entry from before checks registered.
+				return map[string]any{"total_count": 0, "check_runs": []any{}}
+			}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+		case strings.HasSuffix(path, "/status"):
+			return map[string]any{"total_count": 0, "statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", path)
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("cached emptiness must revalidate fresh and continue: action=%v err=%v", result.action, result.err)
+	}
+	if !strings.Contains(out.String(), "CI\tpass") {
+		t.Fatalf("out=%q", out.String())
+	}
+}
+
+func TestGHPRChecksWatchFreshEmptyTerminalIsNotGreen(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		switch path := body["path"].(string); {
+		case path == "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case strings.HasSuffix(path, "/check-runs"):
+			h, _ := body["headers"].(map[string]any)
+			if h["cache-control"] == "max-age=0" {
+				// Terminal confirmation sees the checks vanish (rerun lag).
+				return map[string]any{"total_count": 0, "check_runs": []any{}}
+			}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+		case strings.HasSuffix(path, "/status"):
+			return map[string]any{"total_count": 0, "statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", path)
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	if result.err == nil || !strings.Contains(result.err.Error(), "no checks reported") {
+		t.Fatalf("fresh-empty terminal must not confirm green: err=%v", result.err)
+	}
+}
+
 func TestGHWatchShapeLastWatchValueWins(t *testing.T) {
 	if isGHWatchShape([]string{"pr", "checks", "7", "--watch", "--watch=false"}) {
 		t.Fatal("--watch --watch=false must not count as a watch shape")

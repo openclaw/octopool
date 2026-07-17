@@ -392,10 +392,28 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		if err != nil {
 			return watchError(err, progressPrinted)
 		}
-		// Zero registered checks must not read as green: real gh errors out
-		// instead of watching (push-then-watch races land here).
+		// Zero registered checks must not read as green. A cached empty
+		// snapshot may simply predate check registration, so confirm with a
+		// fresh sweep first; genuinely empty results error like real gh.
 		if len(items) == 0 {
-			return fmt.Errorf("no checks reported on pull request #%s", opts.number)
+			err := retryWatchTick(ctx, &backoff, func() error {
+				current, freshErr := relayPRHeadSHA(ctx, client, opts.repo, opts.number, 0)
+				if freshErr != nil {
+					return freshErr
+				}
+				freshItems, freshErr := prCheckItemsForSHAFresh(ctx, client, opts.repo, current)
+				if freshErr != nil {
+					return freshErr
+				}
+				items, sha = freshItems, current
+				return nil
+			})
+			if err != nil {
+				return watchError(err, progressPrinted)
+			}
+			if len(items) == 0 {
+				return fmt.Errorf("no checks reported on pull request #%s", opts.number)
+			}
 		}
 		pending, passing, failing, cancelled := checkWatchCounts(items)
 		counts := fmt.Sprintf("%d/%d/%d/%d", pending, passing, failing, cancelled)
@@ -452,6 +470,11 @@ func confirmPRChecksTerminal(
 	items, err := prCheckItemsForSHAFresh(ctx, client, opts.repo, current)
 	if err != nil {
 		return nil, false, err
+	}
+	// A fresh empty set after a terminal-looking cached snapshot is an
+	// anomaly (rerun re-registration, data lag) — never confirm it as green.
+	if len(items) == 0 {
+		return nil, false, fmt.Errorf("no checks reported on pull request #%s", opts.number)
 	}
 	pending, _, failing, _ := checkWatchCounts(items)
 	if pending == 0 || opts.failFast && failing > 0 {
