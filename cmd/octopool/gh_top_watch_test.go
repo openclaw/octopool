@@ -230,8 +230,106 @@ func TestGHPRChecksWatchJSONFinalSnapshot(t *testing.T) {
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
-	if !strings.Contains(out.String(), `[{"bucket":"pass","name":"CI"}]`) {
-		t.Fatalf("out=%q", out.String())
+	if strings.TrimSpace(out.String()) != `[{"bucket":"pass","name":"CI"}]` {
+		t.Fatalf("stdout must be pure JSON, got %q", out.String())
+	}
+}
+
+func TestGHPRChecksWatchJSONSuppressesProgressWhilePending(t *testing.T) {
+	ticks := 0
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
+			ticks++
+			status, conclusion := "in_progress", ""
+			if ticks > 1 {
+				status, conclusion = "completed", "success"
+			}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": status, "conclusion": conclusion}}}
+		case "/repos/openclaw/octopool/commits/abc1234/status":
+			return map[string]any{"statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", body["path"])
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--json", "name,bucket"}, &out)
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if strings.TrimSpace(out.String()) != `[{"bucket":"pass","name":"CI"}]` {
+		t.Fatalf("stdout must stay pure across pending ticks, got %q", out.String())
+	}
+}
+
+func TestGHPRChecksWatchEqualsTrueSpelling(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+		case "/repos/openclaw/octopool/commits/abc1234/status":
+			return map[string]any{"statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", body["path"])
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch=true"}, &out)
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("--watch=true must use the native watch path: action=%v err=%v", result.action, result.err)
+	}
+	if !isGHWatchShape([]string{"pr", "checks", "7", "--watch=true"}) {
+		t.Fatal("--watch=true must count as a watch shape for interval flooring")
+	}
+	if isGHWatchShape([]string{"pr", "checks", "7", "--watch=false"}) {
+		t.Fatal("--watch=false must not count as a watch shape")
+	}
+}
+
+func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
+	jobsRequests := []string{}
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/actions/runs/42":
+			return map[string]any{"id": 42, "status": "completed", "conclusion": "success"}
+		case "/repos/openclaw/octopool/actions/runs/42/jobs":
+			page := body["query"].(map[string]any)["page"].(string)
+			jobsRequests = append(jobsRequests, page)
+			jobs := []map[string]any{}
+			count := relayPageSize
+			offset := 0
+			if page == "2" {
+				count = 50
+				offset = relayPageSize
+			}
+			for index := 0; index < count; index++ {
+				jobs = append(jobs, map[string]any{"id": offset + index, "name": "job", "status": "completed", "conclusion": "success"})
+			}
+			return map[string]any{"total_count": 150, "jobs": jobs}
+		default:
+			t.Fatalf("unexpected path = %v", body["path"])
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool"}, &out)
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if len(jobsRequests) != 2 || jobsRequests[0] != "1" || jobsRequests[1] != "2" {
+		t.Fatalf("jobs pages requested = %v", jobsRequests)
+	}
+	if got := strings.Count(out.String(), "job job: success"); got != 150 {
+		t.Fatalf("job lines = %d, want 150", got)
 	}
 }
 

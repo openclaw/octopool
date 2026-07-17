@@ -34,6 +34,11 @@ func relayPaginatedGHAPI(
 	perPage, validPerPage := positiveQueryInt(request.query["per_page"])
 	page, validPage := positiveQueryInt(request.query["page"])
 	state := ghAPIPaginationState{}
+	if validPerPage && validPage {
+		// total_count covers the whole collection; count the pages a
+		// caller-supplied start page skipped so has-next stays accurate.
+		state.objectItems = (page - 1) * perPage
+	}
 	pages := make([]relayEnvelope, 0, maxRelayPages)
 
 	for pageIndex := 0; pageIndex < maxRelayPages; pageIndex++ {
@@ -44,15 +49,20 @@ func relayPaginatedGHAPI(
 		if envelope.Status >= 400 {
 			return writeGHBody(ctx, stdout, envelope, request.jq)
 		}
-		pages = append(pages, envelope)
 
 		hasNext := false
+		empty := false
 		if envelope.BodyEncoding == "json" && validPerPage && validPage {
 			body, decodeErr := decodeRelayBody(envelope)
 			if decodeErr != nil {
 				return decodeErr
 			}
-			hasNext = relayPageHasNext(body, perPage, &state)
+			hasNext, empty = relayPageHasNext(body, perPage, &state)
+		}
+		// A full previous page forces one probe fetch; when the probe comes
+		// back empty it carries no data and must not appear in the output.
+		if !empty || pageIndex == 0 {
+			pages = append(pages, envelope)
 		}
 		if !hasNext {
 			return writeGHAPIPages(ctx, stdout, pages, request.jq, request.slurp)
@@ -76,18 +86,18 @@ func positiveQueryInt(value any) (int, bool) {
 	return parsed, err == nil && parsed > 0
 }
 
-func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) bool {
+func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (hasNext bool, empty bool) {
 	var value any
 	if err := json.Unmarshal(body, &value); err != nil {
-		return false
+		return false, false
 	}
 	switch typed := value.(type) {
 	case []any:
-		return len(typed) == perPage
+		return len(typed) == perPage, len(typed) == 0
 	case map[string]any:
 		totalCount, ok := jsonNumericInt(typed["total_count"])
 		if !ok {
-			return false
+			return false, false
 		}
 		arrayKey := ""
 		pageItems := 0
@@ -100,23 +110,23 @@ func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) boo
 				continue
 			}
 			if arrayKey != "" {
-				return false
+				return false, false
 			}
 			arrayKey = key
 			pageItems = len(items)
 		}
 		if arrayKey == "" {
-			return false
+			return false, false
 		}
 		if state.objectArrayKey == "" {
 			state.objectArrayKey = arrayKey
 		} else if state.objectArrayKey != arrayKey {
-			return false
+			return false, false
 		}
 		state.objectItems += pageItems
-		return state.objectItems < totalCount && pageItems > 0
+		return state.objectItems < totalCount && pageItems > 0, pageItems == 0
 	default:
-		return false
+		return false, false
 	}
 }
 
@@ -139,27 +149,59 @@ func writeGHAPIPages(
 	jq string,
 	slurp bool,
 ) error {
-	var output bytes.Buffer
-	if slurp {
-		output.WriteByte('[')
-	}
-	for index, envelope := range pages {
+	bodies := make([][]byte, 0, len(pages))
+	for _, envelope := range pages {
 		body, err := decodeRelayBody(envelope)
 		if err != nil {
 			return err
 		}
-		if slurp {
-			if !json.Valid(body) {
-				return errors.New("cannot slurp a non-JSON response")
-			}
+		if slurp && !json.Valid(body) {
+			return errors.New("cannot slurp a non-JSON response")
+		}
+		bodies = append(bodies, body)
+	}
+	var output bytes.Buffer
+	switch {
+	case slurp:
+		output.WriteByte('[')
+		for index, body := range bodies {
 			if index > 0 {
 				output.WriteByte(',')
 			}
+			output.Write(body)
 		}
-		output.Write(body)
-	}
-	if slurp {
 		output.WriteByte(']')
+	case mergedArrayPages(bodies, &output):
+		// real gh coalesces paginated REST array pages into one JSON array.
+	default:
+		for _, body := range bodies {
+			output.Write(body)
+		}
 	}
 	return writeBytes(ctx, stdout, output.Bytes(), jq)
+}
+
+// mergedArrayPages writes one combined JSON array when every page is a
+// top-level array, matching real gh's --paginate output for REST lists.
+func mergedArrayPages(bodies [][]byte, output *bytes.Buffer) bool {
+	interiors := make([][]byte, 0, len(bodies))
+	for _, body := range bodies {
+		trimmed := bytes.TrimSpace(body)
+		if len(trimmed) < 2 || trimmed[0] != '[' || trimmed[len(trimmed)-1] != ']' {
+			return false
+		}
+		interior := bytes.TrimSpace(trimmed[1 : len(trimmed)-1])
+		if len(interior) > 0 {
+			interiors = append(interiors, interior)
+		}
+	}
+	output.WriteByte('[')
+	for index, interior := range interiors {
+		if index > 0 {
+			output.WriteByte(',')
+		}
+		output.Write(interior)
+	}
+	output.WriteByte(']')
+	return true
 }

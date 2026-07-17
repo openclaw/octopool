@@ -114,26 +114,38 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 }
 
 func runJobs(envelope relayEnvelope) ([]any, error) {
-	body, err := envelopeBodyBytes(envelope)
+	jobs, total, err := runJobsPage(envelope)
 	if err != nil {
 		return nil, err
 	}
+	if total > len(jobs) {
+		return nil, localFallbackError{Reason: "workflow jobs response requires pagination"}
+	}
+	return jobs, nil
+}
+
+func runJobsPage(envelope relayEnvelope) ([]any, int, error) {
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return nil, 0, err
+	}
 	var response map[string]any
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	rawJobs, ok := response["jobs"].([]any)
 	if !ok {
-		return nil, errors.New("workflow jobs response did not include jobs")
+		return nil, 0, errors.New("workflow jobs response did not include jobs")
 	}
-	if total, ok := response["total_count"].(float64); ok && total > float64(len(rawJobs)) {
-		return nil, localFallbackError{Reason: "workflow jobs response requires pagination"}
+	total := len(rawJobs)
+	if value, ok := response["total_count"].(float64); ok {
+		total = int(value)
 	}
 	jobs := make([]any, 0, len(rawJobs))
 	for _, rawJob := range rawJobs {
 		job, ok := rawJob.(map[string]any)
 		if !ok {
-			return nil, errors.New("workflow jobs response included an invalid job")
+			return nil, 0, errors.New("workflow jobs response included an invalid job")
 		}
 		mapped := map[string]any{}
 		for field, path := range map[string][]string{
@@ -154,7 +166,7 @@ func runJobs(envelope relayEnvelope) ([]any, error) {
 			for _, rawStep := range rawSteps {
 				step, ok := rawStep.(map[string]any)
 				if !ok {
-					return nil, errors.New("workflow jobs response included an invalid step")
+					return nil, 0, errors.New("workflow jobs response included an invalid step")
 				}
 				mappedStep := map[string]any{}
 				for field, path := range map[string][]string{
@@ -175,7 +187,7 @@ func runJobs(envelope relayEnvelope) ([]any, error) {
 		}
 		jobs = append(jobs, mapped)
 	}
-	return jobs, nil
+	return jobs, total, nil
 }
 
 func hasJSONField(fields []string, expected string) bool {

@@ -208,19 +208,33 @@ func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id st
 func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, id string, backoff *watchBackoff) ([]any, error) {
 	var jobs []any
 	err := retryWatchTick(ctx, backoff, func() error {
-		envelope, err := client.do(ctx, ghAPIRequest{
-			method: "GET",
-			path:   repoPath(repo, "actions", "runs", id, "jobs"),
-			query:  map[string]any{"per_page": "100"},
-			headers: map[string]string{
-				"x-octopool-public-shape": publicShapeActionsJobs,
-			},
-		})
-		if err != nil {
-			return err
+		jobs = jobs[:0]
+		total := 0
+		for page := 1; page <= maxRelayPages; page++ {
+			envelope, err := client.do(ctx, ghAPIRequest{
+				method: "GET",
+				path:   repoPath(repo, "actions", "runs", id, "jobs"),
+				query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
+				headers: map[string]string{
+					"x-octopool-public-shape": publicShapeActionsJobs,
+				},
+			})
+			if err != nil {
+				return err
+			}
+			pageJobs, pageTotal, err := runJobsPage(envelope)
+			if err != nil {
+				return err
+			}
+			if page == 1 {
+				total = pageTotal
+			}
+			jobs = append(jobs, pageJobs...)
+			if len(jobs) >= total || len(pageJobs) < relayPageSize {
+				return nil
+			}
 		}
-		jobs, err = runJobs(envelope)
-		return err
+		return localFallbackError{Reason: "workflow jobs pagination exhausted"}
 	})
 	return jobs, err
 }
@@ -272,7 +286,7 @@ func parseGHPRChecksWatchOptions(args []string) (ghPRChecksWatchOptions, bool) {
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		switch {
-		case arg == "--watch":
+		case arg == "--watch" || arg == "--watch=true":
 			watch = true
 		case arg == "--fail-fast":
 			opts.failFast = true
@@ -342,13 +356,16 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		}
 		pending, passing, failing := checkWatchCounts(items)
 		counts := fmt.Sprintf("%d/%d/%d", pending, passing, failing)
-		if counts != previousCounts {
+		// Structured output must stay pure: no progress lines ahead of the
+		// final --json/--jq payload.
+		structured := len(opts.json) > 0 || opts.jq != ""
+		if counts != previousCounts && !structured {
 			if _, err := fmt.Fprintf(stdout, "checks: %d pending, %d pass, %d fail\n", pending, passing, failing); err != nil {
 				return err
 			}
 			progressPrinted = true
-			previousCounts = counts
 		}
+		previousCounts = counts
 		if pending == 0 || opts.failFast && failing > 0 {
 			if err := printPRChecksWatchFinal(ctx, stdout, items, opts); err != nil {
 				return err
@@ -424,7 +441,8 @@ func watchError(err error, progressPrinted bool) error {
 
 func hasWatchFlag(args []string) bool {
 	for _, arg := range args {
-		if arg == "--watch" {
+		// Cobra bools also accept the explicit form; --watch=false stays unwatched.
+		if arg == "--watch" || arg == "--watch=true" {
 			return true
 		}
 	}

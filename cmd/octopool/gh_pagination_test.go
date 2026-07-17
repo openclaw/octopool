@@ -30,9 +30,12 @@ func TestRunGHAPIPaginatesArrayResponse(t *testing.T) {
 	}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	pages := decodeArrayPageStream(t, out.Bytes())
-	if len(pages) != 3 || len(pages[0]) != 100 || len(pages[1]) != 100 || len(pages[2]) != 1 {
-		t.Fatalf("page lengths = %v", pageLengths(pages))
+	var merged []any
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatalf("output is not one merged JSON array: %v\n%s", err, out.Bytes())
+	}
+	if len(merged) != 2*relayPageSize+1 {
+		t.Fatalf("merged length = %d", len(merged))
 	}
 	for index, query := range queries {
 		if query["page"] != strconv.Itoa(index+1) || query["per_page"] != "100" {
@@ -57,9 +60,12 @@ func TestRunGHAPIPaginatesExactMultipleThroughEmptyPage(t *testing.T) {
 	}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	pages := decodeArrayPageStream(t, out.Bytes())
-	if requests != 2 || len(pages) != 2 || len(pages[0]) != 100 || len(pages[1]) != 0 {
-		t.Fatalf("requests=%d page lengths=%v", requests, pageLengths(pages))
+	var merged []any
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatalf("output is not one merged JSON array: %v\n%s", err, out.Bytes())
+	}
+	if requests != 2 || len(merged) != relayPageSize {
+		t.Fatalf("requests=%d merged length=%d", requests, len(merged))
 	}
 }
 
@@ -226,6 +232,25 @@ func TestRunGHAPIPaginationExhaustionFallsBackToRealGH(t *testing.T) {
 	}
 }
 
+func TestRunGHAPIPaginationSeedsCallerStartPage(t *testing.T) {
+	requests := []string{}
+	relayTestServer(t, func(body map[string]any) any {
+		page := body["query"].(map[string]any)["page"].(string)
+		requests = append(requests, page)
+		return map[string]any{"total_count": 6, "check_runs": []map[string]any{{"id": page + "a"}, {"id": page + "b"}}}
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/commits/abc1234/check-runs?per_page=2&page=2", "--paginate",
+	}, &out, io.Discard); err != nil {
+		t.Fatalf("start page beyond 1 must not exhaust pagination: %v", err)
+	}
+	if len(requests) != 2 || requests[0] != "2" || requests[1] != "3" {
+		t.Fatalf("requests = %v", requests)
+	}
+}
+
 func TestParseGHAPISlurpRequiresPaginate(t *testing.T) {
 	_, _, err := parseGHAPIArgs([]string{"repos/openclaw/octopool/issues", "--slurp"})
 	if err == nil || err.Error() != "--slurp requires --paginate" {
@@ -277,31 +302,6 @@ func paginationItems(start int, count int) []int {
 		items[index] = start + index
 	}
 	return items
-}
-
-func decodeArrayPageStream(t *testing.T, raw []byte) [][]int {
-	t.Helper()
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	var pages [][]int
-	for {
-		var page []int
-		err := decoder.Decode(&page)
-		if err == io.EOF {
-			return pages
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		pages = append(pages, page)
-	}
-}
-
-func pageLengths(pages [][]int) []int {
-	lengths := make([]int, len(pages))
-	for index, page := range pages {
-		lengths[index] = len(page)
-	}
-	return lengths
 }
 
 func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
