@@ -69,6 +69,238 @@ func TestRunGHAPIPaginatesExactMultipleThroughEmptyPage(t *testing.T) {
 	}
 }
 
+func TestRunGHAPIPaginatesThroughAuthoritativeLinkHeader(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(body map[string]any) any {
+		requests++
+		page := body["query"].(map[string]any)["page"]
+		switch page {
+		case "1":
+			return relayTestResponse{
+				Body:    []int{1},
+				Headers: map[string]string{"Link": `<https://api.github.com/repos/openclaw/octopool/issues?labels=a,b&per_page=100&page=2>; rel="next"`},
+			}
+		case "2":
+			return relayTestResponse{
+				Body: []int{2},
+				Headers: map[string]string{"link": strings.Join([]string{
+					`<https://api.github.com/repos/openclaw/octopool/issues?labels=a,b&per_page=100&page=1>; rel="prev"`,
+					`<https://api.github.com/repos/openclaw/octopool/issues?labels=a,b&per_page=100&page=3>; rel=next`,
+				}, ", ")},
+			}
+		case "3":
+			return relayTestResponse{
+				Body:    []int{3},
+				Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?labels=a,b&per_page=100&page=2>; rel="prev"`},
+			}
+		default:
+			t.Fatalf("unexpected page query: %#v", page)
+			return nil
+		}
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var merged []int
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 || len(merged) != 3 {
+		t.Fatalf("requests=%d merged=%v", requests, merged)
+	}
+}
+
+func TestRunGHAPILinkContinuesAfterSparsePage(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		if requests == 1 {
+			return relayTestResponse{
+				Body:    paginationItems(0, 50),
+				Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?per_page=100&page=2>; rel="next"`},
+			}
+		}
+		return relayTestResponse{
+			Body:    []int{50},
+			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?per_page=100&page=1>; rel="prev"`},
+		}
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var merged []int
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(merged) != 51 {
+		t.Fatalf("requests=%d merged length=%d", requests, len(merged))
+	}
+}
+
+func TestRunGHAPILinkWithoutNextStopsImmediately(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		return relayTestResponse{
+			Body: map[string]any{"commits": []int{1}, "files": []int{2}},
+			Headers: map[string]string{
+				"link": `<https://api.github.com/repos/openclaw/octopool/compare/a...b?page=1>; rel="prev"`,
+			},
+		}
+	})
+
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/compare/a...b", "--paginate",
+	}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d", requests)
+	}
+}
+
+func TestRunGHAPILinkAdoptsCursorQuery(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(body map[string]any) any {
+		requests++
+		query := body["query"].(map[string]any)
+		if requests == 1 {
+			return relayTestResponse{
+				Body:    []int{1},
+				Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?after=abc>; rel="next"`},
+			}
+		}
+		if len(query) != 1 || query["after"] != "abc" {
+			t.Fatalf("cursor query = %#v", query)
+		}
+		return relayTestResponse{
+			Body:    []int{2},
+			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?before=abc>; rel="prev"`},
+		}
+	})
+
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate",
+	}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d", requests)
+	}
+}
+
+func TestRunGHAPILinkCrossPathFallsBack(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		return relayTestResponse{
+			Body:    []int{1},
+			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/pulls?page=2>; rel="next"`},
+		}
+	})
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate",
+	}, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || !strings.HasPrefix(out.String(), "real-gh:") ||
+		!strings.Contains(stderr.String(), "pagination_link_path_mismatch") {
+		t.Fatalf("requests=%d output=%q stderr=%q", requests, out.String(), stderr.String())
+	}
+}
+
+func TestRunGHAPIUnsafeLinkQueryFallsBack(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		return relayTestResponse{
+			Body:    []int{1},
+			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?secret=redacted>; rel="next"`},
+		}
+	})
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate",
+	}, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || !strings.HasPrefix(out.String(), "real-gh:") ||
+		!strings.Contains(stderr.String(), "pagination_link_unsafe") {
+		t.Fatalf("requests=%d output=%q stderr=%q", requests, out.String(), stderr.String())
+	}
+}
+
+func TestRunGHAPIExactMultipleWithLinkDoesNotProbe(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		return relayTestResponse{
+			Body:    paginationItems(0, relayPageSize),
+			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?page=1>; rel="prev"`},
+		}
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var merged []int
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || len(merged) != relayPageSize {
+		t.Fatalf("requests=%d merged length=%d", requests, len(merged))
+	}
+}
+
+func TestRunGHAPIEmptyFinalLinkPageIsNotEmitted(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		if requests == 1 {
+			return relayTestResponse{
+				Body:    []int{1},
+				Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?page=2>; rel="next"`},
+			}
+		}
+		return relayTestResponse{
+			Body:    []int{},
+			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?page=1>; rel="prev"`},
+		}
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate", "--slurp",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var pages [][]int
+	if err := json.Unmarshal(out.Bytes(), &pages); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(pages) != 1 || len(pages[0]) != 1 {
+		t.Fatalf("requests=%d pages=%v", requests, pages)
+	}
+}
+
 func TestRunGHAPIPaginatesObjectTotalCountResponse(t *testing.T) {
 	requests := 0
 	relayTestServer(t, func(map[string]any) any {

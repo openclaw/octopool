@@ -15,9 +15,10 @@ import (
 )
 
 type relayEnvelope struct {
-	Status       int             `json:"status"`
-	Body         json.RawMessage `json:"body"`
-	BodyEncoding string          `json:"body_encoding"`
+	Status       int               `json:"status"`
+	Headers      map[string]string `json:"headers"`
+	Body         json.RawMessage   `json:"body"`
+	BodyEncoding string            `json:"body_encoding"`
 }
 
 var errOctopoolNotLoggedIn = errors.New("not logged in; run: octopool login")

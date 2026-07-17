@@ -113,10 +113,11 @@ Use `--json` for scripts.
 
 Relays a read-only `gh api` call through Octopool's cache and pool. Prints the GitHub
 response body exactly like `gh api`, optionally piping it through `jq -r <expr>`.
-GET reads using `--paginate` and `--slurp` stay relay-cached for up to 10 pages;
-longer result sets and response shapes whose completion cannot be proven without
-Link headers (arrays and `total_count` object lists can) fall through to the real
-`gh` for a complete response.
+GET reads using `--paginate` and `--slurp` stay relay-cached for up to 10 pages.
+When present, GitHub's Link header authoritatively selects the next page; header-less
+web-synthesized and legacy-cached responses fall back to array-length and `total_count`
+shape heuristics. Longer result sets and unprovable header-less shapes fall through
+to the real `gh` for a complete response.
 
 ```sh
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number

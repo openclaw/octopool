@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 type ghAPIPaginationState struct {
@@ -54,6 +56,35 @@ func relayPaginatedGHAPI(
 			return writeGHBody(ctx, stdout, envelope, request.jq)
 		}
 
+		if link, ok := relayResponseHeader(envelope.Headers, "link"); ok {
+			nextTarget, hasNext := relayNextLink(link)
+			empty := false
+			if !hasNext && pageIndex > 0 && envelope.BodyEncoding == "json" {
+				body, decodeErr := decodeRelayBody(envelope)
+				if decodeErr != nil {
+					return decodeErr
+				}
+				empty = relayJSONPageEmpty(body)
+			}
+			if !empty || pageIndex == 0 {
+				pages = append(pages, envelope)
+			}
+			if !hasNext {
+				return writeGHAPIPages(ctx, stdout, pages, request.jq, request.slurp)
+			}
+			if pageIndex == maxRelayPages-1 {
+				return localFallbackError{Reason: "pagination_exhausted"}
+			}
+			nextRequest, fallback := relayNextPageRequest(request, nextTarget)
+			if fallback != nil {
+				return *fallback
+			}
+			request = nextRequest
+			continue
+		}
+
+		perPage, validPerPage = positiveQueryInt(request.query["per_page"])
+		page, validPage = positiveQueryInt(request.query["page"])
 		if envelope.BodyEncoding != "json" || !validPerPage || !validPage {
 			return localFallbackError{Reason: "pagination_shape_unsupported"}
 		}
@@ -84,6 +115,144 @@ func relayPaginatedGHAPI(
 	}
 
 	return localFallbackError{Reason: "pagination_exhausted"}
+}
+
+func relayResponseHeader(headers map[string]string, name string) (string, bool) {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value, true
+		}
+	}
+	return "", false
+}
+
+func relayNextLink(header string) (string, bool) {
+	for _, entry := range splitRelayLinkHeader(header) {
+		open := strings.IndexByte(entry, '<')
+		if open < 0 {
+			continue
+		}
+		closeOffset := strings.IndexByte(entry[open+1:], '>')
+		if closeOffset < 0 {
+			continue
+		}
+		closeIndex := open + 1 + closeOffset
+		for _, parameter := range strings.Split(entry[closeIndex+1:], ";") {
+			key, value, ok := strings.Cut(parameter, "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(key), "rel") {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+				value = value[1 : len(value)-1]
+			}
+			for _, relation := range strings.Fields(value) {
+				if strings.EqualFold(relation, "next") {
+					return strings.TrimSpace(entry[open+1 : closeIndex]), true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func splitRelayLinkHeader(header string) []string {
+	entries := make([]string, 0, 4)
+	start := 0
+	inAngle := false
+	inQuote := false
+	escaped := false
+	for index := 0; index < len(header); index++ {
+		character := header[index]
+		if inQuote {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if character == '\\' {
+				escaped = true
+			} else if character == '"' {
+				inQuote = false
+			}
+			continue
+		}
+		switch character {
+		case '<':
+			inAngle = true
+		case '>':
+			inAngle = false
+		case '"':
+			inQuote = true
+		case ',':
+			if !inAngle {
+				entries = append(entries, strings.TrimSpace(header[start:index]))
+				start = index + 1
+			}
+		}
+	}
+	entries = append(entries, strings.TrimSpace(header[start:]))
+	return entries
+}
+
+func relayNextPageRequest(request ghAPIRequest, target string) (ghAPIRequest, *localFallbackError) {
+	nextURL, err := url.Parse(target)
+	if err != nil || nextURL.Path == "" {
+		return request, &localFallbackError{Reason: "pagination_link_invalid"}
+	}
+	if nextURL.Path != request.path {
+		return request, &localFallbackError{Reason: "pagination_link_path_mismatch"}
+	}
+	values, err := url.ParseQuery(nextURL.RawQuery)
+	if err != nil {
+		return request, &localFallbackError{Reason: "pagination_link_invalid"}
+	}
+	query := make(map[string]any, len(values))
+	for key, items := range values {
+		switch len(items) {
+		case 1:
+			query[key] = items[0]
+		case 0:
+		default:
+			query[key] = items
+		}
+	}
+	nextRequest := request
+	nextRequest.query = query
+	if !safeRelayRequest(nextRequest) {
+		return request, &localFallbackError{Reason: "pagination_link_unsafe"}
+	}
+	return nextRequest, nil
+}
+
+func relayJSONPageEmpty(body []byte) bool {
+	var value any
+	if err := json.Unmarshal(body, &value); err != nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case []any:
+		return len(typed) == 0
+	case map[string]any:
+		if _, ok := jsonNumericInt(typed["total_count"]); !ok {
+			return false
+		}
+		arrayCount := 0
+		empty := false
+		for key, candidate := range typed {
+			if key == "incomplete_results" {
+				continue
+			}
+			items, isArray := candidate.([]any)
+			if !isArray {
+				continue
+			}
+			arrayCount++
+			empty = len(items) == 0
+		}
+		return arrayCount == 1 && empty
+	default:
+		return false
+	}
 }
 
 func positiveQueryInt(value any) (int, bool) {

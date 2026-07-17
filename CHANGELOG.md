@@ -4,6 +4,7 @@
 
 ### Changes
 
+- Follow authoritative GitHub Link pagination through the relay while retaining shape inference for header-less responses.
 - Keep bounded `gh api --paginate` and `--slurp` GET reads on the shared relay cache, falling back to real `gh` after 10 pages.
 
 ### Fixes

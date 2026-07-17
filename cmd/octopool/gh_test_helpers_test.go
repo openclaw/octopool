@@ -7,6 +7,11 @@ import (
 	"testing"
 )
 
+type relayTestResponse struct {
+	Body    any
+	Headers map[string]string
+}
+
 func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
@@ -30,7 +35,12 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 			Status:       200,
 			BodyEncoding: "json",
 		}
-		raw, err := json.Marshal(responseBody(body))
+		fixture := responseBody(body)
+		if response, ok := fixture.(relayTestResponse); ok {
+			fixture = response.Body
+			envelope.Headers = response.Headers
+		}
+		raw, err := json.Marshal(fixture)
 		if err != nil {
 			t.Errorf("marshal relay fixture: %v", err)
 			http.Error(w, "invalid fixture body", http.StatusInternalServerError)
