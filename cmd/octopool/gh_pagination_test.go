@@ -299,6 +299,29 @@ func TestRunGHAPIPaginationSeedsCallerStartPage(t *testing.T) {
 	}
 }
 
+func TestRunGHAPIPaginateUninferableObjectFallsBackToRealGH(t *testing.T) {
+	relayTestServer(t, func(map[string]any) any {
+		// compare-like shape: multiple arrays, no total_count — completion
+		// cannot be proven without Link headers.
+		return map[string]any{"total_commits": 250, "commits": []any{}, "files": []any{}}
+	})
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/compare/a...b", "--paginate",
+	}, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "real-gh:api repos/openclaw/octopool/compare/a...b --paginate\n" {
+		t.Fatalf("output = %q", out.String())
+	}
+	if !strings.Contains(stderr.String(), "pagination_shape_unsupported") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestParseGHAPISlurpRejectsJQ(t *testing.T) {
 	_, _, err := parseGHAPIArgs([]string{"repos/openclaw/octopool/issues", "--paginate", "--slurp", "--jq", ".x"})
 	if err == nil || !strings.Contains(err.Error(), "not supported with") {

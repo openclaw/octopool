@@ -54,14 +54,19 @@ func relayPaginatedGHAPI(
 			return writeGHBody(ctx, stdout, envelope, request.jq)
 		}
 
-		hasNext := false
-		empty := false
-		if envelope.BodyEncoding == "json" && validPerPage && validPage {
-			body, decodeErr := decodeRelayBody(envelope)
-			if decodeErr != nil {
-				return decodeErr
-			}
-			hasNext, empty = relayPageHasNext(body, perPage, &state)
+		if envelope.BodyEncoding != "json" || !validPerPage || !validPage {
+			return localFallbackError{Reason: "pagination_shape_unsupported"}
+		}
+		body, decodeErr := decodeRelayBody(envelope)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		hasNext, empty, inferable := relayPageHasNext(body, perPage, &state)
+		if !inferable {
+			// Without Link headers the relay can only prove completion for
+			// plain arrays and total_count object lists; anything else (e.g.
+			// compare's total_commits shape) must keep real gh's semantics.
+			return localFallbackError{Reason: "pagination_shape_unsupported"}
 		}
 		// A full previous page forces one probe fetch; when the probe comes
 		// back empty it carries no data and must not appear in the output.
@@ -90,18 +95,18 @@ func positiveQueryInt(value any) (int, bool) {
 	return parsed, err == nil && parsed > 0
 }
 
-func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (hasNext bool, empty bool) {
+func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (hasNext bool, empty bool, inferable bool) {
 	var value any
 	if err := json.Unmarshal(body, &value); err != nil {
-		return false, false
+		return false, false, false
 	}
 	switch typed := value.(type) {
 	case []any:
-		return len(typed) == perPage, len(typed) == 0
+		return len(typed) == perPage, len(typed) == 0, true
 	case map[string]any:
 		totalCount, ok := jsonNumericInt(typed["total_count"])
 		if !ok {
-			return false, false
+			return false, false, false
 		}
 		arrayKey := ""
 		pageItems := 0
@@ -114,23 +119,23 @@ func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (ha
 				continue
 			}
 			if arrayKey != "" {
-				return false, false
+				return false, false, false
 			}
 			arrayKey = key
 			pageItems = len(items)
 		}
 		if arrayKey == "" {
-			return false, false
+			return false, false, false
 		}
 		if state.objectArrayKey == "" {
 			state.objectArrayKey = arrayKey
 		} else if state.objectArrayKey != arrayKey {
-			return false, false
+			return false, false, false
 		}
 		state.objectItems += pageItems
-		return state.objectItems < totalCount && pageItems > 0, pageItems == 0
+		return state.objectItems < totalCount && pageItems > 0, pageItems == 0, true
 	default:
-		return false, false
+		return false, false, false
 	}
 }
 

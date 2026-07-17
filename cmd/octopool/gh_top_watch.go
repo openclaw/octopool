@@ -406,7 +406,13 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 			// before the watch (new head SHA) or a check rerun (same SHA, cached
 			// terminal payloads) could otherwise finalize on obsolete results.
 			// One fresh sweep per exit attempt.
-			final, confirmed, err := confirmPRChecksTerminal(ctx, client, opts, sha)
+			var final []any
+			var confirmed bool
+			err := retryWatchTick(ctx, &backoff, func() error {
+				var confirmErr error
+				final, confirmed, confirmErr = confirmPRChecksTerminal(ctx, client, opts, sha)
+				return confirmErr
+			})
 			if err != nil {
 				return watchError(err, progressPrinted)
 			}
