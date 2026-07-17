@@ -58,17 +58,10 @@ func relayPaginatedGHAPI(
 
 		if link, ok := relayResponseHeader(envelope.Headers, "link"); ok {
 			nextTarget, hasNext := relayNextLink(link)
-			empty := false
-			if !hasNext && pageIndex > 0 && envelope.BodyEncoding == "json" {
-				body, decodeErr := decodeRelayBody(envelope)
-				if decodeErr != nil {
-					return decodeErr
-				}
-				empty = relayJSONPageEmpty(body)
-			}
-			if !empty || pageIndex == 0 {
-				pages = append(pages, envelope)
-			}
+			// Every Link-followed page is one real gh would fetch and emit —
+			// even an empty terminal page. Probe suppression is only for the
+			// header-less heuristic, whose extra fetch real gh never makes.
+			pages = append(pages, envelope)
 			if !hasNext {
 				return writeGHAPIPages(ctx, stdout, pages, request.jq, request.slurp)
 			}
@@ -222,37 +215,6 @@ func relayNextPageRequest(request ghAPIRequest, target string) (ghAPIRequest, *l
 		return request, &localFallbackError{Reason: "pagination_link_unsafe"}
 	}
 	return nextRequest, nil
-}
-
-func relayJSONPageEmpty(body []byte) bool {
-	var value any
-	if err := json.Unmarshal(body, &value); err != nil {
-		return false
-	}
-	switch typed := value.(type) {
-	case []any:
-		return len(typed) == 0
-	case map[string]any:
-		if _, ok := jsonNumericInt(typed["total_count"]); !ok {
-			return false
-		}
-		arrayCount := 0
-		empty := false
-		for key, candidate := range typed {
-			if key == "incomplete_results" {
-				continue
-			}
-			items, isArray := candidate.([]any)
-			if !isArray {
-				continue
-			}
-			arrayCount++
-			empty = len(items) == 0
-		}
-		return arrayCount == 1 && empty
-	default:
-		return false
-	}
 }
 
 func positiveQueryInt(value any) (int, bool) {

@@ -270,7 +270,7 @@ func TestRunGHAPIExactMultipleWithLinkDoesNotProbe(t *testing.T) {
 	}
 }
 
-func TestRunGHAPIEmptyFinalLinkPageIsNotEmitted(t *testing.T) {
+func TestRunGHAPIEmptyFinalLinkPageIsEmitted(t *testing.T) {
 	requests := 0
 	relayTestServer(t, func(map[string]any) any {
 		requests++
@@ -296,7 +296,8 @@ func TestRunGHAPIEmptyFinalLinkPageIsNotEmitted(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &pages); err != nil {
 		t.Fatal(err)
 	}
-	if requests != 2 || len(pages) != 1 || len(pages[0]) != 1 {
+	// real gh emits every Link-followed page, including an empty terminal one.
+	if requests != 2 || len(pages) != 2 || len(pages[0]) != 1 || len(pages[1]) != 0 {
 		t.Fatalf("requests=%d pages=%v", requests, pages)
 	}
 }
