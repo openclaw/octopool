@@ -392,15 +392,17 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		if err != nil {
 			return watchError(err, progressPrinted)
 		}
-		pending, passing, failing := checkWatchCounts(items)
-		counts := fmt.Sprintf("%d/%d/%d", pending, passing, failing)
+		pending, passing, failing, cancelled := checkWatchCounts(items)
+		counts := fmt.Sprintf("%d/%d/%d/%d", pending, passing, failing, cancelled)
 		if counts != previousCounts {
-			if _, err := fmt.Fprintf(stdout, "checks: %d pending, %d pass, %d fail\n", pending, passing, failing); err != nil {
+			if _, err := fmt.Fprintf(stdout, "checks: %d pending, %d pass, %d fail, %d cancel\n", pending, passing, failing, cancelled); err != nil {
 				return err
 			}
 			progressPrinted = true
 		}
 		previousCounts = counts
+		// real gh's --fail-fast stops on failed checks only; cancellation is
+		// terminal but not a failure.
 		if pending == 0 || opts.failFast && failing > 0 {
 			// The snapshot came from bounded-staleness cache reads; a push right
 			// before the watch (new head SHA) or a check rerun (same SHA, cached
@@ -446,14 +448,14 @@ func confirmPRChecksTerminal(
 	if err != nil {
 		return nil, false, err
 	}
-	pending, _, failing := checkWatchCounts(items)
+	pending, _, failing, _ := checkWatchCounts(items)
 	if pending == 0 || opts.failFast && failing > 0 {
 		return items, true, nil
 	}
 	return nil, false, nil
 }
 
-func checkWatchCounts(items []any) (pending int, passing int, failing int) {
+func checkWatchCounts(items []any) (pending int, passing int, failing int, cancelled int) {
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {
@@ -462,13 +464,15 @@ func checkWatchCounts(items []any) (pending int, passing int, failing int) {
 		switch watchCheckBucket(item) {
 		case "pass", "skipping":
 			passing++
-		case "fail", "cancel":
+		case "fail":
 			failing++
+		case "cancel":
+			cancelled++
 		default:
 			pending++
 		}
 	}
-	return pending, passing, failing
+	return pending, passing, failing, cancelled
 }
 
 func watchCheckBucket(item map[string]any) string {

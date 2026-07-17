@@ -167,8 +167,8 @@ func TestGHPRChecksWatchPendingToDone(t *testing.T) {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 	for _, want := range []string{
-		"checks: 1 pending, 1 pass, 0 fail",
-		"checks: 0 pending, 2 pass, 0 fail",
+		"checks: 1 pending, 1 pass, 0 fail, 0 cancel",
+		"checks: 0 pending, 2 pass, 0 fail, 0 cancel",
 		"CI\tpass\tSUCCESS\thttps://example.test/ci",
 	} {
 		if !strings.Contains(out.String(), want) {
@@ -207,8 +207,43 @@ func TestGHPRChecksWatchFailFast(t *testing.T) {
 	if checkCalls != 2 || len(*sleeps) != 0 {
 		t.Fatalf("check calls=%d sleeps=%v", checkCalls, *sleeps)
 	}
-	if !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 1 fail") || !strings.Contains(out.String(), "CI\tfail\tFAILURE") {
+	if !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 1 fail, 0 cancel") || !strings.Contains(out.String(), "CI\tfail\tFAILURE") {
 		t.Fatalf("out=%q", out.String())
+	}
+}
+
+func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
+	var checkCalls int
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
+			checkCalls++
+			pendingStatus := "queued"
+			pendingConclusion := ""
+			if checkCalls >= 2 {
+				pendingStatus, pendingConclusion = "completed", "success"
+			}
+			return map[string]any{"total_count": 2, "check_runs": []map[string]any{
+				{"name": "CI", "status": "completed", "conclusion": "cancelled"},
+				{"name": "Integration", "status": pendingStatus, "conclusion": pendingConclusion},
+			}}
+		case "/repos/openclaw/octopool/commits/abc1234/status":
+			return map[string]any{"statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", body["path"])
+			return nil
+		}
+	})
+	sleeps := recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--fail-fast"}, &out)
+	// Cancelled is terminal but not failed: the watch must keep polling the
+	// pending check instead of fail-fasting, then exit 1 from the cancel bucket.
+	assertExitCode(t, result.err, 1)
+	if len(*sleeps) == 0 || !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 0 fail, 1 cancel") {
+		t.Fatalf("sleeps=%v out=%q", *sleeps, out.String())
 	}
 }
 
