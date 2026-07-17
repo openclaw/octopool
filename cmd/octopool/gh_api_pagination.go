@@ -16,7 +16,11 @@ type ghAPIPaginationState struct {
 }
 
 func prepareGHAPIPagination(request ghAPIRequest) ghAPIRequest {
-	if _, ok := request.query["per_page"]; !ok {
+	if raw, ok := request.query["per_page"]; !ok {
+		request.query["per_page"] = strconv.Itoa(relayPageSize)
+	} else if perPage, valid := positiveQueryInt(raw); valid && perPage > relayPageSize {
+		// GitHub caps per_page at 100; clamping keeps the short-page has-next
+		// inference sound instead of stopping after one silently capped page.
 		request.query["per_page"] = strconv.Itoa(relayPageSize)
 	}
 	if _, ok := request.query["page"]; !ok {

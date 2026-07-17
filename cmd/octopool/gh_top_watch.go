@@ -372,9 +372,10 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 	progressPrinted := false
 	for {
 		var items []any
+		var sha string
 		err := retryWatchTick(ctx, &backoff, func() error {
 			var pollErr error
-			items, pollErr = relayPRCheckItems(ctx, client, opts.repo, opts.number)
+			items, sha, pollErr = relayPRCheckItemsWithSHA(ctx, client, opts.repo, opts.number)
 			return pollErr
 		})
 		if err != nil {
@@ -393,10 +394,19 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		}
 		previousCounts = counts
 		if pending == 0 || opts.failFast && failing > 0 {
-			if err := printPRChecksWatchFinal(ctx, stdout, items, opts); err != nil {
-				return err
+			// The snapshot's head came from a bounded-staleness lookup; a push
+			// right before the watch could otherwise turn a stale SHA's finished
+			// checks into a false terminal result. One fresh read per exit.
+			current, err := relayPRHeadSHA(ctx, client, opts.repo, opts.number, 0)
+			if err != nil {
+				return watchError(err, progressPrinted)
 			}
-			return checkExitCode(items)
+			if current == sha {
+				if err := printPRChecksWatchFinal(ctx, stdout, items, opts); err != nil {
+					return err
+				}
+				return checkExitCode(items)
+			}
 		}
 		if err := backoff.sleep(ctx); err != nil {
 			return err
@@ -569,7 +579,15 @@ func floorGHWatchDelegateArgs(args []string) []string {
 		}
 	}
 	if !found {
-		out = append(out, "--interval", "30")
+		floor := []string{"--interval", "30"}
+		// Keep the injected flag ahead of any `--` terminator; after it,
+		// real gh would treat the flag as a positional and reject the command.
+		for index, arg := range out {
+			if arg == "--" {
+				return append(out[:index:index], append(floor, out[index:]...)...)
+			}
+		}
+		out = append(out, floor...)
 	}
 	return out
 }

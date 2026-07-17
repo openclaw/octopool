@@ -39,35 +39,47 @@ func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number st
 }
 
 func relayPRCheckItems(ctx context.Context, client ghRelayClient, repo string, number string) ([]any, error) {
-	// Bound the PR lookup's staleness instead of forcing a live read: concurrent
-	// CI-polling sessions coalesce onto one shared-cache fill while the head SHA
-	// stays at most a few seconds behind a push.
-	freshHeaders := map[string]string{"cache-control": "max-age=" + strconv.Itoa(prChecksMaxPRAgeSeconds)}
+	items, _, err := relayPRCheckItemsWithSHA(ctx, client, repo, number)
+	return items, err
+}
+
+func relayPRHeadSHA(ctx context.Context, client ghRelayClient, repo string, number string, maxAgeSeconds int) (string, error) {
 	prEnvelope, err := client.do(ctx, ghAPIRequest{
 		method:  "GET",
 		path:    repoPath(repo, "pulls", number),
-		headers: freshHeaders,
+		headers: map[string]string{"cache-control": "max-age=" + strconv.Itoa(maxAgeSeconds)},
 	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	prBody, err := envelopeBodyBytes(prEnvelope)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	var pr map[string]any
 	if err := json.Unmarshal(prBody, &pr); err != nil {
-		return nil, err
+		return "", err
 	}
 	sha, ok := nestedString(pr, "head", "sha")
 	if !ok || sha == "" {
-		return nil, errors.New("pull request response did not include head.sha")
+		return "", errors.New("pull request response did not include head.sha")
+	}
+	return sha, nil
+}
+
+func relayPRCheckItemsWithSHA(ctx context.Context, client ghRelayClient, repo string, number string) ([]any, string, error) {
+	// Bound the PR lookup's staleness instead of forcing a live read: concurrent
+	// CI-polling sessions coalesce onto one shared-cache fill while the head SHA
+	// stays at most a few seconds behind a push.
+	sha, err := relayPRHeadSHA(ctx, client, repo, number, prChecksMaxPRAgeSeconds)
+	if err != nil {
+		return nil, "", err
 	}
 	items, err := prCheckItemsForSHA(ctx, client, repo, sha)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return items, nil
+	return items, sha, nil
 }
 
 func prCheckItemsForSHA(ctx context.Context, client ghRelayClient, repo string, sha string) ([]any, error) {

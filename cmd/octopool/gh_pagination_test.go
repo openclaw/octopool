@@ -232,6 +232,32 @@ func TestRunGHAPIPaginationExhaustionFallsBackToRealGH(t *testing.T) {
 	}
 }
 
+func TestRunGHAPIPaginationClampsOversizedPerPage(t *testing.T) {
+	perPages := []string{}
+	relayTestServer(t, func(body map[string]any) any {
+		query := body["query"].(map[string]any)
+		perPages = append(perPages, query["per_page"].(string))
+		if query["page"] == "1" {
+			return paginationItems(0, relayPageSize)
+		}
+		return paginationItems(relayPageSize, 1)
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues?per_page=200", "--paginate",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var merged []any
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatal(err)
+	}
+	if len(perPages) != 2 || perPages[0] != "100" || perPages[1] != "100" || len(merged) != relayPageSize+1 {
+		t.Fatalf("per_page sent = %v merged=%d; oversized per_page must clamp to GitHub's cap", perPages, len(merged))
+	}
+}
+
 func TestRunGHAPIJQAppliesPerPage(t *testing.T) {
 	if !jqAvailable() {
 		t.Skip("jq is required")

@@ -311,6 +311,46 @@ func TestGHWatchParsersHandleAttachedInterval(t *testing.T) {
 	if !reflect.DeepEqual(floored, []string{"run", "watch", "42", "--json", "x", "-i30"}) {
 		t.Fatalf("delegated -i5 must floor in place, got %v", floored)
 	}
+	terminated := floorGHWatchDelegateArgs([]string{"run", "watch", "--", "42"})
+	if !reflect.DeepEqual(terminated, []string{"run", "watch", "--interval", "30", "--", "42"}) {
+		t.Fatalf("injected interval must precede the -- terminator, got %v", terminated)
+	}
+}
+
+func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
+	checkFetches := []string{}
+	relayTestServer(t, func(body map[string]any) any {
+		switch path := body["path"].(string); {
+		case path == "/repos/openclaw/octopool/pulls/7":
+			headers := body["headers"].(map[string]any)
+			if headers["cache-control"] == "max-age=0" {
+				return map[string]any{"head": map[string]any{"sha": "newsha"}}
+			}
+			sha := "oldsha"
+			if len(checkFetches) > 0 {
+				sha = "newsha"
+			}
+			return map[string]any{"head": map[string]any{"sha": sha}}
+		case strings.HasSuffix(path, "/check-runs"):
+			sha := strings.Split(path, "/")[5]
+			checkFetches = append(checkFetches, sha)
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+		case strings.HasSuffix(path, "/status"):
+			return map[string]any{"statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", path)
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if len(checkFetches) != 2 || checkFetches[0] != "oldsha" || checkFetches[1] != "newsha" {
+		t.Fatalf("check fetches = %v, want stale head rejected then re-polled", checkFetches)
+	}
 }
 
 func TestGHPRChecksWatchJQWithoutJSONDelegates(t *testing.T) {
