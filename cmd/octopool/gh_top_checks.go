@@ -83,13 +83,30 @@ func relayPRCheckItemsWithSHA(ctx context.Context, client ghRelayClient, repo st
 }
 
 func prCheckItemsForSHA(ctx context.Context, client ghRelayClient, repo string, sha string) ([]any, error) {
+	return prCheckItemsForSHAWithHeaders(ctx, client, repo, sha, nil)
+}
+
+// prCheckItemsForSHAFresh bypasses cached staleness so a terminal watch
+// snapshot cannot be confirmed by an obsolete cached payload after a rerun.
+func prCheckItemsForSHAFresh(ctx context.Context, client ghRelayClient, repo string, sha string) ([]any, error) {
+	return prCheckItemsForSHAWithHeaders(ctx, client, repo, sha, map[string]string{"cache-control": "max-age=0"})
+}
+
+func prCheckItemsForSHAWithHeaders(
+	ctx context.Context,
+	client ghRelayClient,
+	repo string,
+	sha string,
+	headers map[string]string,
+) ([]any, error) {
 	checkRuns := []any{}
 	totalCheckRuns := 0
 	for page := 1; page <= maxRelayPages; page++ {
 		request := ghAPIRequest{
-			method: "GET",
-			path:   repoPath(repo, "commits", sha, "check-runs"),
-			query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
+			method:  "GET",
+			path:    repoPath(repo, "commits", sha, "check-runs"),
+			query:   map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
+			headers: headers,
 		}
 		checkRunsEnvelope, err := client.do(ctx, request)
 		if err != nil {
@@ -111,8 +128,9 @@ func prCheckItemsForSHA(ctx context.Context, client ghRelayClient, repo string, 
 		return nil, localFallbackError{Reason: "pagination_exhausted"}
 	}
 	statusEnvelope, err := client.do(ctx, ghAPIRequest{
-		method: "GET",
-		path:   repoPath(repo, "commits", sha, "status"),
+		method:  "GET",
+		path:    repoPath(repo, "commits", sha, "status"),
+		headers: headers,
 	})
 	if err != nil {
 		return nil, err

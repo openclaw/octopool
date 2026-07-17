@@ -41,8 +41,6 @@ type ghPRChecksWatchOptions struct {
 	number   string
 	interval time.Duration
 	failFast bool
-	json     []string
-	jq       string
 }
 
 type watchBackoff struct {
@@ -157,7 +155,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 		var run map[string]any
 		err := retryWatchTick(ctx, &backoff, func() error {
 			var pollErr error
-			run, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id)
+			run, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, nil)
 			return pollErr
 		})
 		if err != nil {
@@ -179,6 +177,31 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 		}
 		previousStatus = status
 		if status == "completed" {
+			// Reruns reuse the run ID, so a cached terminal payload from a
+			// previous attempt could finalize the watch instantly with stale
+			// results. Confirm completion with one uncached read per exit.
+			var confirmed map[string]any
+			err := retryWatchTick(ctx, &backoff, func() error {
+				var pollErr error
+				confirmed, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, watchFreshHeaders())
+				return pollErr
+			})
+			if err != nil {
+				return watchError(err, progressPrinted)
+			}
+			confirmedStatus := watchSafeText(firstString(confirmed, "status"))
+			if confirmedStatus != "completed" {
+				if confirmedStatus != "" && confirmedStatus != status {
+					if _, err := fmt.Fprintf(stdout, "run %s: %s -> %s\n", opts.id, status, confirmedStatus); err != nil {
+						return err
+					}
+					previousStatus = confirmedStatus
+				}
+				if err := backoff.sleep(ctx); err != nil {
+					return err
+				}
+				continue
+			}
 			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, opts.id, &backoff)
 			if err != nil {
 				return watchError(err, true)
@@ -186,7 +209,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			if err := printWatchRunJobs(stdout, jobs); err != nil {
 				return err
 			}
-			conclusion := watchSafeText(firstString(run, "conclusion"))
+			conclusion := watchSafeText(firstString(confirmed, "conclusion"))
 			if _, err := fmt.Fprintf(stdout, "Run %s completed with '%s'\n", opts.id, conclusion); err != nil {
 				return err
 			}
@@ -201,11 +224,19 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 	}
 }
 
-func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id string) (map[string]any, error) {
+func watchFreshHeaders() map[string]string {
+	return map[string]string{"cache-control": "max-age=0"}
+}
+
+func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id string, extraHeaders map[string]string) (map[string]any, error) {
+	headers := map[string]string{"x-octopool-public-shape": publicShapeActionsSummary}
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
 	envelope, err := client.do(ctx, ghAPIRequest{
 		method:  "GET",
 		path:    repoPath(repo, "actions", "runs", id),
-		headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
+		headers: headers,
 	})
 	if err != nil {
 		return nil, err
@@ -233,6 +264,9 @@ func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, i
 				query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
 				headers: map[string]string{
 					"x-octopool-public-shape": publicShapeActionsJobs,
+					// The run just confirmed terminal; stale cached jobs from a
+					// previous attempt must not leak into the final summary.
+					"cache-control": "max-age=0",
 				},
 			})
 			if err != nil {
@@ -284,7 +318,7 @@ func printWatchRunJobs(stdout io.Writer, jobs []any) error {
 
 func handleGHPRChecksWatch(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	opts, ok := parseGHPRChecksWatchOptions(args)
-	if !ok || opts.jq != "" && !jqAvailable() {
+	if !ok {
 		return ghDelegated()
 	}
 	repo, ok := repoFromOptionOrCurrent(opts.repo)
@@ -324,38 +358,15 @@ func parseGHPRChecksWatchOptions(args []string) (ghPRChecksWatchOptions, bool) {
 			if !setWatchInterval(attachedWatchInterval(arg), &opts.interval) {
 				return opts, false
 			}
-		case isWatchValueFlag(arg, "--json"):
-			value, valueOK := takeWatchFlagValue(args, &index, arg, "--json")
-			if !valueOK {
-				return opts, false
-			}
-			opts.json = splitFields(value)
-			if len(opts.json) == 0 || !supportedJSONFields(ghTopOptions{json: opts.json}, supportedCheckRunFields) {
-				return opts, false
-			}
-		case isWatchValueFlag(arg, "--jq"):
-			value, valueOK := takeWatchFlagValue(args, &index, arg, "--jq")
-			if !valueOK {
-				return opts, false
-			}
-			opts.jq = value
-		case isWatchValueFlag(arg, "-q"):
-			value, valueOK := takeWatchFlagValue(args, &index, arg, "-q")
-			if !valueOK {
-				return opts, false
-			}
-			opts.jq = value
 		case strings.HasPrefix(arg, "-"):
+			// real gh rejects --watch with --json/--jq/--template; delegating
+			// unknown flags lets it report those combinations itself.
 			return opts, false
 		default:
 			positionals = append(positionals, arg)
 		}
 	}
 	if !watch || len(positionals) != 1 || !isDigits(positionals[0]) {
-		return opts, false
-	}
-	// real gh rejects --jq without --json; delegate so it reports that itself.
-	if opts.jq != "" && len(opts.json) == 0 {
 		return opts, false
 	}
 	opts.number = positionals[0]
@@ -383,10 +394,7 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		}
 		pending, passing, failing := checkWatchCounts(items)
 		counts := fmt.Sprintf("%d/%d/%d", pending, passing, failing)
-		// Structured output must stay pure: no progress lines ahead of the
-		// final --json/--jq payload.
-		structured := len(opts.json) > 0 || opts.jq != ""
-		if counts != previousCounts && !structured {
+		if counts != previousCounts {
 			if _, err := fmt.Fprintf(stdout, "checks: %d pending, %d pass, %d fail\n", pending, passing, failing); err != nil {
 				return err
 			}
@@ -394,24 +402,49 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		}
 		previousCounts = counts
 		if pending == 0 || opts.failFast && failing > 0 {
-			// The snapshot's head came from a bounded-staleness lookup; a push
-			// right before the watch could otherwise turn a stale SHA's finished
-			// checks into a false terminal result. One fresh read per exit.
-			current, err := relayPRHeadSHA(ctx, client, opts.repo, opts.number, 0)
+			// The snapshot came from bounded-staleness cache reads; a push right
+			// before the watch (new head SHA) or a check rerun (same SHA, cached
+			// terminal payloads) could otherwise finalize on obsolete results.
+			// One fresh sweep per exit attempt.
+			final, confirmed, err := confirmPRChecksTerminal(ctx, client, opts, sha)
 			if err != nil {
 				return watchError(err, progressPrinted)
 			}
-			if current == sha {
-				if err := printPRChecksWatchFinal(ctx, stdout, items, opts); err != nil {
+			if confirmed {
+				if err := printPRChecksWatchFinal(stdout, final); err != nil {
 					return err
 				}
-				return checkExitCode(items)
+				return checkExitCode(final)
 			}
 		}
 		if err := backoff.sleep(ctx); err != nil {
 			return err
 		}
 	}
+}
+
+func confirmPRChecksTerminal(
+	ctx context.Context,
+	client ghRelayClient,
+	opts ghPRChecksWatchOptions,
+	sha string,
+) ([]any, bool, error) {
+	current, err := relayPRHeadSHA(ctx, client, opts.repo, opts.number, 0)
+	if err != nil {
+		return nil, false, err
+	}
+	if current != sha {
+		return nil, false, nil
+	}
+	items, err := prCheckItemsForSHAFresh(ctx, client, opts.repo, current)
+	if err != nil {
+		return nil, false, err
+	}
+	pending, _, failing := checkWatchCounts(items)
+	if pending == 0 || opts.failFast && failing > 0 {
+		return items, true, nil
+	}
+	return nil, false, nil
 }
 
 func checkWatchCounts(items []any) (pending int, passing int, failing int) {
@@ -444,18 +477,7 @@ func watchCheckBucket(item map[string]any) string {
 	return "pending"
 }
 
-func printPRChecksWatchFinal(ctx context.Context, stdout io.Writer, items []any, opts ghPRChecksWatchOptions) error {
-	if len(opts.json) > 0 {
-		raw, err := json.Marshal(items)
-		if err != nil {
-			return err
-		}
-		raw, err = filterJSONFields(raw, opts.json, fieldMapCheckRun)
-		if err != nil {
-			return err
-		}
-		return writeBytes(ctx, stdout, raw, opts.jq)
-	}
+func printPRChecksWatchFinal(stdout io.Writer, items []any) error {
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {

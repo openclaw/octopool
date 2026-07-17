@@ -100,6 +100,9 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	if request.slurp && !request.paginate {
 		return request, false, errors.New("--slurp requires --paginate")
 	}
+	if request.slurp && request.jq != "" {
+		return request, false, errors.New("the `--slurp` option is not supported with `--jq` or `--template`")
+	}
 	if request.path == "" {
 		return request, false, errors.New("gh api path is required")
 	}

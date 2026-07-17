@@ -21,7 +21,8 @@ func TestGHRunWatchPrintsTransitionsAndFetchesJobsOnce(t *testing.T) {
 			if headers["x-octopool-public-shape"] != "actions-summary-v1" {
 				t.Fatalf("run headers = %#v", headers)
 			}
-			statuses := []string{"queued", "in_progress", "in_progress", "completed"}
+			// The fifth read is the terminal confirmation with max-age=0.
+			statuses := []string{"queued", "in_progress", "in_progress", "completed", "completed"}
 			return map[string]any{"status": statuses[runCalls-1], "conclusion": "failure"}
 		case "/repos/openclaw/octopool/actions/runs/42/jobs":
 			jobsCalls++
@@ -64,7 +65,7 @@ func TestGHRunWatchPrintsTransitionsAndFetchesJobsOnce(t *testing.T) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
 		}
 	}
-	if runCalls != 4 || jobsCalls != 1 {
+	if runCalls != 5 || jobsCalls != 1 {
 		t.Fatalf("run calls=%d jobs calls=%d", runCalls, jobsCalls)
 	}
 	if want := []time.Duration{30 * time.Second, 60 * time.Second, 120 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
@@ -81,7 +82,7 @@ func TestGHRunWatchRequestedIntervalStartsAt45Seconds(t *testing.T) {
 		calls++
 		status := "in_progress"
 		conclusion := ""
-		if calls == 2 {
+		if calls >= 2 {
 			status = "completed"
 			conclusion = "success"
 		}
@@ -141,7 +142,7 @@ func TestGHPRChecksWatchPendingToDone(t *testing.T) {
 			checkCalls++
 			status := "in_progress"
 			conclusion := ""
-			if checkCalls == 2 {
+			if checkCalls >= 2 {
 				status = "completed"
 				conclusion = "success"
 			}
@@ -202,7 +203,8 @@ func TestGHPRChecksWatchFailFast(t *testing.T) {
 	var out bytes.Buffer
 	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--fail-fast"}, &out)
 	assertExitCode(t, result.err, 1)
-	if checkCalls != 1 || len(*sleeps) != 0 {
+	// One polling read plus the fresh terminal confirmation sweep.
+	if checkCalls != 2 || len(*sleeps) != 0 {
 		t.Fatalf("check calls=%d sleeps=%v", checkCalls, *sleeps)
 	}
 	if !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 1 fail") || !strings.Contains(out.String(), "CI\tfail\tFAILURE") {
@@ -210,59 +212,17 @@ func TestGHPRChecksWatchFailFast(t *testing.T) {
 	}
 }
 
-func TestGHPRChecksWatchJSONFinalSnapshot(t *testing.T) {
-	relayTestServer(t, func(body map[string]any) any {
-		switch body["path"] {
-		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
-		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
-		case "/repos/openclaw/octopool/commits/abc1234/status":
-			return map[string]any{"statuses": []any{}}
-		default:
-			t.Fatalf("unexpected path = %v", body["path"])
-			return nil
-		}
-	})
-	recordWatchSleeps(t)
+func TestGHPRChecksWatchJSONDelegatesLikeRealGH(t *testing.T) {
+	// real gh rejects --watch with --json/--jq; the shim delegates so gh
+	// reports the combination itself.
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--json", "name,bucket"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
-	if strings.TrimSpace(out.String()) != `[{"bucket":"pass","name":"CI"}]` {
-		t.Fatalf("stdout must be pure JSON, got %q", out.String())
-	}
-}
-
-func TestGHPRChecksWatchJSONSuppressesProgressWhilePending(t *testing.T) {
-	ticks := 0
-	relayTestServer(t, func(body map[string]any) any {
-		switch body["path"] {
-		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
-		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
-			ticks++
-			status, conclusion := "in_progress", ""
-			if ticks > 1 {
-				status, conclusion = "completed", "success"
-			}
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": status, "conclusion": conclusion}}}
-		case "/repos/openclaw/octopool/commits/abc1234/status":
-			return map[string]any{"statuses": []any{}}
-		default:
-			t.Fatalf("unexpected path = %v", body["path"])
-			return nil
+	for _, args := range [][]string{
+		{"checks", "7", "-R", "openclaw/octopool", "--watch", "--json", "name,bucket"},
+		{"checks", "7", "-R", "openclaw/octopool", "--watch", "--jq", ".x"},
+	} {
+		if result := handleGHPR(t.Context(), args, &out); result.action != ghDelegate {
+			t.Fatalf("args %v must delegate, got action=%v", args, result.action)
 		}
-	})
-	recordWatchSleeps(t)
-	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--json", "name,bucket"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
-	if strings.TrimSpace(out.String()) != `[{"bucket":"pass","name":"CI"}]` {
-		t.Fatalf("stdout must stay pure across pending ticks, got %q", out.String())
 	}
 }
 
@@ -322,7 +282,7 @@ func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch path := body["path"].(string); {
 		case path == "/repos/openclaw/octopool/pulls/7":
-			headers := body["headers"].(map[string]any)
+			headers, _ := body["headers"].(map[string]any)
 			if headers["cache-control"] == "max-age=0" {
 				return map[string]any{"head": map[string]any{"sha": "newsha"}}
 			}
@@ -348,8 +308,85 @@ func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
-	if len(checkFetches) != 2 || checkFetches[0] != "oldsha" || checkFetches[1] != "newsha" {
-		t.Fatalf("check fetches = %v, want stale head rejected then re-polled", checkFetches)
+	// tick(oldsha) -> terminal confirm rejects on fresh head; tick(newsha) ->
+	// terminal -> fresh confirm sweep re-reads newsha's checks.
+	if len(checkFetches) != 3 || checkFetches[0] != "oldsha" || checkFetches[1] != "newsha" || checkFetches[2] != "newsha" {
+		t.Fatalf("check fetches = %v, want stale head rejected then re-polled with fresh confirm", checkFetches)
+	}
+}
+
+func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
+	freshRunReads := 0
+	relayTestServer(t, func(body map[string]any) any {
+		switch path := body["path"].(string); {
+		case path == "/repos/openclaw/octopool/actions/runs/42":
+			headers, _ := body["headers"].(map[string]any)
+			if headers["cache-control"] == "max-age=0" {
+				freshRunReads++
+				if freshRunReads == 1 {
+					// The rerun is live even though the cache still says done.
+					return map[string]any{"id": 42, "status": "in_progress"}
+				}
+			}
+			conclusion := "failure"
+			if freshRunReads > 0 {
+				conclusion = "success"
+			}
+			return map[string]any{"id": 42, "status": "completed", "conclusion": conclusion}
+		case strings.HasSuffix(path, "/jobs"):
+			if h, _ := body["headers"].(map[string]any); h["cache-control"] != "max-age=0" {
+				t.Fatal("terminal jobs read must bypass cached staleness")
+			}
+			return map[string]any{"total_count": 0, "jobs": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", path)
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "--exit-status"}, &out)
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if freshRunReads != 2 {
+		t.Fatalf("fresh run reads = %d, want stale terminal rejected then confirmed", freshRunReads)
+	}
+	if !strings.Contains(out.String(), "completed -> in_progress") || !strings.Contains(out.String(), "Run 42 completed with 'success'") {
+		t.Fatalf("out=%q", out.String())
+	}
+}
+
+func TestGHPRChecksWatchConfirmsRerunSameHead(t *testing.T) {
+	freshCheckReads := 0
+	relayTestServer(t, func(body map[string]any) any {
+		switch path := body["path"].(string); {
+		case path == "/repos/openclaw/octopool/pulls/7":
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case strings.HasSuffix(path, "/check-runs"):
+			if h, _ := body["headers"].(map[string]any); h["cache-control"] == "max-age=0" {
+				freshCheckReads++
+				if freshCheckReads == 1 {
+					// Rerun in flight: same head SHA, cached payload obsolete.
+					return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "in_progress"}}}
+				}
+			}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+		case strings.HasSuffix(path, "/status"):
+			return map[string]any{"statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path = %v", path)
+			return nil
+		}
+	})
+	recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if freshCheckReads != 2 {
+		t.Fatalf("fresh check reads = %d, want rerun detected then confirmed", freshCheckReads)
 	}
 }
 

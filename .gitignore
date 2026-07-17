@@ -5,3 +5,4 @@ worker-configuration.d.ts
 dist/
 bin/
 *.test
+/octopool

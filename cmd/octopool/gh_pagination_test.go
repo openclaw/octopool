@@ -299,6 +299,13 @@ func TestRunGHAPIPaginationSeedsCallerStartPage(t *testing.T) {
 	}
 }
 
+func TestParseGHAPISlurpRejectsJQ(t *testing.T) {
+	_, _, err := parseGHAPIArgs([]string{"repos/openclaw/octopool/issues", "--paginate", "--slurp", "--jq", ".x"})
+	if err == nil || !strings.Contains(err.Error(), "not supported with") {
+		t.Fatalf("err = %v, want real gh's slurp/jq rejection", err)
+	}
+}
+
 func TestParseGHAPISlurpRequiresPaginate(t *testing.T) {
 	_, _, err := parseGHAPIArgs([]string{"repos/openclaw/octopool/issues", "--slurp"})
 	if err == nil || err.Error() != "--slurp requires --paginate" {
