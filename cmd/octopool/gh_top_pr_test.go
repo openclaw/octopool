@@ -113,12 +113,12 @@ func TestStatusItemsMapLegacyContexts(t *testing.T) {
 		BodyEncoding: "json",
 		Body:         []byte(`{"statuses":[{"context":"ci/external","state":"success","target_url":"https://example.test","created_at":"2026-05-27T00:00:00Z","updated_at":"2026-05-27T00:01:00Z"}]}`),
 	}
-	items, err := statusItems(envelope)
+	items, total, err := statusItems(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("items = %#v", items)
+	if len(items) != 1 || total != 1 {
+		t.Fatalf("items = %#v total=%d", items, total)
 	}
 	item := items[0].(map[string]any)
 	if item["name"] != "ci/external" || item["conclusion"] != "success" || item["details_url"] != "https://example.test" {

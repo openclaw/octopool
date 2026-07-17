@@ -127,17 +127,32 @@ func prCheckItemsForSHAWithHeaders(
 	if len(checkRuns) < totalCheckRuns {
 		return nil, localFallbackError{Reason: "pagination_exhausted"}
 	}
-	statusEnvelope, err := client.do(ctx, ghAPIRequest{
-		method:  "GET",
-		path:    repoPath(repo, "commits", sha, "status"),
-		headers: headers,
-	})
-	if err != nil {
-		return nil, err
+	statuses := []any{}
+	totalStatuses := 0
+	for page := 1; page <= maxRelayPages; page++ {
+		statusEnvelope, err := client.do(ctx, ghAPIRequest{
+			method:  "GET",
+			path:    repoPath(repo, "commits", sha, "status"),
+			query:   map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
+			headers: headers,
+		})
+		if err != nil {
+			return nil, err
+		}
+		items, total, err := statusItems(statusEnvelope)
+		if err != nil {
+			return nil, err
+		}
+		if page == 1 {
+			totalStatuses = total
+		}
+		statuses = append(statuses, items...)
+		if len(statuses) >= totalStatuses || len(items) < relayPageSize {
+			break
+		}
 	}
-	statuses, err := statusItems(statusEnvelope)
-	if err != nil {
-		return nil, err
+	if len(statuses) < totalStatuses {
+		return nil, localFallbackError{Reason: "pagination_exhausted"}
 	}
 	return ghCheckItems(append(checkRuns, statuses...)), nil
 }
@@ -162,18 +177,22 @@ func checkRunItems(envelope relayEnvelope) ([]any, int, error) {
 	return items, total, nil
 }
 
-func statusItems(envelope relayEnvelope) ([]any, error) {
+func statusItems(envelope relayEnvelope) ([]any, int, error) {
 	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var response map[string]any
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	rawItems, ok := response["statuses"].([]any)
 	if !ok {
-		return nil, errors.New("status response did not include statuses")
+		return nil, 0, errors.New("status response did not include statuses")
+	}
+	total := len(rawItems)
+	if value, ok := response["total_count"].(float64); ok {
+		total = int(value)
 	}
 	items := make([]any, 0, len(rawItems))
 	for _, raw := range rawItems {
@@ -197,7 +216,7 @@ func statusItems(envelope relayEnvelope) ([]any, error) {
 		}
 		items = append(items, item)
 	}
-	return items, nil
+	return items, total, nil
 }
 
 func ghCheckItems(items []any) []any {
@@ -274,8 +293,11 @@ func checkExitCode(items []any) error {
 		bucket, _ := item["bucket"].(string)
 		state, _ := item["state"].(string)
 		switch strings.ToLower(bucket) {
-		case "fail", "cancel":
+		case "fail":
 			exitCode = 1
+		case "cancel":
+			// real gh exits by Failed then Pending counts only; cancelled
+			// checks are terminal and do not fail the command.
 		case "pending":
 			if exitCode == 0 {
 				exitCode = 8

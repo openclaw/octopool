@@ -240,10 +240,26 @@ func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
 	var out bytes.Buffer
 	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--fail-fast"}, &out)
 	// Cancelled is terminal but not failed: the watch must keep polling the
-	// pending check instead of fail-fasting, then exit 1 from the cancel bucket.
-	assertExitCode(t, result.err, 1)
+	// pending check instead of fail-fasting, and cancelled-only results exit 0
+	// exactly like real gh (Failed then Pending counts decide the exit code).
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
 	if len(*sleeps) == 0 || !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 0 fail, 1 cancel") {
 		t.Fatalf("sleeps=%v out=%q", *sleeps, out.String())
+	}
+}
+
+func TestGHWatchShapeLastWatchValueWins(t *testing.T) {
+	if isGHWatchShape([]string{"pr", "checks", "7", "--watch", "--watch=false"}) {
+		t.Fatal("--watch --watch=false must not count as a watch shape")
+	}
+	if !isGHWatchShape([]string{"pr", "checks", "7", "--watch=false", "--watch"}) {
+		t.Fatal("--watch=false --watch must count as a watch shape")
+	}
+	floored := floorGHWatchDelegateArgs([]string{"run", "watch", "42", "--", "-i1"})
+	if !reflect.DeepEqual(floored, []string{"run", "watch", "42", "--interval", "30", "--", "-i1"}) {
+		t.Fatalf("post-terminator tokens must stay untouched and floor injected before --, got %v", floored)
 	}
 }
 

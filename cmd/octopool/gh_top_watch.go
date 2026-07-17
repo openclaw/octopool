@@ -521,12 +521,22 @@ func watchError(err error, progressPrinted bool) error {
 }
 
 func hasWatchFlag(args []string) bool {
+	// pflag applies last-value-wins to repeated boolean flags; mirror that so
+	// `--watch --watch=false` is not treated as a watch shape.
+	watch := false
 	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
 		if watchFlagTrue(arg) {
-			return true
+			watch = true
+		} else if value, ok := strings.CutPrefix(arg, "--watch="); ok {
+			if parsed, err := strconv.ParseBool(value); err == nil && !parsed {
+				watch = false
+			}
 		}
 	}
-	return false
+	return watch
 }
 
 // watchFlagTrue mirrors pflag bool parsing: bare --watch or any ParseBool
@@ -588,6 +598,10 @@ func floorGHWatchDelegateArgs(args []string) []string {
 	found := false
 	for index := 2; index < len(out); index++ {
 		arg := out[index]
+		// Everything after the terminator is positional, never an interval flag.
+		if arg == "--" {
+			break
+		}
 		if value := attachedWatchInterval(arg); value != "" {
 			found = true
 			out[index] = "-i" + floorWatchIntervalValue(value)
