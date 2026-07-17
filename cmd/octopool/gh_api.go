@@ -13,6 +13,8 @@ type ghAPIRequest struct {
 	headers   map[string]string
 	routeHint map[string]string
 	jq        string
+	paginate  bool
+	slurp     bool
 }
 
 func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
@@ -49,7 +51,11 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 				}
 				request.headers[header] = strings.TrimSpace(value)
 			}
-		case "-f", "-F", "--field", "--raw-field", "--paginate", "--slurp":
+		case "--paginate":
+			request.paginate = true
+		case "--slurp":
+			request.slurp = true
+		case "-f", "-F", "--field", "--raw-field":
 			return request, true, nil
 		default:
 			if strings.HasPrefix(arg, "--method=") {
@@ -90,6 +96,9 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 				}
 			}
 		}
+	}
+	if request.slurp && !request.paginate {
+		return request, false, errors.New("--slurp requires --paginate")
 	}
 	if request.path == "" {
 		return request, false, errors.New("gh api path is required")

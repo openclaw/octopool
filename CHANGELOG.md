@@ -2,6 +2,10 @@
 
 ## 0.4.7 - Unreleased
 
+### Changes
+
+- Keep bounded `gh api --paginate` and `--slurp` GET reads on the shared relay cache, falling back to real `gh` after 10 pages.
+
 ### Fixes
 
 - Make every Octopool subcommand help flag exit successfully with command-specific usage and flag details instead of reporting `flag: help requested`.

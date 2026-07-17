@@ -10,7 +10,7 @@ import (
 
 func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
-		fmt.Fprintln(stdout, "usage: octopool gh api <GET path> [--jq expr]")
+		fmt.Fprintln(stdout, "usage: octopool gh api <GET path> [--paginate] [--slurp] [--jq expr]")
 		fmt.Fprintln(stdout, "       octopool gh pr|issue|run|repo|release|workflow|label|gist|search ...")
 		return nil
 	}
@@ -40,12 +40,22 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 	if err != nil {
 		return err
 	}
-	if fallback || !safeRelayRequest(request) || request.jq != "" && !jqAvailable() {
+	if request.paginate {
+		request = prepareGHAPIPagination(request)
+	}
+	if fallback || request.method != "GET" || !safeRelayRequest(request) || request.jq != "" && !jqAvailable() {
 		return execRealGH(ctx, args, stdout, stderr)
 	}
 	client, err := newGHRelayClient()
 	if err != nil {
 		if shouldRunRealGH(err) {
+			return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
+		}
+		return err
+	}
+	if request.paginate {
+		err = relayPaginatedGHAPI(ctx, client, request, stdout)
+		if err != nil && shouldRunRealGH(err) {
 			return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
 		}
 		return err
