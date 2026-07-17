@@ -201,7 +201,10 @@ func writeGHAPIPages(
 }
 
 // mergedArrayPages writes one combined JSON array when every page is a
-// top-level array, matching real gh's --paginate output for REST lists.
+// top-level array. This matches real gh, verified empirically: `gh api
+// 'repos/o/r/labels?per_page=4' --paginate` over 3 pages emits ONE array
+// (`jq -s length` == 1) — gh coalesces REST array pages unless --slurp asks
+// for an array of pages.
 func mergedArrayPages(bodies [][]byte, output *bytes.Buffer) bool {
 	interiors := make([][]byte, 0, len(bodies))
 	for _, body := range bodies {
