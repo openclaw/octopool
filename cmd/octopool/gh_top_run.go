@@ -11,6 +11,9 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 	if len(args) == 0 {
 		return ghDelegated()
 	}
+	if args[0] == "watch" {
+		return handleGHRunWatch(ctx, args[1:], stdout)
+	}
 	opts, early, ok := prepareGHTopOptions(args[1:])
 	if !ok {
 		return early

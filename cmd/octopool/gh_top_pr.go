@@ -31,6 +31,9 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	if len(args) == 0 {
 		return ghDelegated()
 	}
+	if args[0] == "checks" && hasWatchFlag(args[1:]) {
+		return handleGHPRChecksWatch(ctx, args[1:], stdout)
+	}
 	opts, early, ok := prepareGHTopOptions(args[1:])
 	if !ok {
 		return early

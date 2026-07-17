@@ -27,11 +27,11 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 			return nil
 		case ghFail:
 			if shouldRunRealGH(result.err) {
-				return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, result.err)
+				return execRealGHAfterLocalFallback(ctx, floorGHWatchDelegateArgs(args), stdout, stderr, result.err)
 			}
 			return result.err
 		case ghDelegate:
-			return execRealGH(ctx, args, stdout, stderr)
+			return execRealGH(ctx, floorGHWatchDelegateArgs(args), stdout, stderr)
 		default:
 			return errors.New("invalid gh dispatch outcome")
 		}
