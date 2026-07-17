@@ -232,6 +232,28 @@ func TestRunGHAPIPaginationExhaustionFallsBackToRealGH(t *testing.T) {
 	}
 }
 
+func TestRunGHAPIJQAppliesPerPage(t *testing.T) {
+	if !jqAvailable() {
+		t.Skip("jq is required")
+	}
+	relayTestServer(t, func(body map[string]any) any {
+		if body["query"].(map[string]any)["page"] == "1" {
+			return []map[string]any{{"id": 1}, {"id": 2}}
+		}
+		return []map[string]any{{"id": 3}}
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues?per_page=2", "--paginate", "--jq", "length",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "2\n1\n" {
+		t.Fatalf("jq must run once per page like real gh, got %q", out.String())
+	}
+}
+
 func TestRunGHAPIPaginationSeedsCallerStartPage(t *testing.T) {
 	requests := []string{}
 	relayTestServer(t, func(body map[string]any) any {

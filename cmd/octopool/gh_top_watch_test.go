@@ -286,11 +286,42 @@ func TestGHPRChecksWatchEqualsTrueSpelling(t *testing.T) {
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("--watch=true must use the native watch path: action=%v err=%v", result.action, result.err)
 	}
-	if !isGHWatchShape([]string{"pr", "checks", "7", "--watch=true"}) {
-		t.Fatal("--watch=true must count as a watch shape for interval flooring")
+	for _, spelling := range []string{"--watch=true", "--watch=1", "--watch=t", "--watch=TRUE"} {
+		if !isGHWatchShape([]string{"pr", "checks", "7", spelling}) {
+			t.Fatalf("%s must count as a watch shape for interval flooring", spelling)
+		}
 	}
-	if isGHWatchShape([]string{"pr", "checks", "7", "--watch=false"}) {
-		t.Fatal("--watch=false must not count as a watch shape")
+	for _, spelling := range []string{"--watch=false", "--watch=0", "--watch=F"} {
+		if isGHWatchShape([]string{"pr", "checks", "7", spelling}) {
+			t.Fatalf("%s must not count as a watch shape", spelling)
+		}
+	}
+}
+
+func TestGHWatchParsersHandleAttachedInterval(t *testing.T) {
+	opts, ok := parseGHRunWatchOptions([]string{"42", "-i45"})
+	if !ok || opts.interval != 45*time.Second {
+		t.Fatalf("run watch -i45: ok=%v interval=%v", ok, opts.interval)
+	}
+	checkOpts, ok := parseGHPRChecksWatchOptions([]string{"7", "--watch", "-i5"})
+	if !ok || checkOpts.interval != watchMinInterval {
+		t.Fatalf("checks watch -i5 must floor: ok=%v interval=%v", ok, checkOpts.interval)
+	}
+	floored := floorGHWatchDelegateArgs([]string{"run", "watch", "42", "--json", "x", "-i5"})
+	if !reflect.DeepEqual(floored, []string{"run", "watch", "42", "--json", "x", "-i30"}) {
+		t.Fatalf("delegated -i5 must floor in place, got %v", floored)
+	}
+}
+
+func TestGHPRChecksWatchJQWithoutJSONDelegates(t *testing.T) {
+	if _, ok := parseGHPRChecksWatchOptions([]string{"7", "--watch", "--jq", ".x"}); ok {
+		t.Fatal("--jq without --json must delegate to real gh")
+	}
+}
+
+func TestWatchSafeTextStripsControlSequences(t *testing.T) {
+	if got := watchSafeText("ok\x1b[31mred\x9bx\x00\ttab"); got != "ok[31mredxtab" {
+		t.Fatalf("got %q", got)
 	}
 }
 

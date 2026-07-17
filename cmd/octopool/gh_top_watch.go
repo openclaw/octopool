@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -104,6 +105,8 @@ func parseGHRunWatchOptions(args []string) (ghRunWatchOptions, bool) {
 		case arg == "--exit-status":
 			opts.exitStatus = true
 		case arg == "--compact":
+			// Accepted without effect: the shim's terse transition/summary output
+			// is already compact by design and does not render real gh's live table.
 		case watchFlagValue(args, &index, arg, "-R", &opts.repo):
 		case watchFlagValue(args, &index, arg, "--repo", &opts.repo):
 		case isWatchValueFlag(arg, "-i"):
@@ -114,6 +117,10 @@ func parseGHRunWatchOptions(args []string) (ghRunWatchOptions, bool) {
 		case isWatchValueFlag(arg, "--interval"):
 			value, valueOK := takeWatchFlagValue(args, &index, arg, "--interval")
 			if !valueOK || !setWatchInterval(value, &opts.interval) {
+				return opts, false
+			}
+		case attachedWatchInterval(arg) != "":
+			if !setWatchInterval(attachedWatchInterval(arg), &opts.interval) {
 				return opts, false
 			}
 		case strings.HasPrefix(arg, "-"):
@@ -127,6 +134,15 @@ func parseGHRunWatchOptions(args []string) (ghRunWatchOptions, bool) {
 	}
 	opts.id = positionals[0]
 	return opts, true
+}
+
+// attachedWatchInterval handles pflag's attached shorthand form -i45.
+func attachedWatchInterval(arg string) string {
+	value, ok := strings.CutPrefix(arg, "-i")
+	if !ok || value == "" || !isDigits(value) {
+		return ""
+	}
+	return value
 }
 
 func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions) error {
@@ -147,7 +163,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 		if err != nil {
 			return watchError(err, progressPrinted)
 		}
-		status := firstString(run, "status")
+		status := watchSafeText(firstString(run, "status"))
 		if status == "" {
 			return watchError(errors.New("workflow run response did not include status"), progressPrinted)
 		}
@@ -170,7 +186,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			if err := printWatchRunJobs(stdout, jobs); err != nil {
 				return err
 			}
-			conclusion := firstString(run, "conclusion")
+			conclusion := watchSafeText(firstString(run, "conclusion"))
 			if _, err := fmt.Fprintf(stdout, "Run %s completed with '%s'\n", opts.id, conclusion); err != nil {
 				return err
 			}
@@ -245,8 +261,8 @@ func printWatchRunJobs(stdout io.Writer, jobs []any) error {
 		if !ok {
 			continue
 		}
-		conclusion := firstString(job, "conclusion")
-		if _, err := fmt.Fprintf(stdout, "job %s: %s\n", firstString(job, "name"), conclusion); err != nil {
+		conclusion := watchSafeText(firstString(job, "conclusion"))
+		if _, err := fmt.Fprintf(stdout, "job %s: %s\n", watchSafeText(firstString(job, "name")), conclusion); err != nil {
 			return err
 		}
 		if !strings.EqualFold(conclusion, "failure") {
@@ -258,7 +274,7 @@ func printWatchRunJobs(stdout io.Writer, jobs []any) error {
 			if !ok || !strings.EqualFold(firstString(step, "conclusion"), "failure") {
 				continue
 			}
-			if _, err := fmt.Fprintf(stdout, "  step %s: %s\n", firstString(step, "name"), firstString(step, "conclusion")); err != nil {
+			if _, err := fmt.Fprintf(stdout, "  step %s: %s\n", watchSafeText(firstString(step, "name")), watchSafeText(firstString(step, "conclusion"))); err != nil {
 				return err
 			}
 		}
@@ -286,8 +302,10 @@ func parseGHPRChecksWatchOptions(args []string) (ghPRChecksWatchOptions, bool) {
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		switch {
-		case arg == "--watch" || arg == "--watch=true":
+		case watchFlagTrue(arg):
 			watch = true
+		case strings.HasPrefix(arg, "--watch="):
+			return opts, false
 		case arg == "--fail-fast":
 			opts.failFast = true
 		case watchFlagValue(args, &index, arg, "-R", &opts.repo):
@@ -300,6 +318,10 @@ func parseGHPRChecksWatchOptions(args []string) (ghPRChecksWatchOptions, bool) {
 		case isWatchValueFlag(arg, "--interval"):
 			value, valueOK := takeWatchFlagValue(args, &index, arg, "--interval")
 			if !valueOK || !setWatchInterval(value, &opts.interval) {
+				return opts, false
+			}
+		case attachedWatchInterval(arg) != "":
+			if !setWatchInterval(attachedWatchInterval(arg), &opts.interval) {
 				return opts, false
 			}
 		case isWatchValueFlag(arg, "--json"):
@@ -330,6 +352,10 @@ func parseGHPRChecksWatchOptions(args []string) (ghPRChecksWatchOptions, bool) {
 		}
 	}
 	if !watch || len(positionals) != 1 || !isDigits(positionals[0]) {
+		return opts, false
+	}
+	// real gh rejects --jq without --json; delegate so it reports that itself.
+	if opts.jq != "" && len(opts.json) == 0 {
 		return opts, false
 	}
 	opts.number = positionals[0]
@@ -425,11 +451,24 @@ func printPRChecksWatchFinal(ctx context.Context, stdout io.Writer, items []any,
 		if !ok {
 			continue
 		}
-		if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", firstString(item, "name"), firstString(item, "bucket"), firstString(item, "state"), firstString(item, "link")); err != nil {
+		if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", watchSafeText(firstString(item, "name")), firstString(item, "bucket"), watchSafeText(firstString(item, "state")), watchSafeText(firstString(item, "link"))); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// watchSafeText strips ASCII/C1 control characters and invalid UTF-8 from
+// API-controlled strings so job/check names cannot inject terminal escape
+// sequences. Printable CSI remainders like "[31m" are harmless once the
+// escape introducer is gone.
+func watchSafeText(raw string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError {
+			return -1
+		}
+		return r
+	}, raw)
 }
 
 func watchError(err error, progressPrinted bool) error {
@@ -441,12 +480,25 @@ func watchError(err error, progressPrinted bool) error {
 
 func hasWatchFlag(args []string) bool {
 	for _, arg := range args {
-		// Cobra bools also accept the explicit form; --watch=false stays unwatched.
-		if arg == "--watch" || arg == "--watch=true" {
+		if watchFlagTrue(arg) {
 			return true
 		}
 	}
 	return false
+}
+
+// watchFlagTrue mirrors pflag bool parsing: bare --watch or any ParseBool
+// true spelling counts; false spellings stay unwatched.
+func watchFlagTrue(arg string) bool {
+	if arg == "--watch" {
+		return true
+	}
+	value, ok := strings.CutPrefix(arg, "--watch=")
+	if !ok {
+		return false
+	}
+	parsed, err := strconv.ParseBool(value)
+	return err == nil && parsed
 }
 
 func watchFlagValue(args []string, index *int, arg string, name string, target *string) bool {
@@ -494,6 +546,11 @@ func floorGHWatchDelegateArgs(args []string) []string {
 	found := false
 	for index := 2; index < len(out); index++ {
 		arg := out[index]
+		if value := attachedWatchInterval(arg); value != "" {
+			found = true
+			out[index] = "-i" + floorWatchIntervalValue(value)
+			continue
+		}
 		for _, name := range []string{"-i", "--interval"} {
 			if arg == name {
 				found = true

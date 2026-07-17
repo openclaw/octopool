@@ -160,6 +160,16 @@ func writeGHAPIPages(
 		}
 		bodies = append(bodies, body)
 	}
+	// real gh evaluates --jq once per response page; only --slurp collapses
+	// the pages into a single jq input.
+	if jq != "" && !slurp {
+		for _, body := range bodies {
+			if err := writeBytes(ctx, stdout, body, jq); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	var output bytes.Buffer
 	switch {
 	case slurp:
