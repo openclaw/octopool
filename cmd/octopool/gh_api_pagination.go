@@ -73,11 +73,12 @@ func relayPaginatedGHAPI(
 				continue
 			}
 			// GitHub may canonicalize next links (e.g. /repositories/{id}/...),
-			// which the relay's route allowlist cannot follow. Existence of a
-			// next page is still authoritative, so step the page number on the
-			// original relay path instead of abandoning the shared cache.
-			if page, ok := positiveQueryInt(request.query["page"]); ok {
-				request.query["page"] = strconv.Itoa(page + 1)
+			// which the relay's route allowlist cannot follow. When the link
+			// itself paginates numerically, adopt its page number on the
+			// original relay path; cursor-style links cannot be replayed and
+			// must go to real gh.
+			if nextPage, ok := relayLinkNumericPage(nextTarget); ok {
+				request.query["page"] = strconv.Itoa(nextPage)
 				continue
 			}
 			return localFallbackError{Reason: "pagination_link_unfollowable"}
@@ -228,6 +229,22 @@ func positiveQueryInt(value any) (int, bool) {
 	}
 	parsed, err := strconv.Atoi(raw)
 	return parsed, err == nil && parsed > 0
+}
+
+func relayLinkNumericPage(target string) (int, bool) {
+	nextURL, err := url.Parse(target)
+	if err != nil {
+		return 0, false
+	}
+	values, err := url.ParseQuery(nextURL.RawQuery)
+	if err != nil {
+		return 0, false
+	}
+	pages, ok := values["page"]
+	if !ok || len(pages) != 1 {
+		return 0, false
+	}
+	return positiveQueryInt(pages[0])
 }
 
 func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (hasNext bool, empty bool, inferable bool) {
