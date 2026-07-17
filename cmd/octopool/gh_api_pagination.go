@@ -68,12 +68,19 @@ func relayPaginatedGHAPI(
 			if pageIndex == maxRelayPages-1 {
 				return localFallbackError{Reason: "pagination_exhausted"}
 			}
-			nextRequest, fallback := relayNextPageRequest(request, nextTarget)
-			if fallback != nil {
-				return *fallback
+			if nextRequest, ok := relayNextPageRequest(request, nextTarget); ok {
+				request = nextRequest
+				continue
 			}
-			request = nextRequest
-			continue
+			// GitHub may canonicalize next links (e.g. /repositories/{id}/...),
+			// which the relay's route allowlist cannot follow. Existence of a
+			// next page is still authoritative, so step the page number on the
+			// original relay path instead of abandoning the shared cache.
+			if page, ok := positiveQueryInt(request.query["page"]); ok {
+				request.query["page"] = strconv.Itoa(page + 1)
+				continue
+			}
+			return localFallbackError{Reason: "pagination_link_unfollowable"}
 		}
 
 		perPage, validPerPage = positiveQueryInt(request.query["per_page"])
@@ -187,17 +194,14 @@ func splitRelayLinkHeader(header string) []string {
 	return entries
 }
 
-func relayNextPageRequest(request ghAPIRequest, target string) (ghAPIRequest, *localFallbackError) {
+func relayNextPageRequest(request ghAPIRequest, target string) (ghAPIRequest, bool) {
 	nextURL, err := url.Parse(target)
-	if err != nil || nextURL.Path == "" {
-		return request, &localFallbackError{Reason: "pagination_link_invalid"}
-	}
-	if nextURL.Path != request.path {
-		return request, &localFallbackError{Reason: "pagination_link_path_mismatch"}
+	if err != nil || nextURL.Path == "" || nextURL.Path != request.path {
+		return request, false
 	}
 	values, err := url.ParseQuery(nextURL.RawQuery)
 	if err != nil {
-		return request, &localFallbackError{Reason: "pagination_link_invalid"}
+		return request, false
 	}
 	query := make(map[string]any, len(values))
 	for key, items := range values {
@@ -212,9 +216,9 @@ func relayNextPageRequest(request ghAPIRequest, target string) (ghAPIRequest, *l
 	nextRequest := request
 	nextRequest.query = query
 	if !safeRelayRequest(nextRequest) {
-		return request, &localFallbackError{Reason: "pagination_link_unsafe"}
+		return request, false
 	}
-	return nextRequest, nil
+	return nextRequest, true
 }
 
 func positiveQueryInt(value any) (int, bool) {

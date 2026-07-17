@@ -197,37 +197,81 @@ func TestRunGHAPILinkAdoptsCursorQuery(t *testing.T) {
 	}
 }
 
-func TestRunGHAPILinkCrossPathFallsBack(t *testing.T) {
-	requests := 0
-	relayTestServer(t, func(map[string]any) any {
-		requests++
-		return relayTestResponse{
-			Body:    []int{1},
-			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/pulls?page=2>; rel="next"`},
+func TestRunGHAPICanonicalizedLinkStepsPageOnRelay(t *testing.T) {
+	requests := []string{}
+	relayTestServer(t, func(body map[string]any) any {
+		page := body["query"].(map[string]any)["page"].(string)
+		requests = append(requests, page)
+		if page == "1" {
+			// GitHub canonicalizes the repo path to /repositories/{id}/...;
+			// the relay allowlist cannot follow it, but next existence is
+			// still authoritative.
+			return relayTestResponse{
+				Body:    []int{1},
+				Headers: map[string]string{"link": `<https://api.github.com/repositories/1300192/issues?page=2>; rel="next"`},
+			}
 		}
+		return []int{2}
 	})
-	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
 
 	var out bytes.Buffer
-	var stderr bytes.Buffer
 	if err := runGH(t.Context(), []string{
 		"api", "repos/openclaw/octopool/issues", "--paginate",
-	}, &out, &stderr); err != nil {
+	}, &out, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if requests != 1 || !strings.HasPrefix(out.String(), "real-gh:") ||
-		!strings.Contains(stderr.String(), "pagination_link_path_mismatch") {
-		t.Fatalf("requests=%d output=%q stderr=%q", requests, out.String(), stderr.String())
+	var merged []int
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || requests[1] != "2" || len(merged) != 2 {
+		t.Fatalf("requests=%v merged=%v; canonicalized links must step pages on the relay", requests, merged)
 	}
 }
 
-func TestRunGHAPIUnsafeLinkQueryFallsBack(t *testing.T) {
+func TestRunGHAPIUnsafeLinkQueryStepsPageOnRelay(t *testing.T) {
 	requests := 0
 	relayTestServer(t, func(map[string]any) any {
 		requests++
+		if requests == 1 {
+			return relayTestResponse{
+				Body:    []int{1},
+				Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?secret=redacted&page=2>; rel="next"`},
+			}
+		}
+		return []int{2}
+	})
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/issues", "--paginate",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var merged []int
+	if err := json.Unmarshal(out.Bytes(), &merged); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(merged) != 2 {
+		t.Fatalf("requests=%d merged=%v; unsafe link queries must degrade to page stepping", requests, merged)
+	}
+}
+
+func TestRunGHAPIUnfollowableLinkAfterCursorFallsBack(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		if requests == 1 {
+			return relayTestResponse{
+				Body:    []int{1},
+				Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?after=abc>; rel="next"`},
+			}
+		}
+		// Cursor adoption dropped the numeric page; a canonicalized next
+		// link now leaves no way to continue on the relay.
 		return relayTestResponse{
-			Body:    []int{1},
-			Headers: map[string]string{"link": `<https://api.github.com/repos/openclaw/octopool/issues?secret=redacted>; rel="next"`},
+			Body:    []int{2},
+			Headers: map[string]string{"link": `<https://api.github.com/repositories/1300192/issues?after=def>; rel="next"`},
 		}
 	})
 	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
@@ -239,8 +283,8 @@ func TestRunGHAPIUnsafeLinkQueryFallsBack(t *testing.T) {
 	}, &out, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	if requests != 1 || !strings.HasPrefix(out.String(), "real-gh:") ||
-		!strings.Contains(stderr.String(), "pagination_link_unsafe") {
+	if requests != 2 || !strings.HasPrefix(out.String(), "real-gh:") ||
+		!strings.Contains(stderr.String(), "pagination_link_unfollowable") {
 		t.Fatalf("requests=%d output=%q stderr=%q", requests, out.String(), stderr.String())
 	}
 }
