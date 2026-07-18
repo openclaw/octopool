@@ -527,7 +527,7 @@ func TestGHPRChecksWatchJQWithoutJSONDelegates(t *testing.T) {
 }
 
 func TestWatchSafeTextStripsControlSequences(t *testing.T) {
-	if got := watchSafeText("ok\x1b[31mred\x9bx\x00\ttab"); got != "ok[31mredxtab" {
+	if got := watchSafeText("ok\x1b[31mred\x9bx\x00\ttab"); got != "ok[31mred\uFFFDxtab" {
 		t.Fatalf("got %q", got)
 	}
 }

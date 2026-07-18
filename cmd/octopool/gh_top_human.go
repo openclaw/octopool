@@ -13,6 +13,11 @@ import (
 )
 
 var stdoutIsTTY = func() bool {
+	// GH_FORCE_TTY explicitly requests terminal formatting; honor it by
+	// delegating like any interactive session.
+	if os.Getenv("GH_FORCE_TTY") != "" {
+		return true
+	}
 	info, err := os.Stdout.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
@@ -205,8 +210,10 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 		return err
 	}
 	// Workflow-file problems fail with zero jobs; match real gh's diagnostic
-	// instead of an unexplained empty JOBS section.
-	if len(jobs) == 0 && runGlyph(run) == "X" {
+	// instead of an unexplained empty JOBS section. Cancelled-while-queued
+	// runs also have zero jobs and must not get this label.
+	conclusion := strings.ToLower(firstString(run, "conclusion"))
+	if len(jobs) == 0 && (conclusion == "failure" || conclusion == "startup_failure") {
 		_, err := fmt.Fprintf(stdout, "\nThis run likely failed because of a workflow file issue.\n\nView this run on GitHub: %s\n", watchSafeText(firstString(run, "html_url")))
 		return err
 	}

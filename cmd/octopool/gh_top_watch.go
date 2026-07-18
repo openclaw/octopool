@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 const (
@@ -528,13 +527,14 @@ func printPRChecksWatchFinal(stdout io.Writer, items []any) error {
 	return nil
 }
 
-// watchSafeText strips ASCII/C1 control characters and invalid UTF-8 from
-// API-controlled strings so job/check names cannot inject terminal escape
-// sequences. Printable CSI remainders like "[31m" are harmless once the
-// escape introducer is gone.
+// watchSafeText strips ASCII/C1 control characters from API-controlled
+// strings so job/check names cannot inject terminal escape sequences.
+// Printable CSI remainders like "[31m" are harmless once the escape
+// introducer is gone. U+FFFD passes through: post-JSON strings are valid
+// UTF-8, so stripping it would only eat legitimate replacement characters.
 func watchSafeText(raw string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return -1
 		}
 		return r
@@ -545,7 +545,7 @@ func watchSafeText(raw string) string {
 // could alter terminal state or encode invalid text.
 func bodySafeText(raw string) string {
 	return strings.Map(func(r rune) rune {
-		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError {
+		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return -1
 		}
 		return r
