@@ -452,9 +452,11 @@ func humanDuration(startRaw string, endRaw string) string {
 		return ""
 	}
 	duration := end.Sub(start).Truncate(time.Second)
+	// Divide as time.Duration before narrowing: int(time.Minute) overflows
+	// 32-bit ints.
 	hours := int(duration / time.Hour)
-	minutes := int(duration%time.Hour) / int(time.Minute)
-	seconds := int(duration%time.Minute) / int(time.Second)
+	minutes := int((duration % time.Hour) / time.Minute)
+	seconds := int((duration % time.Minute) / time.Second)
 	if hours > 0 {
 		return fmt.Sprintf("%dh%dm%ds", hours, minutes, seconds)
 	}
