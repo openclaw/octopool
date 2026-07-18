@@ -39,9 +39,8 @@ import {
 import {
   deleteTerminalLogCache,
   readTerminalLogCache,
-  terminalLogCacheKey,
+  terminalLogCacheProof,
   terminalLogNeedsRevalidation,
-  terminalLogRunCompleted,
   type CachedTerminalLog,
   writeTerminalLogCache,
 } from "./terminal-log-cache";
@@ -191,15 +190,15 @@ async function prepareRelay(
 
 async function executeRelay(state: ActiveRelay): Promise<Response> {
   if (state.route.logs && !hasConditionalRequestHeaders(state.request)) {
-    const completed = await terminalLogRunCompleted(
+    const terminalProof = await terminalLogCacheProof(
       state.env,
       state.ctx,
       state.request,
       state.route,
       state.policy,
     );
-    if (completed) {
-      const key = terminalLogCacheKey(state.request);
+    if (terminalProof !== undefined) {
+      const key = terminalProof.key;
       state.terminalLogCacheKey = key;
       state.cacheStatus = "miss";
       state.cacheable = true;

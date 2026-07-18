@@ -1,9 +1,14 @@
 import { env } from "cloudflare:workers";
 import { createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { githubCacheKey, readGitHubCache, writeGitHubCache } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
-import { terminalLogCacheKey, terminalLogRunCompleted } from "../../src/terminal-log-cache";
+import {
+  terminalLogCacheKey,
+  terminalLogCacheProof,
+  terminalLogRunCompleted,
+} from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
@@ -21,7 +26,7 @@ const RUNS_PATH = "/repos/openclaw/octopool/actions/runs";
 describe("terminal Actions log cache", () => {
   beforeEach(seedPool);
 
-  it("caches a completed-run log and serves the next request without a backend fetch", async () => {
+  it("caches a fresh completed job and reuses its log after another fresh proof", async () => {
     const upstream = terminalLogUpstream("completed");
     vi.stubGlobal("fetch", upstream);
 
@@ -32,8 +37,6 @@ describe("terminal Actions log cache", () => {
       body_encoding: "text",
       relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
-    const callsAfterFill = upstream.mock.calls.length;
-
     const second = await relay(LOG_PATH);
     expect(await second.json<RelayEnvelope>()).toMatchObject({
       status: 200,
@@ -41,7 +44,7 @@ describe("terminal Actions log cache", () => {
       body_encoding: "text",
       relay: { cache: "hit", cacheable: true, route_kind: "job_logs" },
     });
-    expect(upstream).toHaveBeenCalledTimes(callsAfterFill);
+    expect(jobMetadataCalls(upstream)).toBe(2);
     expect(logBackendCalls(upstream)).toBe(1);
     expect(
       await env.DB.prepare(
@@ -53,6 +56,46 @@ describe("terminal Actions log cache", () => {
         { cache_status: "hit", cacheable: 1 },
       ],
     });
+  });
+
+  it("bypasses an active rerun job despite a cached completed run", async () => {
+    const runRequest: RelayRequest = {
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs/99",
+    };
+    const policy = defaultPolicy("openclaw");
+    const runRoute = classifyRoute(runRequest, policy);
+    const runKey = await githubCacheKey(runRequest.pool, runRequest, runRoute);
+    await writeGitHubCache(env, runKey, runRequest, runRoute, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+      body: { id: 99, status: "completed", run_attempt: 1 },
+      body_encoding: "json",
+    });
+    await expect(readGitHubCache(env, runKey)).resolves.toMatchObject({
+      body: { status: "completed" },
+    });
+
+    const upstream = terminalLogUpstream("in_progress");
+    vi.stubGlobal("fetch", upstream);
+    const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+
+    const response = await relay(LOG_PATH);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: "build log\n",
+      relay: { cache: "bypass", route_kind: "job_logs" },
+    });
+    expect(jobMetadataCalls(upstream)).toBe(1);
+    expect(logBackendCalls(upstream)).toBe(1);
+    expect(put).not.toHaveBeenCalled();
+    expect(
+      await env.ACTIONS_LOGS.get(
+        terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH }),
+      ),
+    ).toBeNull();
+    put.mockRestore();
   });
 
   it.each(["if-none-match", "if-modified-since"] as const)(
@@ -111,7 +154,74 @@ describe("terminal Actions log cache", () => {
     ).toEqual({ count: 0 });
   });
 
-  it("bypasses the log cache while the owning run is active", async () => {
+  it.each([
+    ["in_progress", 2, false],
+    ["completed", undefined, false],
+    ["completed", 2, true],
+  ] as const)(
+    "uses fresh whole-run status %s attempt %s instead of cached completion",
+    async (status, runAttempt, cacheable) => {
+      const policy = defaultPolicy("openclaw");
+      const runRequest: RelayRequest = {
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/actions/runs/99",
+      };
+      const runRoute = classifyRoute(runRequest, policy);
+      await writeGitHubCache(
+        env,
+        await githubCacheKey(runRequest.pool, runRequest, runRoute),
+        runRequest,
+        runRoute,
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: { id: 99, status: "completed", run_attempt: 1 },
+          body_encoding: "json",
+        },
+      );
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).pathname === runRequest.path) {
+          return jsonResponse({
+            id: 99,
+            status,
+            ...(runAttempt === undefined ? {} : { run_attempt: runAttempt }),
+          });
+        }
+        return jsonResponse({ message: "unavailable" }, 503);
+      });
+      vi.stubGlobal("fetch", upstream);
+      const logRequest: RelayRequest = {
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/actions/runs/99/logs",
+      };
+      const logRoute = classifyRoute(
+        { pool: "maintainers", method: "GET", path: LOG_PATH },
+        policy,
+      );
+
+      const proof = await terminalLogCacheProof(
+        env,
+        createExecutionContext(),
+        logRequest,
+        logRoute,
+        policy,
+      );
+      expect(proof).toEqual(
+        cacheable ? { key: terminalLogCacheKey(logRequest, runAttempt) } : undefined,
+      );
+      expect(
+        upstream.mock.calls.filter(([input, init]) => {
+          const request = new Request(input, init);
+          return new URL(request.url).pathname === runRequest.path;
+        }),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("bypasses the log cache while the owning job is active", async () => {
     const upstream = terminalLogUpstream("in_progress");
     vi.stubGlobal("fetch", upstream);
 
@@ -140,7 +250,6 @@ describe("terminal Actions log cache", () => {
     const upstream = terminalLogUpstream("completed");
     vi.stubGlobal("fetch", upstream);
     await relay(LOG_PATH);
-    const callsAfterFill = upstream.mock.calls.length;
     const get = vi
       .spyOn(env.ACTIONS_LOGS, "get")
       .mockRejectedValueOnce(new Error("R2 unavailable"));
@@ -151,7 +260,7 @@ describe("terminal Actions log cache", () => {
       body: "build log\n",
       relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
-    expect(upstream.mock.calls.length).toBe(callsAfterFill + 3);
+    expect(jobMetadataCalls(upstream)).toBe(2);
     expect(logBackendCalls(upstream)).toBe(2);
     get.mockRestore();
   });
@@ -227,12 +336,11 @@ describe("terminal Actions log cache", () => {
       body: "build log\n",
       relay: { cache: "hit" },
     });
-    const callsAfterProbe = upstream.mock.calls.length;
     expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
       body: "build log\n",
       relay: { cache: "hit" },
     });
-    expect(upstream).toHaveBeenCalledTimes(callsAfterProbe);
+    expect(jobMetadataCalls(upstream)).toBe(3);
     expect(logBackendCalls(upstream)).toBe(2);
   });
 
@@ -264,7 +372,7 @@ describe("terminal Actions log cache", () => {
     expect(logBackendCalls(upstream)).toBe(2);
   });
 
-  it("runs the public-repository guard before serving an R2 hit", async () => {
+  it("re-establishes fresh public proof before serving an R2 hit", async () => {
     const fill = terminalLogUpstream("completed");
     vi.stubGlobal("fetch", fill);
     await relay(LOG_PATH);
@@ -272,18 +380,24 @@ describe("terminal Actions log cache", () => {
     await deleteEdgeJSON("public-repo-v1", "openclaw/octopool");
     const guarded = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
+      const url = new URL(request.url);
       if (bearer(request) === "test-org-token") {
         return jsonResponse({ private: true });
+      }
+      if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
+        return jsonResponse({ id: 42, run_id: 99, status: "completed" });
       }
       return jsonResponse({ message: "unavailable" }, 503);
     });
     vi.stubGlobal("fetch", guarded);
 
     const response = await relay(LOG_PATH);
-    expect(response.status).toBe(424);
-    expect(await response.json()).toMatchObject({
-      error: { code: "fallback_local", details: { reason: "repo_not_public" } },
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: "build log\n",
+      relay: { cache: "hit" },
     });
+    expect(jobMetadataCalls(guarded)).toBe(1);
     expect(logBackendCalls(guarded)).toBe(0);
   });
 });
@@ -543,6 +657,16 @@ function logBackendCalls(upstream: ReturnType<typeof vi.fn<typeof fetch>>): numb
   return upstream.mock.calls.filter(([input, init]) => {
     const request = new Request(input, init);
     return bearer(request) === "test-primary-token" && new URL(request.url).pathname === LOG_PATH;
+  }).length;
+}
+
+function jobMetadataCalls(upstream: ReturnType<typeof vi.fn<typeof fetch>>): number {
+  return upstream.mock.calls.filter(([input, init]) => {
+    const request = new Request(input, init);
+    return (
+      bearer(request) === undefined &&
+      new URL(request.url).pathname === "/repos/openclaw/octopool/actions/jobs/42"
+    );
   }).length;
 }
 

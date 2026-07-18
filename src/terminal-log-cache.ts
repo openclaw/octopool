@@ -1,4 +1,3 @@
-import { githubCacheKey, readGitHubCache, writeGitHubCache } from "./cache";
 import { base64ToBytes } from "./encoding";
 import { callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
@@ -19,8 +18,48 @@ export type CachedTerminalLog = GitHubRelayResponse & {
   expires_at: string;
 };
 
-export function terminalLogCacheKey(request: RelayRequest): string {
-  return `${LOG_KEY_PREFIX}${encodeURIComponent(request.pool)}${request.path}`;
+export type TerminalLogCacheProof = { key: string };
+
+export function terminalLogCacheKey(request: RelayRequest, runAttempt?: number): string {
+  const base = `${LOG_KEY_PREFIX}${encodeURIComponent(request.pool)}${request.path}`;
+  return runAttempt === undefined ? base : `${base}/attempt-${String(runAttempt)}`;
+}
+
+export async function terminalLogCacheProof(
+  env: Env,
+  _ctx: ExecutionContext,
+  request: RelayRequest,
+  route: RouteInfo,
+  policy: PoolPolicy,
+): Promise<TerminalLogCacheProof | undefined> {
+  try {
+    if (!route.logs || route.owner === undefined || route.repo === undefined) {
+      return undefined;
+    }
+    const jobID = /\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
+    if (jobID !== undefined) {
+      const job = await fetchFreshMetadata(
+        env,
+        metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
+        policy,
+      );
+      return metadataProvesCompleted(job) ? { key: terminalLogCacheKey(request) } : undefined;
+    }
+    const runID = /\/actions\/runs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
+    if (runID === undefined) {
+      return undefined;
+    }
+    const run = await fetchFreshMetadata(
+      env,
+      metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/runs/${runID}`),
+      policy,
+    );
+    const runAttempt = completedRunAttempt(run);
+    return runAttempt === undefined ? undefined : { key: terminalLogCacheKey(request, runAttempt) };
+  } catch (error) {
+    console.error("actions log completion preflight failed", error);
+    return undefined;
+  }
 }
 
 export async function terminalLogRunCompleted(
@@ -30,42 +69,7 @@ export async function terminalLogRunCompleted(
   route: RouteInfo,
   policy: PoolPolicy,
 ): Promise<boolean> {
-  try {
-    if (route.kind !== "job_logs" || route.owner === undefined || route.repo === undefined) {
-      return false;
-    }
-    const jobID = /\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
-    if (jobID === undefined) {
-      return false;
-    }
-    const job = await readOrFetchMetadata(
-      env,
-      ctx,
-      metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
-      policy,
-    );
-    if (
-      !isRecord(job?.body) ||
-      typeof job.body.run_id !== "number" ||
-      !Number.isSafeInteger(job.body.run_id) ||
-      job.body.run_id < 1
-    ) {
-      return false;
-    }
-    const run = await readOrFetchMetadata(
-      env,
-      ctx,
-      metadataRequest(
-        request,
-        `/repos/${route.owner}/${route.repo}/actions/runs/${String(job.body.run_id)}`,
-      ),
-      policy,
-    );
-    return isRecord(run?.body) && run.body.status === "completed";
-  } catch (error) {
-    console.error("actions log completion preflight failed", error);
-    return false;
-  }
+  return (await terminalLogCacheProof(env, ctx, request, route, policy)) !== undefined;
 }
 
 export function terminalLogNeedsRevalidation(cached: CachedTerminalLog): boolean {
@@ -142,22 +146,12 @@ export async function writeTerminalLogCache(
   });
 }
 
-async function readOrFetchMetadata(
+async function fetchFreshMetadata(
   env: Env,
-  ctx: ExecutionContext,
   request: RelayRequest,
   policy: PoolPolicy,
 ): Promise<GitHubRelayResponse | undefined> {
   const route = classifyRoute(request, policy);
-  const key = await githubCacheKey(request.pool, request, route);
-  try {
-    const cached = await readGitHubCache(env, key, ctx);
-    if (cached !== undefined) {
-      return cached;
-    }
-  } catch (error) {
-    console.error("actions log metadata cache read failed", error);
-  }
   const fetched = await callGitHubWeb(env, request, route);
   if (fetched === undefined) {
     return undefined;
@@ -170,12 +164,27 @@ async function readOrFetchMetadata(
   ) {
     await recordPublicGitHubRepo(env, route);
   }
-  try {
-    await writeGitHubCache(env, key, request, route, response);
-  } catch (error) {
-    console.error("actions log metadata cache write failed", error);
-  }
   return response;
+}
+
+function metadataProvesCompleted(response: GitHubRelayResponse | undefined): boolean {
+  return (
+    response !== undefined &&
+    response.status >= 200 &&
+    response.status < 300 &&
+    isRecord(response.body) &&
+    response.body.status === "completed"
+  );
+}
+
+function completedRunAttempt(response: GitHubRelayResponse | undefined): number | undefined {
+  if (response === undefined || !metadataProvesCompleted(response) || !isRecord(response.body)) {
+    return undefined;
+  }
+  const attempt = response.body.run_attempt;
+  return typeof attempt === "number" && Number.isSafeInteger(attempt) && attempt > 0
+    ? attempt
+    : undefined;
 }
 
 function metadataRequest(request: RelayRequest, path: string): RelayRequest {

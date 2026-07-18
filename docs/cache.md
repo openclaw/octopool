@@ -125,20 +125,24 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 ## Completed Actions log cache
 
-`job_logs` requests first resolve the job's `run_id`, then resolve the owning `run_view`
-through the normal edge + D1 metadata cache. Active or unknown runs keep the previous
-large-payload bypass behavior; metadata errors also fail open to that unchanged bypass.
-Only a successful 2xx anonymous metadata response records a public-repository proof.
-A run whose status is `completed` uses the dedicated
-`ACTIONS_LOGS` R2 bucket, keyed by pool and exact route path, so immutable log downloads
-are shared without putting their large payloads in D1.
+`job_logs` requests fetch the job endpoint without using edge or D1 metadata cache and
+require that fresh job payload's own `status` to be `completed`. A cached completed run can
+therefore never make an active job from a re-run terminal. Whole-run log routes likewise
+require a fresh uncached run payload whose current status is `completed`, plus a positive
+`run_attempt`; the attempt becomes part of the R2 key so a completed re-run cannot receive
+an earlier attempt's archive. Active, unknown, attempt-less, or failed metadata probes keep
+the previous large-payload bypass behavior. Only a successful 2xx anonymous metadata
+response records a public-repository proof. A proven-terminal log uses the dedicated
+`ACTIONS_LOGS` R2 bucket, keyed by pool, exact route path, and whole-run attempt when
+applicable, so immutable log downloads are shared without putting their large payloads in D1.
 
 R2 stores the raw log bytes, content type, original body encoding, and a retention timestamp.
-An object younger than one hour can be served with no upstream contact. Older objects first
-make an authenticated log request without following its redirect: a validated `302 Location`
-confirms existence and refreshes the retention timestamp, while `404` purges the object and
-returns GitHub's deletion response. Thus a deletion can remain cached for at most the bounded
-one-hour zero-contact window, not the full retention period.
+After the fresh terminal-status proof, an object younger than one hour can be served without
+contacting the log endpoint. Older objects also make an authenticated log request without
+following its redirect: a validated `302 Location` confirms existence and refreshes the
+retention timestamp, while `404` purges the object and returns GitHub's deletion response.
+Thus a deletion can remain cached for at most the bounded one-hour no-log-probe window, not
+the full retention period.
 
 Objects untouched and unconfirmed for seven days expire. Reads enforce that lifetime from
 object metadata: expired objects are treated as misses and removed, so lifecycle cleanup

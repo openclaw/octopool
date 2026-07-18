@@ -132,7 +132,7 @@ describe("Worker end-to-end relay security boundaries", () => {
       identity: { id: "primary", kind: "pat" },
       relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
-    expect(upstream).toHaveBeenCalledTimes(5);
+    expect(upstream).toHaveBeenCalledTimes(4);
     expect(
       await env.DB.prepare("SELECT cache_status, cacheable, status FROM audit_events").first(),
     ).toEqual({ cache_status: "miss", cacheable: 1, status: 200 });
@@ -165,7 +165,7 @@ describe("Worker end-to-end relay security boundaries", () => {
     expect(await response.json()).toMatchObject({
       error: { code: "github_log_redirect_denied" },
     });
-    expect(upstream).toHaveBeenCalledTimes(4);
+    expect(upstream).toHaveBeenCalledTimes(3);
     expect(
       await env.DB.prepare("SELECT identity_id, status, error_code FROM audit_events").first(),
     ).toEqual({
