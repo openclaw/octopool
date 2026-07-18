@@ -70,6 +70,7 @@ describe("Actions run-list superset eligibility", () => {
             etag: '"canonical"',
             "Last-Modified": "Sat, 18 Jul 2026 08:00:00 GMT",
             "content-length": "1234",
+            link: '<https://api.github.com/repositories/1/actions/runs?page=2>; rel="next"',
             "content-type": "application/json",
           },
           body: {

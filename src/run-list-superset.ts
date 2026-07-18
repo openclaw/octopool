@@ -4,7 +4,7 @@ import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const SUPERSET_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 30;
-const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length"]);
+const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length", "link"]);
 const SUPPORTED_RUN_STATUSES = new Set([
   "completed",
   "action_required",
@@ -22,12 +22,40 @@ const SUPPORTED_RUN_STATUSES = new Set([
   "pending",
 ]);
 
-export type RunListSupersetView = {
-  cacheRequest: RelayRequest;
+export type RunListView = {
   branch?: string;
   status?: string;
   limit: number;
 };
+
+export type RunListSupersetView = RunListView & {
+  cacheRequest: RelayRequest;
+};
+
+export function runListShapeView(request: RelayRequest, route: RouteInfo): RunListView | undefined {
+  if (!actionsSummaryRunList(request, route) || request.query?.limit === undefined) {
+    return undefined;
+  }
+  const limit = cappedPageSize(request.query.limit);
+  if (limit === undefined) {
+    return undefined;
+  }
+  const perPage = boundedPageSize(request.query.per_page);
+  return { limit: Math.min(perPage ?? SUPERSET_PAGE_SIZE, limit) };
+}
+
+export function exactRunListRequest(request: RelayRequest, route: RouteInfo): RelayRequest {
+  if (!actionsSummaryRunList(request, route)) {
+    return request;
+  }
+  const query = { ...request.query };
+  const limit = cappedPageSize(query.limit);
+  delete query.limit;
+  if (query.per_page === undefined && limit !== undefined) {
+    query.per_page = String(limit);
+  }
+  return { ...request, query };
+}
 
 export function runListSupersetView(
   request: RelayRequest,
@@ -71,7 +99,7 @@ export function runListSupersetView(
 
 export function filterRunListSuperset(
   response: GitHubRelayResponse,
-  view: RunListSupersetView | undefined,
+  view: RunListView | undefined,
   options: { preserveTotalCount?: boolean } = {},
 ): GitHubRelayResponse {
   if (
@@ -117,7 +145,7 @@ export function runListSupersetUnderfilled(
   );
 }
 
-function filterRuns(runs: unknown[], view: RunListSupersetView): Record<string, unknown>[] {
+function filterRuns(runs: unknown[], view: RunListView): Record<string, unknown>[] {
   return runs.filter((item): item is Record<string, unknown> => {
     if (!isRecord(item)) {
       return false;
@@ -129,6 +157,21 @@ function filterRuns(runs: unknown[], view: RunListSupersetView): Record<string, 
       view.status === undefined || item.status === view.status || item.conclusion === view.status
     );
   });
+}
+
+function actionsSummaryRunList(request: RelayRequest, route: RouteInfo): boolean {
+  return (
+    (route.kind === "run_list" || route.kind === "workflow_run_list") &&
+    request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.actionsSummary
+  );
+}
+
+function cappedPageSize(value: string | string[] | undefined): number | undefined {
+  if (value === undefined || Array.isArray(value) || !/^[1-9][0-9]*$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? Math.min(parsed, SUPERSET_PAGE_SIZE) : undefined;
 }
 
 function boundedPageSize(value: string | string[] | undefined): number | undefined {

@@ -28,9 +28,12 @@ import {
 } from "./public-repos";
 import { capabilitiesForRouteKind } from "./route-manifest";
 import {
+  exactRunListRequest,
   filterRunListSuperset,
+  runListShapeView,
   runListSupersetUnderfilled,
   runListSupersetView,
+  type RunListView,
   type RunListSupersetView,
 } from "./run-list-superset";
 import {
@@ -69,6 +72,7 @@ type ActiveRelay = RelayBase & {
   route: RouteInfo;
   policy: PoolPolicy;
   cacheRequest: RelayRequest;
+  runListView: RunListView | undefined;
   runListSuperset: RunListSupersetView | undefined;
   runListExactFallback: boolean;
   terminalLogCacheKey: string | undefined;
@@ -155,12 +159,11 @@ async function prepareRelay(
   );
   const cacheEnabled = shouldUseGitHubCache(base.request, route);
   const runListSuperset = runListSupersetView(base.request, route);
-  const cacheRequest =
-    runListSuperset === undefined
-      ? base.request
-      : cacheEnabled
-        ? runListSuperset.cacheRequest
-        : exactRunListRequest(base.request, runListSuperset);
+  const runListView = runListSuperset ?? runListShapeView(base.request, route);
+  const useRunListSuperset = cacheEnabled && runListSuperset !== undefined;
+  const cacheRequest = useRunListSuperset
+    ? runListSuperset.cacheRequest
+    : exactRunListRequest(base.request, route);
   const cacheKey = cacheEnabled
     ? await githubCacheKey(base.request.pool, cacheRequest, route)
     : undefined;
@@ -169,8 +172,9 @@ async function prepareRelay(
     route,
     policy,
     cacheRequest,
+    runListView,
     runListSuperset,
-    runListExactFallback: runListSuperset !== undefined && !cacheEnabled,
+    runListExactFallback: runListView !== undefined && !useRunListSuperset,
     terminalLogCacheKey: undefined,
     terminalLogCached: undefined,
     cacheEnabled,
@@ -765,7 +769,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   if (state.terminalLogCacheKey !== undefined) {
     await publishTerminalLogCache(state.env, state.terminalLogCacheKey, result.github);
   }
-  const clientResponse = filterRunListSuperset(result.github, state.runListSuperset, {
+  const clientResponse = filterRunListSuperset(result.github, state.runListView, {
     preserveTotalCount: state.runListExactFallback,
   });
   const background: Promise<unknown>[] = [
@@ -949,7 +953,7 @@ function cachedResponseParams(
   cacheStatus: "hit" | "stale",
   extras: { staleReason?: string; coalesced?: boolean } = {},
 ): Parameters<typeof serveCachedGitHubResponse>[2] {
-  const clientResponse = filterRunListSuperset(cached, state.runListSuperset, {
+  const clientResponse = filterRunListSuperset(cached, state.runListView, {
     preserveTotalCount: state.runListExactFallback,
   });
   return {
@@ -1151,24 +1155,12 @@ async function serveFreshCachedRelayResponse(
 
 async function switchToExactRunList(state: ActiveRelay): Promise<void> {
   state.runListExactFallback = true;
-  state.cacheRequest = exactRunListRequest(state.request, state.runListSuperset);
+  state.cacheRequest = exactRunListRequest(state.request, state.route);
   state.identity = undefined;
   state.attemptedIdentityCacheKeys = [];
   const cacheKey = await githubCacheKey(state.request.pool, state.cacheRequest, state.route);
   state.sharedCacheKey = cacheKey;
   await switchRelayCacheKey(state, cacheKey);
-}
-
-function exactRunListRequest(
-  request: RelayRequest,
-  view: RunListSupersetView | undefined,
-): RelayRequest {
-  const query = { ...request.query };
-  if (query.per_page === undefined && query.limit !== undefined && view !== undefined) {
-    query.per_page = String(Math.min(view.limit, 100));
-  }
-  delete query.limit;
-  return { ...request, query };
 }
 
 function hasConditionalRequestHeaders(request: RelayRequest): boolean {

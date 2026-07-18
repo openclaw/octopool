@@ -181,9 +181,10 @@ page sizes above 100, workflow-scoped paths, unknown query parameters, unsupport
 status values, and requests without the shim shape keep exact upstream and per-query cache
 behavior. Conditional shim requests bypass the canonical cache but still translate the
 shim-only `limit` into a capped upstream `per_page` and shape successful responses locally.
-Exact underfill fallbacks use the same translation and never forward `limit` to GitHub.
-Locally shaped responses omit `ETag`, `Last-Modified`, and `Content-Length` because those
-validators and lengths describe the upstream representation, not the transformed body.
+All other exact shaped requests, including workflow-scoped paths, use the same translation
+and never forward `limit` to GitHub. Locally shaped responses omit `ETag`, `Last-Modified`,
+`Content-Length`, and `Link` because those validators, lengths, and pagination links describe
+the upstream representation, not the transformed body.
 
 ## Cache-hit integrity
 

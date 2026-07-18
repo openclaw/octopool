@@ -345,7 +345,11 @@ describe("Actions run-list superset", () => {
             ],
           },
           200,
-          { etag: '"upstream"', "last-modified": "Sat, 18 Jul 2026 08:00:00 GMT" },
+          {
+            etag: '"upstream"',
+            "last-modified": "Sat, 18 Jul 2026 08:00:00 GMT",
+            link: '<https://api.github.com/repositories/1/actions/runs?page=2>; rel="next"',
+          },
         );
       }
       return jsonResponse({ message: "unavailable" }, 503);
@@ -365,6 +369,7 @@ describe("Actions run-list superset", () => {
     expect(envelope.body).toMatchObject({ total_count: 100 });
     expect(envelope.headers).not.toHaveProperty("etag");
     expect(envelope.headers).not.toHaveProperty("last-modified");
+    expect(envelope.headers).not.toHaveProperty("link");
     expect(Object.fromEntries(exactURL!.searchParams)).toEqual({ per_page: "2" });
     expect(conditionalHeader).toBe('"client"');
   });
@@ -437,7 +442,7 @@ describe("Actions run-list superset", () => {
     }
   });
 
-  it("leaves workflow-scoped shaped requests on their exact upstream path", async () => {
+  it("normalizes and shapes an ineligible workflow-scoped request", async () => {
     const apiRequests: URL[] = [];
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
@@ -447,8 +452,11 @@ describe("Actions run-list superset", () => {
       }
       apiRequests.push(url);
       return jsonResponse({
-        total_count: 1,
-        workflow_runs: [run(9, "main", "completed", "success")],
+        total_count: 2,
+        workflow_runs: [
+          run(9, "main", "completed", "success"),
+          run(10, "main", "completed", "success"),
+        ],
       });
     });
     vi.stubGlobal("fetch", upstream);
@@ -457,7 +465,7 @@ describe("Actions run-list superset", () => {
       "/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
       undefined,
       {
-        query: { branch: "main", per_page: "1" },
+        query: { branch: "main", limit: "1" },
         headers: { "x-octopool-public-shape": "actions-summary-v1" },
       },
     );
@@ -468,6 +476,9 @@ describe("Actions run-list superset", () => {
       branch: "main",
       per_page: "1",
     });
+    const envelope = await response.json<RelayEnvelope>();
+    expect(runIDs(envelope.body)).toEqual([9]);
+    expect(envelope.body).toMatchObject({ total_count: 2 });
   });
 
   it("leaves non-shim run-list requests on exact per-query caching", async () => {
