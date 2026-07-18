@@ -47,6 +47,29 @@ func relayHumanPRView(ctx context.Context, stdout io.Writer, repo string, number
 	return renderHumanPRView(stdout, pr, reviews)
 }
 
+// prHeadLabel qualifies fork branches as owner:branch like gh's HeadLabel.
+func prHeadLabel(pr map[string]any) string {
+	ref := nestedStringValue(pr, "head", "ref")
+	headOwner := headRepoOwner(pr, "head")
+	baseOwner := headRepoOwner(pr, "base")
+	if headOwner != "" && headOwner != baseOwner {
+		return headOwner + ":" + ref
+	}
+	return ref
+}
+
+func headRepoOwner(pr map[string]any, side string) string {
+	half, _ := pr[side].(map[string]any)
+	if half == nil {
+		return ""
+	}
+	repo, _ := half["repo"].(map[string]any)
+	if repo == nil {
+		return ""
+	}
+	return nestedStringValue(repo, "owner", "login")
+}
+
 func humanPRState(pr map[string]any) string {
 	if firstString(pr, "merged_at") != "" {
 		return "MERGED"
@@ -94,9 +117,9 @@ func relayHumanPRList(ctx context.Context, stdout io.Writer, request ghAPIReques
 		if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n",
 			watchSafeText(numberText(item["number"])),
 			watchSafeText(firstString(item, "title")),
-			watchSafeText(nestedStringValue(item, "head", "ref")),
+			watchSafeText(prHeadLabel(item)),
 			watchSafeText(humanPRState(item)),
-			iso8601UTC(firstString(item, "updated_at")),
+			iso8601UTC(firstString(item, "created_at")),
 		); err != nil {
 			return err
 		}
@@ -157,8 +180,8 @@ func relayHumanRunList(ctx context.Context, stdout io.Writer, request ghAPIReque
 			watchSafeText(firstString(item, "head_branch")),
 			watchSafeText(firstString(item, "event")),
 			watchSafeText(numberText(item["id"])),
-			humanDuration(firstString(item, "run_started_at", "created_at"), firstString(item, "updated_at")),
-			iso8601UTC(firstString(item, "created_at")),
+			runElapsed(item),
+			iso8601UTC(firstString(item, "run_started_at", "created_at")),
 		); err != nil {
 			return err
 		}
@@ -177,7 +200,7 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 		watchSafeText(display),
 		watchSafeText(id),
 		watchSafeText(firstString(run, "event")),
-		relativeHumanTime(firstString(run, "created_at")),
+		relativeHumanTime(firstString(run, "run_started_at", "created_at")),
 	); err != nil {
 		return err
 	}
@@ -433,6 +456,17 @@ func humanDuration(startRaw string, endRaw string) string {
 	return fmt.Sprintf("%ds", seconds)
 }
 
+// runElapsed measures active runs through now; updated_at can sit still
+// while work continues.
+func runElapsed(run map[string]any) string {
+	start := firstString(run, "run_started_at", "created_at")
+	end := firstString(run, "updated_at")
+	if !strings.EqualFold(firstString(run, "status"), "completed") {
+		end = humanNow().UTC().Format(time.RFC3339)
+	}
+	return humanDuration(start, end)
+}
+
 func relativeHumanTime(raw string) string {
 	created, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
@@ -472,14 +506,18 @@ func jobGlyph(job map[string]any) string {
 	return statusGlyph(firstString(job, "status"), firstString(job, "conclusion"))
 }
 
+// statusGlyph mirrors gh's completed-conclusion mapping: tick only for
+// success, dash for skipped/neutral, X for every other terminal conclusion.
 func statusGlyph(status string, conclusion string) string {
-	switch strings.ToLower(conclusion) {
-	case "success", "neutral":
-		return "✓"
-	case "failure", "timed_out", "action_required", "startup_failure":
-		return "X"
-	case "cancelled", "skipped":
-		return "-"
+	if lowered := strings.ToLower(conclusion); lowered != "" {
+		switch lowered {
+		case "success":
+			return "✓"
+		case "neutral", "skipped":
+			return "-"
+		default:
+			return "X"
+		}
 	}
 	switch strings.ToLower(status) {
 	case "queued", "in_progress", "pending", "requested", "waiting":

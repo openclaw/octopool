@@ -200,6 +200,11 @@ differences:
   empty because the REST issue payload does not provide them.
 - Run-view headers use `<head branch> <workflow name>`, matching the verified GitHub run
   payload behind real `gh`; relative timestamps use coarse minute, hour, and day buckets.
+- Run views render jobs and their failed steps only; real `gh`'s ANNOTATIONS and ARTIFACTS
+  sections are omitted (those routes are not relay-backed), and the footer always points at
+  the first job instead of varying by conclusion and job count. `--log-failed` and other log
+  flags delegate to real `gh`.
+- Enabled auto-merge renders as `enabled` without the enabling user and merge method.
 
 All relay-controlled single-line text has terminal control characters removed. PR and
 issue bodies preserve newlines and tabs while removing other control characters and

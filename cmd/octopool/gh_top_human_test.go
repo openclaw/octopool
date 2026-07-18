@@ -70,7 +70,8 @@ func TestHumanPRListExactOutput(t *testing.T) {
 		return []map[string]any{{
 			"number": 25, "title": "feat: authoritative Link-header pagination for relay-backed gh api",
 			"head": map[string]any{"ref": "feat/link-pagination"}, "state": "closed",
-			"merged_at": "2026-07-17T21:15:50Z", "updated_at": "2026-07-17T22:15:50+01:00",
+			"merged_at": "2026-07-17T21:15:50Z", "updated_at": "2026-07-17T23:35:50+01:00",
+			"created_at": "2026-07-17T22:15:50+01:00",
 		}}
 	})
 	var out bytes.Buffer
@@ -88,7 +89,7 @@ func TestHumanPRListMarksDrafts(t *testing.T) {
 		return []map[string]any{{
 			"number": 30, "title": "wip", "draft": true,
 			"head": map[string]any{"ref": "wip-branch"}, "state": "open",
-			"updated_at": "2026-07-17T22:15:50Z",
+			"updated_at": "2026-07-17T22:15:50Z", "created_at": "2026-07-17T22:15:50Z",
 		}}
 	})
 	var out bytes.Buffer
