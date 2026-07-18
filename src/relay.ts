@@ -307,6 +307,9 @@ async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response |
         return restoreSharedCacheFill(state);
       }
     }
+    if (!usesTokenFreeAPI && !(await guardRevalidationPublicRepo(state))) {
+      return undefined;
+    }
     const github = await callRevalidationAPI(state, candidates[0]!, usesTokenFreeAPI);
     if (github === undefined) {
       return restoreSharedCacheFill(state);
@@ -317,6 +320,9 @@ async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response |
     return response ?? restoreSharedCacheFill(state);
   }
   if (identities.length === 0) {
+    return undefined;
+  }
+  if (!(await guardRevalidationPublicRepo(state))) {
     return undefined;
   }
 
@@ -485,24 +491,8 @@ async function finishRevalidation(
 }
 
 async function restoreSharedCacheFill(state: ActiveRelay): Promise<Response | undefined> {
-  state.identity = undefined;
-  if (state.cacheKey === state.sharedCacheKey && state.cacheKey !== undefined) {
-    await finishGitHubCacheFill(state.coordinator, state.cacheKey, state.cacheFillToken);
-    state.cacheFillToken = undefined;
-  } else {
-    await switchRelayCacheKey(state, state.sharedCacheKey);
-  }
-  const coalesced = await coalesceRelayCacheMiss(state);
-  if (
-    coalesced === undefined ||
-    !(await cachedResponseAvailable(
-      state.env,
-      state.request.pool,
-      state.route,
-      coalesced,
-      state.coordinator,
-    ))
-  ) {
+  const coalesced = await restoreSharedCacheFillState(state);
+  if (coalesced === undefined) {
     return undefined;
   }
   return serveCachedGitHubResponse(
@@ -510,6 +500,29 @@ async function restoreSharedCacheFill(state: ActiveRelay): Promise<Response | un
     state.ctx,
     cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
   );
+}
+
+async function guardRevalidationPublicRepo(state: ActiveRelay): Promise<boolean> {
+  try {
+    await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+    return true;
+  } catch {
+    await restoreSharedCacheFillState(state);
+    return false;
+  }
+}
+
+async function restoreSharedCacheFillState(
+  state: ActiveRelay,
+): Promise<CachedGitHubResponse | undefined> {
+  state.identity = undefined;
+  if (state.cacheKey === state.sharedCacheKey && state.cacheKey !== undefined) {
+    await finishGitHubCacheFill(state.coordinator, state.cacheKey, state.cacheFillToken);
+    state.cacheFillToken = undefined;
+  } else {
+    await switchRelayCacheKey(state, state.sharedCacheKey);
+  }
+  return coalesceRelayCacheMiss(state);
 }
 
 async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | undefined> {

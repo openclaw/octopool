@@ -202,6 +202,60 @@ describe("Worker end-to-end cache revalidation", () => {
     ).toHaveLength(1);
   });
 
+  it("fails closed before authenticated revalidation when a repository becomes private", async () => {
+    await seedPool();
+    const path = "/repos/openclaw/octopool/pulls/42";
+    const options = { headers: { accept: "application/vnd.github.diff" } };
+    let privateRepo = false;
+    let authenticatedCallsAfterPrivate = 0;
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const token = bearer(request);
+      if (request.url === "https://github.com/openclaw/octopool/pull/42.diff") {
+        return new Response("unavailable", { status: 503 });
+      }
+      if (token === "test-org-token") {
+        return jsonResponse({ private: privateRepo });
+      }
+      if (token === "test-primary-token") {
+        if (privateRepo) {
+          authenticatedCallsAfterPrivate++;
+        }
+        return new Response("diff --git a/a b/a\n", {
+          headers: {
+            "content-type": "text/plain",
+            etag: '"private-boundary"',
+            ...rateHeaders({ remaining: 4_999 }),
+          },
+        });
+      }
+      throw new Error(`unexpected upstream ${request.url}`);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const primed = await relay(path, undefined, options);
+    expect(primed.status).toBe(200);
+    await expireCacheEntry("pr_view");
+    privateRepo = true;
+
+    const response = await relay(path, undefined, options);
+
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "repo_not_public" } },
+    });
+    expect(authenticatedCallsAfterPrivate).toBe(0);
+    expect(
+      upstream.mock.calls.filter(([input, init]) => {
+        const request = new Request(input, init);
+        return (
+          bearer(request) === "test-primary-token" &&
+          request.headers.get("if-none-match") === '"private-boundary"'
+        );
+      }),
+    ).toHaveLength(0);
+  });
+
   it("publishes a 304 refresh to coalesced waiters", async () => {
     await seedPool();
     let releaseRevalidation!: () => void;
