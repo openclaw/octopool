@@ -1,0 +1,382 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestHumanPRViewExactOutputAndLatestReviewWins(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/25":
+			return map[string]any{
+				"number": 25,
+				"title":  "feat: authoritative Link-header pagination for relay-backed gh api",
+				"state":  "closed",
+				"user":   map[string]any{"login": "steipete", "name": "Peter Steinberger"},
+				"labels": []map[string]any{{"name": "enhancement"}, {"name": "relay"}},
+				"assignees": []map[string]any{
+					{"login": "octocat"},
+				},
+				"milestone":  map[string]any{"title": "0.4.8"},
+				"merged_at":  "2026-07-17T21:15:50Z",
+				"html_url":   "https://github.com/openclaw/octopool/pull/25",
+				"additions":  453,
+				"deletions":  8,
+				"auto_merge": nil,
+				"body":       "First paragraph.\n\nSecond paragraph.",
+			}
+		case "/repos/openclaw/octopool/pulls/25/reviews":
+			return []map[string]any{
+				{"user": map[string]any{"login": "chatgpt-codex-connector"}, "state": "COMMENTED"},
+				{"user": map[string]any{"login": "alice"}, "state": "COMMENTED"},
+				{"user": map[string]any{"login": "alice"}, "state": "CHANGES_REQUESTED"},
+			}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"view", "25", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	want := "title:\tfeat: authoritative Link-header pagination for relay-backed gh api\n" +
+		"state:\tMERGED\n" +
+		"author:\tsteipete\n" +
+		"labels:\tenhancement, relay\n" +
+		"assignees:\toctocat\n" +
+		"reviewers:\tchatgpt-codex-connector (Commented), alice (Changes Requested)\n" +
+		"projects:\t\n" +
+		"milestone:\t0.4.8\n" +
+		"number:\t25\n" +
+		"url:\thttps://github.com/openclaw/octopool/pull/25\n" +
+		"additions:\t453\n" +
+		"deletions:\t8\n" +
+		"auto-merge:\tdisabled\n" +
+		"--\n" +
+		"First paragraph.\n\nSecond paragraph.\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestHumanPRListExactOutput(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		return []map[string]any{{
+			"number": 25, "title": "feat: authoritative Link-header pagination for relay-backed gh api",
+			"head": map[string]any{"ref": "feat/link-pagination"}, "state": "closed",
+			"merged_at": "2026-07-17T21:15:50Z", "updated_at": "2026-07-17T22:15:50+01:00",
+		}}
+	})
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--state", "all"}, &out)
+	assertGHComplete(t, result)
+	want := "25\tfeat: authoritative Link-header pagination for relay-backed gh api\tfeat/link-pagination\tMERGED\t2026-07-17T21:15:50Z\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestHumanPRChecksExactOutputAndSanitizesName(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/25":
+			return map[string]any{"head": map[string]any{"sha": "abc123"}}
+		case "/repos/openclaw/octopool/commits/abc123/check-runs":
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{
+				"name": "Check\x1b[31m", "status": "completed", "conclusion": "success",
+				"started_at": "2026-07-17T21:00:00Z", "completed_at": "2026-07-17T21:03:12Z",
+				"details_url": "https://github.com/openclaw/octopool/actions/runs/29614118703/job/87995297404",
+			}}}
+		case "/repos/openclaw/octopool/commits/abc123/status":
+			return map[string]any{"total_count": 0, "statuses": []map[string]any{}}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	want := "Check[31m\tpass\t3m12s\thttps://github.com/openclaw/octopool/actions/runs/29614118703/job/87995297404\t\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestHumanRunListExactOutput(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		return map[string]any{"workflow_runs": []map[string]any{{
+			"status": "completed", "conclusion": "success",
+			"display_title": "chore: open 0.4.8 development", "name": "CI", "head_branch": "main",
+			"event": "push", "id": 29614557506,
+			"run_started_at": "2026-07-17T21:23:36Z", "updated_at": "2026-07-17T21:26:55Z",
+			"created_at": "2026-07-17T22:23:36+01:00",
+		}}}
+	})
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"list", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	want := "completed\tsuccess\tchore: open 0.4.8 development\tCI\tmain\tpush\t29614557506\t3m19s\t2026-07-17T21:23:36Z\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestHumanRunViewExactOutput(t *testing.T) {
+	setHumanTestSeams(t, time.Date(2026, 7, 18, 4, 21, 25, 0, time.UTC))
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/actions/runs/29614434370":
+			return map[string]any{
+				"id": 29614434370, "display_title": "chore(release): 0.4.7", "name": "release", "head_branch": "v0.4.7",
+				"event": "push", "status": "completed", "conclusion": "success",
+				"created_at": "2026-07-17T21:21:25Z", "updated_at": "2026-07-17T21:22:52Z",
+				"html_url": "https://github.com/openclaw/octopool/actions/runs/29614434370",
+			}
+		case "/repos/openclaw/octopool/actions/runs/29614434370/jobs":
+			return map[string]any{"total_count": 1, "jobs": []map[string]any{{
+				"id": 87996300812, "name": "goreleaser", "status": "completed", "conclusion": "success",
+				"started_at": "2026-07-17T21:21:27Z", "completed_at": "2026-07-17T21:22:51Z",
+				"html_url": "https://github.com/openclaw/octopool/actions/runs/29614434370/job/87996300812",
+			}}}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"view", "29614434370", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	want := "\n✓ v0.4.7 release · 29614434370\n" +
+		"Triggered via push about 7 hours ago\n\n" +
+		"JOBS\n" +
+		"✓ goreleaser in 1m24s (ID 87996300812)\n\n" +
+		"For more information about the job, try: gh run view --job=87996300812\n" +
+		"View this run on GitHub: https://github.com/openclaw/octopool/actions/runs/29614434370\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestHumanIssueViewExactOutput(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		return map[string]any{
+			"number": 110411, "title": "cron.update: converting a recurring job", "state": "open",
+			"user": map[string]any{"login": "maintainer"}, "labels": []map[string]any{{"name": "maintainer"}, {"name": "P2"}},
+			"comments": 1, "assignees": []map[string]any{}, "milestone": nil,
+			"body": "Reproduction\n\tstep one\x1b",
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHIssue(t.Context(), []string{"view", "110411", "-R", "openclaw/openclaw"}, &out)
+	assertGHComplete(t, result)
+	want := "title:\tcron.update: converting a recurring job\n" +
+		"state:\tOPEN\n" +
+		"author:\tmaintainer\n" +
+		"labels:\tmaintainer, P2\n" +
+		"comments:\t1\n" +
+		"assignees:\t\n" +
+		"projects:\t\n" +
+		"milestone:\t\n" +
+		"issue-type:\t\n" +
+		"parent:\t\n" +
+		"sub-issues:\t\n" +
+		"sub-issues-completed:\t\n" +
+		"blocked-by:\t\n" +
+		"blocking:\t\n" +
+		"number:\t110411\n" +
+		"--\n" +
+		"Reproduction\n\tstep one\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestHumanIssueListExactOutput(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		return []map[string]any{{
+			"number": 110411, "state": "open", "title": "cron.update: converting a recurring job...",
+			"labels":     []map[string]any{{"name": "maintainer"}, {"name": "P2"}, {"name": "bug"}},
+			"updated_at": "2026-07-18T04:46:30Z",
+		}}
+	})
+	var out bytes.Buffer
+	result := handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/openclaw"}, &out)
+	assertGHComplete(t, result)
+	want := "110411\tOPEN\tcron.update: converting a recurring job...\tmaintainer, P2, bug\t2026-07-18T04:46:30Z\n"
+	if got := out.String(); got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestHumanReadsDelegateWhenStdoutIsTTY(t *testing.T) {
+	old := stdoutIsTTY
+	stdoutIsTTY = func() bool { return true }
+	t.Cleanup(func() { stdoutIsTTY = old })
+	relayTestServer(t, func(body map[string]any) any {
+		t.Fatalf("TTY read contacted relay: %#v", body)
+		return nil
+	})
+	tests := []struct {
+		name string
+		run  func(*bytes.Buffer) ghResult
+	}{
+		{"pr view", func(out *bytes.Buffer) ghResult {
+			return handleGHPR(t.Context(), []string{"view", "25", "-R", "openclaw/octopool"}, out)
+		}},
+		{"pr checks", func(out *bytes.Buffer) ghResult {
+			return handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool"}, out)
+		}},
+		{"pr list", func(out *bytes.Buffer) ghResult {
+			return handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool"}, out)
+		}},
+		{"run view", func(out *bytes.Buffer) ghResult {
+			return handleGHRun(t.Context(), []string{"view", "29614434370", "-R", "openclaw/octopool"}, out)
+		}},
+		{"run list", func(out *bytes.Buffer) ghResult {
+			return handleGHRun(t.Context(), []string{"list", "-R", "openclaw/octopool"}, out)
+		}},
+		{"issue view", func(out *bytes.Buffer) ghResult {
+			return handleGHIssue(t.Context(), []string{"view", "110411", "-R", "openclaw/openclaw"}, out)
+		}},
+		{"issue list", func(out *bytes.Buffer) ghResult {
+			return handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/openclaw"}, out)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var out bytes.Buffer
+			result := test.run(&out)
+			if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
+				t.Fatalf("action=%v err=%v out=%q", result.action, result.err, out.String())
+			}
+		})
+	}
+}
+
+func TestHumanReadsDelegateUnsupportedFlags(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	tests := []struct {
+		name string
+		run  func(*bytes.Buffer) ghResult
+	}{
+		{"pr view", func(out *bytes.Buffer) ghResult {
+			return handleGHPR(t.Context(), []string{"view", "25", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+		}},
+		{"pr checks", func(out *bytes.Buffer) ghResult {
+			return handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+		}},
+		{"pr list", func(out *bytes.Buffer) ghResult {
+			return handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+		}},
+		{"run view", func(out *bytes.Buffer) ghResult {
+			return handleGHRun(t.Context(), []string{"view", "29614434370", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+		}},
+		{"run list", func(out *bytes.Buffer) ghResult {
+			return handleGHRun(t.Context(), []string{"list", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+		}},
+		{"issue view", func(out *bytes.Buffer) ghResult {
+			return handleGHIssue(t.Context(), []string{"view", "110411", "-R", "openclaw/openclaw", "--template", "{{.}}"}, out)
+		}},
+		{"issue list", func(out *bytes.Buffer) ghResult {
+			return handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/openclaw", "--template", "{{.}}"}, out)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var out bytes.Buffer
+			result := test.run(&out)
+			if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
+				t.Fatalf("action=%v err=%v out=%q", result.action, result.err, out.String())
+			}
+		})
+	}
+}
+
+func TestHumanPRChecksPendingExitsEight(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/25":
+			return map[string]any{"head": map[string]any{"sha": "abc123"}}
+		case "/repos/openclaw/octopool/commits/abc123/check-runs":
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{
+				"name": "Check", "status": "in_progress", "started_at": "2026-07-17T21:00:00Z",
+			}}}
+		case "/repos/openclaw/octopool/commits/abc123/status":
+			return map[string]any{"total_count": 0, "statuses": []map[string]any{}}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool"}, &out)
+	var exitErr exitCodeError
+	if result.action != ghFail || !errors.As(result.err, &exitErr) || exitErr.Code != 8 {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if got, want := out.String(), "Check\tpending\t\t\t\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestHumanDurationFormatting(t *testing.T) {
+	tests := []struct {
+		start string
+		end   string
+		want  string
+	}{
+		{"2026-07-18T00:00:00Z", "2026-07-18T00:00:12Z", "12s"},
+		{"2026-07-18T00:00:00Z", "2026-07-18T00:03:12Z", "3m12s"},
+		{"2026-07-18T00:00:00Z", "2026-07-18T01:02:03Z", "1h2m3s"},
+		{"2026-07-18T00:00:00Z", "", ""},
+	}
+	for _, test := range tests {
+		if got := humanDuration(test.start, test.end); got != test.want {
+			t.Errorf("humanDuration(%q, %q) = %q, want %q", test.start, test.end, got, test.want)
+		}
+	}
+}
+
+func TestHumanReadLeavesJSONBehaviorUnchanged(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		return []map[string]any{{"number": 25, "title": "JSON remains JSON"}}
+	})
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--json", "number,title"}, &out)
+	assertGHComplete(t, result)
+	if got, want := out.String(), "[{\"number\":25,\"title\":\"JSON remains JSON\"}]\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func setHumanTestSeams(t *testing.T, now time.Time) {
+	t.Helper()
+	oldTTY, oldNow := stdoutIsTTY, humanNow
+	stdoutIsTTY = func() bool { return false }
+	if !now.IsZero() {
+		humanNow = func() time.Time { return now }
+	}
+	t.Cleanup(func() {
+		stdoutIsTTY = oldTTY
+		humanNow = oldNow
+	})
+}
+
+func assertGHComplete(t *testing.T, result ghResult) {
+	t.Helper()
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+}

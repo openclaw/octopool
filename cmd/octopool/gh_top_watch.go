@@ -541,6 +541,17 @@ func watchSafeText(raw string) string {
 	}, raw)
 }
 
+// bodySafeText preserves body layout while removing control characters that
+// could alter terminal state or encode invalid text.
+func bodySafeText(raw string) string {
+	return strings.Map(func(r rune) rune {
+		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError {
+			return -1
+		}
+		return r
+	}, raw)
+}
+
 func watchError(err error, progressPrinted bool) error {
 	if progressPrinted && shouldRunRealGH(err) {
 		return errors.New(err.Error())

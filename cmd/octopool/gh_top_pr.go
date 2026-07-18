@@ -41,7 +41,13 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	switch args[0] {
 	case "view":
 		repo, number, ok := repoNumber(opts)
-		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedPRFields) {
+		if !ok || hasTopModifiers(opts) {
+			return ghDelegated()
+		}
+		if nativeHumanFormat(opts) {
+			return ghCompleted(relayHumanPRView(ctx, stdout, repo, number))
+		}
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedPRFields) {
 			return ghDelegated()
 		}
 		if needsHydratedPR(opts.json) {
@@ -54,12 +60,22 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		}, opts, fieldMapPR))
 	case "list":
 		repo, ok := repoOnly(opts)
-		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedPRListFields) || !supportedPRListState(opts.state) || limitOverOnePage(opts) || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
+		if !ok || !supportedPRListState(opts.state) || limitOverOnePage(opts) || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
 			return ghDelegated()
 		}
 		query := listQuery(opts)
 		if opts.state != "" {
 			query["state"] = opts.state
+		}
+		if nativeHumanFormat(opts) {
+			return ghCompleted(relayHumanPRList(ctx, stdout, ghAPIRequest{
+				method: "GET",
+				path:   repoPath(repo, "pulls"),
+				query:  query,
+			}))
+		}
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedPRListFields) {
+			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
@@ -84,7 +100,10 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		return ghCompleted(relayTop(ctx, stdout, request, ghTopOptions{}, nil))
 	case "checks":
 		repo, number, ok := repoNumber(opts)
-		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedCheckRunFields) {
+		if !ok || hasTopModifiers(opts) {
+			return ghDelegated()
+		}
+		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedCheckRunFields)) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayPRChecks(ctx, stdout, repo, number, opts))

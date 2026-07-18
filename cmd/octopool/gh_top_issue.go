@@ -31,7 +31,13 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 	switch args[0] {
 	case "view":
 		repo, number, ok := repoNumber(opts)
-		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields) {
+		if !ok || hasTopModifiers(opts) {
+			return ghDelegated()
+		}
+		if nativeHumanFormat(opts) {
+			return ghCompleted(relayHumanIssueView(ctx, stdout, repo, number))
+		}
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
@@ -41,7 +47,10 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 		}, opts, fieldMapIssue))
 	case "list":
 		repo, ok := repoOnly(opts)
-		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields) || limitOverOnePage(opts) || hasCurrentUserFilter(opts) {
+		if !ok || limitOverOnePage(opts) || hasCurrentUserFilter(opts) {
+			return ghDelegated()
+		}
+		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields)) {
 			return ghDelegated()
 		}
 		query := listQuery(opts)
@@ -109,15 +118,16 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 	if len(filtered) < limit && !complete {
 		return localFallbackError{Reason: "pagination_exhausted"}
 	}
+	if len(opts.json) == 0 {
+		return renderHumanIssueList(stdout, filtered)
+	}
 	raw, err := json.Marshal(filtered)
 	if err != nil {
 		return err
 	}
-	if len(opts.json) > 0 {
-		raw, err = filterJSONFields(raw, opts.json, fieldMapIssue)
-		if err != nil {
-			return err
-		}
+	raw, err = filterJSONFields(raw, opts.json, fieldMapIssue)
+	if err != nil {
+		return err
 	}
 	return writeBytes(ctx, stdout, raw, opts.jq)
 }

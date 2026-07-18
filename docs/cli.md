@@ -155,9 +155,9 @@ octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content
 ```
 
-Top-level commands are relayed only for machine-readable `--json` shapes; normal human
-formatted commands stay on the real `gh`. Supported `--json` fields are intentionally
-conservative. Common `gh` field names are mapped where the REST API uses different
+Top-level commands relay machine-readable `--json` shapes and selected non-interactive
+human-format reads. Supported `--json` fields are intentionally conservative. Common
+`gh` field names are mapped where the REST API uses different
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
 Run views also support the nested `jobs` field; Octopool composes its job/step metadata from
@@ -179,6 +179,31 @@ on the relay, floors intervals at 30 seconds, and backs off to 120 seconds. Ask 
 `gh api` conditional requests only when instant freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
+
+#### Human-format reads
+
+When stdout is not a terminal, the shim renders `pr view`, `pr checks`, `pr list`,
+`run view`, `run list`, `issue view`, and `issue list` from the same relay-backed REST
+responses used by their `--json` forms. Their supported flags, filters, required numeric
+view identifiers, pagination bounds, and fallback behavior are identical to the existing
+`--json` interception paths. Terminal stdout still delegates to the real `gh`, preserving
+its interactive decoration. Unsupported presentation flags such as `--web`, `--comments`,
+and `--template` also delegate.
+
+The native output follows real `gh` 2.x non-terminal formatting with these REST-driven
+differences:
+
+- PR authors show the login only, without the display name lookup; PR projects are empty.
+- PR reviewers come from the cached pull-review route, with each reviewer's latest state
+  rendered in title case.
+- Issue projects, issue type, parent, sub-issue counts, blocked-by, and blocking fields are
+  empty because the REST issue payload does not provide them.
+- Run-view headers use `<head branch> <workflow name>`, matching the verified GitHub run
+  payload behind real `gh`; relative timestamps use coarse minute, hour, and day buckets.
+
+All relay-controlled single-line text has terminal control characters removed. PR and
+issue bodies preserve newlines and tabs while removing other control characters and
+invalid UTF-8.
 
 The command falls through to the real `gh` without contacting Octopool when any of these
 hold:

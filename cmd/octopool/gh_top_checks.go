@@ -22,18 +22,22 @@ func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number st
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(items)
-	if err != nil {
-		return err
-	}
-	if len(opts.json) > 0 {
+	if len(opts.json) == 0 {
+		if err := renderHumanPRChecks(stdout, items); err != nil {
+			return err
+		}
+	} else {
+		raw, err := json.Marshal(items)
+		if err != nil {
+			return err
+		}
 		raw, err = filterJSONFields(raw, opts.json, fieldMapCheckRun)
 		if err != nil {
 			return err
 		}
-	}
-	if err := writeBytes(ctx, stdout, raw, opts.jq); err != nil {
-		return err
+		if err := writeBytes(ctx, stdout, raw, opts.jq); err != nil {
+			return err
+		}
 	}
 	return checkExitCode(items)
 }

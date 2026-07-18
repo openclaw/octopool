@@ -38,21 +38,31 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 			}
 			path = repoPath(repo, "actions", "workflows", opts.workflow, "runs")
 		}
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunListFields) || limitOverOnePage(opts) {
+		if limitOverOnePage(opts) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
+		request := ghAPIRequest{
 			method:  "GET",
 			path:    path,
 			query:   query,
 			headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
-		}, opts, fieldMapRun))
+		}
+		if nativeHumanFormat(opts) {
+			return ghCompleted(relayHumanRunList(ctx, stdout, request))
+		}
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunListFields) {
+			return ghDelegated()
+		}
+		return ghCompleted(relayTop(ctx, stdout, request, opts, fieldMapRun))
 	case "view":
-		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRunViewFields) {
+		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) {
 			return ghDelegated()
 		}
 		repo, ok := repoFromOptionOrCurrent(opts.repo)
 		if !ok {
+			return ghDelegated()
+		}
+		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedRunViewFields)) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayRunView(ctx, stdout, repo, opts.positionals[0], opts))
@@ -67,7 +77,8 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 		return err
 	}
 	run := map[string]any{}
-	if len(opts.json) > 1 || !hasJSONField(opts.json, "jobs") {
+	human := len(opts.json) == 0
+	if human || len(opts.json) > 1 || !hasJSONField(opts.json, "jobs") {
 		envelope, err := client.do(ctx, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "actions", "runs", id),
@@ -84,7 +95,7 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 			return err
 		}
 	}
-	if hasJSONField(opts.json, "jobs") {
+	if human || hasJSONField(opts.json, "jobs") {
 		envelope, err := client.do(ctx, ghAPIRequest{
 			method: "GET",
 			path:   repoPath(repo, "actions", "runs", id, "jobs"),
@@ -101,6 +112,10 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 			return err
 		}
 		run["jobs"] = jobs
+	}
+	if human {
+		jobs, _ := run["jobs"].([]any)
+		return renderHumanRunView(stdout, run, jobs)
 	}
 	raw, err := json.Marshal(run)
 	if err != nil {

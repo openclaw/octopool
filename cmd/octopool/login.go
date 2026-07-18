@@ -239,7 +239,7 @@ func githubResetTime(value string) string {
 	if err != nil || epoch <= 0 {
 		return ""
 	}
-	return time.Unix(epoch, 0).Local().Format(time.RFC1123)
+	return time.Unix(epoch, 0).UTC().Format(time.RFC1123)
 }
 
 func validateLoginURL(rawURL string) error {
