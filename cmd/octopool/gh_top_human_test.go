@@ -22,7 +22,13 @@ func TestHumanPRViewExactOutputAndLatestReviewWins(t *testing.T) {
 				"assignees": []map[string]any{
 					{"login": "octocat"},
 				},
-				"milestone":  map[string]any{"title": "0.4.8"},
+				"milestone": map[string]any{"title": "0.4.8"},
+				"requested_reviewers": []map[string]any{
+					{"login": "alice"},
+				},
+				"requested_teams": []map[string]any{
+					{"slug": "octopool-maintainers"},
+				},
 				"merged_at":  "2026-07-17T21:15:50Z",
 				"html_url":   "https://github.com/openclaw/octopool/pull/25",
 				"additions":  453,
@@ -49,7 +55,7 @@ func TestHumanPRViewExactOutputAndLatestReviewWins(t *testing.T) {
 		"author:\tsteipete\n" +
 		"labels:\tenhancement, relay\n" +
 		"assignees:\toctocat\n" +
-		"reviewers:\tchatgpt-codex-connector (Commented), alice (Changes Requested)\n" +
+		"reviewers:\tchatgpt-codex-connector (Commented), alice (Requested), octopool-maintainers (Requested)\n" +
 		"projects:\t\n" +
 		"milestone:\t0.4.8\n" +
 		"number:\t25\n" +

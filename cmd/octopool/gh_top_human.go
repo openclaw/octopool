@@ -93,7 +93,7 @@ func renderHumanPRView(stdout io.Writer, pr map[string]any, reviews []any) error
 		{"author", nestedStringValue(pr, "user", "login")},
 		{"labels", joinedObjectStrings(pr["labels"], "name")},
 		{"assignees", joinedObjectStrings(pr["assignees"], "login")},
-		{"reviewers", latestReviewers(reviews)},
+		{"reviewers", latestReviewers(pr, reviews)},
 		{"projects", ""},
 		{"milestone", nestedStringValue(pr, "milestone", "title")},
 		{"number", numberText(pr["number"])},
@@ -370,13 +370,21 @@ func joinedObjectStrings(raw any, key string) string {
 	return strings.Join(values, ", ")
 }
 
-func latestReviewers(reviews []any) string {
+func latestReviewers(pr map[string]any, reviews []any) string {
 	type review struct {
 		login string
 		state string
 	}
 	ordered := []review{}
 	positions := map[string]int{}
+	upsert := func(login string, state string) {
+		if index, ok := positions[login]; ok {
+			ordered[index].state = state
+			return
+		}
+		positions[login] = len(ordered)
+		ordered = append(ordered, review{login: login, state: state})
+	}
 	for _, raw := range reviews {
 		item, ok := raw.(map[string]any)
 		if !ok {
@@ -386,13 +394,31 @@ func latestReviewers(reviews []any) string {
 		if login == "" {
 			continue
 		}
-		state := reviewStateTitle(firstString(item, "state"))
-		if index, ok := positions[login]; ok {
-			ordered[index].state = state
-			continue
+		upsert(login, reviewStateTitle(firstString(item, "state")))
+	}
+	// Outstanding requests (including re-requests) override any prior
+	// submitted state, matching real gh's reviewer summary.
+	if requested, ok := pr["requested_reviewers"].([]any); ok {
+		for _, raw := range requested {
+			item, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if login := watchSafeText(firstString(item, "login")); login != "" {
+				upsert(login, "Requested")
+			}
 		}
-		positions[login] = len(ordered)
-		ordered = append(ordered, review{login: login, state: state})
+	}
+	if teams, ok := pr["requested_teams"].([]any); ok {
+		for _, raw := range teams {
+			item, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if slug := watchSafeText(firstString(item, "slug", "name")); slug != "" {
+				upsert(slug, "Requested")
+			}
+		}
 	}
 	values := make([]string, 0, len(ordered))
 	for _, item := range ordered {
