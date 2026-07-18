@@ -7,6 +7,11 @@ import { HttpError, parsePositiveInt } from "./http";
 import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
+export type GitHubLogProbe =
+  | { kind: "exists"; status: number; headers: Record<string, string> }
+  | { kind: "deleted"; response: GitHubRelayResponse }
+  | { kind: "unknown"; status: number; headers: Record<string, string> };
+
 export async function callGitHub(
   env: Env,
   identity: Identity,
@@ -23,6 +28,41 @@ export async function callPublicGitHub(
   route: RouteInfo,
 ): Promise<GitHubRelayResponse> {
   return callGitHubAPI(env, request, route);
+}
+
+export async function probeGitHubLog(
+  env: Env,
+  identity: Identity,
+  request: RelayRequest,
+  route: RouteInfo,
+): Promise<GitHubLogProbe> {
+  const token = await githubToken(env, identity);
+  const response = await fetch(githubUrl(request), {
+    method: "GET",
+    headers: githubHeaders(token, request.headers),
+    redirect: "manual",
+    signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+  });
+  const headers = githubResponseHeaders(response.headers);
+  if (response.status === 302) {
+    githubLogRedirectURL(response);
+    return { kind: "exists", status: response.status, headers };
+  }
+  if (response.status !== 404) {
+    return { kind: "unknown", status: response.status, headers };
+  }
+  const bodyBytes = await readGitHubBody(response, responseCapBytes(env, route));
+  const contentType = response.headers.get("content-type") ?? "";
+  const { body, encoding } = decodeBody(bodyBytes, contentType);
+  return {
+    kind: "deleted",
+    response: {
+      status: response.status,
+      headers,
+      body,
+      body_encoding: encoding,
+    },
+  };
 }
 
 async function callGitHubAPI(
@@ -61,22 +101,7 @@ async function fetchGitHubLogRedirect(
   cap: number,
   timeoutMs: number,
 ): Promise<GitHubRelayResponse> {
-  const location = response.headers.get("location");
-  if (location === null) {
-    throw new HttpError(502, "github_log_redirect_missing", "GitHub log redirect is missing");
-  }
-  let url: URL;
-  try {
-    url = new URL(location);
-  } catch {
-    throw new HttpError(502, "github_log_redirect_denied", "GitHub log redirect is invalid");
-  }
-  if (url.protocol !== "https:") {
-    throw new HttpError(502, "github_log_redirect_denied", "GitHub log redirect is not HTTPS");
-  }
-  if (!isAllowedLogRedirectHost(url.hostname)) {
-    throw new HttpError(502, "github_log_redirect_denied", "GitHub log redirect host is denied");
-  }
+  const url = githubLogRedirectURL(response);
   const redirected = await fetch(url.toString(), {
     method: "GET",
     redirect: "manual",
@@ -94,6 +119,26 @@ async function fetchGitHubLogRedirect(
     body,
     body_encoding: encoding,
   };
+}
+
+function githubLogRedirectURL(response: Response): URL {
+  const location = response.headers.get("location");
+  if (location === null) {
+    throw new HttpError(502, "github_log_redirect_missing", "GitHub log redirect is missing");
+  }
+  let url: URL;
+  try {
+    url = new URL(location);
+  } catch {
+    throw new HttpError(502, "github_log_redirect_denied", "GitHub log redirect is invalid");
+  }
+  if (url.protocol !== "https:") {
+    throw new HttpError(502, "github_log_redirect_denied", "GitHub log redirect is not HTTPS");
+  }
+  if (!isAllowedLogRedirectHost(url.hostname)) {
+    throw new HttpError(502, "github_log_redirect_denied", "GitHub log redirect host is denied");
+  }
+  return url;
 }
 
 function isAllowedLogRedirectHost(hostname: string): boolean {

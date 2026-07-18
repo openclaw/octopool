@@ -62,7 +62,39 @@ export function filterRunListSuperset(
   ) {
     return response;
   }
-  const filtered = response.body.workflow_runs.filter((item) => {
+  const filtered = filterRuns(response.body.workflow_runs, view);
+  return {
+    ...response,
+    body: {
+      ...response.body,
+      total_count: filtered.length,
+      workflow_runs: filtered.slice(0, view.limit),
+    },
+  };
+}
+
+export function runListSupersetUnderfilled(
+  response: GitHubRelayResponse,
+  view: RunListSupersetView | undefined,
+): boolean {
+  if (
+    view === undefined ||
+    (view.branch === undefined && view.status === undefined) ||
+    !isRecord(response.body) ||
+    !Array.isArray(response.body.workflow_runs) ||
+    typeof response.body.total_count !== "number" ||
+    !Number.isSafeInteger(response.body.total_count)
+  ) {
+    return false;
+  }
+  return (
+    filterRuns(response.body.workflow_runs, view).length < view.limit &&
+    response.body.total_count > response.body.workflow_runs.length
+  );
+}
+
+function filterRuns(runs: unknown[], view: RunListSupersetView): Record<string, unknown>[] {
+  return runs.filter((item): item is Record<string, unknown> => {
     if (!isRecord(item)) {
       return false;
     }
@@ -73,14 +105,6 @@ export function filterRunListSuperset(
       view.status === undefined || item.status === view.status || item.conclusion === view.status
     );
   });
-  return {
-    ...response,
-    body: {
-      ...response.body,
-      total_count: filtered.length,
-      workflow_runs: filtered.slice(0, view.limit),
-    },
-  };
 }
 
 function boundedPageSize(value: string | string[] | undefined): number | undefined {

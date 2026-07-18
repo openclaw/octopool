@@ -4,11 +4,12 @@ import { callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { isRecord } from "./object";
 import { classifyRoute } from "./policy";
-import { recordPublicGitHubRepo } from "./public-repos";
+import { anonymousGitHubResponseProvesPublicRepo, recordPublicGitHubRepo } from "./public-repos";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import type { GitHubRelayResponse, PoolPolicy, RelayRequest, RouteInfo } from "./types";
 
 const LOG_TTL_SECONDS = 7 * 24 * 60 * 60;
+const LOG_REVALIDATE_SECONDS = 60 * 60;
 const LOG_KEY_PREFIX = "github-actions-logs/v1/";
 const CREATED_AT_METADATA = "created-at";
 const BODY_ENCODING_METADATA = "body-encoding";
@@ -35,37 +36,55 @@ export async function terminalLogRunCompleted(
   route: RouteInfo,
   policy: PoolPolicy,
 ): Promise<boolean> {
-  if (route.kind !== "job_logs" || route.owner === undefined || route.repo === undefined) {
+  try {
+    if (route.kind !== "job_logs" || route.owner === undefined || route.repo === undefined) {
+      return false;
+    }
+    const jobID = /\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
+    if (jobID === undefined) {
+      return false;
+    }
+    const job = await readOrFetchMetadata(
+      env,
+      ctx,
+      metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
+      policy,
+    );
+    if (
+      !isRecord(job?.body) ||
+      typeof job.body.run_id !== "number" ||
+      !Number.isSafeInteger(job.body.run_id) ||
+      job.body.run_id < 1
+    ) {
+      return false;
+    }
+    const run = await readOrFetchMetadata(
+      env,
+      ctx,
+      metadataRequest(
+        request,
+        `/repos/${route.owner}/${route.repo}/actions/runs/${String(job.body.run_id)}`,
+      ),
+      policy,
+    );
+    return isRecord(run?.body) && run.body.status === "completed";
+  } catch (error) {
+    console.error("actions log completion preflight failed", error);
     return false;
   }
-  const jobID = /\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
-  if (jobID === undefined) {
-    return false;
+}
+
+export function terminalLogNeedsRevalidation(cached: CachedTerminalLog): boolean {
+  const createdAt = parseSQLiteTimestamp(cached.created_at);
+  return !Number.isFinite(createdAt) || Date.now() - createdAt >= LOG_REVALIDATE_SECONDS * 1000;
+}
+
+export async function deleteTerminalLogCache(env: Env, key: string): Promise<void> {
+  try {
+    await env.ACTIONS_LOGS.delete(key);
+  } catch (error) {
+    console.error("actions log cache deletion failed", error);
   }
-  const job = await readOrFetchMetadata(
-    env,
-    ctx,
-    metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
-    policy,
-  );
-  if (
-    !isRecord(job?.body) ||
-    typeof job.body.run_id !== "number" ||
-    !Number.isSafeInteger(job.body.run_id) ||
-    job.body.run_id < 1
-  ) {
-    return false;
-  }
-  const run = await readOrFetchMetadata(
-    env,
-    ctx,
-    metadataRequest(
-      request,
-      `/repos/${route.owner}/${route.repo}/actions/runs/${String(job.body.run_id)}`,
-    ),
-    policy,
-  );
-  return isRecord(run?.body) && run.body.status === "completed";
 }
 
 export async function readTerminalLogCache(
@@ -178,7 +197,13 @@ async function readOrFetchMetadata(
     return undefined;
   }
   const response = sanitizeGitHubResponse(route, fetched);
-  await recordPublicGitHubRepo(env, route);
+  if (
+    response.status >= 200 &&
+    response.status < 300 &&
+    anonymousGitHubResponseProvesPublicRepo(route)
+  ) {
+    await recordPublicGitHubRepo(env, route);
+  }
   try {
     await writeGitHubCache(env, key, request, route, response);
   } catch (error) {

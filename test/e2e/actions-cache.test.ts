@@ -1,7 +1,9 @@
 import { env } from "cloudflare:workers";
+import { createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { deleteEdgeJSON } from "../../src/edge-cache";
-import { terminalLogCacheKey } from "../../src/terminal-log-cache";
+import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { terminalLogCacheKey, terminalLogRunCompleted } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
@@ -52,6 +54,28 @@ describe("terminal Actions log cache", () => {
     });
   });
 
+  it("does not mint a public-repository proof from a 404 metadata response", async () => {
+    const request: RelayRequest = { pool: "maintainers", method: "GET", path: LOG_PATH };
+    const policy = defaultPolicy("openclaw");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => jsonResponse({ message: "Not Found" }, 404)),
+    );
+
+    await expect(
+      terminalLogRunCompleted(
+        env,
+        createExecutionContext(),
+        request,
+        classifyRoute(request, policy),
+        policy,
+      ),
+    ).resolves.toBe(false);
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM github_public_repos").first(),
+    ).toEqual({ count: 0 });
+  });
+
   it("bypasses the log cache while the owning run is active", async () => {
     const upstream = terminalLogUpstream("in_progress");
     vi.stubGlobal("fetch", upstream);
@@ -95,6 +119,86 @@ describe("terminal Actions log cache", () => {
     expect(upstream.mock.calls.length).toBe(callsAfterFill + 3);
     expect(logBackendCalls(upstream)).toBe(2);
     get.mockRestore();
+  });
+
+  it("fails open to the unchanged bypass when the completion probe throws", async () => {
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      const token = bearer(request);
+      if (token === "test-org-token") {
+        return jsonResponse({ private: false });
+      }
+      if (token === "test-primary-token") {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: "https://results-receiver.actions.githubusercontent.com/logs/fixture",
+          },
+        });
+      }
+      if (url.hostname === "results-receiver.actions.githubusercontent.com") {
+        return new Response("build log\n", { headers: { "content-type": "text/plain" } });
+      }
+      throw new Error("metadata backend unavailable");
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay(LOG_PATH);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: "build log\n",
+      relay: { cache: "bypass", cacheable: true, route_kind: "job_logs" },
+    });
+    expect(logBackendCalls(upstream)).toBe(1);
+  });
+
+  it("purges an hour-old cached log when the authenticated probe returns 404", async () => {
+    let logRequests = 0;
+    const base = terminalLogUpstream("completed");
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (bearer(request) === "test-primary-token") {
+        logRequests++;
+        if (logRequests === 2) {
+          return jsonResponse({ message: "Not Found" }, 404);
+        }
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", upstream);
+    await relay(LOG_PATH);
+    const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+    await ageTerminalLog(key, "-2 hours");
+
+    const response = await relay(LOG_PATH);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 404,
+      body: { message: "Not Found" },
+      relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
+    });
+    expect(await env.ACTIONS_LOGS.get(key)).toBeNull();
+    expect(logBackendCalls(upstream)).toBe(2);
+  });
+
+  it("refreshes the one-hour no-contact window after an existence probe", async () => {
+    const upstream = terminalLogUpstream("completed");
+    vi.stubGlobal("fetch", upstream);
+    await relay(LOG_PATH);
+    const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+    await ageTerminalLog(key, "-2 hours");
+
+    expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+      body: "build log\n",
+      relay: { cache: "hit" },
+    });
+    const callsAfterProbe = upstream.mock.calls.length;
+    expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+      body: "build log\n",
+      relay: { cache: "hit" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(callsAfterProbe);
+    expect(logBackendCalls(upstream)).toBe(2);
   });
 
   it("refetches an expired R2 log object", async () => {
@@ -160,7 +264,7 @@ describe("Actions run-list superset", () => {
       expect(url.pathname).toBe(RUNS_PATH);
       expect(Object.fromEntries(url.searchParams)).toEqual({ page: "1", per_page: "100" });
       return jsonResponse({
-        total_count: 200,
+        total_count: 4,
         workflow_runs: [
           run(1, "main", "completed", "success"),
           run(2, "main", "completed", "failure"),
@@ -183,6 +287,40 @@ describe("Actions run-list superset", () => {
     expect(limited.body).toMatchObject({ total_count: 4 });
     expect(runIDs(limited.body)).toEqual([1]);
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to an exact filtered request when the superset can underfill", async () => {
+    const urls: URL[] = [];
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      urls.push(url);
+      if (url.searchParams.has("branch")) {
+        return jsonResponse({
+          total_count: 25,
+          workflow_runs: [
+            run(101, "target", "completed", "success"),
+            run(102, "target", "completed", "success"),
+            run(103, "target", "completed", "success"),
+          ],
+        });
+      }
+      return jsonResponse({
+        total_count: 200,
+        workflow_runs: [run(1, "main", "completed", "success")],
+      });
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await shapedRunList({ branch: "target", per_page: "100", limit: "2" });
+    expect(runIDs(response.body)).toEqual([101, 102]);
+    expect(urls).toHaveLength(2);
+    expect(Object.fromEntries(urls[0]!.searchParams)).toEqual({ page: "1", per_page: "100" });
+    expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({
+      branch: "target",
+      limit: "2",
+      per_page: "100",
+    });
   });
 
   it("leaves workflow-scoped shaped requests on their exact upstream path", async () => {
@@ -281,6 +419,21 @@ function logBackendCalls(upstream: ReturnType<typeof vi.fn<typeof fetch>>): numb
     const request = new Request(input, init);
     return bearer(request) === "test-primary-token" && new URL(request.url).pathname === LOG_PATH;
   }).length;
+}
+
+async function ageTerminalLog(key: string, modifier: string): Promise<void> {
+  const object = await env.ACTIONS_LOGS.get(key);
+  expect(object).not.toBeNull();
+  const row = await env.DB.prepare("SELECT datetime('now', ?) AS created_at")
+    .bind(modifier)
+    .first<{ created_at: string }>();
+  await env.ACTIONS_LOGS.put(key, await object!.arrayBuffer(), {
+    ...(object!.httpMetadata === undefined ? {} : { httpMetadata: object!.httpMetadata }),
+    customMetadata: {
+      ...object!.customMetadata,
+      "created-at": row!.created_at,
+    },
+  });
 }
 
 async function shapedRunList(query: Record<string, string>): Promise<RelayEnvelope> {

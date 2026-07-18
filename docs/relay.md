@@ -241,7 +241,9 @@ following read-only shapes are enabled. A safe CLI-shaped request outside this s
 `job_logs` is a large-payload, log-class route: it follows GitHub's signed redirect to
 `*.actions.githubusercontent.com` / `*.blob.core.windows.net`, caches immutable logs in R2
 for seven days only after the owning run completes, and is gated by the pool's `allow_logs`
-policy. Active-run logs retain the direct-fetch bypass.
+policy. Cached logs get at most a one-hour zero-contact window before an authenticated
+existence probe honors upstream deletion; active-run and failed-preflight logs retain the
+direct-fetch bypass.
 
 ## Policy gates
 

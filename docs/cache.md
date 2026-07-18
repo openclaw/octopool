@@ -127,16 +127,24 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 `job_logs` requests first resolve the job's `run_id`, then resolve the owning `run_view`
 through the normal edge + D1 metadata cache. Active or unknown runs keep the previous
-large-payload bypass behavior. A run whose status is `completed` uses the dedicated
+large-payload bypass behavior; metadata errors also fail open to that unchanged bypass.
+Only a successful 2xx anonymous metadata response records a public-repository proof.
+A run whose status is `completed` uses the dedicated
 `ACTIONS_LOGS` R2 bucket, keyed by pool and exact route path, so immutable log downloads
 are shared without putting their large payloads in D1.
 
-R2 stores the raw log bytes, content type, original body encoding, and a creation timestamp.
-Objects are fresh for seven days. Reads enforce that lifetime from object metadata because
-R2 has no native object TTL; expired objects are treated as misses and removed. The hourly
-maintenance task also scans and deletes expired objects in bounded pages. R2 read, write,
-or maintenance failures never fail a relay request: Octopool fetches the log through the
-existing authenticated redirect-validation path instead.
+R2 stores the raw log bytes, content type, original body encoding, and a retention timestamp.
+An object younger than one hour can be served with no upstream contact. Older objects first
+make an authenticated log request without following its redirect: a validated `302 Location`
+confirms existence and refreshes the retention timestamp, while `404` purges the object and
+returns GitHub's deletion response. Thus a deletion can remain cached for at most the bounded
+one-hour zero-contact window, not the full retention period.
+
+Objects untouched and unconfirmed for seven days expire. Reads enforce that lifetime from
+object metadata because R2 has no native object TTL; expired objects are treated as misses
+and removed. The hourly maintenance task also scans and deletes expired objects in bounded
+pages. R2 read, write, probe, or maintenance failures never fail a relay request: Octopool
+uses the existing authenticated redirect-validation path instead.
 
 As with edge + D1 hits, Octopool runs the public-repository guard before returning an R2
 log hit. Successful hits are audited as cacheable `hit` events and count as saved GitHub
@@ -154,9 +162,11 @@ matching either the GitHub run `status` or terminal `conclusion`, then apply `pe
 
 The derived response's `total_count` is the number of matching runs found in the cached
 100-run page before truncation. Shim consumers ignore totals beyond the returned page; this
-is deliberately not a claim about older GitHub pages. Page values above 1, page sizes above
-100, workflow-scoped paths, unknown query parameters, conditional requests, and requests
-without the shim shape keep exact upstream and per-query cache behavior.
+is deliberately not a claim about older GitHub pages. If local filtering returns fewer than
+the requested limit while GitHub's canonical `total_count` proves that older runs were not
+captured, Octopool falls back to the exact upstream filtered request. Page values above 1,
+page sizes above 100, workflow-scoped paths, unknown query parameters, conditional requests,
+and requests without the shim shape keep exact upstream and per-query cache behavior.
 
 ## Cache-hit integrity
 
