@@ -394,6 +394,71 @@ func TestHumanRunViewActiveJobOmitsDuration(t *testing.T) {
 	}
 }
 
+func TestHumanListWebFlagDelegates(t *testing.T) {
+	// --web hits the option parser's fallback before any handler runs; the
+	// native renderer must never see it even with non-TTY stdout.
+	setHumanTestSeams(t, time.Time{})
+	var out bytes.Buffer
+	for _, args := range [][]string{
+		{"list", "-R", "openclaw/octopool", "--web"},
+		{"view", "25", "-R", "openclaw/octopool", "--web"},
+	} {
+		if result := handleGHPR(t.Context(), args, &out); result.action != ghDelegate {
+			t.Fatalf("pr %v must delegate, got %v", args, result.action)
+		}
+		if result := handleGHIssue(t.Context(), args, &out); result.action != ghDelegate {
+			t.Fatalf("issue %v must delegate, got %v", args, result.action)
+		}
+	}
+	if out.Len() != 0 {
+		t.Fatalf("delegation must not print, got %q", out.String())
+	}
+}
+
+func TestHumanRunViewRendersFailedSteps(t *testing.T) {
+	setHumanTestSeams(t, time.Date(2026, 7, 18, 4, 21, 25, 0, time.UTC))
+	relayTestServer(t, func(body map[string]any) any {
+		if strings.HasSuffix(body["path"].(string), "/jobs") {
+			return map[string]any{"total_count": 1, "jobs": []map[string]any{{
+				"id": 9, "name": "test", "status": "completed", "conclusion": "failure",
+				"started_at": "2026-07-17T21:00:00Z", "completed_at": "2026-07-17T21:02:00Z",
+				"steps": []map[string]any{
+					{"name": "Build", "status": "completed", "conclusion": "success"},
+					{"name": "Unit tests", "status": "completed", "conclusion": "failure"},
+				},
+			}}}
+		}
+		return map[string]any{
+			"id": 42, "status": "completed", "conclusion": "failure", "head_branch": "main",
+			"name": "CI", "event": "push", "created_at": "2026-07-17T20:59:00Z",
+			"html_url": "https://github.com/openclaw/octopool/actions/runs/42",
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"view", "42", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	if !strings.Contains(out.String(), "  X Unit tests\n") || strings.Contains(out.String(), "Build") {
+		t.Fatalf("failed steps only must render, got %q", out.String())
+	}
+}
+
+func TestHumanBodyNewlineParity(t *testing.T) {
+	var empty bytes.Buffer
+	if err := writeHumanBody(&empty, ""); err != nil {
+		t.Fatal(err)
+	}
+	if empty.String() != "--\n\n" {
+		t.Fatalf("empty body = %q, want gh's unconditional trailing newline", empty.String())
+	}
+	var trailing bytes.Buffer
+	if err := writeHumanBody(&trailing, "text\n"); err != nil {
+		t.Fatal(err)
+	}
+	if trailing.String() != "--\ntext\n\n" {
+		t.Fatalf("trailing-newline body = %q", trailing.String())
+	}
+}
+
 func TestHumanDurationFormatting(t *testing.T) {
 	tests := []struct {
 		start string

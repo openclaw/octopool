@@ -227,6 +227,22 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 		); err != nil {
 			return err
 		}
+		if !strings.EqualFold(firstString(job, "conclusion"), "failure") {
+			continue
+		}
+		steps, _ := job["steps"].([]any)
+		for _, rawStep := range steps {
+			step, ok := rawStep.(map[string]any)
+			if !ok || !strings.EqualFold(firstString(step, "conclusion"), "failure") {
+				continue
+			}
+			if _, err := fmt.Fprintf(stdout, "  %s %s\n",
+				statusGlyph(firstString(step, "status"), firstString(step, "conclusion")),
+				watchSafeText(firstString(step, "name")),
+			); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := fmt.Fprintln(stdout); err != nil {
 		return err
@@ -333,18 +349,10 @@ func writeHumanBody(stdout io.Writer, body string) error {
 	if _, err := fmt.Fprintln(stdout, "--"); err != nil {
 		return err
 	}
-	clean := bodySafeText(body)
-	if clean == "" {
-		return nil
-	}
-	if _, err := io.WriteString(stdout, clean); err != nil {
-		return err
-	}
-	if !strings.HasSuffix(clean, "\n") {
-		_, err := fmt.Fprintln(stdout)
-		return err
-	}
-	return nil
+	// real gh prints the body record with one unconditional trailing newline,
+	// including for empty bodies.
+	_, err := fmt.Fprintln(stdout, bodySafeText(body))
+	return err
 }
 
 func joinedObjectStrings(raw any, key string) string {
