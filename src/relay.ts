@@ -27,12 +27,24 @@ import {
   recordPublicGitHubRepo,
 } from "./public-repos";
 import { capabilitiesForRouteKind } from "./route-manifest";
+import {
+  filterRunListSuperset,
+  runListSupersetView,
+  type RunListSupersetView,
+} from "./run-list-superset";
+import {
+  readTerminalLogCache,
+  terminalLogCacheKey,
+  terminalLogRunCompleted,
+  writeTerminalLogCache,
+} from "./terminal-log-cache";
 import type {
   GitHubRelayResponse,
   Identity,
   RecordResult,
   RelayRequest,
   RouteInfo,
+  PoolPolicy,
   SelectionRequest,
   SelectionResult,
 } from "./types";
@@ -51,6 +63,10 @@ type RelayBase = {
 
 type ActiveRelay = RelayBase & {
   route: RouteInfo;
+  policy: PoolPolicy;
+  cacheRequest: RelayRequest;
+  runListSuperset: RunListSupersetView | undefined;
+  terminalLogCacheKey: string | undefined;
   cacheEnabled: boolean;
   maxAgeSeconds: number | undefined;
   sharedCacheKey: string | undefined;
@@ -132,12 +148,18 @@ async function prepareRelay(
     classifyRoute(base.request, policy),
   );
   const cacheEnabled = shouldUseGitHubCache(base.request, route);
+  const runListSuperset = cacheEnabled ? runListSupersetView(base.request, route) : undefined;
+  const cacheRequest = runListSuperset?.cacheRequest ?? base.request;
   const cacheKey = cacheEnabled
-    ? await githubCacheKey(base.request.pool, base.request, route)
+    ? await githubCacheKey(base.request.pool, cacheRequest, route)
     : undefined;
   return {
     ...base,
     route,
+    policy,
+    cacheRequest,
+    runListSuperset,
+    terminalLogCacheKey: undefined,
     cacheEnabled,
     maxAgeSeconds: cacheEnabled ? requestCacheMaxAgeSeconds(base.request) : undefined,
     sharedCacheKey: cacheKey,
@@ -151,6 +173,30 @@ async function prepareRelay(
 }
 
 async function executeRelay(state: ActiveRelay): Promise<Response> {
+  if (state.route.logs) {
+    const completed = await terminalLogRunCompleted(
+      state.env,
+      state.ctx,
+      state.request,
+      state.route,
+      state.policy,
+    );
+    if (completed) {
+      const key = terminalLogCacheKey(state.request);
+      state.terminalLogCacheKey = key;
+      state.cacheStatus = "miss";
+      state.cacheable = true;
+      const cached = await readTerminalLogCache(state.env, key);
+      if (cached !== undefined) {
+        await ensurePublicGitHubRepo(state.env, state.route, cached.created_at, state.coordinator);
+        return serveCachedGitHubResponse(
+          state.env,
+          state.ctx,
+          cachedResponseParams(state, cached, "hit"),
+        );
+      }
+    }
+  }
   const cached = await readFreshRelayCache(state);
   if (cached !== undefined) {
     return serveCachedGitHubResponse(
@@ -211,7 +257,7 @@ async function readFreshRelayCache(state: ActiveRelay): Promise<CachedGitHubResp
   }
   state.route = await verifyPRStateHintLive(state.env, state.request, state.route);
   const cacheKey = state.cacheEnabled
-    ? await githubCacheKey(state.request.pool, state.request, state.route)
+    ? await githubCacheKey(state.request.pool, state.cacheRequest, state.route)
     : undefined;
   state.sharedCacheKey = cacheKey;
   await switchRelayCacheKey(state, cacheKey);
@@ -563,7 +609,7 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
   if (state.cacheKey === undefined) {
     return undefined;
   }
-  const response = await callGitHubWeb(state.env, state.request, state.route);
+  const response = await callGitHubWeb(state.env, state.cacheRequest, state.route);
   if (response === undefined) {
     return undefined;
   }
@@ -579,7 +625,7 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
 async function callPublicBackend(state: ActiveRelay): Promise<Response> {
   const github = sanitizeGitHubResponse(
     state.route,
-    await callPublicGitHub(state.env, state.request, state.route),
+    await callPublicGitHub(state.env, state.cacheRequest, state.route),
   );
   const fallbackReason = githubResponseLocalFallbackReason(
     github.status,
@@ -621,7 +667,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     const identity = findIdentity(identities, selection.identityId);
     state.identity = identity;
     const identityCacheKey = state.cacheEnabled
-      ? await githubCacheKey(state.request.pool, state.request, state.route, identity)
+      ? await githubCacheKey(state.request.pool, state.cacheRequest, state.route, identity)
       : undefined;
     rememberIdentityCacheKey(state, identityCacheKey, identity);
     await switchRelayCacheKey(state, identityCacheKey);
@@ -643,7 +689,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     }
     const github = sanitizeGitHubResponse(
       state.route,
-      await callGitHub(state.env, identity, state.request, state.route),
+      await callGitHub(state.env, identity, state.cacheRequest, state.route),
     );
     const rate = rateFromHeaders(github.headers);
     const identityFallback = githubResponseLocalFallbackReason(github.status, rate);
@@ -691,12 +737,16 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     await publishGitHubCache(
       state.env,
       state.cacheKey,
-      state.request,
+      state.cacheRequest,
       state.route,
       result.github,
       result.identity,
     );
   }
+  if (state.terminalLogCacheKey !== undefined) {
+    await publishTerminalLogCache(state.env, state.terminalLogCacheKey, result.github);
+  }
+  const clientResponse = filterRunListSuperset(result.github, state.runListSuperset);
   const background: Promise<unknown>[] = [
     insertAudit(state.env, {
       requestId: state.requestId,
@@ -707,7 +757,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
       routeKey: state.route.routeKey,
       routeKind: state.route.kind,
       ...(result.identity === undefined ? {} : { identityId: result.identity.id }),
-      status: result.github.status,
+      status: clientResponse.status,
       durationMs: Date.now() - state.started,
       ...(result.revalidated === true ? { fallbackReason: "cache_revalidated" } : {}),
       cacheStatus,
@@ -728,10 +778,10 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   }
   state.ctx.waitUntil(Promise.all(background));
   return jsonResponse({
-    status: result.github.status,
-    headers: result.github.headers,
-    body: result.github.body,
-    body_encoding: result.github.body_encoding,
+    status: clientResponse.status,
+    headers: clientResponse.headers,
+    body: clientResponse.body,
+    body_encoding: clientResponse.body_encoding,
     ...(result.identity === undefined
       ? {}
       : { identity: { id: result.identity.id, kind: result.identity.kind } }),
@@ -878,6 +928,7 @@ function cachedResponseParams(
   cacheStatus: "hit" | "stale",
   extras: { staleReason?: string; coalesced?: boolean } = {},
 ): Parameters<typeof serveCachedGitHubResponse>[2] {
+  const clientResponse = filterRunListSuperset(cached, state.runListSuperset);
   return {
     requestId: state.requestId,
     callerId: state.callerId,
@@ -885,7 +936,7 @@ function cachedResponseParams(
     clientName: state.clientName,
     pool: state.request.pool,
     route: state.route,
-    cached,
+    cached: { ...cached, ...clientResponse },
     started: state.started,
     cacheStatus,
     ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
@@ -964,7 +1015,7 @@ async function serveCachedGitHubResponse(
         ? {}
         : { cache_expires_at: params.cached.expires_at }),
       route_kind: params.route.kind,
-      ...(params.cached.identity === undefined
+      ...(params.cached.identity === undefined && !params.route.logs
         ? {
             backend:
               capabilitiesForRouteKind(params.route.kind).fallback === "github_public"
@@ -1005,6 +1056,18 @@ async function publishGitHubCache(
   }
 }
 
+async function publishTerminalLogCache(
+  env: Env,
+  key: string,
+  response: GitHubRelayResponse,
+): Promise<void> {
+  try {
+    await writeTerminalLogCache(env, key, response);
+  } catch (error) {
+    console.error("actions log cache write failed", error);
+  }
+}
+
 function staleFallbackReasonFromError(error: unknown): string | undefined {
   if (!(error instanceof HttpError)) {
     return undefined;
@@ -1028,7 +1091,12 @@ async function serveFreshIdentityCache(
     if (attemptedIdentityIds.has(identity.id)) {
       continue;
     }
-    const cacheKey = await githubCacheKey(state.request.pool, state.request, state.route, identity);
+    const cacheKey = await githubCacheKey(
+      state.request.pool,
+      state.cacheRequest,
+      state.route,
+      identity,
+    );
     const cached = await readCacheEntry(state, cacheKey, identity);
     if (cached === undefined) {
       continue;
@@ -1054,7 +1122,7 @@ async function rememberIdentityCacheKeys(
   for (const identity of identities) {
     rememberIdentityCacheKey(
       state,
-      await githubCacheKey(state.request.pool, state.request, state.route, identity),
+      await githubCacheKey(state.request.pool, state.cacheRequest, state.route, identity),
       identity,
     );
   }

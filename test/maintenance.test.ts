@@ -5,6 +5,9 @@ describe("scheduled maintenance", () => {
   it("prunes expired cache and old audit rows", async () => {
     const queries: string[] = [];
     const env = {
+      ACTIONS_LOGS: {
+        list: async () => ({ objects: [], truncated: false }),
+      },
       DB: {
         prepare: (query: string) => {
           queries.push(query);

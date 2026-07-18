@@ -108,6 +108,12 @@ describe("Worker end-to-end relay security boundaries", () => {
           },
         });
       }
+      if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
+        return jsonResponse({ id: 42, run_id: 99, status: "completed" });
+      }
+      if (url.pathname === "/repos/openclaw/octopool/actions/runs/99") {
+        return jsonResponse({ id: 99, status: "completed" });
+      }
       expect(url.hostname).toBe("results-receiver.actions.githubusercontent.com");
       expect(request.headers.get("authorization")).toBeNull();
       return new Response("build log\n", {
@@ -124,20 +130,27 @@ describe("Worker end-to-end relay security boundaries", () => {
       body: "build log\n",
       body_encoding: "text",
       identity: { id: "primary", kind: "pat" },
-      relay: { cache: "bypass", cacheable: true, route_kind: "job_logs" },
+      relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
-    expect(upstream).toHaveBeenCalledTimes(3);
+    expect(upstream).toHaveBeenCalledTimes(5);
     expect(
       await env.DB.prepare("SELECT cache_status, cacheable, status FROM audit_events").first(),
-    ).toEqual({ cache_status: "bypass", cacheable: 0, status: 200 });
+    ).toEqual({ cache_status: "miss", cacheable: 1, status: 200 });
   });
 
   it("rejects an Actions log redirect to an untrusted host", async () => {
     await seedPool();
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
+      const url = new URL(request.url);
       if (bearer(request) === "test-org-token") {
         return jsonResponse({ private: false });
+      }
+      if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
+        return jsonResponse({ id: 42, run_id: 99, status: "completed" });
+      }
+      if (url.pathname === "/repos/openclaw/octopool/actions/runs/99") {
+        return jsonResponse({ id: 99, status: "completed" });
       }
       expect(bearer(request)).toBe("test-primary-token");
       return new Response(null, {
@@ -152,7 +165,7 @@ describe("Worker end-to-end relay security boundaries", () => {
     expect(await response.json()).toMatchObject({
       error: { code: "github_log_redirect_denied" },
     });
-    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(upstream).toHaveBeenCalledTimes(4);
     expect(
       await env.DB.prepare("SELECT identity_id, status, error_code FROM audit_events").first(),
     ).toEqual({

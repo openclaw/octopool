@@ -5,8 +5,9 @@ route with a public-visibility check. Both keep private data out of the shared c
 reduce load on pooled identities.
 
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
-`src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`, `src/maintenance.ts`,
-migrations `0002`/`0003`/`0006`/`0011`.
+`src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
+`src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
+`0002`/`0003`/`0006`/`0011`.
 
 ## Read-through edge + D1 cache
 
@@ -43,9 +44,11 @@ need to re-contact GitHub just to validate the hint.
 
 ### What is cached
 
-Only successful `2xx` responses on cacheable routes are stored. The cache is **bypassed** when:
+Only successful `2xx` responses on cacheable routes are stored. The edge + D1 cache is
+**bypassed** when:
 
-- the route is a log route, large-payload route, or `rate_limit`, or
+- the route is a large-payload route or `rate_limit` (completed Actions logs use the
+  dedicated R2 cache described below), or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).
 
 Cacheable requests can instead bound acceptable staleness with a
@@ -118,9 +121,44 @@ Per route kind and response state (`cacheTTLSeconds`):
 - release lists/latest → 5m; release by tag/id → 1h
 - immutable commit objects → 24h; commit lists → 5m; contents → 1h
 - repo metadata → 10m; workflow metadata → 1h
-- large logs, explicit log routes, `rate_limit`, and conditional requests still bypass
+- active/unknown-run logs, `rate_limit`, and conditional requests still bypass
 
-### Cache-hit integrity
+## Completed Actions log cache
+
+`job_logs` requests first resolve the job's `run_id`, then resolve the owning `run_view`
+through the normal edge + D1 metadata cache. Active or unknown runs keep the previous
+large-payload bypass behavior. A run whose status is `completed` uses the dedicated
+`ACTIONS_LOGS` R2 bucket, keyed by pool and exact route path, so immutable log downloads
+are shared without putting their large payloads in D1.
+
+R2 stores the raw log bytes, content type, original body encoding, and a creation timestamp.
+Objects are fresh for seven days. Reads enforce that lifetime from object metadata because
+R2 has no native object TTL; expired objects are treated as misses and removed. The hourly
+maintenance task also scans and deletes expired objects in bounded pages. R2 read, write,
+or maintenance failures never fail a relay request: Octopool fetches the log through the
+existing authenticated redirect-validation path instead.
+
+As with edge + D1 hits, Octopool runs the public-repository guard before returning an R2
+log hit. Successful hits are audited as cacheable `hit` events and count as saved GitHub
+requests; active-run log fetches remain non-cacheable `bypass` events.
+
+## Actions run-list superset
+
+Repo-level `run_list` requests carrying
+`x-octopool-public-shape: actions-summary-v1` can share one canonical cache entry per pool
+and repository. The canonical request is the unfiltered `page=1&per_page=100` response and
+uses the existing state-aware run-list TTL policy. A miss fills that entry with one upstream
+request; fresh variants filter the cached runs by exact `head_branch`, or by a `status` value
+matching either the GitHub run `status` or terminal `conclusion`, then apply `per_page` and
+`limit` truncation locally.
+
+The derived response's `total_count` is the number of matching runs found in the cached
+100-run page before truncation. Shim consumers ignore totals beyond the returned page; this
+is deliberately not a claim about older GitHub pages. Page values above 1, page sizes above
+100, workflow-scoped paths, unknown query parameters, conditional requests, and requests
+without the shim shape keep exact upstream and per-query cache behavior.
+
+## Cache-hit integrity
 
 A fresh or bounded-stale hit is only served if:
 
@@ -144,7 +182,8 @@ refreshes use the same coordinator pattern, so simultaneous expired-proof checks
 GitHub request. Audit writes remain deferred.
 An hourly scheduled task deletes cache entries after each entry's route-specific
 `stale_expires_at` deadline in bounded batches, preserving every configured stale-serving
-window while keeping D1 growth bounded.
+window while keeping D1 growth bounded. The same task scans bounded R2 pages for completed
+log objects older than seven days.
 
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and
@@ -196,6 +235,7 @@ private-repo block — a hard `404`/private response always denies.
   (migration `0005`).
 - `audit_events.fallback_reason` / `audit_events.coalesced` — local fallback classification
   and duplicate-fill telemetry (migration `0009`).
+- `ACTIONS_LOGS` R2 binding (`octopool-actions-logs`) — raw terminal Actions log objects;
+  no D1 migration is required.
 
-Secret values are never written to the cache. R2 is deferred; current routes are bounded
-enough to live in D1, and large Actions logs skip the cache entirely.
+Secret values are never written to either cache.

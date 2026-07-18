@@ -30,6 +30,12 @@
       "database_id": "28122808-8a3c-4524-a1c0-70b5984744b7",
     },
   ],
+  "r2_buckets": [
+    {
+      "binding": "ACTIONS_LOGS",
+      "bucket_name": "octopool-actions-logs",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

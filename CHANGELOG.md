@@ -7,6 +7,7 @@
 - Prefer validated public page, raw-content, and Git smart HTTP transports before anonymous GitHub API reads, retaining anonymous API and pooled identities as fallbacks.
 - Render common non-interactive human-format `gh pr`, `gh run`, and `gh issue` reads from relay-cached REST responses while preserving real `gh` for terminal and unsupported shapes.
 - Revalidate expired cache entries with conditional requests so unchanged GitHub responses cost zero rate limit.
+- Cache completed Actions job logs in R2 for seven days and serve shaped repo run-list filters from one cached 100-run superset.
 
 ## 0.4.7 - 2026-07-17
 

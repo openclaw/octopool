@@ -1,0 +1,94 @@
+import { PUBLIC_SHAPES } from "./github-public-shapes";
+import { isRecord } from "./object";
+import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
+
+const SUPERSET_PAGE_SIZE = 100;
+const DEFAULT_PAGE_SIZE = 30;
+
+export type RunListSupersetView = {
+  cacheRequest: RelayRequest;
+  branch?: string;
+  status?: string;
+  limit: number;
+};
+
+export function runListSupersetView(
+  request: RelayRequest,
+  route: RouteInfo,
+): RunListSupersetView | undefined {
+  if (
+    route.kind !== "run_list" ||
+    request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.actionsSummary
+  ) {
+    return undefined;
+  }
+  const query = request.query ?? {};
+  const allowed = new Set(["branch", "status", "page", "per_page", "limit"]);
+  if (
+    Object.entries(query).some(
+      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
+    ) ||
+    (query.page !== undefined && query.page !== "1")
+  ) {
+    return undefined;
+  }
+  const perPage = boundedPageSize(query.per_page);
+  const limit = boundedPageSize(query.limit);
+  if (
+    (query.per_page !== undefined && perPage === undefined) ||
+    (query.limit !== undefined && limit === undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    cacheRequest: {
+      ...request,
+      query: { page: "1", per_page: String(SUPERSET_PAGE_SIZE) },
+    },
+    ...(typeof query.branch === "string" ? { branch: query.branch } : {}),
+    ...(typeof query.status === "string" ? { status: query.status } : {}),
+    limit: Math.min(perPage ?? SUPERSET_PAGE_SIZE, limit ?? perPage ?? DEFAULT_PAGE_SIZE),
+  };
+}
+
+export function filterRunListSuperset(
+  response: GitHubRelayResponse,
+  view: RunListSupersetView | undefined,
+): GitHubRelayResponse {
+  if (
+    view === undefined ||
+    !isRecord(response.body) ||
+    !Array.isArray(response.body.workflow_runs)
+  ) {
+    return response;
+  }
+  const filtered = response.body.workflow_runs.filter((item) => {
+    if (!isRecord(item)) {
+      return false;
+    }
+    if (view.branch !== undefined && item.head_branch !== view.branch) {
+      return false;
+    }
+    return (
+      view.status === undefined || item.status === view.status || item.conclusion === view.status
+    );
+  });
+  return {
+    ...response,
+    body: {
+      ...response.body,
+      total_count: filtered.length,
+      workflow_runs: filtered.slice(0, view.limit),
+    },
+  };
+}
+
+function boundedPageSize(value: string | string[] | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(value) || !/^(?:[1-9]|[1-9][0-9]|100)$/.test(value)) {
+    return undefined;
+  }
+  return Number(value);
+}
