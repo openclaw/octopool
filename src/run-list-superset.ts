@@ -4,6 +4,22 @@ import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const SUPERSET_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 30;
+const SUPPORTED_RUN_STATUSES = new Set([
+  "completed",
+  "action_required",
+  "cancelled",
+  "failure",
+  "neutral",
+  "skipped",
+  "stale",
+  "success",
+  "timed_out",
+  "in_progress",
+  "queued",
+  "requested",
+  "waiting",
+  "pending",
+]);
 
 export type RunListSupersetView = {
   cacheRequest: RelayRequest;
@@ -36,7 +52,8 @@ export function runListSupersetView(
   const limit = boundedPageSize(query.limit);
   if (
     (query.per_page !== undefined && perPage === undefined) ||
-    (query.limit !== undefined && limit === undefined)
+    (query.limit !== undefined && limit === undefined) ||
+    (typeof query.status === "string" && !SUPPORTED_RUN_STATUSES.has(query.status))
   ) {
     return undefined;
   }

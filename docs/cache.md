@@ -149,6 +149,8 @@ uses the existing authenticated redirect-validation path instead.
 As with edge + D1 hits, Octopool runs the public-repository guard before returning an R2
 log hit. Successful hits are audited as cacheable `hit` events and count as saved GitHub
 requests; active-run log fetches remain non-cacheable `bypass` events.
+Requests carrying `If-None-Match` or `If-Modified-Since` skip the completion lookup and
+all R2 reads and writes, preserving the normal conditional-request bypass path.
 
 ## Actions run-list superset
 
@@ -166,7 +168,9 @@ is deliberately not a claim about older GitHub pages. If local filtering returns
 the requested limit while GitHub's canonical `total_count` proves that older runs were not
 captured, Octopool falls back to the exact upstream filtered request. Page values above 1,
 page sizes above 100, workflow-scoped paths, unknown query parameters, conditional requests,
-and requests without the shim shape keep exact upstream and per-query cache behavior.
+unsupported GitHub status values, and requests without the shim shape keep exact upstream
+and per-query cache behavior. Exact underfill fallbacks translate shim-only `limit` into a
+capped upstream `per_page` and never forward `limit` to GitHub.
 
 ## Cache-hit integrity
 

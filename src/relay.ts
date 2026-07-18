@@ -181,7 +181,7 @@ async function prepareRelay(
 }
 
 async function executeRelay(state: ActiveRelay): Promise<Response> {
-  if (state.route.logs) {
+  if (state.route.logs && !hasConditionalRequestHeaders(state.request)) {
     const completed = await terminalLogRunCompleted(
       state.env,
       state.ctx,
@@ -1142,12 +1142,31 @@ async function serveFreshCachedRelayResponse(
 
 async function switchToExactRunList(state: ActiveRelay): Promise<void> {
   state.runListExactFallback = true;
-  state.cacheRequest = state.request;
+  state.cacheRequest = exactRunListRequest(state.request, state.runListSuperset);
   state.identity = undefined;
   state.attemptedIdentityCacheKeys = [];
-  const cacheKey = await githubCacheKey(state.request.pool, state.request, state.route);
+  const cacheKey = await githubCacheKey(state.request.pool, state.cacheRequest, state.route);
   state.sharedCacheKey = cacheKey;
   await switchRelayCacheKey(state, cacheKey);
+}
+
+function exactRunListRequest(
+  request: RelayRequest,
+  view: RunListSupersetView | undefined,
+): RelayRequest {
+  const query = { ...request.query };
+  if (query.per_page === undefined && query.limit !== undefined && view !== undefined) {
+    query.per_page = String(Math.min(view.limit, 100));
+  }
+  delete query.limit;
+  return { ...request, query };
+}
+
+function hasConditionalRequestHeaders(request: RelayRequest): boolean {
+  return (
+    request.headers?.["if-none-match"] !== undefined ||
+    request.headers?.["if-modified-since"] !== undefined
+  );
 }
 
 function staleFallbackReasonFromError(error: unknown): string | undefined {

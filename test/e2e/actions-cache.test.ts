@@ -54,6 +54,40 @@ describe("terminal Actions log cache", () => {
     });
   });
 
+  it.each(["if-none-match", "if-modified-since"] as const)(
+    "bypasses R2 reads and writes for %s requests",
+    async (header) => {
+      const upstream = terminalLogUpstream("completed");
+      vi.stubGlobal("fetch", upstream);
+      await relay(LOG_PATH);
+      const get = vi.spyOn(env.ACTIONS_LOGS, "get");
+      const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+
+      const response = await relay(LOG_PATH, undefined, {
+        headers: { [header]: '"fixture"' },
+      });
+
+      expect(await response.json<RelayEnvelope>()).toMatchObject({
+        status: 200,
+        body: "build log\n",
+        relay: { cache: "bypass", cacheable: true, route_kind: "job_logs" },
+      });
+      expect(get).not.toHaveBeenCalled();
+      expect(put).not.toHaveBeenCalled();
+      expect(logBackendCalls(upstream)).toBe(2);
+      expect(
+        upstream.mock.calls.some(([input, init]) => {
+          const request = new Request(input, init);
+          return (
+            bearer(request) === "test-primary-token" && request.headers.get(header) === '"fixture"'
+          );
+        }),
+      ).toBe(true);
+      get.mockRestore();
+      put.mockRestore();
+    },
+  );
+
   it("does not mint a public-repository proof from a 404 metadata response", async () => {
     const request: RelayRequest = { pool: "maintainers", method: "GET", path: LOG_PATH };
     const policy = defaultPolicy("openclaw");
@@ -312,15 +346,49 @@ describe("Actions run-list superset", () => {
     });
     vi.stubGlobal("fetch", upstream);
 
-    const response = await shapedRunList({ branch: "target", per_page: "100", limit: "2" });
+    const response = await shapedRunList({ branch: "target", limit: "2" });
     expect(runIDs(response.body)).toEqual([101, 102]);
-    expect(urls).toHaveLength(2);
-    expect(Object.fromEntries(urls[0]!.searchParams)).toEqual({ page: "1", per_page: "100" });
-    expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({
-      branch: "target",
-      limit: "2",
+    const apiRequests = urls.filter((url) => url.hostname === "api.github.com");
+    expect(apiRequests).toHaveLength(2);
+    expect(Object.fromEntries(apiRequests[0]!.searchParams)).toEqual({
+      page: "1",
       per_page: "100",
     });
+    expect(Object.fromEntries(apiRequests[1]!.searchParams)).toEqual({
+      branch: "target",
+      per_page: "2",
+    });
+  });
+
+  it("preserves GitHub validation for unsupported status values", async () => {
+    const apiRequests: URL[] = [];
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (bearer(request) === "test-org-token") {
+        return jsonResponse({ private: false });
+      }
+      if (url.hostname === "github.com") {
+        return new Response("not found", { status: 404 });
+      }
+      apiRequests.push(url);
+      return jsonResponse({ message: "Validation Failed" }, 422);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay(RUNS_PATH, undefined, {
+      query: { status: "not-a-github-status" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 422,
+      body: { message: "Validation Failed" },
+    });
+    expect(apiRequests).toHaveLength(2);
+    for (const url of apiRequests) {
+      expect(Object.fromEntries(url.searchParams)).toEqual({ status: "not-a-github-status" });
+    }
   });
 
   it("leaves workflow-scoped shaped requests on their exact upstream path", async () => {

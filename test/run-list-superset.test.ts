@@ -21,21 +21,23 @@ describe("Actions run-list superset eligibility", () => {
     });
   });
 
-  it.each([[{ page: "2" }], [{ per_page: "101" }], [{ event: "push" }]])(
-    "leaves unsupported query %o exact",
-    (query) => {
-      const request = validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
-        path: "/repos/openclaw/octopool/actions/runs",
-        query,
-        headers: { "x-octopool-public-shape": "actions-summary-v1" },
-      });
-      expect(
-        runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
-      ).toBeUndefined();
-    },
-  );
+  it.each([
+    [{ page: "2" }],
+    [{ per_page: "101" }],
+    [{ event: "push" }],
+    [{ status: "not-a-github-status" }],
+  ])("leaves unsupported query %o exact", (query) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query,
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    expect(
+      runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
+    ).toBeUndefined();
+  });
 
   it("uses a standalone limit without imposing the REST default page size", () => {
     const request = validateRelayRequest({
