@@ -232,7 +232,10 @@ describe("Worker end-to-end cache revalidation", () => {
     const leader = relay(RUN_PATH);
     await started;
     const follower = relay(RUN_PATH);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Outlast the first 4s coalescing wait while the leader still owns its 8s fill lease.
+    // A follower must wait/claim again instead of starting another conditional request.
+    await new Promise((resolve) => setTimeout(resolve, 4_250));
+    const conditionalCallsBeforePublish = conditionalCalls;
     releaseRevalidation();
     const envelopes = await Promise.all(
       [leader, follower].map(async (responsePromise) =>
@@ -250,6 +253,7 @@ describe("Worker end-to-end cache revalidation", () => {
         relay: expect.objectContaining({ cache: "hit", coalesced: true }),
       }),
     ]);
+    expect(conditionalCallsBeforePublish).toBe(1);
     expect(conditionalCalls).toBe(1);
     expect(
       await env.DB.prepare(
