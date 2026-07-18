@@ -4,6 +4,7 @@ import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
 import { releasePageRequest, summaryPageRequest } from "./github-public-pages";
+import { githubResponseHeaders } from "./github-response";
 import type { WebRequest } from "./github-web-types";
 import { fetchWebResponse, readWebBody } from "./github-web-transport";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
@@ -55,6 +56,56 @@ export async function callGitHubWeb(
     }
   }
   return undefined;
+}
+
+export async function callAnonymousGitHubAPI(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+): Promise<GitHubRelayResponse | undefined> {
+  const api = webRequests(env, request, route).find((candidate) => candidate.usesApiQuota);
+  if (api === undefined) {
+    return undefined;
+  }
+  const fetched = await fetchWebResponse(
+    api.url,
+    { ...api.headers, ...conditionalHeaders(request.headers) },
+    parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000),
+  );
+  if (fetched === undefined) {
+    return undefined;
+  }
+  const { response, url: responseURL } = fetched;
+  await storePublicAPIRate(env, route.resource, response.headers);
+  if (response.status === 304) {
+    return {
+      status: 304,
+      headers: githubResponseHeaders(response.headers),
+      body: null,
+      body_encoding: "text",
+      backend: "web",
+    };
+  }
+  if (response.status < 200 || response.status >= 300) {
+    return undefined;
+  }
+  try {
+    const body = await readWebBody(response, api.capBytes);
+    return await api.payload(new Uint8Array(body), response.headers, response.status, responseURL);
+  } catch {
+    return undefined;
+  }
+}
+
+function conditionalHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+  return {
+    ...(headers?.["if-none-match"] === undefined
+      ? {}
+      : { "if-none-match": headers["if-none-match"] }),
+    ...(headers?.["if-modified-since"] === undefined
+      ? {}
+      : { "if-modified-since": headers["if-modified-since"] }),
+  };
 }
 
 function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequest[] {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cacheTTLSeconds,
+  githubCacheRevalidationHeaders,
   githubCacheKey,
   pruneExpiredGitHubCache,
   readGitHubCache,
@@ -317,6 +318,38 @@ describe("github cache policy", () => {
 
     const rate = validateRelayRequest({ pool: "maintainers", method: "GET", path: "/rate_limit" });
     expect(shouldUseGitHubCache(rate, classifyRoute(rate, policy))).toBe(false);
+  });
+
+  it("revalidates identity and anonymous API entries but not web entries", () => {
+    const base = {
+      status: 200,
+      body: { id: 1 },
+      body_encoding: "json" as const,
+      created_at: sqliteUTC(Date.now() - 120_000),
+      expires_at: sqliteUTC(Date.now() - 60_000),
+    };
+    expect(
+      githubCacheRevalidationHeaders({
+        ...base,
+        headers: { etag: '"identity"' },
+        identity: { id: "primary", kind: "pat" },
+      }),
+    ).toEqual({ "if-none-match": '"identity"' });
+    expect(
+      githubCacheRevalidationHeaders({
+        ...base,
+        headers: {
+          "last-modified": "Fri, 18 Jul 2026 06:00:00 GMT",
+          "x-ratelimit-resource": "core",
+        },
+      }),
+    ).toEqual({ "if-modified-since": "Fri, 18 Jul 2026 06:00:00 GMT" });
+    expect(
+      githubCacheRevalidationHeaders({
+        ...base,
+        headers: { etag: '"web"', "last-modified": "Fri, 18 Jul 2026 06:00:00 GMT" },
+      }),
+    ).toBeUndefined();
   });
 
   it("keeps mutable CI TTLs short and caches terminal CI for an hour", () => {

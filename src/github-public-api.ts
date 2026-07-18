@@ -64,6 +64,15 @@ export function publicAPIRequest(
   };
 }
 
+export function supportsAnonymousGitHubAPI(request: RelayRequest, route: RouteInfo): boolean {
+  return (
+    (releaseRoute(route) && defaultGitHubJSONAccept(request.headers?.accept)) ||
+    (request.method === "GET" &&
+      capabilitiesForRouteKind(route.kind).publicApi &&
+      defaultGitHubJSONAccept(request.headers?.accept))
+  );
+}
+
 export async function storePublicAPIRate(
   env: Env,
   resource: string,

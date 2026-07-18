@@ -1,6 +1,7 @@
 import { authenticateCaller } from "./auth";
 import {
   type CachedGitHubResponse,
+  githubCacheRevalidationHeaders,
   githubCacheKey,
   readGitHubCache,
   readStaleGitHubCache,
@@ -11,8 +12,9 @@ import {
 import { coalesceGitHubCacheMiss, finishGitHubCacheFill } from "./cache-coalesce";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub } from "./github";
+import { supportsAnonymousGitHubAPI } from "./github-public-api";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
-import { callGitHubWeb } from "./github-web";
+import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { HttpError, jsonResponse, parseJsonObject } from "./http";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
@@ -66,6 +68,13 @@ type RelaySuccess = {
   backend?: "web" | "github_public";
   leaseReason?: SelectionResult["reason"];
   rate?: GitHubRate;
+  revalidated?: boolean;
+  upstreamStatus?: number;
+};
+
+type RevalidationCandidate = {
+  cached: CachedGitHubResponse;
+  headers: Record<string, string>;
 };
 
 export async function relayGitHub(
@@ -158,6 +167,11 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
       state.ctx,
       cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
     );
+  }
+
+  const revalidated = await revalidateStaleRelayCache(state);
+  if (revalidated !== undefined) {
+    return revalidated;
   }
 
   const web = await callTokenFreeBackend(state);
@@ -261,6 +275,221 @@ async function coalesceRelayCacheMiss(
     return undefined;
   }
   return fill.cached;
+}
+
+async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response | undefined> {
+  if (state.cacheKey === undefined) {
+    return undefined;
+  }
+  const capabilities = capabilitiesForRouteKind(state.route.kind);
+  const identities =
+    capabilities.fallback === "pool"
+      ? await loadIdentities(state.env, state.request.pool, state.route)
+      : [];
+  await rememberIdentityCacheKeys(state, identities);
+  const candidates = await staleRevalidationCandidates(state);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const usesTokenFreeAPI = supportsAnonymousGitHubAPI(state.request, state.route);
+  if (usesTokenFreeAPI || capabilities.fallback === "github_public") {
+    const github = await callRevalidationAPI(state, candidates[0]!, usesTokenFreeAPI);
+    return github === undefined
+      ? undefined
+      : finishRevalidation(state, candidates[0]!, github, undefined, {
+          backend: usesTokenFreeAPI ? "web" : "github_public",
+        });
+  }
+  if (identities.length === 0) {
+    return undefined;
+  }
+
+  let selection: SelectionResult;
+  try {
+    selection = await selectIdentity(state.coordinator, {
+      pool: state.request.pool,
+      routeKey: state.route.routeKey,
+      resource: state.route.resource,
+      candidates: identities.map((identity) => ({ id: identity.id, weight: identity.weight })),
+    });
+  } catch {
+    return undefined;
+  }
+  const identity = findIdentity(identities, selection.identityId);
+  const identityCacheKey = await githubCacheKey(
+    state.request.pool,
+    state.request,
+    state.route,
+    identity,
+  );
+  state.identity = identity;
+  await switchRelayCacheKey(state, identityCacheKey);
+  const coalesced = await coalesceRelayCacheMiss(state);
+  if (coalesced !== undefined) {
+    if (
+      await cachedResponseAvailable(
+        state.env,
+        state.request.pool,
+        state.route,
+        coalesced,
+        state.coordinator,
+        identity,
+      )
+    ) {
+      return serveCachedGitHubResponse(
+        state.env,
+        state.ctx,
+        cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
+      );
+    }
+    return restoreSharedCacheFill(state);
+  }
+  if (state.cacheFillToken === undefined) {
+    return restoreSharedCacheFill(state);
+  }
+  const github = await callRevalidationAPI(state, candidates[0]!, false, identity);
+  if (github === undefined) {
+    return restoreSharedCacheFill(state);
+  }
+  const response = await finishRevalidation(state, candidates[0]!, github, identity, {
+    leaseReason: selection.reason,
+  });
+  return response ?? restoreSharedCacheFill(state);
+}
+
+async function staleRevalidationCandidates(state: ActiveRelay): Promise<RevalidationCandidate[]> {
+  const candidates: RevalidationCandidate[] = [];
+  for (const candidate of staleCacheCandidates(state)) {
+    const cached = await readStaleGitHubCache(state.env, candidate.cacheKey, state.route);
+    if (cached === undefined) {
+      continue;
+    }
+    const headers = githubCacheRevalidationHeaders(cached);
+    if (headers !== undefined) {
+      candidates.push({ cached, headers });
+    }
+  }
+  return candidates.sort(
+    (left, right) =>
+      Number(left.cached.identity !== undefined) - Number(right.cached.identity !== undefined),
+  );
+}
+
+async function callRevalidationAPI(
+  state: ActiveRelay,
+  candidate: RevalidationCandidate,
+  tokenFree: boolean,
+  identity?: Identity,
+): Promise<GitHubRelayResponse | undefined> {
+  const request: RelayRequest = {
+    ...state.request,
+    headers: { ...state.request.headers, ...candidate.headers },
+  };
+  try {
+    if (tokenFree) {
+      return await callAnonymousGitHubAPI(state.env, request, state.route);
+    }
+    if (identity !== undefined) {
+      return sanitizeGitHubResponse(
+        state.route,
+        await callGitHub(state.env, identity, request, state.route),
+      );
+    }
+    return sanitizeGitHubResponse(
+      state.route,
+      await callPublicGitHub(state.env, request, state.route),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+async function finishRevalidation(
+  state: ActiveRelay,
+  candidate: RevalidationCandidate,
+  github: GitHubRelayResponse,
+  identity: Identity | undefined,
+  result: Pick<RelaySuccess, "backend" | "leaseReason">,
+): Promise<Response | undefined> {
+  if (github.status === 200) {
+    if (identity === undefined && anonymousGitHubResponseProvesPublicRepo(state.route)) {
+      await recordPublicGitHubRepo(state.env, state.route);
+    } else {
+      await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+    }
+    return finalizeRelaySuccess(state, {
+      github: sanitizeGitHubResponse(state.route, github),
+      ...(identity === undefined ? {} : { identity }),
+      ...result,
+      rate: rateFromHeaders(github.headers),
+    });
+  }
+  if (github.status !== 304) {
+    if (identity !== undefined) {
+      await state.coordinator.recordResult(
+        coordinatorResult(state, identity, github.status, rateFromHeaders(github.headers)),
+      );
+    }
+    return undefined;
+  }
+
+  let available = false;
+  try {
+    available = await cachedResponseAvailable(
+      state.env,
+      state.request.pool,
+      state.route,
+      candidate.cached,
+      state.coordinator,
+      candidate.cached.identity,
+      true,
+    );
+  } catch {
+    available = false;
+  }
+  if (!available) {
+    return undefined;
+  }
+  const refreshed: GitHubRelayResponse = {
+    status: candidate.cached.status,
+    headers: { ...candidate.cached.headers, ...github.headers },
+    body: candidate.cached.body,
+    ...(candidate.cached.body_encoding === undefined
+      ? {}
+      : { body_encoding: candidate.cached.body_encoding }),
+  };
+  return finalizeRelaySuccess(state, {
+    github: refreshed,
+    ...(identity === undefined ? {} : { identity }),
+    ...result,
+    rate: rateFromHeaders(github.headers),
+    revalidated: true,
+    upstreamStatus: 304,
+  });
+}
+
+async function restoreSharedCacheFill(state: ActiveRelay): Promise<Response | undefined> {
+  state.identity = undefined;
+  await switchRelayCacheKey(state, state.sharedCacheKey);
+  const coalesced = await coalesceRelayCacheMiss(state);
+  if (
+    coalesced === undefined ||
+    !(await cachedResponseAvailable(
+      state.env,
+      state.request.pool,
+      state.route,
+      coalesced,
+      state.coordinator,
+    ))
+  ) {
+    return undefined;
+  }
+  return serveCachedGitHubResponse(
+    state.env,
+    state.ctx,
+    cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
+  );
 }
 
 async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | undefined> {
@@ -390,6 +619,7 @@ async function switchRelayCacheKey(
 }
 
 async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): Promise<Response> {
+  const cacheStatus = result.revalidated === true ? "hit" : state.cacheStatus;
   if (state.cacheKey !== undefined) {
     await publishGitHubCache(
       state.env,
@@ -412,14 +642,20 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
       ...(result.identity === undefined ? {} : { identityId: result.identity.id }),
       status: result.github.status,
       durationMs: Date.now() - state.started,
-      cacheStatus: state.cacheStatus,
+      ...(result.revalidated === true ? { fallbackReason: "cache_revalidated" } : {}),
+      cacheStatus,
       cacheable: state.cacheable,
     }),
   ];
   if (result.identity !== undefined) {
     background.push(
       state.coordinator.recordResult(
-        coordinatorResult(state, result.identity, result.github.status, result.rate),
+        coordinatorResult(
+          state,
+          result.identity,
+          result.upstreamStatus ?? result.github.status,
+          result.rate,
+        ),
       ),
     );
   }
@@ -436,7 +672,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
       pool: state.request.pool,
       request_id: state.requestId,
       cacheable: state.route.cacheable,
-      cache: state.cacheStatus,
+      cache: cacheStatus,
       stale_ok: false,
       route_kind: state.route.kind,
       ...(result.backend === undefined ? {} : { backend: result.backend }),

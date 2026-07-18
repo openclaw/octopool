@@ -34,6 +34,20 @@ export type CachedGitHubResponse = GitHubRelayResponse & {
   expires_at: string;
 };
 
+export function githubCacheRevalidationHeaders(
+  cached: CachedGitHubResponse,
+): Record<string, string> | undefined {
+  if (cached.identity === undefined && cached.headers["x-ratelimit-resource"] === undefined) {
+    return undefined;
+  }
+  const etag = cached.headers.etag;
+  if (etag !== undefined) {
+    return { "if-none-match": etag };
+  }
+  const lastModified = cached.headers["last-modified"];
+  return lastModified === undefined ? undefined : { "if-modified-since": lastModified };
+}
+
 export async function githubCacheKey(
   pool: string,
   request: RelayRequest,
