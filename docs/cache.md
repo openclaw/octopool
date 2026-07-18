@@ -43,7 +43,7 @@ need to re-contact GitHub just to validate the hint.
 
 ### What is cached
 
-Only `200` responses on cacheable routes are stored. The cache is **bypassed** when:
+Only successful `2xx` responses on cacheable routes are stored. The cache is **bypassed** when:
 
 - the route is a log route, large-payload route, or `rate_limit`, or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).

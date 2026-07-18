@@ -190,7 +190,7 @@ export async function writeGitHubCache(
   response: GitHubRelayResponse,
   identity?: Identity,
 ): Promise<void> {
-  if (response.status !== 200) {
+  if (response.status < 200 || response.status >= 300) {
     return;
   }
   const ttlSeconds = cacheTTLSeconds(route, response);

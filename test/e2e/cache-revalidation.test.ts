@@ -6,7 +6,8 @@ import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 const RUN_PATH = "/repos/openclaw/octopool/actions/runs/123";
 
 type RelayEnvelope = {
-  body: { id?: number; status?: string; content?: string };
+  status: number;
+  body: { id?: number; status?: string; content?: string } | null;
   relay: { cache: string; coalesced?: boolean; route_kind: string };
 };
 
@@ -92,6 +93,95 @@ describe("Worker end-to-end cache revalidation", () => {
          FROM github_cache_entries WHERE route_kind = 'run_view'`,
       ).first(),
     ).toEqual({ status: "completed", ttl: 3_600 });
+  });
+
+  it.each([202, 204])(
+    "publishes a %i replacement response without a second fill",
+    async (replacementStatus) => {
+      await seedPool();
+      let apiCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          if (request.url !== `https://api.github.com${RUN_PATH}`) {
+            return new Response("unavailable", { status: 503 });
+          }
+          apiCalls++;
+          if (request.headers.get("if-none-match") === '"run-v1"') {
+            return replacementStatus === 204
+              ? new Response(null, { status: 204, headers: apiHeaders('"run-v2"') })
+              : jsonResponse(
+                  { id: 123, status: "queued" },
+                  replacementStatus,
+                  apiHeaders('"run-v2"'),
+                );
+          }
+          return jsonResponse({ id: 123, status: "in_progress" }, 200, apiHeaders('"run-v1"'));
+        }),
+      );
+
+      await relay(RUN_PATH);
+      await expireCacheEntry("run_view");
+      const replacement = await relay(RUN_PATH);
+
+      expect(await replacement.json<RelayEnvelope>()).toMatchObject({
+        status: replacementStatus,
+        body: replacementStatus === 204 ? null : { id: 123, status: "queued" },
+        relay: { cache: "miss", route_kind: "run_view" },
+      });
+      const cached = await relay(RUN_PATH);
+      expect(await cached.json<RelayEnvelope>()).toMatchObject({
+        status: replacementStatus,
+        body: replacementStatus === 204 ? null : { id: 123, status: "queued" },
+        relay: { cache: "hit", route_kind: "run_view" },
+      });
+      expect(apiCalls).toBe(2);
+      expect(
+        await env.DB.prepare(
+          "SELECT status, body_json FROM github_cache_entries WHERE route_kind = 'run_view'",
+        ).first(),
+      ).toEqual({
+        status: replacementStatus,
+        body_json: replacementStatus === 204 ? "null" : '{"id":123,"status":"queued"}',
+      });
+    },
+  );
+
+  it("falls through to the normal anonymous fill when identity loading fails", async () => {
+    await seedPool();
+    let apiCalls = 0;
+    let conditionalCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        if (request.url !== `https://api.github.com${RUN_PATH}`) {
+          return new Response("unavailable", { status: 503 });
+        }
+        apiCalls++;
+        if (request.headers.has("if-none-match") || request.headers.has("if-modified-since")) {
+          conditionalCalls++;
+        }
+        return jsonResponse(
+          { id: 123, status: apiCalls === 1 ? "in_progress" : "completed" },
+          200,
+          apiHeaders('"run-v1"'),
+        );
+      }),
+    );
+
+    await relay(RUN_PATH);
+    await expireCacheEntry("run_view");
+    await env.DB.prepare("ALTER TABLE identities RENAME TO unavailable_identities").run();
+    const response = await relay(RUN_PATH);
+
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 123, status: "completed" },
+      relay: { cache: "miss", route_kind: "run_view" },
+    });
+    expect(apiCalls).toBe(2);
+    expect(conditionalCalls).toBe(0);
   });
 
   it("uses the normal fill chain when an API entry has no validator", async () => {

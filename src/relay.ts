@@ -278,6 +278,17 @@ async function coalesceRelayCacheMiss(
 }
 
 async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response | undefined> {
+  try {
+    return await attemptStaleRelayCacheRevalidation(state);
+  } catch {
+    await restoreAfterFailedRevalidation(state);
+    return undefined;
+  }
+}
+
+async function attemptStaleRelayCacheRevalidation(
+  state: ActiveRelay,
+): Promise<Response | undefined> {
   if (state.cacheKey === undefined) {
     return undefined;
   }
@@ -433,7 +444,7 @@ async function finishRevalidation(
   identity: Identity | undefined,
   result: Pick<RelaySuccess, "backend" | "leaseReason">,
 ): Promise<Response | undefined> {
-  if (github.status === 200) {
+  if (github.status >= 200 && github.status < 300) {
     if (identity === undefined && anonymousGitHubResponseProvesPublicRepo(state.route)) {
       await recordPublicGitHubRepo(state.env, state.route);
     } else {
@@ -488,6 +499,29 @@ async function finishRevalidation(
     revalidated: true,
     upstreamStatus: 304,
   });
+}
+
+async function restoreAfterFailedRevalidation(state: ActiveRelay): Promise<void> {
+  if (
+    state.identity === undefined &&
+    state.cacheKey === state.sharedCacheKey &&
+    (state.cacheKey === undefined || state.cacheFillToken !== undefined)
+  ) {
+    return;
+  }
+  try {
+    state.identity = undefined;
+    await switchRelayCacheKey(state, state.sharedCacheKey);
+    if (state.cacheKey !== undefined && state.cacheFillToken === undefined) {
+      state.cacheFillToken = (await state.coordinator.claimCacheFill(state.cacheKey)) ?? undefined;
+    }
+  } catch {
+    state.identity = undefined;
+    state.cacheKey = state.sharedCacheKey;
+    state.cacheFillToken = undefined;
+    state.cacheStatus = state.sharedCacheKey === undefined ? "bypass" : "miss";
+    state.cacheable = state.sharedCacheKey !== undefined;
+  }
 }
 
 async function restoreSharedCacheFill(state: ActiveRelay): Promise<Response | undefined> {
