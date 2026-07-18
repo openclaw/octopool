@@ -47,11 +47,19 @@ func relayHumanPRView(ctx context.Context, stdout io.Writer, repo string, number
 	return renderHumanPRView(stdout, pr, reviews)
 }
 
-func renderHumanPRView(stdout io.Writer, pr map[string]any, reviews []any) error {
-	state := strings.ToUpper(firstString(pr, "state"))
+func humanPRState(pr map[string]any) string {
 	if firstString(pr, "merged_at") != "" {
-		state = "MERGED"
+		return "MERGED"
 	}
+	state := strings.ToUpper(firstString(pr, "state"))
+	if draft, _ := pr["draft"].(bool); draft && state == "OPEN" {
+		return "DRAFT"
+	}
+	return state
+}
+
+func renderHumanPRView(stdout io.Writer, pr map[string]any, reviews []any) error {
+	state := humanPRState(pr)
 	autoMerge := "disabled"
 	if value, ok := pr["auto_merge"]; ok && value != nil {
 		autoMerge = "enabled"
@@ -83,15 +91,11 @@ func relayHumanPRList(ctx context.Context, stdout io.Writer, request ghAPIReques
 		return err
 	}
 	for _, item := range items {
-		state := strings.ToUpper(firstString(item, "state"))
-		if firstString(item, "merged_at") != "" {
-			state = "MERGED"
-		}
 		if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n",
 			watchSafeText(numberText(item["number"])),
 			watchSafeText(firstString(item, "title")),
 			watchSafeText(nestedStringValue(item, "head", "ref")),
-			watchSafeText(state),
+			watchSafeText(humanPRState(item)),
 			iso8601UTC(firstString(item, "updated_at")),
 		); err != nil {
 			return err
@@ -224,6 +228,11 @@ func relayHumanIssueView(ctx context.Context, stdout io.Writer, repo string, num
 	var issue map[string]any
 	if err := json.Unmarshal(body, &issue); err != nil {
 		return err
+	}
+	// REST /issues/{n} also returns pull requests; real gh refuses those, so
+	// let it produce its canonical error instead of a plausible issue view.
+	if _, isPR := issue["pull_request"]; isPR {
+		return localFallbackError{Reason: "issue_number_is_pull_request"}
 	}
 	lines := [][2]string{
 		{"title", firstString(issue, "title")},

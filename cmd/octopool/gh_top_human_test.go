@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,6 +79,42 @@ func TestHumanPRListExactOutput(t *testing.T) {
 	want := "25\tfeat: authoritative Link-header pagination for relay-backed gh api\tfeat/link-pagination\tMERGED\t2026-07-17T21:15:50Z\n"
 	if got := out.String(); got != want {
 		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestHumanPRListMarksDrafts(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		return []map[string]any{{
+			"number": 30, "title": "wip", "draft": true,
+			"head": map[string]any{"ref": "wip-branch"}, "state": "open",
+			"updated_at": "2026-07-17T22:15:50Z",
+		}}
+	})
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	if want := "30\twip\twip-branch\tDRAFT\t2026-07-17T22:15:50Z\n"; out.String() != want {
+		t.Fatalf("output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestHumanIssueViewDelegatesForPullRequests(t *testing.T) {
+	setHumanTestSeams(t, time.Time{})
+	relayTestServer(t, func(body map[string]any) any {
+		return map[string]any{
+			"number": 25, "title": "actually a PR", "state": "open",
+			"pull_request": map[string]any{"url": "https://example.test/pulls/25"},
+		}
+	})
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runGH(t.Context(), []string{"issue", "view", "25", "-R", "openclaw/octopool"}, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "real-gh:") || !strings.Contains(stderr.String(), "issue_number_is_pull_request") {
+		t.Fatalf("PR numbers must delegate to real gh: out=%q stderr=%q", out.String(), stderr.String())
 	}
 }
 
