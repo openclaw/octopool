@@ -195,13 +195,22 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 	if display == "" {
 		display = firstString(run, "display_title")
 	}
-	if _, err := fmt.Fprintf(stdout, "\n%s %s · %s\nTriggered via %s %s\n\nJOBS\n",
+	if _, err := fmt.Fprintf(stdout, "\n%s %s · %s\nTriggered via %s %s\n",
 		runGlyph(run),
 		watchSafeText(display),
 		watchSafeText(id),
 		watchSafeText(firstString(run, "event")),
 		relativeHumanTime(firstString(run, "run_started_at", "created_at")),
 	); err != nil {
+		return err
+	}
+	// Workflow-file problems fail with zero jobs; match real gh's diagnostic
+	// instead of an unexplained empty JOBS section.
+	if len(jobs) == 0 && runGlyph(run) == "X" {
+		_, err := fmt.Fprintf(stdout, "\nThis run likely failed because of a workflow file issue.\n\nView this run on GitHub: %s\n", watchSafeText(firstString(run, "html_url")))
+		return err
+	}
+	if _, err := fmt.Fprint(stdout, "\nJOBS\n"); err != nil {
 		return err
 	}
 	firstJobID := ""
@@ -385,13 +394,16 @@ func latestReviewers(pr map[string]any, reviews []any) string {
 		positions[login] = len(ordered)
 		ordered = append(ordered, review{login: login, state: state})
 	}
+	author := nestedStringValue(pr, "user", "login")
 	for _, raw := range reviews {
 		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
 		login := watchSafeText(nestedStringValue(item, "user", "login"))
-		if login == "" {
+		// real gh omits the author's own comment reviews and unsubmitted
+		// PENDING drafts from the reviewer summary.
+		if login == "" || login == author || strings.EqualFold(firstString(item, "state"), "PENDING") {
 			continue
 		}
 		upsert(login, reviewStateTitle(firstString(item, "state")))

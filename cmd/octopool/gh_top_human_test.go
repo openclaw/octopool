@@ -39,6 +39,8 @@ func TestHumanPRViewExactOutputAndLatestReviewWins(t *testing.T) {
 		case "/repos/openclaw/octopool/pulls/25/reviews":
 			return []map[string]any{
 				{"user": map[string]any{"login": "chatgpt-codex-connector"}, "state": "COMMENTED"},
+				{"user": map[string]any{"login": "steipete"}, "state": "COMMENTED"},
+				{"user": map[string]any{"login": "bob"}, "state": "PENDING"},
 				{"user": map[string]any{"login": "alice"}, "state": "COMMENTED"},
 				{"user": map[string]any{"login": "alice"}, "state": "CHANGES_REQUESTED"},
 			}
@@ -445,6 +447,26 @@ func TestHumanRunViewRendersFailedSteps(t *testing.T) {
 	assertGHComplete(t, result)
 	if !strings.Contains(out.String(), "  X Unit tests\n") || strings.Contains(out.String(), "Build") {
 		t.Fatalf("failed steps only must render, got %q", out.String())
+	}
+}
+
+func TestHumanRunViewZeroJobFailureDiagnostic(t *testing.T) {
+	setHumanTestSeams(t, time.Date(2026, 7, 18, 4, 21, 25, 0, time.UTC))
+	relayTestServer(t, func(body map[string]any) any {
+		if strings.HasSuffix(body["path"].(string), "/jobs") {
+			return map[string]any{"total_count": 0, "jobs": []any{}}
+		}
+		return map[string]any{
+			"id": 42, "status": "completed", "conclusion": "startup_failure", "head_branch": "main",
+			"name": "CI", "event": "push", "created_at": "2026-07-18T04:00:00Z",
+			"html_url": "https://github.com/openclaw/octopool/actions/runs/42",
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"view", "42", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	if !strings.Contains(out.String(), "workflow file issue") || strings.Contains(out.String(), "JOBS") {
+		t.Fatalf("zero-job failure must show the workflow-file diagnostic, got %q", out.String())
 	}
 }
 
