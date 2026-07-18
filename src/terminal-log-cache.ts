@@ -19,12 +19,6 @@ export type CachedTerminalLog = GitHubRelayResponse & {
   expires_at: string;
 };
 
-export type LogPrunePage = {
-  deleted: number;
-  truncated: boolean;
-  cursor?: string;
-};
-
 export function terminalLogCacheKey(request: RelayRequest): string {
   return `${LOG_KEY_PREFIX}${encodeURIComponent(request.pool)}${request.path}`;
 }
@@ -146,34 +140,6 @@ export async function writeTerminalLogCache(
       [BODY_ENCODING_METADATA]: encoding,
     },
   });
-}
-
-export async function pruneExpiredTerminalLogs(
-  env: Env,
-  limit = 500,
-  cursor?: string,
-): Promise<LogPrunePage> {
-  const listed = await env.ACTIONS_LOGS.list({
-    prefix: LOG_KEY_PREFIX,
-    limit,
-    ...(cursor === undefined ? {} : { cursor }),
-    include: ["customMetadata"],
-  });
-  const expired = listed.objects
-    .filter((object) => {
-      const createdAt = object.customMetadata?.[CREATED_AT_METADATA];
-      const createdAtMs = createdAt === undefined ? Number.NaN : parseSQLiteTimestamp(createdAt);
-      return !Number.isFinite(createdAtMs) || Date.now() - createdAtMs >= LOG_TTL_SECONDS * 1000;
-    })
-    .map((object) => object.key);
-  if (expired.length > 0) {
-    await env.ACTIONS_LOGS.delete(expired);
-  }
-  return {
-    deleted: expired.length,
-    truncated: listed.truncated,
-    ...(listed.truncated ? { cursor: listed.cursor } : {}),
-  };
 }
 
 async function readOrFetchMetadata(

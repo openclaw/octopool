@@ -141,10 +141,20 @@ returns GitHub's deletion response. Thus a deletion can remain cached for at mos
 one-hour zero-contact window, not the full retention period.
 
 Objects untouched and unconfirmed for seven days expire. Reads enforce that lifetime from
-object metadata because R2 has no native object TTL; expired objects are treated as misses
-and removed. The hourly maintenance task also scans and deletes expired objects in bounded
-pages. R2 read, write, probe, or maintenance failures never fail a relay request: Octopool
-uses the existing authenticated redirect-validation path instead.
+object metadata: expired objects are treated as misses and removed, so lifecycle cleanup
+timing can never cause stale data to be served. R2 read, write, or probe failures never fail
+a relay request: Octopool uses the existing authenticated redirect-validation path instead.
+
+Operator provisioning is a one-time bucket plus lifecycle setup. The required lifecycle
+rule is: enabled for prefix `github-actions-logs/v1/`, delete objects seven days after
+creation. Apply it with Wrangler (or configure the identical rule in the R2 dashboard):
+
+```sh
+wrangler r2 bucket create octopool-actions-logs
+wrangler r2 bucket lifecycle add octopool-actions-logs octopool-actions-logs-expire github-actions-logs/v1/ --expire-days 7
+```
+
+The operator owns this rule; worker code does not scan R2 or manage bucket lifecycle.
 
 As with edge + D1 hits, Octopool runs the public-repository guard before returning an R2
 log hit. Successful hits are audited as cacheable `hit` events and count as saved GitHub
@@ -167,10 +177,13 @@ The derived response's `total_count` is the number of matching runs found in the
 is deliberately not a claim about older GitHub pages. If local filtering returns fewer than
 the requested limit while GitHub's canonical `total_count` proves that older runs were not
 captured, Octopool falls back to the exact upstream filtered request. Page values above 1,
-page sizes above 100, workflow-scoped paths, unknown query parameters, conditional requests,
-unsupported GitHub status values, and requests without the shim shape keep exact upstream
-and per-query cache behavior. Exact underfill fallbacks translate shim-only `limit` into a
-capped upstream `per_page` and never forward `limit` to GitHub.
+page sizes above 100, workflow-scoped paths, unknown query parameters, unsupported GitHub
+status values, and requests without the shim shape keep exact upstream and per-query cache
+behavior. Conditional shim requests bypass the canonical cache but still translate the
+shim-only `limit` into a capped upstream `per_page` and shape successful responses locally.
+Exact underfill fallbacks use the same translation and never forward `limit` to GitHub.
+Locally shaped responses omit `ETag`, `Last-Modified`, and `Content-Length` because those
+validators and lengths describe the upstream representation, not the transformed body.
 
 ## Cache-hit integrity
 
@@ -196,8 +209,8 @@ refreshes use the same coordinator pattern, so simultaneous expired-proof checks
 GitHub request. Audit writes remain deferred.
 An hourly scheduled task deletes cache entries after each entry's route-specific
 `stale_expires_at` deadline in bounded batches, preserving every configured stale-serving
-window while keeping D1 growth bounded. The same task scans bounded R2 pages for completed
-log objects older than seven days.
+window while keeping D1 growth bounded. R2 expiry is handled by the operator-configured
+bucket lifecycle rule described above.
 
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and

@@ -4,6 +4,7 @@ import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const SUPERSET_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 30;
+const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length"]);
 const SUPPORTED_RUN_STATUSES = new Set([
   "completed",
   "action_required",
@@ -71,6 +72,7 @@ export function runListSupersetView(
 export function filterRunListSuperset(
   response: GitHubRelayResponse,
   view: RunListSupersetView | undefined,
+  options: { preserveTotalCount?: boolean } = {},
 ): GitHubRelayResponse {
   if (
     view === undefined ||
@@ -82,9 +84,14 @@ export function filterRunListSuperset(
   const filtered = filterRuns(response.body.workflow_runs, view);
   return {
     ...response,
+    headers: Object.fromEntries(
+      Object.entries(response.headers).filter(
+        ([key]) => !REPRESENTATION_HEADERS.has(key.toLowerCase()),
+      ),
+    ),
     body: {
       ...response.body,
-      total_count: filtered.length,
+      ...(options.preserveTotalCount === true ? {} : { total_count: filtered.length }),
       workflow_runs: filtered.slice(0, view.limit),
     },
   };

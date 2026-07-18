@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
-import { runListSupersetView } from "../src/run-list-superset";
+import { filterRunListSuperset, runListSupersetView } from "../src/run-list-superset";
 
 describe("Actions run-list superset eligibility", () => {
   it("canonicalizes supported repo-level shim queries", () => {
@@ -50,5 +50,68 @@ describe("Actions run-list superset eligibility", () => {
     expect(
       runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
     ).toMatchObject({ limit: 50 });
+  });
+
+  it("removes canonical representation headers from shaped responses", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { limit: "1" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    const view = runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw")));
+
+    expect(
+      filterRunListSuperset(
+        {
+          status: 200,
+          headers: {
+            etag: '"canonical"',
+            "Last-Modified": "Sat, 18 Jul 2026 08:00:00 GMT",
+            "content-length": "1234",
+            "content-type": "application/json",
+          },
+          body: {
+            total_count: 2,
+            workflow_runs: [
+              { id: 1, head_branch: "main", status: "completed", conclusion: "success" },
+              { id: 2, head_branch: "main", status: "completed", conclusion: "success" },
+            ],
+          },
+          body_encoding: "json",
+        },
+        view,
+      ).headers,
+    ).toEqual({ "content-type": "application/json" });
+  });
+
+  it("preserves GitHub total_count while shaping an exact response", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { limit: "1" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    const view = runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw")));
+    const response = filterRunListSuperset(
+      {
+        status: 200,
+        headers: {},
+        body: {
+          total_count: 100,
+          workflow_runs: [
+            { id: 1, head_branch: "main", status: "completed", conclusion: "success" },
+            { id: 2, head_branch: "main", status: "completed", conclusion: "success" },
+          ],
+        },
+        body_encoding: "json",
+      },
+      view,
+      { preserveTotalCount: true },
+    );
+
+    expect(response.body).toMatchObject({ total_count: 100, workflow_runs: [{ id: 1 }] });
   });
 });

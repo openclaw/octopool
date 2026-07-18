@@ -154,8 +154,13 @@ async function prepareRelay(
     classifyRoute(base.request, policy),
   );
   const cacheEnabled = shouldUseGitHubCache(base.request, route);
-  const runListSuperset = cacheEnabled ? runListSupersetView(base.request, route) : undefined;
-  const cacheRequest = runListSuperset?.cacheRequest ?? base.request;
+  const runListSuperset = runListSupersetView(base.request, route);
+  const cacheRequest =
+    runListSuperset === undefined
+      ? base.request
+      : cacheEnabled
+        ? runListSuperset.cacheRequest
+        : exactRunListRequest(base.request, runListSuperset);
   const cacheKey = cacheEnabled
     ? await githubCacheKey(base.request.pool, cacheRequest, route)
     : undefined;
@@ -165,7 +170,7 @@ async function prepareRelay(
     policy,
     cacheRequest,
     runListSuperset,
-    runListExactFallback: false,
+    runListExactFallback: runListSuperset !== undefined && !cacheEnabled,
     terminalLogCacheKey: undefined,
     terminalLogCached: undefined,
     cacheEnabled,
@@ -760,7 +765,9 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   if (state.terminalLogCacheKey !== undefined) {
     await publishTerminalLogCache(state.env, state.terminalLogCacheKey, result.github);
   }
-  const clientResponse = filterRunListSuperset(result.github, state.runListSuperset);
+  const clientResponse = filterRunListSuperset(result.github, state.runListSuperset, {
+    preserveTotalCount: state.runListExactFallback,
+  });
   const background: Promise<unknown>[] = [
     insertAudit(state.env, {
       requestId: state.requestId,
@@ -942,7 +949,9 @@ function cachedResponseParams(
   cacheStatus: "hit" | "stale",
   extras: { staleReason?: string; coalesced?: boolean } = {},
 ): Parameters<typeof serveCachedGitHubResponse>[2] {
-  const clientResponse = filterRunListSuperset(cached, state.runListSuperset);
+  const clientResponse = filterRunListSuperset(cached, state.runListSuperset, {
+    preserveTotalCount: state.runListExactFallback,
+  });
   return {
     requestId: state.requestId,
     callerId: state.callerId,

@@ -9,6 +9,7 @@ import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
 type RelayEnvelope = {
   status: number;
+  headers: Record<string, string>;
   body: unknown;
   body_encoding: string;
   relay: { cache: string; cacheable: boolean; route_kind: string };
@@ -321,6 +322,51 @@ describe("Actions run-list superset", () => {
     expect(limited.body).toMatchObject({ total_count: 4 });
     expect(runIDs(limited.body)).toEqual([1]);
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes and locally shapes a conditional shim request", async () => {
+    let exactURL: URL | undefined;
+    let conditionalHeader: string | null = null;
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (bearer(request) === "test-org-token") {
+        return jsonResponse({ private: false });
+      }
+      if (bearer(request) === "test-primary-token") {
+        exactURL = new URL(request.url);
+        conditionalHeader = request.headers.get("if-none-match");
+        return jsonResponse(
+          {
+            total_count: 100,
+            workflow_runs: [
+              run(1, "main", "completed", "success"),
+              run(2, "main", "completed", "success"),
+              run(3, "main", "completed", "success"),
+            ],
+          },
+          200,
+          { etag: '"upstream"', "last-modified": "Sat, 18 Jul 2026 08:00:00 GMT" },
+        );
+      }
+      return jsonResponse({ message: "unavailable" }, 503);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay(RUNS_PATH, undefined, {
+      query: { limit: "2" },
+      headers: {
+        "x-octopool-public-shape": "actions-summary-v1",
+        "if-none-match": '"client"',
+      },
+    });
+    expect(response.status).toBe(200);
+    const envelope = await response.json<RelayEnvelope>();
+    expect(runIDs(envelope.body)).toEqual([1, 2]);
+    expect(envelope.body).toMatchObject({ total_count: 100 });
+    expect(envelope.headers).not.toHaveProperty("etag");
+    expect(envelope.headers).not.toHaveProperty("last-modified");
+    expect(Object.fromEntries(exactURL!.searchParams)).toEqual({ per_page: "2" });
+    expect(conditionalHeader).toBe('"client"');
   });
 
   it("falls back to an exact filtered request when the superset can underfill", async () => {
