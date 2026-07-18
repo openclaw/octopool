@@ -9,7 +9,7 @@ describe("github web provider", () => {
     vi.unstubAllGlobals();
   });
 
-  it("fetches public PR diffs without a GitHub API token", async () => {
+  it("keeps custom-media PR diffs on their single public candidate", async () => {
     const fetchMock = vi.fn(async () => new Response("diff --git a/README.md b/README.md\n"));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
@@ -27,6 +27,7 @@ describe("github web provider", () => {
       body_encoding: "text",
       backend: "web",
     });
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
       "https://github.com/openclaw/octopool/pull/12.diff",
       expect.objectContaining({
@@ -69,20 +70,8 @@ describe("github web provider", () => {
     );
   });
 
-  it("prefers exact unauthenticated contents API JSON", async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            type: "file",
-            encoding: "base64",
-            name: "README.md",
-            path: "README.md",
-            content: "aGVsbG8K",
-          }),
-          { headers: { "content-type": "application/json" } },
-        ),
-    );
+  it("prefers raw content before the anonymous contents API", async () => {
+    const fetchMock = vi.fn(async () => new Response("hello\n"));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -94,7 +83,7 @@ describe("github web provider", () => {
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.github.com/repos/openclaw/octopool/contents/README.md?ref=main",
+      "https://raw.githubusercontent.com/openclaw/octopool/main/README.md",
       expect.objectContaining({
         headers: expect.not.objectContaining({ authorization: expect.any(String) }),
       }),
@@ -108,13 +97,21 @@ describe("github web provider", () => {
     });
   });
 
-  it("falls back to raw content extraction when the public contents API is unavailable", async () => {
+  it("falls back to the anonymous contents API when raw content is unavailable", async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(new Response("not found", { status: 404 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ message: "rate limited" }), { status: 403 }),
-      )
-      .mockResolvedValueOnce(new Response("hello\n"));
+        Response.json({
+          type: "file",
+          encoding: "base64",
+          name: "My File.md",
+          path: "docs/My File.md",
+          content: "aGVsbG8K",
+          download_url:
+            "https://raw.githubusercontent.com/openclaw/octopool/main/docs/My%20File.md",
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -127,7 +124,7 @@ describe("github web provider", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://raw.githubusercontent.com/openclaw/octopool/main/docs/My%20File.md",
+      "https://api.github.com/repos/openclaw/octopool/contents/docs/My%20File.md?ref=main",
       expect.any(Object),
     );
     expect(response?.body).toMatchObject({
@@ -185,12 +182,9 @@ describe("github web provider", () => {
     });
   });
 
-  it("falls back to public HTML for common Actions run lists after anonymous quota exhaustion", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-      .mockResolvedValueOnce(
-        new Response(`
+  it("prefers public HTML for common Actions run lists", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(`
           <strong>1 workflow run result</strong>
           <div class="Box-row js-socket-channel js-updatable-content">
             <a href="/openclaw/octopool/actions/runs/27328786454" aria-label="completed successfully: Run 79 of CI. fix: harden setup">
@@ -205,7 +199,7 @@ describe("github web provider", () => {
           </div>
           <div class="paginate-container"></div>
         `),
-      );
+    );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -217,9 +211,9 @@ describe("github web provider", () => {
 
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       "https://github.com/openclaw/octopool/actions?query=branch%3Amain",
       expect.objectContaining({
         headers: expect.not.objectContaining({ authorization: expect.any(String) }),
@@ -244,7 +238,7 @@ describe("github web provider", () => {
     });
   });
 
-  it("persists exhausted anonymous API quota before using Actions HTML", async () => {
+  it("persists anonymous API quota after an Actions HTML parser miss", async () => {
     const bound: unknown[][] = [];
     const database = {
       prepare: vi.fn(() => ({
@@ -261,17 +255,19 @@ describe("github web provider", () => {
       "fetch",
       vi
         .fn()
+        .mockResolvedValueOnce(new Response("<html>unexpected</html>"))
         .mockResolvedValueOnce(
-          new Response("rate limited", {
-            status: 403,
-            headers: {
-              "x-ratelimit-limit": "60",
-              "x-ratelimit-remaining": "0",
-              "x-ratelimit-reset": "4102444800",
+          Response.json(
+            { total_count: 0, workflow_runs: [] },
+            {
+              headers: {
+                "x-ratelimit-limit": "60",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": "4102444800",
+              },
             },
-          }),
-        )
-        .mockResolvedValueOnce(new Response(actionsListHTML("after exhaustion"))),
+          ),
+        ),
     );
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -304,10 +300,7 @@ describe("github web provider", () => {
     ).join("");
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-        .mockResolvedValueOnce(new Response(`<strong>30 workflow runs</strong>${cards}`)),
+      vi.fn().mockResolvedValueOnce(new Response(`<strong>30 workflow runs</strong>${cards}`)),
     );
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -326,7 +319,6 @@ describe("github web provider", () => {
   it("falls back to a public workflow page for workflow-filtered run lists", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
       .mockResolvedValueOnce(
         new Response(`
           <strong>1 workflow run result</strong>
@@ -366,17 +358,17 @@ describe("github web provider", () => {
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       "https://github.com/openclaw/octopool/actions/workflows/ci.yml?query=branch%3Amain",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      2,
       "https://github.com/openclaw/octopool/actions/runs/26906919053",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      3,
       "https://github.com/openclaw/octopool/commit/ef53e13.patch",
       expect.objectContaining({ headers: expect.objectContaining({ accept: "text/plain" }) }),
     );
@@ -409,12 +401,15 @@ describe("github web provider", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("prefers exact anonymous Actions JSON while API quota is available", async () => {
+  it("falls back to exact anonymous Actions JSON when the public parser misses", async () => {
     const exact = {
       total_count: 1,
       workflow_runs: [{ id: 27328786454, unexpected_exact_field: "kept" }],
     };
-    const fetchMock = vi.fn(async () => Response.json(exact));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("<html>unexpected</html>"))
+      .mockResolvedValueOnce(Response.json(exact));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -430,82 +425,23 @@ describe("github web provider", () => {
       body: exact,
       backend: "web",
     });
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://github.com/openclaw/octopool/actions",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "https://api.github.com/repos/openclaw/octopool/actions/runs?per_page=20",
       expect.any(Object),
     );
   });
 
-  it("switches to Actions HTML when an API response drops below half quota", async () => {
-    const exact = {
-      total_count: 1,
-      workflow_runs: [{ id: 27328786454, unexpected_exact_field: "deferred" }],
-    };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        Response.json(exact, {
-          headers: {
-            "x-ratelimit-limit": "60",
-            "x-ratelimit-remaining": "29",
-            "x-ratelimit-reset": "4102444800",
-          },
-        }),
-      )
-      .mockResolvedValueOnce(new Response(actionsListHTML("from HTML")));
-    vi.stubGlobal("fetch", fetchMock);
-    const request = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool/actions/runs",
-      query: { per_page: "20" },
-      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+  it("prefers Actions HTML without consulting a stored API rate snapshot", async () => {
+    const prepare = vi.fn(() => {
+      throw new Error("stored API rate should not be read");
     });
-
-    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(response?.body).toMatchObject({
-      workflow_runs: [{ display_title: "from HTML" }],
-    });
-  });
-
-  it("keeps the successful API response when low-quota HTML parsing fails", async () => {
-    const exact = {
-      total_count: 1,
-      workflow_runs: [{ id: 27328786454, unexpected_exact_field: "kept" }],
-    };
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          Response.json(exact, {
-            headers: {
-              "x-ratelimit-limit": "60",
-              "x-ratelimit-remaining": "29",
-              "x-ratelimit-reset": "4102444800",
-            },
-          }),
-        )
-        .mockResolvedValueOnce(new Response("<html>unexpected</html>")),
-    );
-    const request = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool/actions/runs",
-      query: { per_page: "20" },
-      headers: { "x-octopool-public-shape": "actions-summary-v1" },
-    });
-
-    await expect(
-      callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({ body: exact });
-  });
-
-  it("uses stored low quota to try Actions HTML before the API", async () => {
-    const fetchMock = vi.fn(async () => new Response(actionsListHTML("stored low quota")));
+    const fetchMock = vi.fn(async () => new Response(actionsListHTML("web first")));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -516,54 +452,27 @@ describe("github web provider", () => {
     });
 
     const response = await callGitHubWeb(
-      rateEnv({ limit_count: 60, remaining: 20 }),
+      { ...env(), DB: { prepare } } as unknown as Env,
       request,
       classifyRoute(request, policy),
     );
 
+    expect(prepare).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
       "https://github.com/openclaw/octopool/actions",
       expect.any(Object),
     );
     expect(response?.body).toMatchObject({
-      workflow_runs: [{ display_title: "stored low quota" }],
+      workflow_runs: [{ display_title: "web first" }],
     });
   });
 
-  it("does not switch at exactly half quota", async () => {
-    const exact = { total_count: 0, workflow_runs: [] };
-    const fetchMock = vi.fn(async () =>
-      Response.json(exact, {
-        headers: {
-          "x-ratelimit-limit": "60",
-          "x-ratelimit-remaining": "30",
-          "x-ratelimit-reset": "4102444800",
-        },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const request = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool/actions/runs",
-      headers: { "x-octopool-public-shape": "actions-summary-v1" },
-    });
-
-    await expect(
-      callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({ body: exact });
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-
-  it("falls back to public HTML for Actions run views after anonymous quota exhaustion", async () => {
+  it("prefers public HTML for Actions run views", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-        .mockResolvedValueOnce(
-          new Response(`
+      vi.fn().mockResolvedValueOnce(
+        new Response(`
             <span class="PageHeader-parentLink-label"> CI</span>
             <span class="actions-workflow-runs-status"><svg aria-label="completed successfully: "></svg></span>
             <h1 class="PageHeader-title"><span class="markdown-title">fix: harden setup</span><span>#79</span></h1>
@@ -572,7 +481,7 @@ describe("github web provider", () => {
             <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
             <span>Total duration</span><a class="h4 color-fg-default">2m 49s</a>
           `),
-        ),
+      ),
     );
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -596,10 +505,9 @@ describe("github web provider", () => {
     });
   });
 
-  it("falls back to public job metadata for shaped Actions job lists", async () => {
+  it("prefers public job metadata for shaped Actions job lists", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
       .mockResolvedValueOnce(
         Response.json({
           jobGroups: [
@@ -650,16 +558,16 @@ describe("github web provider", () => {
 
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       "https://github.com/openclaw/octopool/actions/runs/27398328238/job_groups_batch?attempt=1",
       expect.objectContaining({
         headers: expect.objectContaining({ "x-requested-with": "XMLHttpRequest" }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      2,
       "https://github.com/openclaw/octopool/actions/runs/27398328238/job/80970314592",
       expect.any(Object),
     );
@@ -705,12 +613,9 @@ describe("github web provider", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("falls back to release HTML when anonymous API quota is exhausted", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-      .mockResolvedValueOnce(
-        new Response(`
+  it("prefers release HTML for shaped release summaries", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(`
           <nav><li class="breadcrumb-item-selected">v0.8.0</li></nav>
           <h1>0.8.0</h1>
           released this <relative-time datetime="2026-06-10T07:55:39Z"></relative-time>
@@ -718,7 +623,7 @@ describe("github web provider", () => {
           </div>
           <div class="Box-footer"></div>
         `),
-      );
+    );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -729,9 +634,9 @@ describe("github web provider", () => {
 
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       "https://github.com/openclaw/octopool/releases/tag/v0.8.0",
       expect.any(Object),
     );
@@ -748,7 +653,6 @@ describe("github web provider", () => {
   it("follows relative latest-release redirects for summary HTML", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
       .mockResolvedValueOnce(
         new Response(null, {
           status: 302,
@@ -779,36 +683,33 @@ describe("github web provider", () => {
       body: { tag_name: "v0.8.0" },
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      2,
       "https://github.com/openclaw/octopool/releases/tag/v0.8.0",
       expect.any(Object),
     );
   });
 
-  it("falls back to embedded issue data for shaped issue views", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-      .mockResolvedValueOnce(
-        new Response(
-          embeddedPage("IssueViewerViewQuery", {
-            issue: {
-              __typename: "Issue",
-              number: 5,
-              title: "Sign in fails",
-              body: "Public body",
-              state: "CLOSED",
-              url: "https://github.com/openclaw/octopool/issues/5",
-              createdAt: "2026-05-27T23:17:12Z",
-              updatedAt: "2026-05-27T23:19:04Z",
-              author: actor("phoward38", "Patrick Howard"),
-              labels: connection([]),
-              assignedActors: { nodes: [] },
-              milestone: null,
-            },
-          }),
-        ),
-      );
+  it("prefers embedded issue data for shaped issue views", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        embeddedPage("IssueViewerViewQuery", {
+          issue: {
+            __typename: "Issue",
+            number: 5,
+            title: "Sign in fails",
+            body: "Public body",
+            state: "CLOSED",
+            url: "https://github.com/openclaw/octopool/issues/5",
+            createdAt: "2026-05-27T23:17:12Z",
+            updatedAt: "2026-05-27T23:19:04Z",
+            author: actor("phoward38", "Patrick Howard"),
+            labels: connection([]),
+            assignedActors: { nodes: [] },
+            milestone: null,
+          },
+        }),
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -820,7 +721,7 @@ describe("github web provider", () => {
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       "https://github.com/openclaw/octopool/issues/5",
       expect.any(Object),
     );
@@ -844,27 +745,24 @@ describe("github web provider", () => {
     });
   });
 
-  it("falls back to embedded PR data for shaped PR views", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-      .mockResolvedValueOnce(
-        new Response(
-          pullRequestPage({
-            author: { login: "RomneyDa" },
-            baseBranch: "main",
-            closedTime: "2026-06-10T00:52:44Z",
-            createdTime: "2026-06-03T18:13:12Z",
-            headBranch: "fix/login-provisioning-guidance",
-            headSha: "ef53e13233adb1af0730f8239d87149d60cb42ac",
-            mergedTime: "2026-06-10T00:52:44Z",
-            number: 11,
-            relayId: "PR_kwDOSoyMq87iWrbq",
-            state: "MERGED",
-            title: "Clarify login access provisioning failures",
-          }),
-        ),
-      );
+  it("prefers embedded PR data for shaped PR views", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        pullRequestPage({
+          author: { login: "RomneyDa" },
+          baseBranch: "main",
+          closedTime: "2026-06-10T00:52:44Z",
+          createdTime: "2026-06-03T18:13:12Z",
+          headBranch: "fix/login-provisioning-guidance",
+          headSha: "ef53e13233adb1af0730f8239d87149d60cb42ac",
+          mergedTime: "2026-06-10T00:52:44Z",
+          number: 11,
+          relayId: "PR_kwDOSoyMq87iWrbq",
+          state: "MERGED",
+          title: "Clarify login access provisioning failures",
+        }),
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -892,7 +790,7 @@ describe("github web provider", () => {
     });
   });
 
-  it("falls back to embedded issue and PR lists when the whole result fits", async () => {
+  it("prefers embedded issue and PR lists when the whole result fits", async () => {
     const issueNode = {
       __typename: "Issue",
       number: 5,
@@ -920,9 +818,7 @@ describe("github web provider", () => {
     };
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
       .mockResolvedValueOnce(new Response(issueListPage([issueNode])))
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
       .mockResolvedValueOnce(new Response(issueListPage([prNode])));
     vi.stubGlobal("fetch", fetchMock);
     const issueRequest = validateRelayRequest({
@@ -954,12 +850,12 @@ describe("github web provider", () => {
     const prResponse = await callGitHubWeb(env(), prRequest, classifyRoute(prRequest, policy));
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       "https://github.com/openclaw/octopool/issues?q=is%3Aissue+author%3A%22phoward38%22+assignee%3A%22steipete%22",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+      2,
       "https://github.com/openclaw/octopool/issues?q=is%3Apr",
       expect.any(Object),
     );
@@ -975,29 +871,26 @@ describe("github web provider", () => {
     ]);
   });
 
-  it("falls back to embedded labels with GraphQL IDs and URLs", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-      .mockResolvedValueOnce(
-        new Response(
-          embeddedPage("RepositoryLabelIndexPageQuery", {
-            labels: {
-              totalCount: 1,
-              edges: [
-                {
-                  node: {
-                    id: "LA_bug",
-                    name: "good first issue",
-                    color: "7057ff",
-                    description: "Good for newcomers",
-                  },
+  it("prefers embedded labels with GraphQL IDs and URLs", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        embeddedPage("RepositoryLabelIndexPageQuery", {
+          labels: {
+            totalCount: 1,
+            edges: [
+              {
+                node: {
+                  id: "LA_bug",
+                  name: "good first issue",
+                  color: "7057ff",
+                  description: "Good for newcomers",
                 },
-              ],
-            },
-          }),
-        ),
-      );
+              },
+            ],
+          },
+        }),
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -1023,7 +916,6 @@ describe("github web provider", () => {
   it("paginates token-free workflow HTML and preserves workflow state/order", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
       .mockResolvedValueOnce(
         new Response(
           workflowPage(
@@ -1049,7 +941,7 @@ describe("github web provider", () => {
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      2,
       "https://github.com/openclaw/octopool/actions/workflows_partial?query=&page=2",
       expect.any(Object),
     );
@@ -1079,21 +971,18 @@ describe("github web provider", () => {
     });
   });
 
-  it("falls back to the complete workflow list for shaped workflow views", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-      .mockResolvedValueOnce(
-        new Response(
-          workflowPage(
-            [
-              [284355045, "CI", "ci.yml"],
-              [284355048, "release", "release.yml"],
-            ],
-            1,
-          ),
+  it("prefers the complete workflow list for shaped workflow views", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        workflowPage(
+          [
+            [284355045, "CI", "ci.yml"],
+            [284355048, "release", "release.yml"],
+          ],
+          1,
         ),
-      );
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -1114,7 +1003,7 @@ describe("github web provider", () => {
     });
   });
 
-  it("resolves exact branch refs from Git smart HTTP below half quota", async () => {
+  it("prefers exact branch refs from Git smart HTTP", async () => {
     const sha = "e05a16c766609e722571a448f606f6820a0bf249";
     const fetchMock = vi
       .fn()
@@ -1133,11 +1022,7 @@ describe("github web provider", () => {
       path: "/repos/openclaw/octopool/git/ref/heads/main",
     });
 
-    const response = await callGitHubWeb(
-      rateEnv({ limit_count: 60, remaining: 29 }),
-      request,
-      classifyRoute(request, policy),
-    );
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -1156,7 +1041,7 @@ describe("github web provider", () => {
     });
   });
 
-  it("retains the exact API response for ambiguous lightweight tags", async () => {
+  it("falls back to the exact API response for ambiguous lightweight tags", async () => {
     const apiBody = {
       ref: "refs/tags/v1.0.0",
       node_id: "REF_exact",
@@ -1165,21 +1050,22 @@ describe("github web provider", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify(apiBody), {
+        new Response(
+          gitAdvertisement([["0123456789012345678901234567890123456789", "refs/tags/v1.0.0"]]),
+          { headers: { "content-type": "application/x-git-upload-pack-advertisement" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(embeddedPage("IssueIndexPageQuery", { id: "R_kgDOSoyMqw" })),
+      )
+      .mockResolvedValueOnce(
+        Response.json(apiBody, {
           headers: {
             "x-ratelimit-limit": "60",
             "x-ratelimit-remaining": "29",
             "x-ratelimit-reset": "2000000000",
           },
         }),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          gitAdvertisement([["0123456789012345678901234567890123456789", "refs/tags/v1.0.0"]]),
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(embeddedPage("IssueIndexPageQuery", { id: "R_kgDOSoyMqw" })),
       );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
@@ -1191,6 +1077,16 @@ describe("github web provider", () => {
     await expect(
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
     ).resolves.toMatchObject({ body: apiBody });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://github.com/openclaw/octopool.git/info/refs?service=git-upload-pack",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://api.github.com/repos/openclaw/octopool/git/ref/tags/v1.0.0",
+      expect.any(Object),
+    );
   });
 
   it("rejects workflow HTML without pagination completeness proof", async () => {
@@ -1198,8 +1094,8 @@ describe("github web provider", () => {
       "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(new Response("rate limited", { status: 403 }))
-        .mockResolvedValueOnce(new Response(workflowPage([[284355045, "CI", "ci.yml"]]))),
+        .mockResolvedValueOnce(new Response(workflowPage([[284355045, "CI", "ci.yml"]])))
+        .mockResolvedValueOnce(new Response("rate limited", { status: 403 })),
     );
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -1646,14 +1542,6 @@ describe("github web provider", () => {
 
 function env(overrides: Record<string, string> = {}): Env {
   return { REQUEST_TIMEOUT_MS: "15000", ...overrides } as unknown as Env;
-}
-
-function rateEnv(rate: { limit_count: number; remaining: number }): Env {
-  const first = vi.fn(async () => rate);
-  const run = vi.fn(async () => ({}));
-  const bind = vi.fn(() => ({ first, run }));
-  const prepare = vi.fn(() => ({ bind }));
-  return { ...env(), DB: { prepare } } as unknown as Env;
 }
 
 function actionsListHTML(title: string): string {

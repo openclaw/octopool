@@ -411,13 +411,6 @@ ON CONFLICT(owner, repo, number, state_hint) DO UPDATE SET
   checked_at = excluded.checked_at,
   expires_at = excluded.expires_at;
 
--- name: FreshPublicApiRate :one
-SELECT limit_count, remaining
-FROM github_public_api_rates
-WHERE resource = ?1
-  AND reset_at > unixepoch()
-LIMIT 1;
-
 -- name: UpsertPublicApiRate :exec
 INSERT INTO github_public_api_rates (resource, limit_count, remaining, reset_at, updated_at)
 VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)

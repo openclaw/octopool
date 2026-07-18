@@ -117,8 +117,6 @@ export const queries = {
     "SELECT 1\nFROM github_pr_state_proofs\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND number = ?3\n  AND state_hint = ?4\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   upsertPRStateProof:
     "INSERT INTO github_pr_state_proofs (owner, repo, number, state_hint, checked_at, expires_at)\nVALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?5))\nON CONFLICT(owner, repo, number, state_hint) DO UPDATE SET\n  checked_at = excluded.checked_at,\n  expires_at = excluded.expires_at",
-  freshPublicApiRate:
-    "SELECT limit_count, remaining\nFROM github_public_api_rates\nWHERE resource = ?1\n  AND reset_at > unixepoch()\nLIMIT 1",
   upsertPublicApiRate:
     "INSERT INTO github_public_api_rates (resource, limit_count, remaining, reset_at, updated_at)\nVALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP)\nON CONFLICT(resource) DO UPDATE SET\n  limit_count = excluded.limit_count,\n  remaining = excluded.remaining,\n  reset_at = excluded.reset_at,\n  updated_at = CURRENT_TIMESTAMP",
   usageAggregate:

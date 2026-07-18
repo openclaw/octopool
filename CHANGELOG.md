@@ -2,6 +2,10 @@
 
 ## 0.4.8 - Unreleased
 
+### Changes
+
+- Prefer validated public page, raw-content, and Git smart HTTP transports before anonymous GitHub API reads, retaining anonymous API and pooled identities as fallbacks.
+
 ## 0.4.7 - 2026-07-17
 
 ### Changes
@@ -90,10 +94,10 @@
 ### Fixes
 
 - Cache terminal Actions runs/jobs/checks/statuses for one hour with a 24-hour stale fallback, publish cache misses before responding, and prune entries older than the maximum stale window hourly.
-- Serve supported top-level Actions/release summaries from public GitHub pages, prefer public page/raw fallbacks below 50% anonymous API quota while preserving exact raw REST semantics, and prove public repository visibility from GitHub HTML when API proof quotas are depleted.
-- Serve workflow-filtered run lists and top-level `gh run view --json jobs` job/step metadata from public GitHub pages below 50% anonymous API quota, with bounded parsing and exact API fallback.
-- Serve shaped issue views, issue/PR lists, labels, and active workflow lists from token-free GitHub pages below 50% anonymous API quota when their requested fields are exactly representable.
-- Resolve branch and annotated-tag Git refs exactly through Git smart HTTP, and serve bounded PR summaries and workflow views from token-free GitHub pages below 50% anonymous API quota.
+- Serve supported top-level Actions/release summaries from public GitHub pages, add public page/raw fallbacks while preserving exact raw REST semantics, and prove public repository visibility from GitHub HTML when API proof quotas are depleted.
+- Serve workflow-filtered run lists and top-level `gh run view --json jobs` job/step metadata from public GitHub pages, with bounded parsing and exact API fallback.
+- Serve shaped issue views, issue/PR lists, labels, and active workflow lists from token-free GitHub pages when their requested fields are exactly representable.
+- Resolve branch and annotated-tag Git refs exactly through Git smart HTTP, and serve bounded PR summaries and workflow views from token-free GitHub pages.
 - Let verified OpenClaw org members self-enroll into the default Octopool login pool instead of requiring an admin-created caller grant first.
 - Skip legacy Gitcrawl and Octopool `gh` shims when resolving the real GitHub CLI, including copied Windows binaries and invalid `OCTOPOOL_GH_PATH` overrides.
 - Disable Sharp's install script so `pnpm install` uses its prebuilt package instead of failing on machines with a global Homebrew `libvips`.

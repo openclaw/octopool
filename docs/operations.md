@@ -177,8 +177,8 @@ D1 schema lives in `migrations/`:
 - `0006_pr_state_proofs.sql` — short-lived validated PR state discriminators for
   state-aware PR subresource cache keys.
 - `0007_audit_cache_stale.sql` — stale-cache audit status and cacheability metrics.
-- `0008_public_api_rates.sql` — anonymous GitHub API quota snapshots used to prefer
-  public-page/raw reads below 50% remaining.
+- `0008_public_api_rates.sql` — anonymous GitHub API quota snapshots recorded from API
+  responses.
 - `0009_audit_outcomes.sql` — local-fallback reasons and coalesced-fill telemetry.
 - `0010_audit_retention.sql` — audit timestamp index for bounded retention cleanup.
 - `0011_cache_stale_retention.sql` — per-entry stale deadlines and indexed cache cleanup.

@@ -64,17 +64,6 @@ export function publicAPIRequest(
   };
 }
 
-export async function storedPublicAPIRateBelowHalf(env: Env, resource: string): Promise<boolean> {
-  try {
-    const rate = await env.DB.prepare(queries.freshPublicApiRate)
-      .bind(resource)
-      .first<{ limit_count: number; remaining: number }>();
-    return rate !== null && rate.remaining * 2 < rate.limit_count;
-  } catch {
-    return false;
-  }
-}
-
 export async function storePublicAPIRate(
   env: Env,
   resource: string,
@@ -93,12 +82,6 @@ export async function storePublicAPIRate(
   } catch {
     // Rate persistence is advisory; public reads still work without it.
   }
-}
-
-export function publicAPIRateBelowHalf(headers: Headers): boolean {
-  const limit = headerInt(headers, "x-ratelimit-limit");
-  const remaining = headerInt(headers, "x-ratelimit-remaining");
-  return limit !== undefined && remaining !== undefined && limit > 0 && remaining * 2 < limit;
 }
 
 function publicAPIHeaders(request: RelayRequest): Record<string, string> {

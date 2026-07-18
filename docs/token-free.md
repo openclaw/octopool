@@ -18,13 +18,11 @@ Cache hits are separate: a fresh D1 cache hit contacts no GitHub endpoint.
 
 ## Selection rules
 
-- Octopool tries anonymous API reads before spending a pooled PAT/App token.
-- When stored anonymous quota is below 50%, available no-API-quota alternatives move
-  ahead of anonymous API. A newly observed below-50% API response is retained while
-  Octopool tries the remaining no-API-quota alternatives.
+- When a route has both transports, Octopool tries no-API-quota alternatives before the
+  anonymous API, then a pooled PAT/App token where permitted.
 - Diff and patch media use public web endpoints directly.
 - A parser that cannot prove completeness or exactness returns no result. Octopool then
-  retains a successful anonymous API response or falls through to the pooled identity.
+  tries the anonymous API in the same request cycle or falls through to the pooled identity.
 - Shaped page fallbacks require an internal `x-octopool-public-shape` header generated
   by supported top-level CLI commands. Raw `gh api` requests do not opt into these
   reduced page shapes.

@@ -1,11 +1,5 @@
 import { parsePositiveInt } from "./http";
-import {
-  publicAPIRateBelowHalf,
-  publicAPIRequest,
-  releaseAPIRequest,
-  storedPublicAPIRateBelowHalf,
-  storePublicAPIRate,
-} from "./github-public-api";
+import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./github-public-api";
 import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
@@ -26,14 +20,13 @@ export async function callGitHubWeb(
   const hasPublicAlternative =
     requests.some((candidate) => candidate.usesApiQuota) &&
     requests.some((candidate) => !candidate.usesApiQuota);
-  if (hasPublicAlternative && (await storedPublicAPIRateBelowHalf(env, route.resource))) {
+  if (hasPublicAlternative) {
     requests = [
       ...requests.filter((candidate) => !candidate.usesApiQuota),
       ...requests.filter((candidate) => candidate.usesApiQuota),
     ];
   }
-  let deferredApiPayload: GitHubRelayResponse | undefined;
-  for (const [index, web] of requests.entries()) {
+  for (const web of requests) {
     const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
     const fetched = await fetchWebResponse(web.url, web.headers, timeoutMs);
     if (fetched === undefined) {
@@ -55,22 +48,13 @@ export async function callGitHubWeb(
         responseURL,
       );
       if (payload !== undefined) {
-        if (web.usesApiQuota) {
-          if (
-            publicAPIRateBelowHalf(response.headers) &&
-            requests.slice(index + 1).some((candidate) => !candidate.usesApiQuota)
-          ) {
-            deferredApiPayload = payload;
-            continue;
-          }
-        }
         return payload;
       }
     } catch {
       continue;
     }
   }
-  return deferredApiPayload;
+  return undefined;
 }
 
 function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequest[] {

@@ -49,12 +49,13 @@ the cache. The CLI's `gh pr checks` resolves the PR head SHA this way with `max-
 
 ### Token-free GitHub reads
 
-Before spending a pooled identity, Octopool can use anonymous GitHub API, public page/raw,
-and Git smart HTTP endpoints. Successful direct repository-resource responses are themselves
-a public visibility proof; ambiguous search responses still require an explicit repository
-guard. Token-free-only shaped repo search uses the public repository page marker for that
-proof, avoiding both pooled identities and the configured verification token. The canonical
-route-by-route inventory is
+Whenever a validated parser exists, Octopool prefers public page/raw and Git smart HTTP
+endpoints before the anonymous GitHub API. A parser miss falls back to the anonymous API in
+the same request cycle, then to a pooled identity where the route permits one. Successful
+direct repository-resource responses are themselves a public visibility proof; ambiguous
+search responses still require an explicit repository guard. Token-free-only shaped repo
+search uses the public repository page marker for that proof, avoiding both pooled identities
+and the configured verification token. The canonical route-by-route inventory is
 [Token-Free GitHub Endpoints](token-free.md).
 
 The main transport classes are:
@@ -65,8 +66,8 @@ The main transport classes are:
 - compare diff/patch media requests via `github.com/{owner}/{repo}/compare/{base...head}.diff|patch`
 - supported top-level `gh run list/view` summaries (up to 25 results, with branch/status or
   workflow filters) and bounded `gh run view --json jobs` job/step metadata prefer public
-  GitHub pages once anonymous API quota falls below 50%; raw API requests retain exact REST
-  semantics, and log bodies remain authenticated
+  GitHub pages; raw API requests retain exact REST semantics, and log bodies remain
+  authenticated
 - exact public GitHub API reads without caller credentials for repo metadata, commits,
   compare JSON, contents, README, PRs, issues, checks/statuses, Actions run/workflow
   metadata, branches, tags, labels, milestones, topics, community profiles, forks,
@@ -76,21 +77,20 @@ The main transport classes are:
   reactions, assignees, repo-wide issue/PR comments and events, commit pull/check-suite/
   branch/status metadata, network events, repository stats, repository search, and
   repo-scoped issue/commit search
-- explicit-ref contents reads can prefer `raw.githubusercontent.com`, returned as an
-  API-shaped JSON file payload, once anonymous API quota falls below 50%
+- explicit-ref contents reads prefer `raw.githubusercontent.com`, returned as an API-shaped
+  JSON file payload
 - branch refs, matching branch prefixes, and annotated-tag refs can use Git smart HTTP
-  advertisements with exact REST-compatible IDs and object metadata below 50% anonymous
-  API quota; ambiguous lightweight tags remain API-only
+  advertisements with exact REST-compatible IDs and object metadata; ambiguous lightweight
+  tags fall back to the API
 - supported top-level `gh pr view` summaries and `gh workflow view` metadata can use bounded
-  public GitHub page data below 50% anonymous API quota
+  public GitHub page data before the anonymous API
 - release list/latest/tag/id/asset reads via unauthenticated `api.github.com` requests so pooled
   credentials never expose draft releases; supported top-level `gh release view` summaries
-  prefer public release HTML once anonymous API quota falls below 50%, while raw API requests
-  retain exact REST semantics
+  prefer public release HTML, while raw API requests retain exact REST semantics
 
-Anonymous API rate snapshots are stored by GitHub resource until their advertised reset time.
-When a public-page/raw parser cannot satisfy a request, Octopool retains the successful
-anonymous API response as the fallback.
+Anonymous API rate snapshots are recorded by GitHub resource from API responses.
+When a public-page/raw/Git parser cannot satisfy a request, Octopool falls back to the
+anonymous API in the same request cycle.
 
 Successful web reads are cached in the same D1 table with no source identity. A cached
 web hit still re-checks that public proof covers the entry before returning it.
