@@ -191,10 +191,15 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 		if firstJobID == "" {
 			firstJobID = jobID
 		}
-		if _, err := fmt.Fprintf(stdout, "%s %s in %s (ID %s)\n",
+		duration := humanDuration(firstString(job, "startedAt"), firstString(job, "completedAt"))
+		inDuration := ""
+		if duration != "" {
+			inDuration = " in " + duration
+		}
+		if _, err := fmt.Fprintf(stdout, "%s %s%s (ID %s)\n",
 			jobGlyph(job),
 			watchSafeText(firstString(job, "name")),
-			humanDuration(firstString(job, "startedAt"), firstString(job, "completedAt")),
+			inDuration,
 			watchSafeText(jobID),
 		); err != nil {
 			return err
@@ -471,7 +476,7 @@ func statusGlyph(status string, conclusion string) string {
 	switch strings.ToLower(conclusion) {
 	case "success", "neutral":
 		return "✓"
-	case "failure", "timed_out", "action_required":
+	case "failure", "timed_out", "action_required", "startup_failure":
 		return "X"
 	case "cancelled", "skipped":
 		return "-"

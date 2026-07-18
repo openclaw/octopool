@@ -367,6 +367,32 @@ func TestHumanPRChecksPendingExitsEight(t *testing.T) {
 	}
 }
 
+func TestHumanRunViewActiveJobOmitsDuration(t *testing.T) {
+	setHumanTestSeams(t, time.Date(2026, 7, 17, 22, 0, 0, 0, time.UTC))
+	relayTestServer(t, func(body map[string]any) any {
+		if strings.HasSuffix(body["path"].(string), "/jobs") {
+			return map[string]any{"total_count": 1, "jobs": []map[string]any{{
+				"id": 9, "name": "build", "status": "in_progress",
+				"started_at": "2026-07-17T21:59:00Z",
+			}}}
+		}
+		return map[string]any{
+			"id": 42, "status": "in_progress", "head_branch": "main", "name": "CI",
+			"event": "push", "created_at": "2026-07-17T21:58:00Z",
+			"html_url": "https://github.com/openclaw/octopool/actions/runs/42",
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"view", "42", "-R", "openclaw/octopool"}, &out)
+	assertGHComplete(t, result)
+	if !strings.Contains(out.String(), "* build (ID 9)\n") || strings.Contains(out.String(), "in  (") {
+		t.Fatalf("active job must omit the duration phrase, got %q", out.String())
+	}
+	if got := statusGlyph("completed", "startup_failure"); got != "X" {
+		t.Fatalf("startup_failure glyph = %q, want X", got)
+	}
+}
+
 func TestHumanDurationFormatting(t *testing.T) {
 	tests := []struct {
 		start string

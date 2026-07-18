@@ -96,6 +96,8 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 		}
 	}
 	if human || hasJSONField(opts.json, "jobs") {
+		// per_page=100 with runJobs' incomplete-total fallback: >100-job runs
+		// delegate to real gh rather than truncating.
 		envelope, err := client.do(ctx, ghAPIRequest{
 			method: "GET",
 			path:   repoPath(repo, "actions", "runs", id, "jobs"),
