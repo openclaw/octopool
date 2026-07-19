@@ -24,6 +24,7 @@ type PublicProofCoordinator = Pick<
 const EDGE_CACHE_NAMESPACE = "public-repo-v1";
 const PROOF_WAIT_MS = 4_000;
 const PROOF_POLL_MS = 100;
+const HISTORICAL_PROOF_EXPIRY_SLACK_MS = 5_000;
 
 export async function ensurePublicGitHubRepo(
   env: Env,
@@ -332,7 +333,7 @@ function publicProofCovers(
     Number.isFinite(expiresAt) &&
     Number.isFinite(cacheAt) &&
     checkedAt >= cacheAt - 5_000 &&
-    (!requireFresh || expiresAt > Date.now())
+    expiresAt > Date.now() - (requireFresh ? 0 : HISTORICAL_PROOF_EXPIRY_SLACK_MS)
   );
 }
 

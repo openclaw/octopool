@@ -149,7 +149,12 @@ describe("public repo guard", () => {
       )
       .mockResolvedValueOnce(new Response("temporary web failure", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
-    const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(proof());
+    const checkedAt = Date.now() - 30_000;
+    const recentlyExpiredProof = {
+      checked_at: sqliteUTC(checkedAt),
+      expires_at: sqliteUTC(Date.now() - 2_000),
+    };
+    const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(recentlyExpiredProof);
     const run = vi.fn(async () => ({}));
     const bind = vi.fn(() => ({ first, run }));
     const prepare = vi.fn(() => ({ bind }));
@@ -157,10 +162,36 @@ describe("public repo guard", () => {
     await ensurePublicGitHubRepo(
       { ...env(), DB: { prepare } } as unknown as Env,
       route(),
-      "2026-05-28 00:00:00",
+      sqliteUTC(checkedAt),
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects historical proof beyond the expiry slack", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("temporary API failure", { status: 503 }))
+      .mockResolvedValueOnce(new Response("temporary API failure", { status: 503 }))
+      .mockResolvedValueOnce(new Response("temporary web failure", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const checkedAt = Date.now() - 90_000;
+    const expiredProof = {
+      checked_at: sqliteUTC(checkedAt),
+      expires_at: sqliteUTC(Date.now() - 60_000),
+    };
+    const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(expiredProof);
+    const run = vi.fn(async () => ({}));
+    const bind = vi.fn(() => ({ first, run }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await expect(
+      ensurePublicGitHubRepo(
+        { ...env(), DB: { prepare } } as unknown as Env,
+        route(),
+        sqliteUTC(checkedAt),
+      ),
+    ).rejects.toMatchObject({ status: 502, code: "repo_public_check_failed" });
   });
 
   it("proves public visibility from the repository page when API quotas are exhausted", async () => {

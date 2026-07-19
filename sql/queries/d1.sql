@@ -383,6 +383,7 @@ FROM github_public_repos
 WHERE lower(owner) = ?1
   AND lower(repo) = ?2
   AND checked_at >= datetime(?3, '-5 seconds')
+  AND expires_at > datetime(CURRENT_TIMESTAMP, '-5 seconds')
 LIMIT 1;
 
 -- name: FreshCoveringPublicRepoProof :one
