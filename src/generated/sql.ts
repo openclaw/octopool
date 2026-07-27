@@ -110,7 +110,7 @@ export const queries = {
   upsertPublicRepoProof:
     "INSERT INTO github_public_repos (owner, repo, checked_at, expires_at)\nVALUES (?1, ?2, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?3))\nON CONFLICT(owner, repo) DO UPDATE SET\n  checked_at = excluded.checked_at,\n  expires_at = excluded.expires_at",
   coveringPublicRepoProof:
-    "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\nLIMIT 1",
+    "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   freshCoveringPublicRepoProof:
     "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   freshPRStateProof:

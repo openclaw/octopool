@@ -135,7 +135,9 @@ describe("public repo guard", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps historical proof fallback when unauthenticated retry also fails", async () => {
+  it("uses an unexpired historical proof when unauthenticated retry also fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-07-27T16:00:00.000Z");
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -149,7 +151,12 @@ describe("public repo guard", () => {
       )
       .mockResolvedValueOnce(new Response("temporary web failure", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
-    const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(proof());
+    const checkedAt = Date.now() - 30_000;
+    const unexpiredProof = {
+      checked_at: sqliteUTC(checkedAt),
+      expires_at: sqliteUTC(Date.now() + 1_000),
+    };
+    const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(unexpiredProof);
     const run = vi.fn(async () => ({}));
     const bind = vi.fn(() => ({ first, run }));
     const prepare = vi.fn(() => ({ bind }));
@@ -157,10 +164,45 @@ describe("public repo guard", () => {
     await ensurePublicGitHubRepo(
       { ...env(), DB: { prepare } } as unknown as Env,
       route(),
-      "2026-05-28 00:00:00",
+      sqliteUTC(checkedAt),
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["at the expiry boundary", 0],
+    ["after the expiry boundary", -1_000],
+  ])("rejects a historical proof %s even if D1 returns it", async (_label, expiryOffsetMs) => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-07-27T16:00:00.000Z");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("temporary API failure", { status: 503 }))
+      .mockResolvedValueOnce(new Response("temporary API failure", { status: 503 }))
+      .mockResolvedValueOnce(new Response("temporary web failure", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const checkedAt = Date.now() - 30_000;
+    const expiredProof = {
+      checked_at: sqliteUTC(checkedAt),
+      expires_at: sqliteUTC(Date.now() + expiryOffsetMs),
+    };
+    const first = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(expiredProof);
+    const run = vi.fn(async () => ({}));
+    const bind = vi.fn(() => ({ first, run }));
+    const prepare = vi.fn(() => ({ bind }));
+
+    await expect(
+      ensurePublicGitHubRepo(
+        { ...env(), DB: { prepare } } as unknown as Env,
+        route(),
+        sqliteUTC(checkedAt),
+      ),
+    ).rejects.toMatchObject({
+      status: 502,
+      code: "repo_public_check_failed",
+      message: "GitHub public repository check failed with 503",
+    });
   });
 
   it("proves public visibility from the repository page when API quotas are exhausted", async () => {

@@ -285,7 +285,7 @@ async function cachedPublicGitHubRepoCovers(
   const edgeKey = publicProofKey(owner, repo);
   const edge = await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey);
   if (edge !== undefined) {
-    if (publicProofCovers(edge, cacheCreatedAt, requireFresh)) {
+    if (publicProofCovers(edge, cacheCreatedAt)) {
       return true;
     }
     await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey);
@@ -296,7 +296,7 @@ async function cachedPublicGitHubRepoCovers(
   const row = await env.DB.prepare(query)
     .bind(owner, repo, cacheCreatedAt)
     .first<PublicRepoProof>();
-  if (row === null || !publicProofCovers(row, cacheCreatedAt, requireFresh)) {
+  if (row === null || !publicProofCovers(row, cacheCreatedAt)) {
     return false;
   }
   const ttlSeconds = Math.floor((parseSQLiteTimestamp(row.expires_at) - Date.now()) / 1000);
@@ -319,11 +319,7 @@ async function waitForConcurrentPublicProof(
   return false;
 }
 
-function publicProofCovers(
-  proof: PublicRepoProof,
-  cacheCreatedAt: string,
-  requireFresh: boolean,
-): boolean {
+function publicProofCovers(proof: PublicRepoProof, cacheCreatedAt: string): boolean {
   const checkedAt = parseSQLiteTimestamp(proof.checked_at);
   const expiresAt = parseSQLiteTimestamp(proof.expires_at);
   const cacheAt = parseSQLiteTimestamp(cacheCreatedAt);
@@ -332,7 +328,7 @@ function publicProofCovers(
     Number.isFinite(expiresAt) &&
     Number.isFinite(cacheAt) &&
     checkedAt >= cacheAt - 5_000 &&
-    (!requireFresh || expiresAt > Date.now())
+    expiresAt > Date.now()
   );
 }
 

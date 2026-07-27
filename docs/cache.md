@@ -196,8 +196,8 @@ A fresh or bounded-stale hit is only served if:
 
 - the source identity recorded on the entry is still an active candidate for the route
   (web-origin entries have no identity), and
-- the repo's public-visibility proof still covers the entry (re-checked, with a small
-  historical-proof allowance during GitHub outages / secondary-rate-limit — see below).
+- the repo's unexpired public-visibility proof still covers the entry (re-checked during
+  GitHub outages / secondary-rate-limit — see below).
 
 If the eligible token-free and pooled backends are unavailable, depleted, cooling down,
 or rate-limited, Octopool may serve an expired public cache entry for a short route-specific
@@ -251,9 +251,11 @@ is public.
 
 If the live public check fails with a `5xx`, or a `403` with `x-ratelimit-remaining: 0`
 (secondary rate limit), the guard may fall back to a previously recorded proof that was
-captured close to the cache entry's creation time (within 5s). This lets cached public
-data keep serving through transient GitHub failures without ever relaxing the
-private-repo block — a hard `404`/private response always denies.
+captured close to the cache entry's creation time (within 5s) and has not expired. There is
+no post-expiry grace window: a proof whose expiry equals or precedes the current time is
+rejected immediately with `repo_public_check_failed`. This lets cached public data keep
+serving through transient GitHub failures without ever relaxing the private-repo block — a
+hard `404`/private response always denies.
 
 ## Schema
 

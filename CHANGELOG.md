@@ -2,6 +2,10 @@
 
 ## 0.5.1 - Unreleased
 
+### Fixes
+
+- Reject expired public-repository proofs immediately during GitHub outage fallback, keeping runtime and D1 authorization checks fail-closed (thanks @luojiyin1987).
+
 ## 0.5.0 - 2026-07-18
 
 ### Changes
