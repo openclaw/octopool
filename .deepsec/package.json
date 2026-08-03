@@ -6,7 +6,7 @@
   "workspaces": [],
   "type": "module",
   "dependencies": {
-    "deepsec": "^2.1.2"
+    "deepsec": "^2.2.9"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@11.18.0"
 }

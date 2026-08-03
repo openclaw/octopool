@@ -24,16 +24,16 @@
     "types": "wrangler types"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.8",
-    "@types/node": "^26.1.1",
-    "oxfmt": "^0.60.0",
-    "oxlint": "^1.75.0",
+    "@cloudflare/vitest-pool-workers": "^0.20.1",
+    "@types/node": "^26.1.2",
+    "oxfmt": "^0.61.0",
+    "oxlint": "^1.76.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
-    "wrangler": "^4.114.0"
+    "wrangler": "^4.118.0"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.34.5"
+  "packageManager": "pnpm@11.18.0"
 }
