@@ -53,6 +53,11 @@ describe("Worker end-to-end relay backends", () => {
         "SELECT COUNT(*) AS count FROM audit_events WHERE identity_id IS NULL AND cache_status IN ('miss', 'hit')",
       ).first(),
     ).toEqual({ count: 2 });
+    expect(
+      await env.DB.prepare(
+        "SELECT backend FROM audit_events WHERE cache_status = 'miss' LIMIT 1",
+      ).first(),
+    ).toEqual({ backend: "github_api" });
   });
 
   it("uses and caches the explicit anonymous GitHub API fallback", async () => {
@@ -82,6 +87,11 @@ describe("Worker end-to-end relay backends", () => {
       relay: { backend: "github_public", cache: "hit", route_kind: "user_view" },
     });
     expect(upstream).toHaveBeenCalledTimes(1);
+    expect(
+      await env.DB.prepare(
+        "SELECT backend FROM audit_events WHERE cache_status = 'miss' LIMIT 1",
+      ).first(),
+    ).toEqual({ backend: "github_api" });
   });
 
   it("serves GET /user as the caller's public profile", async () => {

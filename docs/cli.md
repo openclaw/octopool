@@ -257,6 +257,10 @@ Fetches `GET /v1/pools/<pool>/stats` using the stored token. The default human o
 shows the pool request count, service errors, expected local fallbacks, raw and
 successful-eligible cache hit rates, coalesced duplicate misses, caller- and client-specific
 usage, all of the caller's active client usage, D1 cache entries, and top route kinds.
+When the server records backend attribution, it also ranks attributed upstream work by
+route and bounded source (`github_web`, anonymous `github_api`, or `github_identity`) and
+groups local delegation by fallback reason. No request bodies, query values, or credentials
+enter these aggregates.
 `--since` accepts `30m`, `24h`, or `7d` style windows, capped at 30 days.
 
 ```sh
@@ -271,6 +275,10 @@ octopool stats
 # this client: 38 requests, 31 saved, 7 backend
 # top routes:
 #   pr_view: 31 req, 86.1% eligible hit, 1 stale, 5 miss, 0 bypass, 0 errors, 1 fallback
+# backends:
+#   github_web / workflow_run_list: 12 req, 12 miss, 0 bypass, 0 revalidated
+# fallback reasons:
+#   identity_pool_depleted / contents: 1 req
 # clients:
 #   steipete-mbp.local: 38 req, 31 saved, 7 backend, 1 fallback
 ```

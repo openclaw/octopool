@@ -108,13 +108,14 @@ export async function seedAudit(
     cacheable?: number;
     callerTokenId?: string;
     clientName?: string;
+    backend?: string;
   } = {},
 ): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO audit_events (
       request_id, caller_id, caller_token_id, client_name, pool_id, route_key, route_kind, identity_id, status,
-      error_code, fallback_reason, duration_ms, cache_status, cacheable, coalesced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'primary', ?, ?, ?, 10, ?, ?, 0)`,
+      error_code, fallback_reason, backend, duration_ms, cache_status, cacheable, coalesced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'primary', ?, ?, ?, ?, 10, ?, ?, 0)`,
   )
     .bind(
       requestId,
@@ -127,6 +128,7 @@ export async function seedAudit(
       status,
       options.errorCode ?? null,
       options.fallbackReason ?? null,
+      options.backend ?? null,
       cacheStatus,
       options.cacheable ?? 1,
     )

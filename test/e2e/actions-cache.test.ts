@@ -410,17 +410,17 @@ describe("Actions run-list superset", () => {
       const request = new Request(input, init);
       expect(bearer(request)).toBeUndefined();
       const url = new URL(request.url);
-      expect(url.pathname).toBe(RUNS_PATH);
-      expect(Object.fromEntries(url.searchParams)).toEqual({ page: "1", per_page: "100" });
-      return jsonResponse({
-        total_count: 4,
-        workflow_runs: [
-          run(1, "main", "completed", "success"),
-          run(2, "main", "completed", "failure"),
-          run(3, "feature", "in_progress", null),
-          run(4, "main", "queued", null),
-        ],
-      });
+      expect(url.hostname).toBe("github.com");
+      expect(url.pathname).toBe("/openclaw/octopool/actions");
+      expect(Object.fromEntries(url.searchParams)).toEqual({});
+      return new Response(
+        runListHTML(4, [
+          [1, "main", "completed successfully"],
+          [2, "main", "failed"],
+          [3, "feature", "in progress"],
+          [4, "main", "queued"],
+        ]),
+      );
     });
     vi.stubGlobal("fetch", upstream);
 
@@ -428,7 +428,7 @@ describe("Actions run-list superset", () => {
     expect(branch.body).toMatchObject({ total_count: 3 });
     expect(runIDs(branch.body)).toEqual([1, 2]);
 
-    const status = await shapedRunList({ status: "failure", per_page: "100" });
+    const status = await shapedRunList({ status: "failure", per_page: "20" });
     expect(status.body).toMatchObject({ total_count: 1 });
     expect(runIDs(status.body)).toEqual([2]);
 
@@ -436,6 +436,11 @@ describe("Actions run-list superset", () => {
     expect(limited.body).toMatchObject({ total_count: 4 });
     expect(runIDs(limited.body)).toEqual([1]);
     expect(upstream).toHaveBeenCalledTimes(1);
+    expect(
+      await env.DB.prepare(
+        "SELECT backend FROM audit_events WHERE cache_status = 'miss' LIMIT 1",
+      ).first(),
+    ).toEqual({ backend: "github_web" });
   });
 
   it("normalizes and locally shapes a conditional shim request", async () => {
@@ -494,35 +499,26 @@ describe("Actions run-list superset", () => {
       const request = new Request(input, init);
       const url = new URL(request.url);
       urls.push(url);
-      if (url.searchParams.has("branch")) {
-        return jsonResponse({
-          total_count: 25,
-          workflow_runs: [
-            run(101, "target", "completed", "success"),
-            run(102, "target", "completed", "success"),
-            run(103, "target", "completed", "success"),
-          ],
-        });
+      expect(url.hostname).toBe("github.com");
+      if (url.searchParams.get("query") === "branch:target") {
+        return new Response(
+          runListHTML(25, [
+            [101, "target", "completed successfully"],
+            [102, "target", "completed successfully"],
+            [103, "target", "completed successfully"],
+          ]),
+        );
       }
-      return jsonResponse({
-        total_count: 200,
-        workflow_runs: [run(1, "main", "completed", "success")],
-      });
+      return new Response(runListHTML(200, [[1, "main", "completed successfully"]]));
     });
     vi.stubGlobal("fetch", upstream);
 
     const response = await shapedRunList({ branch: "target", limit: "2" });
     expect(runIDs(response.body)).toEqual([101, 102]);
-    const apiRequests = urls.filter((url) => url.hostname === "api.github.com");
-    expect(apiRequests).toHaveLength(2);
-    expect(Object.fromEntries(apiRequests[0]!.searchParams)).toEqual({
-      page: "1",
-      per_page: "100",
-    });
-    expect(Object.fromEntries(apiRequests[1]!.searchParams)).toEqual({
-      branch: "target",
-      per_page: "2",
-    });
+    expect(urls).toHaveLength(2);
+    expect(urls.map((url) => url.hostname)).toEqual(["github.com", "github.com"]);
+    expect(Object.fromEntries(urls[0]!.searchParams)).toEqual({});
+    expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({ query: "branch:target" });
   });
 
   it("preserves GitHub validation for unsupported status values", async () => {
@@ -556,22 +552,19 @@ describe("Actions run-list superset", () => {
     }
   });
 
-  it("normalizes and shapes an ineligible workflow-scoped request", async () => {
-    const apiRequests: URL[] = [];
+  it("shares workflow-scoped variants through one public page fill", async () => {
+    const urls: URL[] = [];
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
-      if (url.hostname === "github.com") {
-        return new Response("not found", { status: 404 });
-      }
-      apiRequests.push(url);
-      return jsonResponse({
-        total_count: 2,
-        workflow_runs: [
-          run(9, "main", "completed", "success"),
-          run(10, "main", "completed", "success"),
-        ],
-      });
+      urls.push(url);
+      expect(url.hostname).toBe("github.com");
+      return new Response(
+        runListHTML(2, [
+          [9, "main", "completed successfully"],
+          [10, "main", "completed successfully"],
+        ]),
+      );
     });
     vi.stubGlobal("fetch", upstream);
 
@@ -584,15 +577,21 @@ describe("Actions run-list superset", () => {
       },
     );
     expect(response.status).toBe(200);
-    expect(apiRequests).toHaveLength(1);
-    expect(apiRequests[0]?.pathname).toContain("/actions/workflows/ci.yml/runs");
-    expect(Object.fromEntries(apiRequests[0]!.searchParams)).toEqual({
-      branch: "main",
-      per_page: "1",
-    });
     const envelope = await response.json<RelayEnvelope>();
     expect(runIDs(envelope.body)).toEqual([9]);
     expect(envelope.body).toMatchObject({ total_count: 2 });
+    const cached = await relay(
+      "/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
+      undefined,
+      {
+        query: { status: "success", limit: "1" },
+        headers: { "x-octopool-public-shape": "actions-summary-v1" },
+      },
+    );
+    expect((await cached.json<RelayEnvelope>()).relay.cache).toBe("hit");
+    expect(urls).toHaveLength(1);
+    expect(urls[0]?.pathname).toBe("/openclaw/octopool/actions/workflows/ci.yml");
+    expect(Object.fromEntries(urls[0]!.searchParams)).toEqual({});
   });
 
   it("leaves non-shim run-list requests on exact per-query caching", async () => {
@@ -715,4 +714,22 @@ function runIDs(body: unknown): number[] {
           : [],
       )
     : [];
+}
+
+function runListHTML(total: number, runs: [id: number, branch: string, state: string][]): string {
+  return `<strong>${total} workflow runs</strong>${runs
+    .map(
+      ([id, branch, state]) => `
+        <div class="Box-row js-socket-channel js-updatable-content">
+          <a href="/openclaw/octopool/actions/runs/${id}" aria-label="${state}: Run ${id} of CI. run ${id}">
+            <span class="h4 markdown-title">run ${id}</span>
+          </a>
+          <span class="text-bold">CI</span> #${id}:
+          Commit <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
+          pushed
+          <relative-time datetime="2026-06-11T06:38:49Z"></relative-time>
+          <a class="branch-name" href="/openclaw/octopool/tree/refs/heads/${branch}">${branch}</a>
+        </div>`,
+    )
+    .join("")}`;
 }

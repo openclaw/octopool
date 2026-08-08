@@ -69,6 +69,8 @@ export type GitHubRelayResponse = {
   backend?: "github" | "web";
 };
 
+export type AuditBackend = "github_web" | "github_api" | "github_identity";
+
 export type SelectionCandidate = {
   id: string;
   weight: number;

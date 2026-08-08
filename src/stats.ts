@@ -26,6 +26,23 @@ type ClientRow = UsageAggregateRow & {
   latest_seen_at: string;
 };
 
+type BackendRow = {
+  backend: string;
+  route_kind: string;
+  requests: number;
+  cache_misses: number | null;
+  cache_bypass: number | null;
+  revalidated: number | null;
+  latest_seen_at: string | null;
+};
+
+type FallbackReasonRow = {
+  reason: string;
+  route_kind: string;
+  requests: number;
+  latest_seen_at: string | null;
+};
+
 export function parseStatsWindow(raw: string | null): StatsWindow {
   const fallback = { label: "24h", seconds: 24 * 60 * 60 };
   if (raw === null || raw.trim() === "") {
@@ -54,6 +71,8 @@ export async function poolStats(env: Env, pool: string, caller: Caller, window: 
     callerRoutes,
     clientRoutes,
     clients,
+    backends,
+    fallbackReasons,
     cache,
   ] = await Promise.all([
     aggregateUsage(env, pool, window.seconds),
@@ -63,6 +82,8 @@ export async function poolStats(env: Env, pool: string, caller: Caller, window: 
     routeUsage(env, pool, window.seconds, caller.id),
     routeUsage(env, pool, window.seconds, caller.id, caller.client_name),
     loadClientUsage(env, pool, window.seconds, caller.id),
+    loadBackendUsage(env, pool, window.seconds),
+    loadFallbackReasons(env, pool, window.seconds),
     cacheTotals(env, pool),
   ]);
   return {
@@ -80,6 +101,8 @@ export async function poolStats(env: Env, pool: string, caller: Caller, window: 
     caller_routes: callerRoutes,
     client_routes: clientRoutes,
     clients,
+    backends,
+    fallback_reasons: fallbackReasons,
     cache,
   };
 }
@@ -123,6 +146,25 @@ async function loadClientUsage(env: Env, pool: string, windowSeconds: number, ca
     latest_seen_at: row.latest_seen_at,
     ...normalizeAggregate(row),
   }));
+}
+
+async function loadBackendUsage(env: Env, pool: string, windowSeconds: number) {
+  const rows = await env.DB.prepare(queries.usageBackends)
+    .bind(pool, `-${windowSeconds} seconds`)
+    .all<BackendRow>();
+  return rows.results.map((row) => ({
+    ...row,
+    cache_misses: row.cache_misses ?? 0,
+    cache_bypass: row.cache_bypass ?? 0,
+    revalidated: row.revalidated ?? 0,
+  }));
+}
+
+async function loadFallbackReasons(env: Env, pool: string, windowSeconds: number) {
+  const rows = await env.DB.prepare(queries.usageFallbackReasons)
+    .bind(pool, `-${windowSeconds} seconds`)
+    .all<FallbackReasonRow>();
+  return rows.results;
 }
 
 async function cacheTotals(env: Env, pool: string) {

@@ -2,6 +2,10 @@
 
 ## 0.5.2 - Unreleased
 
+### Changes
+
+- Serve common repo- and workflow-scoped Actions run-list variants from shared public-page cache entries, and expose bounded backend and fallback-reason stats so operators can separate free web reads from GitHub API and pooled-identity traffic.
+
 ## 0.5.1 - 2026-08-02
 
 ### Fixes

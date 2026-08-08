@@ -13,15 +13,17 @@ import (
 )
 
 type statsResponse struct {
-	Pool        string         `json:"pool"`
-	Window      statsWindow    `json:"window"`
-	Operator    statsOperator  `json:"operator"`
-	PoolUsage   statsAggregate `json:"pool_usage"`
-	CallerUsage statsAggregate `json:"caller_usage"`
-	ClientUsage statsAggregate `json:"client_usage"`
-	Routes      []statsRoute   `json:"routes"`
-	Clients     []statsClient  `json:"clients"`
-	Cache       statsCache     `json:"cache"`
+	Pool            string                `json:"pool"`
+	Window          statsWindow           `json:"window"`
+	Operator        statsOperator         `json:"operator"`
+	PoolUsage       statsAggregate        `json:"pool_usage"`
+	CallerUsage     statsAggregate        `json:"caller_usage"`
+	ClientUsage     statsAggregate        `json:"client_usage"`
+	Routes          []statsRoute          `json:"routes"`
+	Backends        []statsBackend        `json:"backends"`
+	FallbackReasons []statsFallbackReason `json:"fallback_reasons"`
+	Clients         []statsClient         `json:"clients"`
+	Cache           statsCache            `json:"cache"`
 }
 
 type statsWindow struct {
@@ -66,6 +68,21 @@ type statsClient struct {
 	ClientName   string `json:"client_name"`
 	LatestSeenAt string `json:"latest_seen_at"`
 	statsAggregate
+}
+
+type statsBackend struct {
+	Backend     string `json:"backend"`
+	RouteKind   string `json:"route_kind"`
+	Requests    int    `json:"requests"`
+	CacheMisses int    `json:"cache_misses"`
+	CacheBypass int    `json:"cache_bypass"`
+	Revalidated int    `json:"revalidated"`
+}
+
+type statsFallbackReason struct {
+	Reason    string `json:"reason"`
+	RouteKind string `json:"route_kind"`
+	Requests  int    `json:"requests"`
 }
 
 type statsCache struct {
@@ -207,6 +224,41 @@ func renderStats(w io.Writer, stats statsResponse) error {
 				intFmt(route.CacheBypass),
 				intFmt(route.ServiceErrors),
 				intFmt(route.Fallbacks),
+			); err != nil {
+				return err
+			}
+		}
+	}
+	if len(stats.Backends) > 0 {
+		if _, err := fmt.Fprintln(w, "backends:"); err != nil {
+			return err
+		}
+		for _, backend := range stats.Backends {
+			if _, err := fmt.Fprintf(
+				w,
+				"  %s / %s: %s req, %s miss, %s bypass, %s revalidated\n",
+				backend.Backend,
+				backend.RouteKind,
+				intFmt(backend.Requests),
+				intFmt(backend.CacheMisses),
+				intFmt(backend.CacheBypass),
+				intFmt(backend.Revalidated),
+			); err != nil {
+				return err
+			}
+		}
+	}
+	if len(stats.FallbackReasons) > 0 {
+		if _, err := fmt.Fprintln(w, "fallback reasons:"); err != nil {
+			return err
+		}
+		for _, fallback := range stats.FallbackReasons {
+			if _, err := fmt.Fprintf(
+				w,
+				"  %s / %s: %s req\n",
+				fallback.Reason,
+				fallback.RouteKind,
+				intFmt(fallback.Requests),
 			); err != nil {
 				return err
 			}

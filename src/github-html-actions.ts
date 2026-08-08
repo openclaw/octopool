@@ -310,6 +310,7 @@ function runState(label: string): RunState | undefined {
     ["neutral", "neutral"],
     ["skipped", "skipped"],
     ["stale", "stale"],
+    ["startup failure", "startup_failure"],
   ] as const) {
     if (normalized.includes(needle)) {
       return { status: "completed", conclusion };

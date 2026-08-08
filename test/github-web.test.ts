@@ -178,7 +178,7 @@ describe("github web provider", () => {
     expect(response).toMatchObject({
       status: 200,
       body: [{ tag_name: "v0.2.5", draft: false }],
-      backend: "web",
+      backend: "github",
     });
   });
 
@@ -235,6 +235,40 @@ describe("github web provider", () => {
           updated_at: "2026-06-11T06:41:38Z",
         },
       ],
+    });
+  });
+
+  it("parses current GitHub startup-failure run status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        new Response(`
+          <strong>1 workflow run result</strong>
+          <div class="Box-row js-socket-channel js-updatable-content">
+            <a href="/openclaw/octopool/actions/runs/27328786455" aria-label="startup failure: Run 80 of CI. invalid workflow">
+              <span class="h4 markdown-title">invalid workflow</span>
+            </a>
+            <span class="text-bold">CI</span> #80:
+            Commit <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
+            pushed
+            <relative-time datetime="2026-06-11T06:38:49Z"></relative-time>
+            <a class="branch-name" href="/openclaw/octopool/tree/refs/heads/main">main</a>
+          </div>
+        `),
+      ),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "20", status: "startup_failure" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+    expect(response?.body).toMatchObject({
+      workflow_runs: [{ status: "completed", conclusion: "startup_failure" }],
     });
   });
 
@@ -423,7 +457,7 @@ describe("github web provider", () => {
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
     ).resolves.toMatchObject({
       body: exact,
-      backend: "web",
+      backend: "github",
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -1184,7 +1218,7 @@ describe("github web provider", () => {
 
     await expect(
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({ body: { name: "README.md" }, backend: "web" });
+    ).resolves.toMatchObject({ body: { name: "README.md" }, backend: "github" });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/repos/openclaw/octopool/contents/README.md",
       expect.any(Object),
@@ -1244,13 +1278,13 @@ describe("github web provider", () => {
 
     await expect(callGitHubWeb(env(), repo, classifyRoute(repo, policy))).resolves.toMatchObject({
       body: { full_name: "openclaw/octopool" },
-      backend: "web",
+      backend: "github",
     });
     await expect(
       callGitHubWeb(env(), branches, classifyRoute(branches, policy)),
     ).resolves.toMatchObject({
       body: [{ name: "main" }],
-      backend: "web",
+      backend: "github",
     });
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -1411,7 +1445,7 @@ describe("github web provider", () => {
       await expect(
         callGitHubWeb(env(), request, classifyRoute(request, policy)),
       ).resolves.toMatchObject({
-        backend: "web",
+        backend: "github",
       });
     }
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -1491,7 +1525,7 @@ describe("github web provider", () => {
       status: 204,
       body: null,
       body_encoding: "text",
-      backend: "web",
+      backend: "github",
     });
   });
 

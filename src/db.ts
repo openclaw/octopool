@@ -1,6 +1,6 @@
 import { defaultPolicy, parsePolicy } from "./policy";
 import { queries } from "./generated/sql";
-import type { Identity, PoolPolicy, RouteInfo } from "./types";
+import type { AuditBackend, Identity, PoolPolicy, RouteInfo } from "./types";
 
 type PoolRow = {
   policy_json: string;
@@ -67,6 +67,7 @@ export async function insertAudit(
     status: number;
     errorCode?: string;
     fallbackReason?: string;
+    backend?: AuditBackend;
     durationMs: number;
     cacheStatus?: "hit" | "miss" | "bypass" | "stale" | "unknown";
     cacheable?: boolean;
@@ -86,6 +87,7 @@ export async function insertAudit(
       event.status,
       event.errorCode ?? null,
       event.fallbackReason ?? null,
+      event.backend ?? null,
       event.durationMs,
       event.cacheStatus ?? "unknown",
       event.cacheable === true ? 1 : 0,

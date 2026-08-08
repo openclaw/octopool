@@ -14,11 +14,70 @@ describe("Actions run-list superset eligibility", () => {
     expect(
       runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
     ).toMatchObject({
-      cacheRequest: { query: { page: "1", per_page: "100" } },
+      cacheRequest: { query: { page: "1", per_page: "25" } },
       branch: "main",
       status: "failure",
       limit: 10,
     });
+  });
+
+  it("shares common workflow-scoped reads through a public-page-sized superset", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
+      query: { branch: "main", per_page: "20", limit: "20" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    expect(
+      runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
+    ).toMatchObject({
+      cacheRequest: {
+        path: "/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
+        query: { page: "1", per_page: "25" },
+      },
+      branch: "main",
+      limit: 20,
+    });
+  });
+
+  it("retains the 100-run repo superset for larger requested pages", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "50", limit: "50" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    expect(
+      runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
+    ).toMatchObject({ cacheRequest: { query: { page: "1", per_page: "100" } }, limit: 50 });
+  });
+
+  it("keeps large workflow-scoped pages exact", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
+      query: { per_page: "50", limit: "50" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    expect(
+      runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
+    ).toBeUndefined();
+  });
+
+  it("accepts GitHub's startup_failure status", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { status: "startup_failure", limit: "20" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    expect(
+      runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw"))),
+    ).toMatchObject({ status: "startup_failure", limit: 20 });
   });
 
   it.each([

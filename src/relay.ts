@@ -45,6 +45,7 @@ import {
   writeTerminalLogCache,
 } from "./terminal-log-cache";
 import type {
+  AuditBackend,
   GitHubRelayResponse,
   Identity,
   RecordResult,
@@ -771,6 +772,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   const clientResponse = filterRunListSuperset(result.github, state.runListView, {
     preserveTotalCount: state.runListExactFallback,
   });
+  const backend = auditBackend(result);
   const background: Promise<unknown>[] = [
     insertAudit(state.env, {
       requestId: state.requestId,
@@ -784,6 +786,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
       status: clientResponse.status,
       durationMs: Date.now() - state.started,
       ...(result.revalidated === true ? { fallbackReason: "cache_revalidated" } : {}),
+      ...(backend === undefined ? {} : { backend }),
       cacheStatus,
       cacheable: state.cacheable,
     }),
@@ -868,6 +871,7 @@ async function handleRelayError(
       cacheStatus: active?.cacheStatus ?? "unknown",
       cacheable: active?.cacheable ?? false,
       ...(active?.identity === undefined ? {} : { identityId: active.identity.id }),
+      ...(active?.identity === undefined ? {} : { backend: "github_identity" }),
     }),
   );
   throw reported;
@@ -982,6 +986,16 @@ function auditFallbackReason(error: unknown): string | undefined {
     return undefined;
   }
   return typeof error.details?.reason === "string" ? error.details.reason : undefined;
+}
+
+function auditBackend(result: RelaySuccess): AuditBackend | undefined {
+  if (result.identity !== undefined) {
+    return "github_identity";
+  }
+  if (result.backend === "github_public" || result.github.backend === "github") {
+    return "github_api";
+  }
+  return result.backend === "web" ? "github_web" : undefined;
 }
 
 async function serveCachedGitHubResponse(

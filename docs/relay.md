@@ -284,7 +284,9 @@ across head SHAs or closed/merged state.
 
 Every validated request from an authenticated caller to an existing pool writes an
 `audit_events` row with request id, caller, pool, route key, route kind, identity id,
-status, error code, and duration. Parse, authentication, and pool-lookup failures occur
+status, error code, bounded backend classification, and duration. Backend values distinguish
+public web pages from anonymous GitHub API and pooled-identity responses without storing URLs,
+query values, request bodies, or credentials. Parse, authentication, and pool-lookup failures occur
 before the audit boundary.
 Audit writes happen via `ctx.waitUntil` and never block the response.
 The hourly maintenance task deletes audit rows older than 30 days in bounded batches,

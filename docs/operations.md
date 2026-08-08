@@ -183,6 +183,7 @@ D1 schema lives in `migrations/`:
 - `0010_audit_retention.sql` — audit timestamp index for bounded retention cleanup.
 - `0011_cache_stale_retention.sql` — per-entry stale deadlines and indexed cache cleanup.
 - `0012_caller_clients.sql` — concurrent per-client caller tokens and audit attribution.
+- `0013_audit_backends.sql` — bounded upstream-source attribution for route-level stats.
 
 Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
 
@@ -246,7 +247,8 @@ cache entries after each entry's route-specific stale deadline and audit rows ol
 30 days; this retains every configured stale window and the full supported stats window
 without unbounded D1 growth.
 
-`GET /v1/pools/<pool>/stats?since=24h` returns pool-, caller-, and client-specific cache stats.
+`GET /v1/pools/<pool>/stats?since=24h` returns pool-, caller-, and client-specific cache stats,
+plus bounded backend-by-route and local-fallback-reason aggregates.
 The CLI wraps this as `octopool stats`. The browser dashboard at `/dashboard` exposes the
 same data plus identity health, live leases, seven-day normalized request patterns and
 outcome causes, and per-caller/client usage — see

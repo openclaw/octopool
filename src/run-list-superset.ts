@@ -2,7 +2,8 @@ import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
-const SUPERSET_PAGE_SIZE = 100;
+const PUBLIC_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 30;
 const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length", "link"]);
 const SUPPORTED_RUN_STATUSES = new Set([
@@ -13,6 +14,7 @@ const SUPPORTED_RUN_STATUSES = new Set([
   "neutral",
   "skipped",
   "stale",
+  "startup_failure",
   "success",
   "timed_out",
   "in_progress",
@@ -41,7 +43,7 @@ export function runListShapeView(request: RelayRequest, route: RouteInfo): RunLi
     return undefined;
   }
   const perPage = boundedPageSize(request.query.per_page);
-  return { limit: Math.min(perPage ?? SUPERSET_PAGE_SIZE, limit) };
+  return { limit: Math.min(perPage ?? MAX_PAGE_SIZE, limit) };
 }
 
 export function exactRunListRequest(request: RelayRequest, route: RouteInfo): RelayRequest {
@@ -62,7 +64,7 @@ export function runListSupersetView(
   route: RouteInfo,
 ): RunListSupersetView | undefined {
   if (
-    route.kind !== "run_list" ||
+    (route.kind !== "run_list" && route.kind !== "workflow_run_list") ||
     request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.actionsSummary
   ) {
     return undefined;
@@ -86,14 +88,24 @@ export function runListSupersetView(
   ) {
     return undefined;
   }
+  const requestedLimit = Math.min(perPage ?? MAX_PAGE_SIZE, limit ?? perPage ?? DEFAULT_PAGE_SIZE);
+  const supersetPageSize =
+    requestedLimit <= PUBLIC_PAGE_SIZE
+      ? PUBLIC_PAGE_SIZE
+      : route.kind === "run_list"
+        ? MAX_PAGE_SIZE
+        : undefined;
+  if (supersetPageSize === undefined) {
+    return undefined;
+  }
   return {
     cacheRequest: {
       ...request,
-      query: { page: "1", per_page: String(SUPERSET_PAGE_SIZE) },
+      query: { page: "1", per_page: String(supersetPageSize) },
     },
     ...(typeof query.branch === "string" ? { branch: query.branch } : {}),
     ...(typeof query.status === "string" ? { status: query.status } : {}),
-    limit: Math.min(perPage ?? SUPERSET_PAGE_SIZE, limit ?? perPage ?? DEFAULT_PAGE_SIZE),
+    limit: requestedLimit,
   };
 }
 
@@ -171,7 +183,7 @@ function cappedPageSize(value: string | string[] | undefined): number | undefine
     return undefined;
   }
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? Math.min(parsed, SUPERSET_PAGE_SIZE) : undefined;
+  return Number.isSafeInteger(parsed) ? Math.min(parsed, MAX_PAGE_SIZE) : undefined;
 }
 
 function boundedPageSize(value: string | string[] | undefined): number | undefined {

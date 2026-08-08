@@ -52,6 +52,8 @@ type StatsEnvelope = {
   clients: (UsageEnvelope & { client_name: string })[];
   routes: (UsageEnvelope & { route_kind: string })[];
   caller_routes: (UsageEnvelope & { route_kind: string })[];
+  backends: { backend: string; route_kind: string; requests: number }[];
+  fallback_reasons: { reason: string; route_kind: string; requests: number }[];
   cache: { total_entries: number };
 };
 
@@ -104,18 +106,31 @@ describe("Worker end-to-end relay", () => {
     ).toHaveLength(1);
 
     const audits = await env.DB.prepare(
-      "SELECT cache_status, identity_id, route_kind, status FROM audit_events",
+      "SELECT cache_status, identity_id, backend, route_kind, status FROM audit_events",
     ).all<{
       cache_status: string;
       identity_id: string | null;
+      backend: string | null;
       route_kind: string;
       status: number;
     }>();
     expect(audits.results).toHaveLength(2);
     expect(audits.results).toEqual(
       expect.arrayContaining([
-        { cache_status: "miss", identity_id: "primary", route_kind: "repo_view", status: 200 },
-        { cache_status: "hit", identity_id: "primary", route_kind: "repo_view", status: 200 },
+        {
+          cache_status: "miss",
+          identity_id: "primary",
+          backend: "github_identity",
+          route_kind: "repo_view",
+          status: 200,
+        },
+        {
+          cache_status: "hit",
+          identity_id: "primary",
+          backend: null,
+          route_kind: "repo_view",
+          status: 200,
+        },
       ]),
     );
   });
@@ -581,7 +596,9 @@ describe("Worker end-to-end read models", () => {
   it("isolates pool and caller stats through the canonical usage queries", async () => {
     await seedPool();
     await seedCaller("other", "other-token", "other");
-    await seedAudit("request-1", "caller", "repo_view", "miss", 200);
+    await seedAudit("request-1", "caller", "repo_view", "miss", 200, {
+      backend: "github_web",
+    });
     await seedAudit("request-2", "caller", "repo_view", "hit", 200);
     await seedAudit("request-3", "other", "actions_log", "unknown", 424, {
       errorCode: "fallback_local",
@@ -628,6 +645,12 @@ describe("Worker end-to-end read models", () => {
     expect(body.routes.map(({ route_kind }) => route_kind)).toEqual(["repo_view", "actions_log"]);
     expect(body.caller_routes).toEqual([
       expect.objectContaining({ route_kind: "repo_view", requests: 2 }),
+    ]);
+    expect(body.backends).toEqual([
+      expect.objectContaining({ backend: "github_web", route_kind: "repo_view", requests: 1 }),
+    ]);
+    expect(body.fallback_reasons).toEqual([
+      expect.objectContaining({ reason: "owner_denied", route_kind: "actions_log", requests: 1 }),
     ]);
   });
 

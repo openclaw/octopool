@@ -56,9 +56,9 @@ WHERE identities.pool_id = ?1
 -- name: InsertAudit :exec
 INSERT INTO audit_events
   (request_id, caller_id, caller_token_id, client_name, pool_id, route_key, route_kind, identity_id, status,
-   error_code, fallback_reason, duration_ms, cache_status, cacheable, coalesced)
+   error_code, fallback_reason, backend, duration_ms, cache_status, cacheable, coalesced)
 VALUES (?1, ?2, (SELECT id FROM caller_tokens WHERE id = ?3), ?4, ?5, ?6, ?7, ?8,
-        ?9, ?10, ?11, ?12, ?13, ?14, ?15);
+        ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16);
 
 -- name: ReadGitHubCache :one
 SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
@@ -172,6 +172,37 @@ WHERE audit_events.pool_id = ?1
 GROUP BY callers.github_login, audit_events.client_name
 ORDER BY requests DESC, last_seen DESC
 LIMIT 40;
+
+-- name: UsageBackends :many
+SELECT
+  backend,
+  route_kind,
+  COUNT(*) AS requests,
+  SUM(CASE WHEN cache_status = 'miss' THEN 1 ELSE 0 END) AS cache_misses,
+  SUM(CASE WHEN cache_status = 'bypass' THEN 1 ELSE 0 END) AS cache_bypass,
+  SUM(CASE WHEN fallback_reason = 'cache_revalidated' THEN 1 ELSE 0 END) AS revalidated,
+  MAX(created_at) AS latest_seen_at
+FROM audit_events
+WHERE pool_id = ?1
+  AND created_at >= datetime('now', ?2)
+  AND backend IS NOT NULL
+GROUP BY backend, route_kind
+ORDER BY requests DESC, latest_seen_at DESC
+LIMIT 20;
+
+-- name: UsageFallbackReasons :many
+SELECT
+  COALESCE(fallback_reason, 'unknown') AS reason,
+  route_kind,
+  COUNT(*) AS requests,
+  MAX(created_at) AS latest_seen_at
+FROM audit_events
+WHERE pool_id = ?1
+  AND created_at >= datetime('now', ?2)
+  AND error_code = 'fallback_local'
+GROUP BY reason, route_kind
+ORDER BY requests DESC, latest_seen_at DESC
+LIMIT 20;
 
 -- name: DashboardRecent :many
 SELECT

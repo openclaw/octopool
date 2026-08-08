@@ -7,7 +7,7 @@ reduce load on pooled identities.
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
 `src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
-`0002`/`0003`/`0006`/`0011`.
+`0002`/`0003`/`0006`/`0011`/`0013`.
 
 ## Read-through edge + D1 cache
 
@@ -168,22 +168,24 @@ all R2 reads and writes, preserving the normal conditional-request bypass path.
 
 ## Actions run-list superset
 
-Repo-level `run_list` requests carrying
+Repo- and workflow-level run-list requests carrying
 `x-octopool-public-shape: actions-summary-v1` can share one canonical cache entry per pool
-and repository. The canonical request is the unfiltered `page=1&per_page=100` response and
-uses the existing state-aware run-list TTL policy. A miss fills that entry with one upstream
-request; fresh variants filter the cached runs by exact `head_branch`, or by a `status` value
-matching either the GitHub run `status` or terminal `conclusion`, then apply `per_page` and
-`limit` truncation locally.
+and exact route path. Common requests for at most 25 runs use an unfiltered
+`page=1&per_page=25` entry, which the validated public Actions page can fill without GitHub
+API quota. Larger repo-level requests retain the `page=1&per_page=100` API superset;
+larger workflow-level requests stay exact. Every entry uses the existing state-aware
+run-list TTL policy. Fresh variants filter the cached runs by exact `head_branch`, or by a
+`status` value matching either the GitHub run `status` or terminal `conclusion`, then apply
+`per_page` and `limit` truncation locally.
 
 The derived response's `total_count` is the number of matching runs found in the cached
-100-run page before truncation. Shim consumers ignore totals beyond the returned page; this
+canonical page before truncation. Shim consumers ignore totals beyond the returned page; this
 is deliberately not a claim about older GitHub pages. If local filtering returns fewer than
 the requested limit while GitHub's canonical `total_count` proves that older runs were not
 captured, Octopool falls back to the exact upstream filtered request. Page values above 1,
-page sizes above 100, workflow-scoped paths, unknown query parameters, unsupported GitHub
-status values, and requests without the shim shape keep exact upstream and per-query cache
-behavior. Conditional shim requests bypass the canonical cache but still translate the
+page sizes above 100, workflow-scoped page sizes above 25, unknown query parameters,
+unsupported GitHub status values, and requests without the shim shape keep exact upstream
+and per-query cache behavior. Conditional shim requests bypass the canonical cache but still translate the
 shim-only `limit` into a capped upstream `per_page` and shape successful responses locally.
 All other exact shaped requests, including workflow-scoped paths, use the same translation
 and never forward `limit` to GitHub. Locally shaped responses omit `ETag`, `Last-Modified`,
@@ -269,6 +271,8 @@ hard `404`/private response always denies.
   (migration `0005`).
 - `audit_events.fallback_reason` / `audit_events.coalesced` — local fallback classification
   and duplicate-fill telemetry (migration `0009`).
+- `audit_events.backend` — bounded upstream classification (`github_web`,
+  `github_api`, or `github_identity`) for route-level stats (migration `0013`).
 - `ACTIONS_LOGS` R2 binding (`octopool-actions-logs`) — raw terminal Actions log objects;
   no D1 migration is required.
 

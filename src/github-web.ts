@@ -49,7 +49,7 @@ export async function callGitHubWeb(
         responseURL,
       );
       if (payload !== undefined) {
-        return payload;
+        return { ...payload, backend: web.usesApiQuota ? "github" : "web" };
       }
     } catch {
       continue;
@@ -83,7 +83,7 @@ export async function callAnonymousGitHubAPI(
       headers: githubResponseHeaders(response.headers),
       body: null,
       body_encoding: "text",
-      backend: "web",
+      backend: "github",
     };
   }
   if (response.status < 200 || response.status >= 300) {

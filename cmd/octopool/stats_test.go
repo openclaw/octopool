@@ -63,6 +63,17 @@ func TestRenderStats(t *testing.T) {
 				EligibleHitRate: &rate,
 			},
 		}},
+		Backends: []statsBackend{{
+			Backend:     "github_web",
+			RouteKind:   "pr_view",
+			Requests:    3,
+			CacheMisses: 3,
+		}},
+		FallbackReasons: []statsFallbackReason{{
+			Reason:    "identity_pool_depleted",
+			RouteKind: "pr_view",
+			Requests:  1,
+		}},
 	}
 	var out bytes.Buffer
 	if err := renderStats(&out, stats); err != nil {
@@ -80,6 +91,8 @@ func TestRenderStats(t *testing.T) {
 		"this client: 5 requests, 4 saved, 1 backend",
 		"entries: 7 fresh / 9 total, 2 expired, 1.5 KiB",
 		"  pr_view: 6 req, 62.5% eligible hit, 1 stale, 1 miss, 2 bypass, 0 errors, 1 fallback",
+		"backends:\n  github_web / pr_view: 3 req, 3 miss, 0 bypass, 0 revalidated",
+		"fallback reasons:\n  identity_pool_depleted / pr_view: 1 req",
 		"clients:\n  steipete-mbp: 5 req, 4 saved, 1 backend, 0 fallback",
 	} {
 		if !strings.Contains(got, want) {
