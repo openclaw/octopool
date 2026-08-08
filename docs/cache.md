@@ -198,6 +198,8 @@ All other exact shaped requests, including workflow-scoped paths, use the same t
 and never forward `limit` to GitHub. Locally shaped responses omit `ETag`, `Last-Modified`,
 `Content-Length`, and `Link` because those validators, lengths, and pagination links describe
 the upstream representation, not the transformed body.
+Public Actions pages must also expose at least `min(total_count, per_page)` parseable cards;
+otherwise Octopool discards the page and falls back to exact anonymous API JSON.
 
 ## Actions attempt job-list superset
 

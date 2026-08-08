@@ -86,6 +86,9 @@ function actionsRunListRequest(
       if (parsed === undefined) {
         return undefined;
       }
+      if (parsed.workflow_runs.length < Math.min(parsed.total_count, query.perPage)) {
+        return undefined;
+      }
       parsed.workflow_runs = parsed.workflow_runs.slice(0, query.perPage);
       const runs = await Promise.all(
         parsed.workflow_runs.map((run) =>

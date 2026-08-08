@@ -509,7 +509,12 @@ describe("Actions run-list superset", () => {
           ]),
         );
       }
-      return new Response(runListHTML(200, [[1, "main", "completed successfully"]]));
+      return new Response(
+        runListHTML(
+          200,
+          Array.from({ length: 25 }, (_, index) => [index + 1, "main", "completed successfully"]),
+        ),
+      );
     });
     vi.stubGlobal("fetch", upstream);
 

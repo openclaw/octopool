@@ -471,6 +471,43 @@ describe("github web provider", () => {
     );
   });
 
+  it("falls back when a filtered Actions page advertises more runs than it parses", async () => {
+    const exact = {
+      total_count: 11,
+      workflow_runs: Array.from({ length: 11 }, (_, index) => ({
+        id: index + 1,
+        status: "completed",
+        conclusion: "failure",
+      })),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("<strong>11 workflow runs</strong>"))
+      .mockResolvedValueOnce(Response.json(exact));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { per_page: "20", status: "failure" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({ body: exact, backend: "github" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://github.com/openclaw/octopool/actions?query=status%3Afailure",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.github.com/repos/openclaw/octopool/actions/runs?per_page=20&status=failure",
+      expect.any(Object),
+    );
+  });
+
   it("prefers Actions HTML without consulting a stored API rate snapshot", async () => {
     const prepare = vi.fn(() => {
       throw new Error("stored API rate should not be read");
