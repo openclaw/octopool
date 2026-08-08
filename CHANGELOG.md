@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4 - Unreleased
+
+### Fixes
+
+- Fall back to exact Actions queries whenever a shared page cannot fill a requested branch/status filter, even when the public page reports its bounded page size as the total.
+
 ## 0.5.3 - 2026-08-08
 
 ### Fixes

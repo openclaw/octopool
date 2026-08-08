@@ -188,8 +188,8 @@ run-list TTL policy. Fresh variants filter the cached runs by exact `head_branch
 The derived response's `total_count` is the number of matching runs found in the cached
 canonical page before truncation. Shim consumers ignore totals beyond the returned page; this
 is deliberately not a claim about older GitHub pages. If local filtering returns fewer than
-the requested limit while GitHub's canonical `total_count` proves that older runs were not
-captured, Octopool falls back to the exact upstream filtered request. Page values above 1,
+the requested limit, Octopool falls back to the exact upstream filtered request because a
+bounded public page cannot prove that older matching runs do not exist. Page values above 1,
 page sizes above 100, workflow-scoped page sizes above 25, unknown query parameters,
 unsupported GitHub status values, and requests without the shim shape keep exact upstream
 and per-query cache behavior. Conditional shim requests bypass the canonical cache but still translate the

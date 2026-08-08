@@ -145,16 +145,13 @@ export function runListSupersetUnderfilled(
     view === undefined ||
     (view.branch === undefined && view.status === undefined) ||
     !isRecord(response.body) ||
-    !Array.isArray(response.body.workflow_runs) ||
-    typeof response.body.total_count !== "number" ||
-    !Number.isSafeInteger(response.body.total_count)
+    !Array.isArray(response.body.workflow_runs)
   ) {
     return false;
   }
-  return (
-    filterRuns(response.body.workflow_runs, view).length < view.limit &&
-    response.body.total_count > response.body.workflow_runs.length
-  );
+  // A bounded public page can report only the captured page size as total_count.
+  // Fewer local matches therefore never prove that older matching runs do not exist.
+  return filterRuns(response.body.workflow_runs, view).length < view.limit;
 }
 
 function filterRuns(runs: unknown[], view: RunListView): Record<string, unknown>[] {

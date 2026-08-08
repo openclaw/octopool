@@ -428,7 +428,7 @@ describe("Actions run-list superset", () => {
     expect(branch.body).toMatchObject({ total_count: 3 });
     expect(runIDs(branch.body)).toEqual([1, 2]);
 
-    const status = await shapedRunList({ status: "failure", per_page: "20" });
+    const status = await shapedRunList({ status: "failure", per_page: "1" });
     expect(status.body).toMatchObject({ total_count: 1 });
     expect(runIDs(status.body)).toEqual([2]);
 
@@ -524,6 +524,40 @@ describe("Actions run-list superset", () => {
     expect(urls.map((url) => url.hostname)).toEqual(["github.com", "github.com"]);
     expect(Object.fromEntries(urls[0]!.searchParams)).toEqual({});
     expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({ query: "branch:target" });
+  });
+
+  it("does not treat a page-sized total as proof that a filter is complete", async () => {
+    const urls: URL[] = [];
+    const upstream = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(new Request(input).url);
+      urls.push(url);
+      if (url.hostname === "api.github.com") {
+        return jsonResponse({
+          total_count: 20,
+          workflow_runs: Array.from({ length: 20 }, (_, index) =>
+            run(index + 100, "main", "completed", "failure"),
+          ),
+        });
+      }
+      if (url.searchParams.get("query") === "status:failure") {
+        return new Response("<strong>20 workflow runs</strong>");
+      }
+      return new Response(
+        runListHTML(
+          25,
+          Array.from({ length: 25 }, (_, index) => [index + 1, "main", "completed successfully"]),
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await shapedRunList({ status: "failure", limit: "20" });
+    expect(runIDs(response.body)).toHaveLength(20);
+    expect(urls.map((url) => url.hostname)).toEqual(["github.com", "github.com", "api.github.com"]);
+    expect(Object.fromEntries(urls[2]!.searchParams)).toEqual({
+      per_page: "20",
+      status: "failure",
+    });
   });
 
   it("preserves GitHub validation for unsupported status values", async () => {

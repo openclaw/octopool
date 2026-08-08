@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
-import { filterRunListSuperset, runListSupersetView } from "../src/run-list-superset";
+import {
+  filterRunListSuperset,
+  runListSupersetUnderfilled,
+  runListSupersetView,
+} from "../src/run-list-superset";
 
 describe("Actions run-list superset eligibility", () => {
   it("canonicalizes supported repo-level shim queries", () => {
@@ -173,5 +177,34 @@ describe("Actions run-list superset eligibility", () => {
     );
 
     expect(response.body).toMatchObject({ total_count: 100, workflow_runs: [{ id: 1 }] });
+  });
+
+  it("treats a filtered shortfall as underfilled even when total_count equals the page", () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { status: "failure", limit: "20" },
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    const view = runListSupersetView(request, classifyRoute(request, defaultPolicy("openclaw")));
+
+    expect(
+      runListSupersetUnderfilled(
+        {
+          status: 200,
+          headers: {},
+          body: {
+            total_count: 25,
+            workflow_runs: Array.from({ length: 25 }, (_, id) => ({
+              id,
+              status: "completed",
+              conclusion: "success",
+            })),
+          },
+        },
+        view,
+      ),
+    ).toBe(true);
   });
 });
