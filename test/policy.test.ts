@@ -162,6 +162,7 @@ describe("route policy", () => {
       "/repos/openclaw/openclaw/commits/v1.2.3",
       "/repos/openclaw/openclaw/statuses/ac49d8e2295a093f168baa45312e1e29238c0351",
       "/repos/openclaw/openclaw/actions/runs/26360397003/jobs",
+      "/repos/openclaw/openclaw/actions/runs/26360397003/attempts/2/jobs",
       "/repos/openclaw/openclaw/actions/runs/26360397003/attempts/2",
       "/repos/openclaw/openclaw/actions/jobs/77594668516/logs",
       "/repos/openclaw/openclaw/issues/80490/comments",
@@ -281,6 +282,16 @@ describe("route policy", () => {
       owner: "steipete",
       publicOnly: true,
     });
+  });
+
+  it("marks attempt-qualified run and job views", () => {
+    for (const path of [
+      "/repos/openclaw/openclaw/actions/runs/26360397003/attempts/2",
+      "/repos/openclaw/openclaw/actions/runs/26360397003/attempts/2/jobs",
+    ]) {
+      const request = validateRelayRequest({ pool: "maintainers", method: "GET", path });
+      expect(classifyRoute(request, policy)).toMatchObject({ run_attempt: 2 });
+    }
   });
 
   it("denies non-OpenClaw owners when public pooling is disabled", () => {

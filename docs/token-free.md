@@ -189,6 +189,7 @@ GET /repos/{owner}/{repo}/actions/runs
 GET /repos/{owner}/{repo}/actions/runs/{id}
 GET /repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}
 GET /repos/{owner}/{repo}/actions/runs/{id}/jobs
+GET /repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}/jobs
 GET /repos/{owner}/{repo}/actions/runs/{id}/artifacts
 GET /repos/{owner}/{repo}/actions/jobs/{id}
 GET /repos/{owner}/{repo}/check-runs/{id}/annotations

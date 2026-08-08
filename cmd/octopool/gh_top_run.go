@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 )
 
 func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult {
@@ -55,7 +56,7 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 		}
 		return ghCompleted(relayTop(ctx, stdout, request, opts, fieldMapRun))
 	case "view":
-		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasTopModifiers(opts) {
+		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasRunViewModifiers(opts) {
 			return ghDelegated()
 		}
 		repo, ok := repoFromOptionOrCurrent(opts.repo)
@@ -78,29 +79,35 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 	}
 	run := map[string]any{}
 	human := len(opts.json) == 0
-	if human || len(opts.json) > 1 || !hasJSONField(opts.json, "jobs") {
-		envelope, err := client.do(ctx, ghAPIRequest{
-			method:  "GET",
-			path:    repoPath(repo, "actions", "runs", id),
-			headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
-		})
-		if err != nil {
-			return err
-		}
-		body, err := envelopeBodyBytes(envelope)
-		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(body, &run); err != nil {
-			return err
-		}
+	runPath := repoPath(repo, "actions", "runs", id)
+	if opts.attemptSet {
+		runPath = repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(opts.attempt))
+	}
+	envelope, err := client.do(ctx, ghAPIRequest{
+		method:  "GET",
+		path:    runPath,
+		headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
+	})
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, &run); err != nil {
+		return err
 	}
 	if human || hasJSONField(opts.json, "jobs") {
+		attempt, ok := positiveJSONInt(run["run_attempt"])
+		if !ok {
+			return localFallbackError{Reason: "workflow run response did not include run_attempt"}
+		}
 		// per_page=100 with runJobs' incomplete-total fallback: >100-job runs
 		// delegate to real gh rather than truncating.
 		envelope, err := client.do(ctx, ghAPIRequest{
 			method: "GET",
-			path:   repoPath(repo, "actions", "runs", id, "jobs"),
+			path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(attempt), "jobs"),
 			query:  map[string]any{"per_page": "100"},
 			headers: map[string]string{
 				"x-octopool-public-shape": publicShapeActionsJobs,
@@ -128,6 +135,14 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 		return err
 	}
 	return writeBytes(ctx, stdout, filtered, opts.jq)
+}
+
+func positiveJSONInt(value any) (int, bool) {
+	parsed, ok := value.(float64)
+	if !ok || parsed < 1 || parsed != float64(int(parsed)) {
+		return 0, false
+	}
+	return int(parsed), true
 }
 
 func runJobs(envelope relayEnvelope) ([]any, error) {

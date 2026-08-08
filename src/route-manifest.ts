@@ -256,6 +256,7 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/actions/runs/{id}", "run_view"),
   route("/repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}", "run_view"),
   route("/repos/{owner}/{repo}/actions/runs/{id}/jobs", "run_jobs"),
+  route("/repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}/jobs", "run_jobs"),
   route("/repos/{owner}/{repo}/actions/runs/{id}/artifacts", "run_artifacts"),
   route("/repos/{owner}/{repo}/actions/jobs/{id}", "job_view"),
   route("/repos/{owner}/{repo}/actions/jobs/{id}/logs", "job_logs", "core", {

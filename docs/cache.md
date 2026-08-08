@@ -109,8 +109,10 @@ web hit still re-checks that public proof covers the entry before returning it.
 
 Per route kind and response state (`cacheTTLSeconds`):
 
-- workflow runs, jobs, checks, check suites, and commit statuses → 60s while active;
-  terminal payloads get 1h fresh plus up to 24h bounded stale fallback
+- base workflow runs and base job lists → 60s even when terminal, because reruns reuse the run ID;
+  completed attempt-qualified run/job lists get 1h fresh plus up to 24h bounded stale fallback
+- checks, check suites, and commit statuses → 60s while active; terminal payloads get 1h fresh
+  plus up to 24h bounded stale fallback
 - run/workflow lists → 60s while active, 2m when every returned run is completed; lists
   remain mutable because new runs can appear
 - PR files with a validated state discriminator → 5m; PR commits, reviews,
@@ -191,6 +193,22 @@ All other exact shaped requests, including workflow-scoped paths, use the same t
 and never forward `limit` to GitHub. Locally shaped responses omit `ETag`, `Last-Modified`,
 `Content-Length`, and `Link` because those validators, lengths, and pagination links describe
 the upstream representation, not the transformed body.
+
+## Actions attempt job-list superset
+
+Shaped `gh run view` and `gh run watch` reads resolve the run's current positive
+`run_attempt`, then request `/actions/runs/{id}/attempts/{attempt}/jobs`. That attempt-qualified
+path is immutable after all returned jobs complete, while the base run and base jobs endpoints
+remain short-lived because a rerun can change both after they previously appeared terminal.
+Before granting the one-hour job-list TTL, Octopool separately verifies that exact attempt's
+run endpoint is completed; a list of currently completed jobs alone is not treated as proof.
+
+Equivalent shaped `page=1`, omitted/`latest` filter, and `per_page` values up to 100 share one
+100-job attempt-qualified cache entry. Octopool truncates that complete superset locally and
+removes upstream representation validators, lengths, and pagination links. If `total_count`
+exceeds the returned jobs—or is missing or invalid—the shaped request fails over to real `gh`
+without publishing or returning the partial page. `filter=all`, later pages, unshaped REST
+requests, active attempt data, and unsupported query variants retain exact semantics.
 
 ## Cache-hit integrity
 

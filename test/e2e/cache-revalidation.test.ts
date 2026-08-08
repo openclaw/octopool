@@ -92,7 +92,7 @@ describe("Worker end-to-end cache revalidation", () => {
                 unixepoch(expires_at) - unixepoch(created_at) AS ttl
          FROM github_cache_entries WHERE route_kind = 'run_view'`,
       ).first(),
-    ).toEqual({ status: "completed", ttl: 3_600 });
+    ).toEqual({ status: "completed", ttl: 60 });
   });
 
   it.each([202, 204])(

@@ -19,6 +19,8 @@ type ghTopOptions struct {
 	branch      string
 	workflow    string
 	status      string
+	attempt     int
+	attemptSet  bool
 	author      string
 	assignee    string
 	labels      []string
@@ -41,6 +43,7 @@ func prepareGHTopOptions(args []string) (ghTopOptions, ghResult, bool) {
 func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {
 	opts := ghTopOptions{limit: 30}
 	limitRaw := ""
+	attemptRaw := ""
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		valueFlag := func(name string) (string, bool, error) {
@@ -71,6 +74,7 @@ func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {
 			{"--branch", func(value string) { opts.branch = value }},
 			{"--workflow", func(value string) { opts.workflow = value }},
 			{"--status", func(value string) { opts.status = value }},
+			{"--attempt", func(value string) { attemptRaw = value; opts.attemptSet = true }},
 			{"--author", func(value string) { opts.author = value }},
 			{"--assignee", func(value string) { opts.assignee = value }},
 			{"--label", func(value string) { opts.labels = append(opts.labels, value) }},
@@ -103,6 +107,13 @@ func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {
 			return opts, false, fmt.Errorf("--limit requires an integer: %w", err)
 		}
 		opts.limit = limit
+	}
+	if opts.attemptSet {
+		attempt, err := strconv.Atoi(attemptRaw)
+		if err != nil || attempt < 1 {
+			return opts, false, fmt.Errorf("--attempt requires a positive integer")
+		}
+		opts.attempt = attempt
 	}
 	return opts, false, nil
 }
@@ -151,9 +162,16 @@ func hasTopModifiers(opts ghTopOptions) bool {
 		opts.branch != "" ||
 		opts.workflow != "" ||
 		opts.status != "" ||
+		opts.attemptSet ||
 		opts.author != "" ||
 		opts.assignee != "" ||
 		len(opts.labels) > 0
+}
+
+func hasRunViewModifiers(opts ghTopOptions) bool {
+	opts.attempt = 0
+	opts.attemptSet = false
+	return hasTopModifiers(opts)
 }
 
 func hasTopModifiersExceptPatch(opts ghTopOptions) bool {

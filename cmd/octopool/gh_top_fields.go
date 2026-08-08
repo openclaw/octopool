@@ -33,6 +33,7 @@ var fieldMapRun = map[string][]string{
 	"headSha":      {"head_sha"},
 	"createdAt":    {"created_at"},
 	"updatedAt":    {"updated_at"},
+	"attempt":      {"run_attempt"},
 }
 
 var fieldMapRepo = map[string][]string{
@@ -123,7 +124,7 @@ var supportedRunListFields = supportedFields(
 
 var supportedRunViewFields = supportedFields(
 	"databaseId", "name", "workflowName", "status", "conclusion", "url", "headBranch",
-	"headSha", "event", "createdAt", "updatedAt", "displayTitle", "number", "jobs",
+	"headSha", "event", "createdAt", "updatedAt", "displayTitle", "number", "attempt", "jobs",
 )
 
 var supportedRepoFields = supportedFields(

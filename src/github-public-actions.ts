@@ -109,12 +109,21 @@ function actionsRunRequest(
   if (Object.keys(request.query ?? {}).length !== 0) {
     return undefined;
   }
-  const id = /\/actions\/runs\/([0-9]+)$/.exec(request.path)?.[1];
+  const match = /\/actions\/runs\/([0-9]+)(?:\/attempts\/([0-9]+))?$/.exec(request.path);
+  const id = match?.[1];
+  const attempt = match?.[2];
   if (id === undefined) {
     return undefined;
   }
   return {
-    url: `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id])}`,
+    url: `https://github.com/${encodedPathSegments([
+      route.owner!,
+      route.repo!,
+      "actions",
+      "runs",
+      id,
+      ...(attempt === undefined ? [] : ["attempts", attempt]),
+    ])}`,
     headers: { accept: "text/html", "user-agent": "octopool" },
     capBytes: responseCapBytes(env, route),
     usesApiQuota: false,
@@ -137,14 +146,16 @@ function actionsRunJobsRequest(
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
-  const id = /\/actions\/runs\/([0-9]+)\/jobs$/.exec(request.path)?.[1];
+  const match = /\/actions\/runs\/([0-9]+)\/attempts\/([0-9]+)\/jobs$/.exec(request.path);
+  const id = match?.[1];
+  const attempt = match?.[2];
   const query = actionsJobsQuery(request.query);
-  if (id === undefined || query === undefined) {
+  if (id === undefined || attempt === undefined || query === undefined) {
     return undefined;
   }
   const runID = Number(id);
   return {
-    url: `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id, "job_groups_batch"])}?attempt=1`,
+    url: `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id, "job_groups_batch"])}?attempt=${attempt}`,
     headers: {
       accept: "application/json",
       referer: `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id])}`,

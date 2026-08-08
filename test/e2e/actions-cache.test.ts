@@ -619,6 +619,127 @@ describe("Actions run-list superset", () => {
   });
 });
 
+describe("Actions attempt job-list cache", () => {
+  beforeEach(seedPool);
+
+  it("shares bounded latest variants on an attempt-qualified complete page", async () => {
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (url.hostname === "github.com") {
+        return jsonResponse({ message: "public parser unavailable" }, 404);
+      }
+      expect(request.headers.get("authorization")).toBeNull();
+      if (url.pathname.endsWith("/attempts/2")) {
+        return jsonResponse({ id: 42, status: "completed", run_attempt: 2 });
+      }
+      return jsonResponse({
+        total_count: 2,
+        jobs: [
+          { id: 1, status: "completed", conclusion: "success" },
+          { id: 2, status: "completed", conclusion: "success" },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", upstream);
+    const path = "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs";
+
+    const first = await relay(path, undefined, {
+      query: { per_page: "1" },
+      headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+    });
+    expect(await first.json<RelayEnvelope>()).toMatchObject({
+      body: { total_count: 2, jobs: [{ id: 1 }] },
+      relay: { cache: "miss", route_kind: "run_jobs" },
+    });
+    const second = await relay(path, undefined, {
+      query: { filter: "latest", page: "1", per_page: "2" },
+      headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+    });
+    expect(await second.json<RelayEnvelope>()).toMatchObject({
+      body: { total_count: 2, jobs: [{ id: 1 }, { id: 2 }] },
+      relay: { cache: "hit", route_kind: "run_jobs" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(4);
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count,
+                unixepoch(MAX(expires_at)) - unixepoch(MAX(created_at)) AS ttl
+         FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
+      ).first(),
+    ).toEqual({ count: 1, ttl: 3600 });
+  });
+
+  it("keeps completed-looking jobs short-lived until the owning attempt is terminal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = new URL(new Request(input).url);
+        if (url.hostname === "github.com") {
+          return jsonResponse({ message: "public parser unavailable" }, 404);
+        }
+        if (url.pathname.endsWith("/attempts/2")) {
+          return jsonResponse({ id: 42, status: "in_progress", run_attempt: 2 });
+        }
+        return jsonResponse({
+          total_count: 1,
+          jobs: [{ id: 1, status: "completed", conclusion: "success" }],
+        });
+      }),
+    );
+    const response = await relay(
+      "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs",
+      undefined,
+      {
+        query: { per_page: "100" },
+        headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await env.DB.prepare(
+        `SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl
+         FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
+      ).first(),
+    ).toEqual({ ttl: 60 });
+  });
+
+  it("fails closed and does not cache when total_count proves another page exists", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = new URL(new Request(input).url);
+        if (url.hostname === "github.com") {
+          return jsonResponse({ message: "public parser unavailable" }, 404);
+        }
+        if (url.pathname.endsWith("/attempts/2")) {
+          return jsonResponse({ id: 42, status: "completed", run_attempt: 2 });
+        }
+        return jsonResponse({ total_count: 3, jobs: [{ id: 1 }, { id: 2 }] });
+      }),
+    );
+    const response = await relay(
+      "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs",
+      undefined,
+      {
+        query: { per_page: "100" },
+        headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+      },
+    );
+
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "pagination_exhausted" } },
+    });
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM github_cache_entries WHERE route_kind = 'run_jobs'",
+      ).first(),
+    ).toEqual({ count: 0 });
+  });
+});
+
 function terminalLogUpstream(status: "completed" | "in_progress") {
   return vi.fn<typeof fetch>(async (input, init) => {
     const request = new Request(input, init);

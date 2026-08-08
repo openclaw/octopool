@@ -53,6 +53,8 @@ export type RouteInfo = {
   resource: string;
   routeKey: string;
   tokenFreeOnly?: boolean;
+  run_attempt?: number;
+  run_attempt_completed?: boolean;
   state_hint?: string;
   state_hint_source?: "cached" | "live";
   cacheable: boolean;

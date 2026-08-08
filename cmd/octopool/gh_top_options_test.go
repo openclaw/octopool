@@ -60,3 +60,15 @@ func TestParseGHTopOptionsRejectsInvalidLimit(t *testing.T) {
 		t.Fatalf("fallback=%v err=%v", fallback, err)
 	}
 }
+
+func TestParseGHTopOptionsValidatesAttempt(t *testing.T) {
+	opts, fallback, err := parseGHTopOptions([]string{"42", "--attempt", "2"})
+	if err != nil || fallback || !opts.attemptSet || opts.attempt != 2 {
+		t.Fatalf("opts=%#v fallback=%v err=%v", opts, fallback, err)
+	}
+	for _, value := range []string{"0", "nope"} {
+		if _, _, err := parseGHTopOptions([]string{"42", "--attempt", value}); err == nil {
+			t.Fatalf("--attempt %s must fail", value)
+		}
+	}
+}

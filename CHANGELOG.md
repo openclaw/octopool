@@ -2,6 +2,10 @@
 
 ## 0.5.3 - Unreleased
 
+### Fixes
+
+- Keep rerunnable base Actions runs and job lists short-lived, cache only completed attempt-qualified job lists long-term, share equivalent bounded `gh run view` job variants, and fail over instead of returning partial job pagination.
+
 ## 0.5.2 - 2026-08-08
 
 ### Changes

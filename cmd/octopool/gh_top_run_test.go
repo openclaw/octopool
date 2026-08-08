@@ -16,12 +16,13 @@ func TestRunGHRunViewComposesJobs(t *testing.T) {
 				t.Fatalf("run headers = %#v", body["headers"])
 			}
 			return map[string]any{
-				"id":         27398328238,
-				"status":     "completed",
-				"conclusion": "success",
-				"head_sha":   "20d9295e7d6258943d6682fe5532ba3f0caedd29",
+				"id":          27398328238,
+				"status":      "completed",
+				"conclusion":  "success",
+				"run_attempt": 2,
+				"head_sha":    "20d9295e7d6258943d6682fe5532ba3f0caedd29",
 			}
-		case "/repos/openclaw/octopool/actions/runs/27398328238/jobs":
+		case "/repos/openclaw/octopool/actions/runs/27398328238/attempts/2/jobs":
 			headers, ok := body["headers"].(map[string]any)
 			if !ok || headers["x-octopool-public-shape"] != "actions-jobs-v1" {
 				t.Fatalf("jobs headers = %#v", body["headers"])
@@ -81,6 +82,36 @@ func TestRunGHRunViewComposesJobs(t *testing.T) {
 	step := steps[0].(map[string]any)
 	if step["completedAt"] != "2026-06-12T06:15:26Z" {
 		t.Fatalf("step = %#v", step)
+	}
+}
+
+func TestRunGHRunViewUsesRequestedAttempt(t *testing.T) {
+	paths := []string{}
+	relayTestServer(t, func(body map[string]any) any {
+		path := body["path"].(string)
+		paths = append(paths, path)
+		if strings.HasSuffix(path, "/jobs") {
+			return map[string]any{"total_count": 0, "jobs": []any{}}
+		}
+		return map[string]any{
+			"id": 27398328238, "status": "completed", "conclusion": "failure", "run_attempt": 1,
+		}
+	})
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{
+		"view", "27398328238", "--attempt", "1", "-R", "openclaw/octopool", "--json", "attempt,jobs",
+	}, &out)
+	if result.err != nil || result.action != ghComplete {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if got, want := strings.Join(paths, "\n"), strings.Join([]string{
+		"/repos/openclaw/octopool/actions/runs/27398328238/attempts/1",
+		"/repos/openclaw/octopool/actions/runs/27398328238/attempts/1/jobs",
+	}, "\n"); got != want {
+		t.Fatalf("paths:\n%s\nwant:\n%s", got, want)
+	}
+	if got := out.String(); !strings.Contains(got, `"attempt":1`) {
+		t.Fatalf("out = %s", got)
 	}
 }
 

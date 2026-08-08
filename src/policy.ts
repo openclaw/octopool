@@ -130,11 +130,16 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
       throw new HttpError(403, "owner_denied", `Owner ${routeOwner} is not allowed for this pool`);
     }
     const routeRepo = match.groups?.repo ?? searchRepo?.repo;
+    const rawRunAttempt = match.groups?.attempt;
+    const runAttempt = rawRunAttempt === undefined ? undefined : Number(rawRunAttempt);
     const info: RouteInfo = {
       kind: rule.kind,
       resource: rule.resource,
       routeKey: routeKeyForMatch(request.method, rule, match),
       ...(tokenFreeOnly ? { tokenFreeOnly: true } : {}),
+      ...(runAttempt !== undefined && Number.isSafeInteger(runAttempt) && runAttempt > 0
+        ? { run_attempt: runAttempt }
+        : {}),
       publicOnly: !allowedOwner,
       cacheable: rule.cacheable,
       largePayload: rule.largePayload === true,

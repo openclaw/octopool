@@ -361,7 +361,7 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(3_600);
+    expect(cacheTTLSeconds(run, response({ status: "completed" }))).toBe(60);
     expect(cacheTTLSeconds(run, response({ status: "in_progress" }))).toBe(60);
 
     const runAttempt = classifyRoute(
@@ -373,6 +373,30 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(runAttempt, response({ status: "in_progress" }))).toBe(60);
+    expect(cacheTTLSeconds(runAttempt, response({ status: "completed" }))).toBe(3_600);
+
+    const jobs = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/runs/123/jobs",
+      }),
+      policy,
+    );
+    const attemptJobs = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/actions/runs/123/attempts/2/jobs",
+      }),
+      policy,
+    );
+    const completedJobs = response({ jobs: [{ status: "completed" }] });
+    expect(cacheTTLSeconds(jobs, completedJobs)).toBe(60);
+    expect(cacheTTLSeconds(attemptJobs, completedJobs)).toBe(60);
+    expect(cacheTTLSeconds({ ...attemptJobs, run_attempt_completed: true }, completedJobs)).toBe(
+      3_600,
+    );
 
     const runList = classifyRoute(
       validateRelayRequest({

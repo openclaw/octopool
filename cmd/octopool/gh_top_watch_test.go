@@ -23,8 +23,8 @@ func TestGHRunWatchPrintsTransitionsAndFetchesJobsOnce(t *testing.T) {
 			}
 			// The fifth read is the terminal confirmation with max-age=0.
 			statuses := []string{"queued", "in_progress", "in_progress", "completed", "completed"}
-			return map[string]any{"status": statuses[runCalls-1], "conclusion": "failure"}
-		case "/repos/openclaw/octopool/actions/runs/42/jobs":
+			return map[string]any{"status": statuses[runCalls-1], "conclusion": "failure", "run_attempt": 2}
+		case "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs":
 			jobsCalls++
 			headers, _ := body["headers"].(map[string]any)
 			query, _ := body["query"].(map[string]any)
@@ -86,7 +86,7 @@ func TestGHRunWatchRequestedIntervalStartsAt45Seconds(t *testing.T) {
 			status = "completed"
 			conclusion = "success"
 		}
-		return map[string]any{"status": status, "conclusion": conclusion}
+		return map[string]any{"status": status, "conclusion": conclusion, "run_attempt": 1}
 	})
 	sleeps := recordWatchSleeps(t)
 	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "-i", "45"}, &bytes.Buffer{})
@@ -108,7 +108,7 @@ func TestGHRunWatchFloorsRequestedInterval(t *testing.T) {
 		if calls == 1 {
 			return map[string]any{"status": "queued"}
 		}
-		return map[string]any{"status": "completed", "conclusion": "success"}
+		return map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 1}
 	})
 	sleeps := recordWatchSleeps(t)
 	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "-i", "5"}, &bytes.Buffer{})
@@ -125,7 +125,7 @@ func TestGHRunWatchExitStatusFailure(t *testing.T) {
 		if strings.HasSuffix(body["path"].(string), "/jobs") {
 			return map[string]any{"total_count": 0, "jobs": []any{}}
 		}
-		return map[string]any{"status": "completed", "conclusion": "failure"}
+		return map[string]any{"status": "completed", "conclusion": "failure", "run_attempt": 1}
 	})
 	recordWatchSleeps(t)
 	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "--exit-status"}, &bytes.Buffer{})
@@ -462,7 +462,7 @@ func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
 			if freshRunReads > 0 {
 				conclusion = "success"
 			}
-			return map[string]any{"id": 42, "status": "completed", "conclusion": conclusion}
+			return map[string]any{"id": 42, "status": "completed", "conclusion": conclusion, "run_attempt": 2}
 		case strings.HasSuffix(path, "/jobs"):
 			if h, _ := body["headers"].(map[string]any); h["cache-control"] != "max-age=0" {
 				t.Fatal("terminal jobs read must bypass cached staleness")
@@ -537,8 +537,8 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/actions/runs/42":
-			return map[string]any{"id": 42, "status": "completed", "conclusion": "success"}
-		case "/repos/openclaw/octopool/actions/runs/42/jobs":
+			return map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 1}
+		case "/repos/openclaw/octopool/actions/runs/42/attempts/1/jobs":
 			page := body["query"].(map[string]any)["page"].(string)
 			jobsRequests = append(jobsRequests, page)
 			jobs := []map[string]any{}

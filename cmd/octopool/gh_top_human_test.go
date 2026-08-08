@@ -182,11 +182,11 @@ func TestHumanRunViewExactOutput(t *testing.T) {
 		case "/repos/openclaw/octopool/actions/runs/29614434370":
 			return map[string]any{
 				"id": 29614434370, "display_title": "chore(release): 0.4.7", "name": "release", "head_branch": "v0.4.7",
-				"event": "push", "status": "completed", "conclusion": "success",
+				"event": "push", "status": "completed", "conclusion": "success", "run_attempt": 1,
 				"created_at": "2026-07-17T21:21:25Z", "updated_at": "2026-07-17T21:22:52Z",
 				"html_url": "https://github.com/openclaw/octopool/actions/runs/29614434370",
 			}
-		case "/repos/openclaw/octopool/actions/runs/29614434370/jobs":
+		case "/repos/openclaw/octopool/actions/runs/29614434370/attempts/1/jobs":
 			return map[string]any{"total_count": 1, "jobs": []map[string]any{{
 				"id": 87996300812, "name": "goreleaser", "status": "completed", "conclusion": "success",
 				"started_at": "2026-07-17T21:21:27Z", "completed_at": "2026-07-17T21:22:51Z",
@@ -387,7 +387,7 @@ func TestHumanRunViewActiveJobOmitsDuration(t *testing.T) {
 		}
 		return map[string]any{
 			"id": 42, "status": "in_progress", "head_branch": "main", "name": "CI",
-			"event": "push", "created_at": "2026-07-17T21:58:00Z",
+			"event": "push", "created_at": "2026-07-17T21:58:00Z", "run_attempt": 1,
 			"html_url": "https://github.com/openclaw/octopool/actions/runs/42",
 		}
 	})
@@ -438,7 +438,7 @@ func TestHumanRunViewRendersFailedSteps(t *testing.T) {
 		}
 		return map[string]any{
 			"id": 42, "status": "completed", "conclusion": "failure", "head_branch": "main",
-			"name": "CI", "event": "push", "created_at": "2026-07-17T20:59:00Z",
+			"name": "CI", "event": "push", "created_at": "2026-07-17T20:59:00Z", "run_attempt": 1,
 			"html_url": "https://github.com/openclaw/octopool/actions/runs/42",
 		}
 	})
@@ -458,7 +458,7 @@ func TestHumanRunViewZeroJobFailureDiagnostic(t *testing.T) {
 		}
 		return map[string]any{
 			"id": 42, "status": "completed", "conclusion": "startup_failure", "head_branch": "main",
-			"name": "CI", "event": "push", "created_at": "2026-07-18T04:00:00Z",
+			"name": "CI", "event": "push", "created_at": "2026-07-18T04:00:00Z", "run_attempt": 1,
 			"html_url": "https://github.com/openclaw/octopool/actions/runs/42",
 		}
 	})

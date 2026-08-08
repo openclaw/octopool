@@ -201,7 +201,11 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 				}
 				continue
 			}
-			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, opts.id, &backoff)
+			attempt, ok := positiveJSONInt(confirmed["run_attempt"])
+			if !ok {
+				return localFallbackError{Reason: "workflow run response did not include run_attempt"}
+			}
+			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, opts.id, attempt, &backoff)
 			if err != nil {
 				return watchError(err, true)
 			}
@@ -251,7 +255,7 @@ func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id st
 	return run, nil
 }
 
-func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, id string, backoff *watchBackoff) ([]any, error) {
+func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, id string, attempt int, backoff *watchBackoff) ([]any, error) {
 	var jobs []any
 	err := retryWatchTick(ctx, backoff, func() error {
 		jobs = jobs[:0]
@@ -259,7 +263,7 @@ func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, i
 		for page := 1; page <= maxRelayPages; page++ {
 			envelope, err := client.do(ctx, ghAPIRequest{
 				method: "GET",
-				path:   repoPath(repo, "actions", "runs", id, "jobs"),
+				path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(attempt), "jobs"),
 				query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
 				headers: map[string]string{
 					"x-octopool-public-shape": publicShapeActionsJobs,

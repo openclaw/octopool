@@ -269,11 +269,15 @@ function freshTTLSeconds(
     case "issue":
       return closedIssue(response) ? 3_600 : 300;
     case "run":
-      return completedRun(response) ? TERMINAL_CI_TTL_SECONDS : 60;
+      return route.run_attempt !== undefined && completedRun(response)
+        ? TERMINAL_CI_TTL_SECONDS
+        : 60;
     case "run_list":
       return completedRunList(response) ? 120 : 60;
     case "jobs":
-      return completedJobs(response) ? TERMINAL_CI_TTL_SECONDS : 60;
+      return route.run_attempt_completed === true && completedJobs(response)
+        ? TERMINAL_CI_TTL_SECONDS
+        : 60;
     case "checks":
       return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "check_suites":

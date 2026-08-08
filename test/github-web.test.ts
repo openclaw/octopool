@@ -513,6 +513,7 @@ describe("github web provider", () => {
             <span>Triggered via pull request <relative-time datetime="2026-06-11T06:38:49Z"></relative-time></span>
             <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
             <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
+            <div data-job-groups-fetch-url="/openclaw/octopool/actions/runs/27328786454/job_groups_batch?attempt=2"></div>
             <span>Total duration</span><a class="h4 color-fg-default">2m 49s</a>
           `),
       ),
@@ -533,6 +534,7 @@ describe("github web provider", () => {
         display_title: "fix: harden setup",
         status: "completed",
         conclusion: "success",
+        run_attempt: 2,
         event: "pull_request",
       },
       backend: "web",
@@ -585,7 +587,7 @@ describe("github web provider", () => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/repos/openclaw/octopool/actions/runs/27398328238/jobs",
+      path: "/repos/openclaw/octopool/actions/runs/27398328238/attempts/2/jobs",
       query: { per_page: "100" },
       headers: { "x-octopool-public-shape": "actions-jobs-v1" },
     });
@@ -595,7 +597,7 @@ describe("github web provider", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://github.com/openclaw/octopool/actions/runs/27398328238/job_groups_batch?attempt=1",
+      "https://github.com/openclaw/octopool/actions/runs/27398328238/job_groups_batch?attempt=2",
       expect.objectContaining({
         headers: expect.objectContaining({ "x-requested-with": "XMLHttpRequest" }),
       }),

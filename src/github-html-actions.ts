@@ -106,6 +106,10 @@ export function parseActionsRunHTML(
       `(?:\\u00b7|&#183;)\\s*${escapeRegex(owner)}/${escapeRegex(repo)}@([0-9A-Fa-f]{7,64})`,
     ).exec(html)?.[1];
   const branch = actionsRunBranch(html, owner, repo);
+  const runAttemptText = new RegExp(
+    `/${escapeRegex(owner)}/${escapeRegex(repo)}/actions/runs/${id}/job_groups_batch\\?attempt=([0-9]+)`,
+  ).exec(html)?.[1];
+  const runAttempt = runAttemptText === undefined ? undefined : Number(runAttemptText);
   if (
     title === undefined ||
     workflow === undefined ||
@@ -136,6 +140,9 @@ export function parseActionsRunHTML(
       .replace(/[\s-]+/g, "_"),
     created_at: createdAt,
     updated_at: addDuration(createdAt, duration) ?? createdAt,
+    ...(runAttempt !== undefined && Number.isSafeInteger(runAttempt) && runAttempt > 0
+      ? { run_attempt: runAttempt }
+      : {}),
   };
 }
 

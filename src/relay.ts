@@ -16,7 +16,9 @@ import { supportsAnonymousGitHubAPI } from "./github-public-api";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
+import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { HttpError, jsonResponse, parseJsonObject } from "./http";
+import { isRecord } from "./object";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import type { PoolCoordinator } from "./pool-coordinator";
@@ -36,6 +38,12 @@ import {
   type RunListView,
   type RunListSupersetView,
 } from "./run-list-superset";
+import {
+  filterRunJobsSuperset,
+  runJobsSupersetIncomplete,
+  runJobsSupersetView,
+  type RunJobsSupersetView,
+} from "./run-jobs-superset";
 import {
   deleteTerminalLogCache,
   readTerminalLogCache,
@@ -74,6 +82,7 @@ type ActiveRelay = RelayBase & {
   cacheRequest: RelayRequest;
   runListView: RunListView | undefined;
   runListSuperset: RunListSupersetView | undefined;
+  runJobsSuperset: RunJobsSupersetView | undefined;
   runListExactFallback: boolean;
   terminalLogCacheKey: string | undefined;
   terminalLogCached: CachedTerminalLog | undefined;
@@ -160,10 +169,11 @@ async function prepareRelay(
   const cacheEnabled = shouldUseGitHubCache(base.request, route);
   const runListSuperset = runListSupersetView(base.request, route);
   const runListView = runListSuperset ?? runListShapeView(base.request, route);
+  const runJobsSuperset = cacheEnabled ? runJobsSupersetView(base.request, route) : undefined;
   const useRunListSuperset = cacheEnabled && runListSuperset !== undefined;
-  const cacheRequest = useRunListSuperset
-    ? runListSuperset.cacheRequest
-    : exactRunListRequest(base.request, route);
+  const cacheRequest =
+    runJobsSuperset?.cacheRequest ??
+    (useRunListSuperset ? runListSuperset.cacheRequest : exactRunListRequest(base.request, route));
   const cacheKey = cacheEnabled
     ? await githubCacheKey(base.request.pool, cacheRequest, route)
     : undefined;
@@ -174,6 +184,7 @@ async function prepareRelay(
     cacheRequest,
     runListView,
     runListSuperset,
+    runJobsSuperset,
     runListExactFallback: runListView !== undefined && !useRunListSuperset,
     terminalLogCacheKey: undefined,
     terminalLogCached: undefined,
@@ -474,8 +485,8 @@ async function callRevalidationAPI(
   identity?: Identity,
 ): Promise<GitHubRelayResponse | undefined> {
   const request: RelayRequest = {
-    ...state.request,
-    headers: { ...state.request.headers, ...candidate.headers },
+    ...state.cacheRequest,
+    headers: { ...state.cacheRequest.headers, ...candidate.headers },
   };
   try {
     if (tokenFree) {
@@ -742,6 +753,10 @@ async function switchRelayCacheKey(
 
 async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): Promise<Response> {
   const cacheStatus = result.revalidated === true ? "hit" : state.cacheStatus;
+  rejectIncompleteRunJobs(state, result.github);
+  if (completedRunJobsResponse(result.github)) {
+    state.route = await proveRunAttemptCompleted(state);
+  }
   if (state.cacheKey !== undefined) {
     await publishGitHubCache(
       state.env,
@@ -769,9 +784,12 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   if (state.terminalLogCacheKey !== undefined) {
     await publishTerminalLogCache(state.env, state.terminalLogCacheKey, result.github);
   }
-  const clientResponse = filterRunListSuperset(result.github, state.runListView, {
-    preserveTotalCount: state.runListExactFallback,
-  });
+  const clientResponse = filterRunJobsSuperset(
+    filterRunListSuperset(result.github, state.runListView, {
+      preserveTotalCount: state.runListExactFallback,
+    }),
+    state.runJobsSuperset,
+  );
   const backend = auditBackend(result);
   const background: Promise<unknown>[] = [
     insertAudit(state.env, {
@@ -956,9 +974,13 @@ function cachedResponseParams(
   cacheStatus: "hit" | "stale",
   extras: { staleReason?: string; coalesced?: boolean } = {},
 ): Parameters<typeof serveCachedGitHubResponse>[2] {
-  const clientResponse = filterRunListSuperset(cached, state.runListView, {
-    preserveTotalCount: state.runListExactFallback,
-  });
+  rejectIncompleteRunJobs(state, cached);
+  const clientResponse = filterRunJobsSuperset(
+    filterRunListSuperset(cached, state.runListView, {
+      preserveTotalCount: state.runListExactFallback,
+    }),
+    state.runJobsSuperset,
+  );
   return {
     requestId: state.requestId,
     callerId: state.callerId,
@@ -1164,6 +1186,57 @@ async function serveFreshCachedRelayResponse(
     state.ctx,
     cachedResponseParams(state, cached, "hit", extras),
   );
+}
+
+function rejectIncompleteRunJobs(state: ActiveRelay, response: GitHubRelayResponse): void {
+  if (runJobsSupersetIncomplete(response, state.runJobsSuperset)) {
+    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+      reason: "pagination_exhausted",
+    });
+  }
+}
+
+function completedRunJobsResponse(response: GitHubRelayResponse): boolean {
+  return (
+    isRecord(response.body) &&
+    Array.isArray(response.body.jobs) &&
+    response.body.jobs.length > 0 &&
+    response.body.jobs.every((job) => isRecord(job) && job.status === "completed")
+  );
+}
+
+async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> {
+  if (state.route.kind !== "run_jobs" || state.route.run_attempt === undefined) {
+    return state.route;
+  }
+  const path = state.request.path.replace(/\/jobs$/, "");
+  const request: RelayRequest = {
+    pool: state.request.pool,
+    method: "GET",
+    path,
+    headers: { "x-octopool-public-shape": PUBLIC_SHAPES.actionsSummary },
+  };
+  const route: RouteInfo = {
+    ...state.route,
+    kind: "run_view",
+    routeKey: state.route.routeKey.replace(/\/jobs$/, ""),
+  };
+  try {
+    const response = await callGitHubWeb(state.env, request, route);
+    if (
+      response !== undefined &&
+      response.status >= 200 &&
+      response.status < 300 &&
+      isRecord(response.body) &&
+      response.body.status === "completed" &&
+      response.body.run_attempt === state.route.run_attempt
+    ) {
+      return { ...state.route, run_attempt_completed: true };
+    }
+  } catch {
+    // The proof only enables a longer TTL; failure keeps the conservative default.
+  }
+  return state.route;
 }
 
 async function switchToExactRunList(state: ActiveRelay): Promise<void> {
