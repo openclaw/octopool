@@ -200,6 +200,9 @@ and never forward `limit` to GitHub. Locally shaped responses omit `ETag`, `Last
 the upstream representation, not the transformed body.
 Public Actions pages must also expose at least `min(total_count, per_page)` parseable cards;
 otherwise Octopool discards the page and falls back to exact anonymous API JSON.
+Branch/status-filtered public pages are never treated as exact: GitHub can report only the
+visible matching card count while older API matches still exist. Underfilled canonical filters
+therefore go directly to the exact anonymous API/pool fallback chain.
 
 ## Actions attempt job-list superset
 

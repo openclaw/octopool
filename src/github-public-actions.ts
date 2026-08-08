@@ -208,18 +208,10 @@ function actionsListQuery(
   if (!Number.isInteger(perPage) || perPage < 1 || perPage > 25) {
     return undefined;
   }
-  const qualifiers: string[] = [];
-  for (const key of ["branch", "status"] as const) {
-    const value = scalarQuery(query, key);
-    if (value === undefined) {
-      continue;
-    }
-    if (value.length > 200 || value.includes("\0") || /[\s"\\]/.test(value)) {
-      return undefined;
-    }
-    qualifiers.push(`${key}:${value}`);
+  if (scalarQuery(query, "branch") !== undefined || scalarQuery(query, "status") !== undefined) {
+    return undefined;
   }
-  return { perPage, search: qualifiers.join(" ") };
+  return { perPage, search: "" };
 }
 
 function actionsJobsQuery(

@@ -205,7 +205,7 @@ describe("github web provider", () => {
       pool: "maintainers",
       method: "GET",
       path: "/repos/openclaw/octopool/actions/runs",
-      query: { per_page: "20", branch: "main" },
+      query: { per_page: "20" },
       headers: { "x-octopool-public-shape": "actions-summary-v1" },
     });
 
@@ -214,7 +214,7 @@ describe("github web provider", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://github.com/openclaw/octopool/actions?query=branch%3Amain",
+      "https://github.com/openclaw/octopool/actions",
       expect.objectContaining({
         headers: expect.not.objectContaining({ authorization: expect.any(String) }),
       }),
@@ -238,25 +238,13 @@ describe("github web provider", () => {
     });
   });
 
-  it("parses current GitHub startup-failure run status", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValueOnce(
-        new Response(`
-          <strong>1 workflow run result</strong>
-          <div class="Box-row js-socket-channel js-updatable-content">
-            <a href="/openclaw/octopool/actions/runs/27328786455" aria-label="startup failure: Run 80 of CI. invalid workflow">
-              <span class="h4 markdown-title">invalid workflow</span>
-            </a>
-            <span class="text-bold">CI</span> #80:
-            Commit <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
-            pushed
-            <relative-time datetime="2026-06-11T06:38:49Z"></relative-time>
-            <a class="branch-name" href="/openclaw/octopool/tree/refs/heads/main">main</a>
-          </div>
-        `),
-      ),
-    );
+  it("keeps filtered startup-failure reads on exact anonymous API JSON", async () => {
+    const exact = {
+      total_count: 1,
+      workflow_runs: [{ id: 27328786455, status: "completed", conclusion: "startup_failure" }],
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(exact));
+    vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -267,9 +255,11 @@ describe("github web provider", () => {
 
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
-    expect(response?.body).toMatchObject({
-      workflow_runs: [{ status: "completed", conclusion: "startup_failure" }],
-    });
+    expect(response).toMatchObject({ body: exact, backend: "github" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/actions/runs?per_page=20&status=startup_failure",
+      expect.any(Object),
+    );
   });
 
   it("persists anonymous API quota after an Actions HTML parser miss", async () => {
@@ -350,7 +340,7 @@ describe("github web provider", () => {
     expect(body?.workflow_runs).toHaveLength(25);
   });
 
-  it("falls back to a public workflow page for workflow-filtered run lists", async () => {
+  it("falls back to a public workflow page for workflow-scoped run lists", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -385,7 +375,7 @@ describe("github web provider", () => {
       pool: "maintainers",
       method: "GET",
       path: "/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
-      query: { per_page: "20", branch: "main" },
+      query: { per_page: "20" },
       headers: { "x-octopool-public-shape": "actions-summary-v1" },
     });
 
@@ -393,7 +383,7 @@ describe("github web provider", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://github.com/openclaw/octopool/actions/workflows/ci.yml?query=branch%3Amain",
+      "https://github.com/openclaw/octopool/actions/workflows/ci.yml",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -418,7 +408,7 @@ describe("github web provider", () => {
     });
   });
 
-  it("does not drop repeated Actions list filters in the HTML fallback", async () => {
+  it("does not drop repeated Actions list filters in the exact API fallback", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response("rate limited", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
@@ -471,7 +461,7 @@ describe("github web provider", () => {
     );
   });
 
-  it("falls back when a filtered Actions page advertises more runs than it parses", async () => {
+  it("routes filtered Actions reads directly to exact anonymous API JSON", async () => {
     const exact = {
       total_count: 11,
       workflow_runs: Array.from({ length: 11 }, (_, index) => ({
@@ -480,10 +470,7 @@ describe("github web provider", () => {
         conclusion: "failure",
       })),
     };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("<strong>11 workflow runs</strong>"))
-      .mockResolvedValueOnce(Response.json(exact));
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(exact));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -496,13 +483,7 @@ describe("github web provider", () => {
     await expect(
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
     ).resolves.toMatchObject({ body: exact, backend: "github" });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://github.com/openclaw/octopool/actions?query=status%3Afailure",
-      expect.any(Object),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/repos/openclaw/octopool/actions/runs?per_page=20&status=failure",
       expect.any(Object),
     );

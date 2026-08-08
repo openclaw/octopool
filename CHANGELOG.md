@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5 - Unreleased
+
+### Fixes
+
+- Route underfilled branch/status Actions queries directly to the exact API path because GitHub's filtered public page can hide older matching runs behind a page-sized total.
+
 ## 0.5.4 - 2026-08-08
 
 ### Fixes

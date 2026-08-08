@@ -499,15 +499,15 @@ describe("Actions run-list superset", () => {
       const request = new Request(input, init);
       const url = new URL(request.url);
       urls.push(url);
-      expect(url.hostname).toBe("github.com");
-      if (url.searchParams.get("query") === "branch:target") {
-        return new Response(
-          runListHTML(25, [
-            [101, "target", "completed successfully"],
-            [102, "target", "completed successfully"],
-            [103, "target", "completed successfully"],
-          ]),
-        );
+      if (url.hostname === "api.github.com") {
+        return jsonResponse({
+          total_count: 3,
+          workflow_runs: [
+            run(101, "target", "completed", "success"),
+            run(102, "target", "completed", "success"),
+            run(103, "target", "completed", "success"),
+          ],
+        });
       }
       return new Response(
         runListHTML(
@@ -521,9 +521,12 @@ describe("Actions run-list superset", () => {
     const response = await shapedRunList({ branch: "target", limit: "2" });
     expect(runIDs(response.body)).toEqual([101, 102]);
     expect(urls).toHaveLength(2);
-    expect(urls.map((url) => url.hostname)).toEqual(["github.com", "github.com"]);
+    expect(urls.map((url) => url.hostname)).toEqual(["github.com", "api.github.com"]);
     expect(Object.fromEntries(urls[0]!.searchParams)).toEqual({});
-    expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({ query: "branch:target" });
+    expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({
+      branch: "target",
+      per_page: "2",
+    });
   });
 
   it("does not treat a page-sized total as proof that a filter is complete", async () => {
@@ -539,9 +542,6 @@ describe("Actions run-list superset", () => {
           ),
         });
       }
-      if (url.searchParams.get("query") === "status:failure") {
-        return new Response("<strong>20 workflow runs</strong>");
-      }
       return new Response(
         runListHTML(
           25,
@@ -553,8 +553,8 @@ describe("Actions run-list superset", () => {
 
     const response = await shapedRunList({ status: "failure", limit: "20" });
     expect(runIDs(response.body)).toHaveLength(20);
-    expect(urls.map((url) => url.hostname)).toEqual(["github.com", "github.com", "api.github.com"]);
-    expect(Object.fromEntries(urls[2]!.searchParams)).toEqual({
+    expect(urls.map((url) => url.hostname)).toEqual(["github.com", "api.github.com"]);
+    expect(Object.fromEntries(urls[1]!.searchParams)).toEqual({
       per_page: "20",
       status: "failure",
     });
