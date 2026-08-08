@@ -51,10 +51,11 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	clientName := normalizeClientName(*client)
 	body := map[string]any{
 		"github_token": token,
 		"pool":         server.Pool,
-		"client_name":  strings.TrimSpace(*client),
+		"client_name":  clientName,
 	}
 	out, status, err := doRaw(ctx, apiURL(server.APIBase, "/v1/login/github-cli"), "", body)
 	if err != nil {
@@ -70,7 +71,7 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 	if response.Token == "" {
 		return errors.New("login response did not include a caller token")
 	}
-	resolvedClient := firstNonEmpty(response.Caller.ClientName, strings.TrimSpace(*client))
+	resolvedClient := firstNonEmpty(response.Caller.ClientName, clientName)
 	if err := saveAuth(authFile{
 		URL:       server.APIBase,
 		Pool:      server.Pool,
@@ -97,11 +98,19 @@ func defaultClientName() string {
 	if err != nil || strings.TrimSpace(hostname) == "" {
 		return "unknown"
 	}
-	hostname = strings.TrimSpace(hostname)
+	hostname = normalizeClientName(hostname)
 	if len(hostname) > 80 {
 		return hostname[:80]
 	}
 	return hostname
+}
+
+func normalizeClientName(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) > len(".local") && strings.HasSuffix(strings.ToLower(value), ".local") {
+		return value[:len(value)-len(".local")]
+	}
+	return value
 }
 
 func normalizeLoginArgs(args []string) []string {

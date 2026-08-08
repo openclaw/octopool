@@ -83,6 +83,8 @@ octopool login --client build-mac
   login, client, timestamp).
 - The default client name is the local hostname. `--client` overrides it; re-login rotates
   only that named client's caller token and leaves the user's other clients active.
+  macOS `.local` suffixes are normalized away at login and audit time so the same host does
+  not split usage across Bonjour and short hostname spellings.
 - Each caller retains up to 16 named clients. Adding another retires the least recently
   updated session, which bounds abandoned hostname and ephemeral-runner credentials.
 - Octopool validates the GitHub identity and OpenClaw org membership during login, and
@@ -92,7 +94,7 @@ octopool login --client build-mac
 
 ```sh
 octopool login
-# logged in to https://octopool.dev as steipete for pool maintainers from steipete-mbp.local
+# logged in to https://octopool.dev as steipete for pool maintainers from steipete-mbp
 ```
 
 ### `octopool whoami [--json]`
@@ -104,7 +106,7 @@ octopool whoami
 # server: https://octopool.dev
 # pool: maintainers
 # login: steipete
-# client: steipete-mbp.local
+# client: steipete-mbp
 ```
 
 Use `--json` for scripts.
@@ -123,6 +125,11 @@ to the real `gh` for a complete response.
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 # 85341
 ```
+
+The exact `gh api user --jq .login` identity probe first validates the saved caller token
+against Octopool's pool-health endpoint, then prints the saved login without spending GitHub
+API or pooled-identity quota. Token/URL overrides, other projections, headers, queries, and
+full user-profile reads retain the normal relay or real-`gh` behavior.
 
 ### `octopool gh pr|issue|run|repo|release ...`
 
@@ -266,7 +273,7 @@ enter these aggregates.
 ```sh
 octopool stats
 # pool: maintainers
-# client: steipete-mbp.local
+# client: steipete-mbp
 # requests: 54 (1 service errors, 2 local fallbacks)
 # cache: 82.4% hit (40 hits, 2 stale, 9 misses, 3 bypass, 0 unknown)
 # eligible: 49/54 requests, 85.7% hit
@@ -280,7 +287,7 @@ octopool stats
 # fallback reasons:
 #   identity_pool_depleted / contents: 1 req
 # clients:
-#   steipete-mbp.local: 38 req, 31 saved, 7 backend, 1 fallback
+#   steipete-mbp: 38 req, 31 saved, 7 backend, 1 fallback
 ```
 
 Use `--json` for dashboards or scripts that want the raw aggregate:

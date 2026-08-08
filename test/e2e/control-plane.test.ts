@@ -16,6 +16,19 @@ import {
 } from "./harness";
 
 describe("Worker end-to-end control plane", () => {
+  it("attributes legacy macOS .local client aliases to the canonical host", async () => {
+    await seedPool();
+    await env.DB.prepare(
+      "UPDATE caller_tokens SET client_name = 'clawstudio.local' WHERE id = 'caller-client-token'",
+    ).run();
+
+    const response = await authenticatedGet(`/v1/pools/${POOL}/stats?since=24h`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      operator: { client_name: "clawstudio" },
+    });
+  });
+
   it("reports active, disabled, empty, and missing pool health correctly", async () => {
     await seedPool({ secondary: true });
     await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'secondary'").run();

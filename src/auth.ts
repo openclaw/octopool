@@ -1,4 +1,5 @@
 import { bytesToBase64URL } from "./encoding";
+import { normalizeClientName } from "./client-name";
 import { HttpError, parsePositiveInt, requestBearer } from "./http";
 import { queries } from "./generated/sql";
 import type { Caller } from "./types";
@@ -31,7 +32,7 @@ export async function authenticateCaller(
     throw new HttpError(403, "org_denied", `Caller is not a ${allowedOrg} org user`);
   }
   await ensureFreshOrgMembership(env, row);
-  return row;
+  return { ...row, client_name: normalizeClientName(row.client_name) };
 }
 
 export async function authenticateAdmin(request: Request, env: Env): Promise<void> {

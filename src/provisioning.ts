@@ -5,6 +5,7 @@ import {
   verifyGitHubOrgMember,
   verifyGitHubOrgMemberWithToken,
 } from "./auth";
+import { normalizeClientName } from "./client-name";
 import { ensureCliCaller } from "./callers";
 import { requestedLoginPool } from "./config";
 import { ensurePool } from "./db";
@@ -63,7 +64,7 @@ function parseClientName(value: unknown): string {
   if (typeof value !== "string") {
     throw new HttpError(400, "client_name_invalid", "client_name must be a string");
   }
-  const clientName = value.trim();
+  const clientName = normalizeClientName(value);
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(clientName)) {
     throw new HttpError(
       400,

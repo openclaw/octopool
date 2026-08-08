@@ -7,6 +7,7 @@
 - Keep rerunnable base Actions runs and job lists short-lived, cache only completed attempt-qualified job lists long-term, share equivalent bounded `gh run view` job variants, and fail over instead of returning partial job pagination.
 - Keep closed-but-unmerged PR summaries mutable, share safe hydrated summary/file shapes, and recheck the PR head after file pagination so moving heads fail over instead of mixing revisions.
 - Reject incomplete public-page Actions parses instead of returning partial filtered run lists.
+- Normalize macOS `.local` client aliases and satisfy the exact `gh api user --jq .login` probe after a quota-free Octopool caller-health check.
 
 ## 0.5.2 - 2026-08-08
 

@@ -43,7 +43,13 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 	if request.paginate {
 		request = prepareGHAPIPagination(request)
 	}
-	if fallback || request.method != "GET" || !safeRelayRequest(request) || request.jq != "" && !jqAvailable() {
+	if fallback || request.method != "GET" || !safeRelayRequest(request) {
+		return execRealGH(ctx, args, stdout, stderr)
+	}
+	if handled, err := writeLocalUserLogin(ctx, request, stdout); handled {
+		return err
+	}
+	if request.jq != "" && !jqAvailable() {
 		return execRealGH(ctx, args, stdout, stderr)
 	}
 	client, err := newGHRelayClient()
