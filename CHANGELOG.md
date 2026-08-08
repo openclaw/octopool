@@ -2,6 +2,10 @@
 
 ## 0.5.6 - Unreleased
 
+### Changes
+
+- Redesign the operator dashboard as an editorial ledger: serif display type, hairline-rule sections, tick-marked rate gauges with low-headroom coloring, and right-aligned tabular numerals.
+
 ## 0.5.5 - 2026-08-08
 
 ### Fixes

@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import { dashboardResponse } from "../src/dashboard";
 
 describe("dashboard page", () => {
-  it("separates the account footer from tablet-sized pool controls", async () => {
+  it("sizes table empty states from the table header instead of hardcoded column counts", async () => {
     const html = await dashboardResponse().text();
-    expect(html).toContain(
-      ".who{margin-top:14px;padding:14px 0 0;border-top:1px solid var(--line-soft);border-left:0}",
-    );
+    expect(html).toContain('const ths = body.closest("table").tHead.rows[0].cells;');
+    expect(html).toContain("td.colSpan = ths.length;");
   });
 
   it("uses website session auth instead of browser-stored admin tokens", async () => {
@@ -18,8 +17,8 @@ describe("dashboard page", () => {
     expect(html).toContain('credentials: "same-origin"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain("Eligible cache hit");
-    expect(html).toContain("Request Patterns");
-    expect(html).toContain("Fallback & Failure Causes");
+    expect(html).toContain("Request patterns");
+    expect(html).toContain("Fallback &amp; failure causes");
     expect(html).toContain("function ratePercent(rate)");
     expect(html).not.toContain("rate.remaining / 50");
     expect(html).not.toContain("OCTOPOOL_ADMIN_TOKEN");
