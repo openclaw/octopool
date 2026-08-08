@@ -514,7 +514,10 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(pr, response({ state: "closed", merged_at: null }))).toBe(3_600);
+    expect(cacheTTLSeconds(pr, response({ state: "closed", merged_at: null }))).toBe(120);
+    expect(
+      cacheTTLSeconds(pr, response({ state: "closed", merged_at: "2026-08-08T00:00:00Z" })),
+    ).toBe(3_600);
     expect(cacheTTLSeconds(pr, response({ state: "open" }))).toBe(120);
 
     const user = classifyRoute(

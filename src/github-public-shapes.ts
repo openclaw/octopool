@@ -6,6 +6,7 @@ export const PUBLIC_SHAPES = {
   issueSearch: "issue-search-v1",
   pullRequestList: "pr-list-v1",
   pullRequestSummary: "pr-summary-v1",
+  pullRequestFiles: "pr-files-v1",
   labelList: "label-list-v1",
   workflowList: "workflow-list-v1",
   workflowView: "workflow-view-v1",

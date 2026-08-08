@@ -12,6 +12,7 @@ const (
 	publicShapeIssueSearch        = "issue-search-v1"
 	publicShapePullRequestList    = "pr-list-v1"
 	publicShapePullRequestSummary = "pr-summary-v1"
+	publicShapePullRequestFiles   = "pr-files-v1"
 	publicShapeLabelList          = "label-list-v1"
 	publicShapeWorkflowList       = "workflow-list-v1"
 	publicShapeWorkflowView       = "workflow-view-v1"

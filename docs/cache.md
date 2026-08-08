@@ -41,6 +41,11 @@ that already know the current PR state can use that to avoid mixing entries acro
 SHAs while letting Octopool keep `files` warm longer. Hints are first checked against
 GitHub and then cached briefly in `github_pr_state_proofs`, so repeated cache hits do not
 need to re-contact GitHub just to validate the hint.
+The `gh pr view --json files` shim resolves the head with `max-age=0`, sends a dedicated
+`pr-files-v1` shape plus the verified head on every bounded page, and resolves the head
+again after all hydration. If the head moved, the entire command falls back to real `gh`
+instead of returning pages that may span revisions. Missing heads and lists beyond the
+bounded pagination window also fall back.
 
 ### What is cached
 
@@ -119,7 +124,7 @@ Per route kind and response state (`cacheTTLSeconds`):
   comments, issue comments/events/timeline, and undiscriminated PR files → 1m..5m
 - supported repository-scoped `gh search issues|prs` shim calls use anonymous API before
   any allowed search-bucket identity
-- closed PRs/issues → 1h; open PRs → 2m; open issues → 5m
+- merged PRs and closed issues → 1h; open or closed-unmerged PRs → 2m; open issues → 5m
 - release lists/latest → 5m; release by tag/id → 1h
 - immutable commit objects → 24h; commit lists → 5m; contents → 1h
 - repo metadata → 10m; workflow metadata → 1h

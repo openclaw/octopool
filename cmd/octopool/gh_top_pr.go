@@ -117,7 +117,16 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 	if err != nil {
 		return err
 	}
-	prEnvelope, err := client.do(ctx, ghAPIRequest{method: "GET", path: repoPath(repo, "pulls", number)})
+	headers := hydratedPRViewHeaders(opts)
+	if hasJSONField(opts.json, "files") {
+		if headers == nil {
+			headers = map[string]string{}
+		}
+		headers["cache-control"] = "max-age=0"
+	}
+	prEnvelope, err := client.do(ctx, ghAPIRequest{
+		method: "GET", path: repoPath(repo, "pulls", number), headers: headers,
+	})
 	if err != nil {
 		return err
 	}
@@ -129,17 +138,25 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 	if err := json.Unmarshal(body, &pr); err != nil {
 		return err
 	}
+	filesHeadSHA := ""
 	for _, field := range opts.json {
 		switch field {
 		case "files":
-			routeHint := map[string]string{}
-			if sha := nestedStringValue(pr, "head", "sha"); sha != "" {
-				routeHint["pr_head_sha"] = sha
+			sha := nestedStringValue(pr, "head", "sha")
+			if sha == "" {
+				return localFallbackError{Reason: "pull request response did not include head.sha"}
 			}
-			files, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "files"), routeHint)
+			files, err := relayPagedArrayWithHeaders(
+				ctx,
+				client,
+				repoPath(repo, "pulls", number, "files"),
+				map[string]string{"pr_head_sha": sha},
+				map[string]string{"x-octopool-public-shape": publicShapePullRequestFiles},
+			)
 			if err != nil {
 				return err
 			}
+			filesHeadSHA = sha
 			pr["files"] = mapPRFiles(files)
 		case "commits":
 			commits, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "commits"), nil)
@@ -161,6 +178,15 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 			pr["reviews"] = mapPRReviews(reviews)
 		}
 	}
+	if filesHeadSHA != "" {
+		currentSHA, err := relayPRHeadSHA(ctx, client, repo, number, 0)
+		if err != nil {
+			return err
+		}
+		if currentSHA != filesHeadSHA {
+			return localFallbackError{Reason: "pull request head changed during file pagination"}
+		}
+	}
 	raw, err := json.Marshal(pr)
 	if err != nil {
 		return err
@@ -172,7 +198,29 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 	return writeBytes(ctx, stdout, filtered, opts.jq)
 }
 
+func hydratedPRViewHeaders(opts ghTopOptions) map[string]string {
+	for _, field := range opts.json {
+		if needsHydratedPR([]string{field}) {
+			continue
+		}
+		if !supportedPublicPRViewFields[field] {
+			return nil
+		}
+	}
+	return map[string]string{"x-octopool-public-shape": publicShapePullRequestSummary}
+}
+
 func relayPagedArray(ctx context.Context, client ghRelayClient, path string, routeHint map[string]string) ([]any, error) {
+	return relayPagedArrayWithHeaders(ctx, client, path, routeHint, nil)
+}
+
+func relayPagedArrayWithHeaders(
+	ctx context.Context,
+	client ghRelayClient,
+	path string,
+	routeHint map[string]string,
+	headers map[string]string,
+) ([]any, error) {
 	items := []any{}
 	complete := false
 	for page := 1; page <= maxRelayPages; page++ {
@@ -180,6 +228,7 @@ func relayPagedArray(ctx context.Context, client ghRelayClient, path string, rou
 			method:    "GET",
 			path:      path,
 			query:     map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
+			headers:   headers,
 			routeHint: routeHint,
 		})
 		if err != nil {

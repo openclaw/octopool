@@ -7,9 +7,15 @@ import (
 )
 
 func TestRunGHPRViewHydratesDetails(t *testing.T) {
+	prCalls := 0
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
+			prCalls++
+			headers := body["headers"].(map[string]any)
+			if headers["x-octopool-public-shape"] != "pr-summary-v1" || headers["cache-control"] != "max-age=0" {
+				t.Fatalf("PR headers = %#v", headers)
+			}
 			return map[string]any{
 				"number":   7,
 				"title":    "hydrate pr",
@@ -17,6 +23,10 @@ func TestRunGHPRViewHydratesDetails(t *testing.T) {
 				"head":     map[string]any{"sha": "0123456789abcdef0123456789abcdef01234567"},
 			}
 		case "/repos/openclaw/octopool/pulls/7/files":
+			headers := body["headers"].(map[string]any)
+			if headers["x-octopool-public-shape"] != "pr-files-v1" {
+				t.Fatalf("files headers = %#v", headers)
+			}
 			hint := body["route_hint"].(map[string]any)
 			if hint["pr_head_sha"] != "0123456789abcdef0123456789abcdef01234567" {
 				t.Fatalf("route hint = %#v", hint)
@@ -43,11 +53,41 @@ func TestRunGHPRViewHydratesDetails(t *testing.T) {
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
+	if prCalls != 2 {
+		t.Fatalf("PR calls = %d, want initial and final head reads", prCalls)
+	}
 	got := out.String()
 	for _, want := range []string{"cmd/octopool/gh.go", "abc1234", "looks good", "APPROVED"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("out missing %q: %s", want, got)
 		}
+	}
+}
+
+func TestRunGHPRViewFilesFallsBackWhenHeadMoves(t *testing.T) {
+	prCalls := 0
+	relayTestServer(t, func(body map[string]any) any {
+		switch body["path"] {
+		case "/repos/openclaw/octopool/pulls/7":
+			prCalls++
+			sha := "0123456789abcdef0123456789abcdef01234567"
+			if prCalls == 2 {
+				sha = "fedcba9876543210fedcba9876543210fedcba98"
+			}
+			return map[string]any{"number": 7, "head": map[string]any{"sha": sha}}
+		case "/repos/openclaw/octopool/pulls/7/files":
+			return []map[string]any{{"filename": "moving.ts"}}
+		default:
+			t.Fatalf("path = %v", body["path"])
+			return nil
+		}
+	})
+
+	result := handleGHPR(t.Context(), []string{
+		"view", "7", "-R", "openclaw/octopool", "--json", "number,files",
+	}, &bytes.Buffer{})
+	if result.action != ghFail || !isLocalFallback(result.err) {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }
 
@@ -78,6 +118,9 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 			}
 			if _, ok := headers["if-none-match"]; ok {
 				t.Fatalf("unexpected cache-bypass header: %#v", headers)
+			}
+			if headers["x-octopool-public-shape"] != "pr-summary-v1" {
+				t.Fatalf("expected public PR summary shape, got %#v", headers)
 			}
 		}
 		switch body["path"] {

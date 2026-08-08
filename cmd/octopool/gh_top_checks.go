@@ -49,9 +49,12 @@ func relayPRCheckItems(ctx context.Context, client ghRelayClient, repo string, n
 
 func relayPRHeadSHA(ctx context.Context, client ghRelayClient, repo string, number string, maxAgeSeconds int) (string, error) {
 	prEnvelope, err := client.do(ctx, ghAPIRequest{
-		method:  "GET",
-		path:    repoPath(repo, "pulls", number),
-		headers: map[string]string{"cache-control": "max-age=" + strconv.Itoa(maxAgeSeconds)},
+		method: "GET",
+		path:   repoPath(repo, "pulls", number),
+		headers: map[string]string{
+			"cache-control":           "max-age=" + strconv.Itoa(maxAgeSeconds),
+			"x-octopool-public-shape": publicShapePullRequestSummary,
+		},
 	})
 	if err != nil {
 		return "", err

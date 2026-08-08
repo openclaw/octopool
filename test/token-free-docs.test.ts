@@ -43,7 +43,7 @@ describe("token-free endpoint documentation", () => {
       "raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}",
       "{repo}.git/info/refs?service=git-upload-pack",
       "/issues?q=is%3Aissue",
-      "/actions/runs/{id}/job_groups_batch?attempt=1",
+      "/actions/runs/{id}/job_groups_batch?attempt={attempt}",
       "/actions/workflows_partial?query=&page={page}",
       "/releases/tag/{tag}",
     ]) {

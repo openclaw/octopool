@@ -66,30 +66,33 @@ API-only because the advertisement cannot prove their target object type.
 These mappings are used only when the requested top-level `gh --json` fields fit the
 documented public shape.
 
-Current shape IDs are `pr-summary-v1`, `pr-list-v1`, `issue-summary-v1`,
+Current shape IDs are `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summary-v1`,
 `issue-list-v1`, `label-list-v1`, `workflow-list-v1`, `workflow-view-v1`,
 `actions-summary-v1`, `actions-jobs-v1`, and `release-summary-v1`.
 
-| Relay request                                                 | Public source                                                                                               | Shape/limits                                                               |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `GET /repos/{owner}/{repo}/pulls/{number}`                    | `https://github.com/{owner}/{repo}/pull/{number}`                                                           | PR summary fields; no query                                                |
-| `GET /repos/{owner}/{repo}/pulls`                             | `https://github.com/{owner}/{repo}/issues?q=is%3Apr...`                                                     | First page; complete embedded result required                              |
-| `GET /repos/{owner}/{repo}/issues/{number}`                   | `https://github.com/{owner}/{repo}/issues/{number}`                                                         | Issue summary fields; no query                                             |
-| `GET /repos/{owner}/{repo}/issues`                            | `https://github.com/{owner}/{repo}/issues?q=is%3Aissue...`                                                  | First page; complete embedded result required                              |
-| `GET /repos/{owner}/{repo}/labels`                            | `https://github.com/{owner}/{repo}/labels`                                                                  | First page; complete embedded label set required                           |
-| `GET /repos/{owner}/{repo}/actions/workflows`                 | `https://github.com/{owner}/{repo}/actions`                                                                 | Up to 10 workflow pages                                                    |
-| `GET /repos/{owner}/{repo}/actions/workflows/{workflow}`      | Same Actions workflow list                                                                                  | Lookup by workflow ID or YAML filename                                     |
-| `GET /repos/{owner}/{repo}/actions/runs`                      | `https://github.com/{owner}/{repo}/actions?query={filters}`                                                 | Up to 25 runs; optional branch/status filters; shared public-page superset |
-| `GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs` | `https://github.com/{owner}/{repo}/actions/workflows/{workflow}?query={filters}`                            | Up to 25 runs; shared per-workflow public-page superset                    |
-| `GET /repos/{owner}/{repo}/actions/runs/{id}`                 | `https://github.com/{owner}/{repo}/actions/runs/{id}`                                                       | Run summary; no query                                                      |
-| `GET /repos/{owner}/{repo}/actions/runs/{id}/jobs`            | `https://github.com/{owner}/{repo}/actions/runs/{id}/job_groups_batch?attempt=1`, then each public job page | Latest attempt; up to 25 job pages                                         |
-| `GET /repos/{owner}/{repo}/releases/latest`                   | `https://github.com/{owner}/{repo}/releases/latest`                                                         | Release summary used by `gh release view`                                  |
-| `GET /repos/{owner}/{repo}/releases/tags/{tag}`               | `https://github.com/{owner}/{repo}/releases/tag/{tag}`                                                      | Release summary used by `gh release view`; no query                        |
+| Relay request                                                         | Public source                                                                                                       | Shape/limits                                                               |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `GET /repos/{owner}/{repo}/pulls/{number}`                            | `https://github.com/{owner}/{repo}/pull/{number}`                                                                   | PR summary fields; no query                                                |
+| `GET /repos/{owner}/{repo}/pulls`                                     | `https://github.com/{owner}/{repo}/issues?q=is%3Apr...`                                                             | First page; complete embedded result required                              |
+| `GET /repos/{owner}/{repo}/issues/{number}`                           | `https://github.com/{owner}/{repo}/issues/{number}`                                                                 | Issue summary fields; no query                                             |
+| `GET /repos/{owner}/{repo}/issues`                                    | `https://github.com/{owner}/{repo}/issues?q=is%3Aissue...`                                                          | First page; complete embedded result required                              |
+| `GET /repos/{owner}/{repo}/labels`                                    | `https://github.com/{owner}/{repo}/labels`                                                                          | First page; complete embedded label set required                           |
+| `GET /repos/{owner}/{repo}/actions/workflows`                         | `https://github.com/{owner}/{repo}/actions`                                                                         | Up to 10 workflow pages                                                    |
+| `GET /repos/{owner}/{repo}/actions/workflows/{workflow}`              | Same Actions workflow list                                                                                          | Lookup by workflow ID or YAML filename                                     |
+| `GET /repos/{owner}/{repo}/actions/runs`                              | `https://github.com/{owner}/{repo}/actions?query={filters}`                                                         | Up to 25 runs; optional branch/status filters; shared public-page superset |
+| `GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs`         | `https://github.com/{owner}/{repo}/actions/workflows/{workflow}?query={filters}`                                    | Up to 25 runs; shared per-workflow public-page superset                    |
+| `GET /repos/{owner}/{repo}/actions/runs/{id}`                         | `https://github.com/{owner}/{repo}/actions/runs/{id}`                                                               | Run summary; no query                                                      |
+| `GET /repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}/jobs` | `https://github.com/{owner}/{repo}/actions/runs/{id}/job_groups_batch?attempt={attempt}`, then each public job page | Exact attempt; up to 25 job pages                                          |
+| `GET /repos/{owner}/{repo}/releases/latest`                           | `https://github.com/{owner}/{repo}/releases/latest`                                                                 | Release summary used by `gh release view`                                  |
+| `GET /repos/{owner}/{repo}/releases/tags/{tag}`                       | `https://github.com/{owner}/{repo}/releases/tag/{tag}`                                                              | Release summary used by `gh release view`; no query                        |
 
 Supported field sets:
 
 - PR view: `number`, `title`, `state`, `url`, `createdAt`, `closedAt`, `mergedAt`,
   `headRefName`, `headRefOid`, `baseRefName`.
+- PR files: `path`, `additions`, `deletions`, `changeType`, and `originalPath`; the
+  `pr-files-v1` shape uses exact anonymous API data plus a verified head discriminator,
+  not a reduced public-page parser.
 - PR list: `number`, `title`, `state`, `url`, `author`, `createdAt`, `updatedAt`,
   `closedAt`, `mergedAt`, `isDraft`, `labels`.
 - Issue view: `number`, `title`, `body`, `state`, `url`, `author`, `createdAt`,
@@ -99,7 +102,8 @@ Supported field sets:
 - Labels and workflows: `id`, `name`, `description`, `color`, `url` for labels;
   `id`, `name`, `path`, `state` for workflows.
 - Run summary: `databaseId`, `name`, `workflowName`, `status`, `conclusion`, `url`,
-  `headBranch`, `headSha`, `event`, `createdAt`, `updatedAt`, `displayTitle`, `number`.
+  `headBranch`, `headSha`, `event`, `createdAt`, `updatedAt`, `displayTitle`, `number`,
+  and `attempt` for run views.
 - Run jobs add `jobs` with bounded job and step metadata.
 - Release summary: `tagName`, `name`, `url`, `isDraft`, `isPrerelease`, `createdAt`,
   `publishedAt`, `body`.

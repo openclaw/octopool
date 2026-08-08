@@ -348,7 +348,7 @@ function closedPR(response?: GitHubRelayResponse): boolean {
   if (!isRecord(response?.body)) {
     return false;
   }
-  return response.body.state === "closed" || typeof response.body.merged_at === "string";
+  return typeof response.body.merged_at === "string";
 }
 
 function closedIssue(response?: GitHubRelayResponse): boolean {
