@@ -11,6 +11,7 @@
   },
   "vars": {
     "ALLOWED_GITHUB_ORG": "openclaw",
+    "PUBLIC_REPO_TTL_SECONDS": "900",
     "DEFAULT_ALLOWED_OWNERS": "openclaw",
     "MAX_RESPONSE_BYTES": "2097152",
     "REQUEST_TIMEOUT_MS": "15000",

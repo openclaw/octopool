@@ -1,4 +1,5 @@
 import { bytesToBase64URL } from "./encoding";
+import { cachedConfigLookup } from "./config-cache";
 import { normalizeClientName } from "./client-name";
 import { HttpError, parsePositiveInt, requestBearer } from "./http";
 import { queries } from "./generated/sql";
@@ -21,18 +22,23 @@ export async function authenticateCaller(
 ): Promise<Caller> {
   const token = requestBearer(request);
   const tokenHash = await hashToken(token);
-  const row = await env.DB.prepare(queries.authenticateCaller)
-    .bind(tokenHash, pool)
-    .first<CallerRow>();
-  if (row === null) {
-    throw new HttpError(401, "invalid_auth", "Invalid caller token");
-  }
-  const allowedOrg = env.ALLOWED_GITHUB_ORG.toLowerCase();
-  if (row.org_login.toLowerCase() !== allowedOrg) {
-    throw new HttpError(403, "org_denied", `Caller is not a ${allowedOrg} org user`);
-  }
-  await ensureFreshOrgMembership(env, row);
-  return { ...row, client_name: normalizeClientName(row.client_name) };
+  // Cached after org checks so a stale org_verified_at cannot re-trigger the
+  // GitHub membership probe on every request of a burst. Failures are never
+  // cached; an invalid token re-checks D1 each time.
+  return cachedConfigLookup(`caller:${tokenHash}:${pool}`, async () => {
+    const row = await env.DB.prepare(queries.authenticateCaller)
+      .bind(tokenHash, pool)
+      .first<CallerRow>();
+    if (row === null) {
+      throw new HttpError(401, "invalid_auth", "Invalid caller token");
+    }
+    const allowedOrg = env.ALLOWED_GITHUB_ORG.toLowerCase();
+    if (row.org_login.toLowerCase() !== allowedOrg) {
+      throw new HttpError(403, "org_denied", `Caller is not a ${allowedOrg} org user`);
+    }
+    await ensureFreshOrgMembership(env, row);
+    return { ...row, client_name: normalizeClientName(row.client_name) };
+  });
 }
 
 export async function authenticateAdmin(request: Request, env: Env): Promise<void> {

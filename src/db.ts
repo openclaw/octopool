@@ -1,3 +1,8 @@
+import { cachedConfigLookup } from "./config-cache";
+
+function uncachedLookup<T>(_key: string, load: () => Promise<T>): Promise<T> {
+  return load();
+}
 import { defaultPolicy, parsePolicy } from "./policy";
 import { queries } from "./generated/sql";
 import type { AuditBackend, Identity, PoolPolicy, RouteInfo } from "./types";
@@ -21,36 +26,48 @@ export async function ensurePool(env: Env, pool: string): Promise<void> {
 }
 
 export async function loadPoolPolicy(env: Env, pool: string): Promise<PoolPolicy | null> {
-  const row = await env.DB.prepare(queries.getPoolPolicy).bind(pool).first<PoolRow>();
-  if (row === null) {
-    return null;
-  }
-  return parsePolicy(row.policy_json, env.DEFAULT_ALLOWED_OWNERS);
+  return cachedConfigLookup(`policy:${pool}`, async () => {
+    const row = await env.DB.prepare(queries.getPoolPolicy).bind(pool).first<PoolRow>();
+    if (row === null) {
+      return null;
+    }
+    return parsePolicy(row.policy_json, env.DEFAULT_ALLOWED_OWNERS);
+  });
 }
 
 export async function loadIdentities(
   env: Env,
   pool: string,
   route: RouteInfo,
+  // fresh: authoritative-recheck moments (e.g. proving a cached row's source
+  // identity is still active after a 304) must not serve from the config cache.
+  options: { fresh?: boolean } = {},
 ): Promise<Identity[]> {
+  const lookup = options.fresh === true ? uncachedLookup : cachedConfigLookup;
   if (route.owner === undefined) {
-    const rows = await env.DB.prepare(queries.listActiveIdentitiesForPool)
-      .bind(pool)
-      .all<IdentityRow>();
-    return rows.results;
+    return lookup(`identities:${pool}:*`, async () => {
+      const rows = await env.DB.prepare(queries.listActiveIdentitiesForPool)
+        .bind(pool)
+        .all<IdentityRow>();
+      return rows.results;
+    });
   }
   if (route.publicOnly) {
-    const rows = await env.DB.prepare(queries.listActivePublicIdentitiesForPool)
-      .bind(pool)
-      .all<IdentityRow>();
-    return rows.results;
+    return lookup(`identities:${pool}:public`, async () => {
+      const rows = await env.DB.prepare(queries.listActivePublicIdentitiesForPool)
+        .bind(pool)
+        .all<IdentityRow>();
+      return rows.results;
+    });
   }
   const owner = route.owner ?? "";
   const repo = route.repo ?? "";
-  const rows = await env.DB.prepare(queries.listActiveIdentitiesForRoute)
-    .bind(pool, owner, repo)
-    .all<IdentityRow>();
-  return rows.results;
+  return lookup(`identities:${pool}:${owner}/${repo}`, async () => {
+    const rows = await env.DB.prepare(queries.listActiveIdentitiesForRoute)
+      .bind(pool, owner, repo)
+      .all<IdentityRow>();
+    return rows.results;
+  });
 }
 
 export async function insertAudit(

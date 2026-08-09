@@ -289,8 +289,11 @@ is public.
   that a `repo:` qualifier names a public repository; token-free-only shaped search uses
   the public repository page marker directly.
 - A successful public check is recorded in `github_public_repos` with a TTL
-  (`PUBLIC_REPO_TTL_SECONDS`, default 30s) and the edge cache; subsequent cache hits reuse
-  the fresh proof instead of re-hitting GitHub.
+  (`PUBLIC_REPO_TTL_SECONDS`, default 30s; the hosted deployment sets 900s) and the edge
+  cache; subsequent cache hits reuse the fresh proof instead of re-hitting GitHub. A
+  proof refresh stalls concurrent requests for that repo behind one probe, so a short
+  TTL puts a periodic GitHub round trip on the cache-hit path — the trade against it is
+  how long a repo that flips private can keep serving already-cached content.
 
 ### Historical proof during outages
 

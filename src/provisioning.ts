@@ -5,6 +5,7 @@ import {
   verifyGitHubOrgMember,
   verifyGitHubOrgMemberWithToken,
 } from "./auth";
+import { clearConfigCache } from "./config-cache";
 import { normalizeClientName } from "./client-name";
 import { ensureCliCaller } from "./callers";
 import { requestedLoginPool } from "./config";
@@ -21,6 +22,9 @@ export async function loginGitHubCLI(request: Request, env: Env): Promise<Respon
   const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
   const token = newToken("op");
   const caller = await ensureCliCaller(env, pool, user, verifiedAt, token, clientName);
+  // Admin/login mutations invalidate this isolate's config cache immediately;
+  // other isolates converge within the cache TTL.
+  clearConfigCache();
   return jsonResponse(
     {
       caller,
@@ -48,6 +52,7 @@ export async function createCaller(request: Request, env: Env): Promise<Response
     token,
     "admin",
   );
+  clearConfigCache();
   return jsonResponse(
     {
       caller,
@@ -134,6 +139,7 @@ export async function upsertIdentity(request: Request, env: Env, pool: string): 
     ),
   ];
   await env.DB.batch(statements);
+  clearConfigCache();
   return jsonResponse(
     {
       identity: {

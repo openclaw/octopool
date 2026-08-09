@@ -3,6 +3,7 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import { vi } from "vitest";
 import worker from "../../src/index";
 import { hashToken } from "../../src/auth";
+import { clearConfigCache } from "../../src/config-cache";
 import type { RelayRequest } from "../../src/types";
 
 export const CALLER_TOKEN = "caller-token";
@@ -24,6 +25,10 @@ export async function relay(
 }
 
 export async function callWorker(path: string, init?: RequestInit): Promise<Response> {
+  // Every simulated request starts cold: e2e tests mutate callers/identities
+  // between requests via direct SQL and assert immediate effect, which the
+  // isolate-local config cache would otherwise mask for its TTL.
+  clearConfigCache();
   const ctx = createExecutionContext();
   const url = path.startsWith("https://") ? path : `https://octopool.dev${path}`;
   const response = await worker.fetch(new Request(url, init), env, ctx);

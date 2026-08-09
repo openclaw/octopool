@@ -1332,7 +1332,7 @@ async function cachedIdentityAvailable(
   if (capabilitiesForRouteKind(route.kind).fallback === "github_public") {
     return false;
   }
-  const activeIdentities = await loadIdentities(env, pool, route);
+  const activeIdentities = await loadIdentities(env, pool, route, { fresh: true });
   if (activeIdentities.length === 0) {
     throw new HttpError(503, "no_identity", "No active identity can serve this route");
   }

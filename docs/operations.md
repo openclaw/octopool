@@ -152,7 +152,8 @@ Plain vars (in `wrangler.jsonc`):
   fresh before octopool re-checks at request time.
 - `GITHUB_OAUTH_CLIENT_ID` — GitHub App OAuth client id used for browser sign-in.
 
-Optional vars (set as needed): `PUBLIC_REPO_TTL_SECONDS` (default 30),
+Optional vars (set as needed): `PUBLIC_REPO_TTL_SECONDS` (default 30; the hosted
+deployment sets 900 — see the public-repo guard notes in `cache.md` for the trade),
 `DEFAULT_LOGIN_POOL` (default `maintainers`).
 
 Secrets (via `wrangler secret put`, never in D1/KV/logs):
