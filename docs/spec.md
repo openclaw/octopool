@@ -209,6 +209,9 @@ failures occur before audit context exists. Bodies, credentials, and raw tokens 
   locally without contacting Octopool.
 - Safe requests contact Octopool first and delegate only on explicit `fallback_local` or
   stale/invalid Octopool auth. `OCTOPOOL_NO_FALLBACK` disables delegation.
+- The canonical relay client loop retries selected transient pool fallbacks and
+  `5xx internal_error` responses plus malformed 502/503/504 gateway responses with bounded
+  backoff; exhausted service failures do not delegate to local GitHub quota.
 - Relay envelopes require a known body encoding; upstream status and CLI exit semantics are
   preserved.
 - Bounded pagination delegates instead of returning partial PR details/checks/issue lists.

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,32 +32,22 @@ func shouldRunRealGH(err error) bool {
 	return isLocalFallback(err) || errors.Is(err, errOctopoolNotLoggedIn)
 }
 
-func parseLocalFallback(out []byte) (localFallbackError, bool) {
-	var response apiErrorResponse
-	if err := json.Unmarshal(out, &response); err != nil {
-		return localFallbackError{}, false
-	}
-	if response.Error.Code != "fallback_local" {
-		return localFallbackError{}, false
-	}
-	reason := response.Error.Details.FallbackReason
-	if reason == "" {
-		reason = response.Error.Message
-	}
-	return localFallbackError{Reason: reason}, true
-}
-
-func parseAuthFallback(out []byte) (localFallbackError, bool) {
-	var response apiErrorResponse
-	if err := json.Unmarshal(out, &response); err != nil {
-		return localFallbackError{}, false
-	}
-	switch response.Error.Code {
+func localFallbackFromRelayError(relay *relayResponseError) (localFallbackError, bool) {
+	switch relay.Code {
+	case "fallback_local":
+		return localFallbackError{Reason: relayFallbackReason(relay)}, true
 	case "missing_auth", "invalid_auth":
 		return localFallbackError{Reason: "octopool auth unavailable"}, true
 	default:
 		return localFallbackError{}, false
 	}
+}
+
+func relayFallbackReason(relay *relayResponseError) string {
+	if relay.Details.FallbackReason != "" {
+		return relay.Details.FallbackReason
+	}
+	return relay.Message
 }
 
 func execRealGHAfterLocalFallback(

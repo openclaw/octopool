@@ -328,9 +328,11 @@ These are dev/CI escape hatches, not the everyday UX:
   `fallback_local`, useful for proving relay/cache coverage.
 - `OCTOPOOL_RELAY_RETRIES` — how many times transient pool-exhaustion fallbacks
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
-  `github_rate_limited`, `relay_overloaded`) are retried against the relay (1s, then 3s
-  backoff) before the CLI
-  falls back to real `gh`. Default `2`; `0` disables retries.
+  `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and
+  malformed 502/503/504 gateway responses are retried against the relay (1s, then 3s for
+  subsequent retries). Exhausted transient fallbacks may delegate to real `gh`; exhausted
+  service errors remain failures instead of spending local GitHub quota. Default `2`; `0`
+  disables retries.
 - `OCTOPOOL_ADMIN_TOKEN` — admin token for `octopool admin`.
 - `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` — permit non-HTTPS login for local dev.
 

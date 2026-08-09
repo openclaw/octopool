@@ -1,4 +1,4 @@
-import { errorResponse } from "./http";
+import { errorResponse, logUnexpectedWorkerError } from "./http";
 import { runScheduledMaintenance } from "./maintenance";
 import { PoolCoordinator } from "./pool-coordinator";
 import { routeRequest } from "./router";
@@ -17,6 +17,7 @@ export default {
     try {
       return secureResponse(request, await routeRequest(request, env, ctx, requestId));
     } catch (error) {
+      logUnexpectedWorkerError(request, requestId, error);
       if (shouldUseWebError(request)) {
         return secureResponse(request, webErrorResponse(error, requestId));
       }

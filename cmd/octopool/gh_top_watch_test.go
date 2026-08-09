@@ -651,13 +651,13 @@ func TestWatchFallbackOnlyBeforeProgress(t *testing.T) {
 
 func recordWatchSleeps(t *testing.T) *[]time.Duration {
 	t.Helper()
-	original := watchSleep
+	original := sleepContext
 	durations := []time.Duration{}
-	watchSleep = func(_ context.Context, duration time.Duration) error {
+	sleepContext = func(_ context.Context, duration time.Duration) error {
 		durations = append(durations, duration)
 		return nil
 	}
-	t.Cleanup(func() { watchSleep = original })
+	t.Cleanup(func() { sleepContext = original })
 	return &durations
 }
 

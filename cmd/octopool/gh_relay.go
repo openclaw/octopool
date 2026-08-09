@@ -83,29 +83,52 @@ func relayRetryAttempts() int {
 }
 
 func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
+	// All callers construct GET requests; keep writes outside the shared retry path.
+	if request.method != "GET" {
+		return relayEnvelope{}, fmt.Errorf("relay client requires GET, got %q", request.method)
+	}
 	retries := relayRetryAttempts()
 	for attempt := 0; ; attempt++ {
 		envelope, err := client.doOnce(ctx, request)
-		var fallback localFallbackError
-		if err == nil || attempt >= retries ||
-			!errors.As(err, &fallback) || !transientFallbackReason(fallback.Reason) {
+		if err == nil {
 			return envelope, err
 		}
-		delay := relayRetryDelays[min(attempt, len(relayRetryDelays)-1)]
-		if !sleepContext(ctx, delay) {
-			return envelope, err
+		if attempt < retries && transientRelayFailure(err) {
+			delay := relayRetryDelays[min(attempt, len(relayRetryDelays)-1)]
+			if err := sleepContext(ctx, delay); err != nil {
+				return envelope, err
+			}
+			continue
 		}
+		var relay *relayResponseError
+		if errors.As(err, &relay) {
+			if fallback, ok := localFallbackFromRelayError(relay); ok {
+				return envelope, fallback
+			}
+		}
+		return envelope, err
 	}
 }
 
-func sleepContext(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
+func transientRelayFailure(err error) bool {
+	var relay *relayResponseError
+	if !errors.As(err, &relay) {
 		return false
-	case <-timer.C:
+	}
+	if relay.Code == "fallback_local" {
+		return transientFallbackReason(relayFallbackReason(relay))
+	}
+	if relay.Status < 500 || relay.Status > 599 {
+		return false
+	}
+	if relay.Code != "" {
+		return relay.Code == "internal_error"
+	}
+	switch relay.Status {
+	case 502, 503, 504:
 		return true
+	default:
+		return false
 	}
 }
 
@@ -128,14 +151,8 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	if err != nil {
 		return relayEnvelope{}, err
 	}
-	if status >= 400 {
-		if fallback, ok := parseAuthFallback(out); ok {
-			return relayEnvelope{}, fallback
-		}
-		if fallback, ok := parseLocalFallback(out); ok {
-			return relayEnvelope{}, fallback
-		}
-		return relayEnvelope{}, fmt.Errorf("octopool request failed: %s", strings.TrimSpace(string(out)))
+	if status < 200 || status >= 300 {
+		return relayEnvelope{}, parseRelayResponseError(status, out)
 	}
 	var envelope relayEnvelope
 	if err := json.Unmarshal(out, &envelope); err != nil {

@@ -66,6 +66,39 @@ export function errorResponse(error: unknown, requestId?: string): Response {
   );
 }
 
+export function logUnexpectedWorkerError(
+  request: Request,
+  requestId: string,
+  error: unknown,
+): void {
+  if (error instanceof HttpError || backendOverloadedError(error) !== undefined) {
+    return;
+  }
+  const detail =
+    error instanceof Error
+      ? {
+          name: error.name,
+          // Exception messages can embed request URLs or response bodies. Stack frames retain
+          // actionable source locations without logging the message line.
+          ...(error.stack === undefined
+            ? {}
+            : { stack: error.stack.split("\n").slice(1).join("\n") }),
+        }
+      : {
+          name: "NonErrorThrown",
+          type: typeof error,
+        };
+  // request_id is the safe join key to the existing D1 audit route/client/cache metadata.
+  console.error({
+    event: "octopool.worker.unexpected_exception",
+    code: "internal_error",
+    request_id: requestId,
+    method: request.method,
+    pathname: new URL(request.url).pathname,
+    error: detail,
+  });
+}
+
 export async function parseJsonObject(request: Request): Promise<JsonObject> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {

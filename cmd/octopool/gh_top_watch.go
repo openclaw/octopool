@@ -17,7 +17,7 @@ const (
 	watchMaxErrors   = 3
 )
 
-var watchSleep = func(ctx context.Context, duration time.Duration) error {
+var sleepContext = func(ctx context.Context, duration time.Duration) error {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
 	select {
@@ -53,7 +53,7 @@ func newWatchBackoff(requested time.Duration) watchBackoff {
 }
 
 func (backoff *watchBackoff) sleep(ctx context.Context) error {
-	if err := watchSleep(ctx, backoff.current); err != nil {
+	if err := sleepContext(ctx, backoff.current); err != nil {
 		return err
 	}
 	backoff.current = min(backoff.current*2, backoff.limit)

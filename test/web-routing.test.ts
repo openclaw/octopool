@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoveryResponse } from "../src/discovery";
 import { PROXY_HOST_HEADER, PROXY_SECRET_HEADER } from "../src/hosts";
-import { errorResponse, HttpError } from "../src/http";
+import { errorResponse, HttpError, logUnexpectedWorkerError } from "../src/http";
 import { rootResponse } from "../src/landing";
 import proxyWorker from "../src/openclaw-proxy";
 import { publicWebHostRedirect } from "../src/web-routing";
@@ -124,10 +124,17 @@ describe("web routing helpers", () => {
   });
 
   it("reports backend overload as a typed retryable error, not internal_error", async () => {
-    const response = errorResponse(
-      new Error("D1_ERROR: D1 DB is overloaded. Requests queued for too long."),
+    const error = new Error("D1_ERROR: D1 DB is overloaded. Requests queued for too long.");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    logUnexpectedWorkerError(
+      new Request("https://octopool.dev/v1/pools/maintainers/health"),
       "req-overload",
+      error,
     );
+    expect(logged).not.toHaveBeenCalled();
+    logged.mockRestore();
+
+    const response = errorResponse(error, "req-overload");
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
