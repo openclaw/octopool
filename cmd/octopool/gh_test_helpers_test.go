@@ -10,6 +10,7 @@ import (
 type relayTestResponse struct {
 	Body    any
 	Headers map[string]string
+	Status  int
 }
 
 func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
@@ -37,6 +38,16 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 		}
 		fixture := responseBody(body)
 		if response, ok := fixture.(relayTestResponse); ok {
+			if response.Status != 0 {
+				for key, value := range response.Headers {
+					w.Header().Set(key, value)
+				}
+				w.WriteHeader(response.Status)
+				if err := json.NewEncoder(w).Encode(response.Body); err != nil {
+					t.Errorf("write relay error fixture: %v", err)
+				}
+				return
+			}
 			fixture = response.Body
 			envelope.Headers = response.Headers
 		}

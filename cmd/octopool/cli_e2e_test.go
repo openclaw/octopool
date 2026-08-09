@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +134,92 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 			t.Fatalf("err=%v stdout=%q stderr=%q", disabled.err, disabled.stdout, disabled.stderr)
 		}
 	})
+
+	const boundary = "octopool: relay requested local fallback (relay_overloaded); continuing watch with real gh\n"
+	for _, command := range []struct {
+		name     string
+		args     []string
+		exitCode int
+		serve    func(*testing.T, map[string]any, http.ResponseWriter)
+	}{
+		{
+			name:     "run watch exit 0",
+			args:     []string{"gh", "run", "watch", "42", "-R", "openclaw/octopool", "--exit-status", "-i", "5"},
+			exitCode: 0,
+			serve: func(t *testing.T, body map[string]any, w http.ResponseWriter) {
+				headers, _ := body["headers"].(map[string]any)
+				if headers["cache-control"] == "max-age=0" {
+					writeCLIFallback(t, w, "relay_overloaded")
+					return
+				}
+				writeCLIEnvelope(t, w, map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 1})
+			},
+		},
+		{
+			name:     "pr checks watch exit 7",
+			args:     []string{"gh", "pr", "checks", "7", "-R", "openclaw/octopool", "--watch", "--interval=5"},
+			exitCode: 7,
+			serve: func(t *testing.T, body map[string]any, w http.ResponseWriter) {
+				path := body["path"].(string)
+				switch {
+				case strings.HasSuffix(path, "/pulls/7"):
+					headers, _ := body["headers"].(map[string]any)
+					if headers["cache-control"] == "max-age=0" {
+						writeCLIFallback(t, w, "relay_overloaded")
+						return
+					}
+					writeCLIEnvelope(t, w, map[string]any{"head": map[string]any{"sha": "abc1234"}})
+				case strings.HasSuffix(path, "/check-runs"):
+					writeCLIEnvelope(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}})
+				case strings.HasSuffix(path, "/status"):
+					writeCLIEnvelope(t, w, map[string]any{"total_count": 0, "statuses": []any{}})
+				default:
+					t.Fatalf("unexpected path %q", path)
+				}
+			},
+		},
+	} {
+		t.Run(command.name, func(t *testing.T) {
+			fake := fakeGHExit(t, command.exitCode)
+			server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				command.serve(t, body, w)
+			})
+			result := runCLI(t, bin, server.URL, map[string]string{
+				"OCTOPOOL_GH_PATH":       fake,
+				"OCTOPOOL_RELAY_RETRIES": "0",
+			}, command.args...)
+			if command.exitCode == 0 {
+				if result.err != nil {
+					t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+				}
+			} else {
+				var exitErr *exec.ExitError
+				if !errors.As(result.err, &exitErr) || exitErr.ExitCode() != command.exitCode {
+					t.Fatalf("err=%v, want exit %d", result.err, command.exitCode)
+				}
+			}
+			wantArgv := strings.Join(floorGHWatchDelegateArgs(command.args[1:]), " ")
+			wantChild := fakeGHArgvPrefix + wantArgv
+			if strings.Count(result.stdout, fakeGHArgvPrefix) != 1 || !strings.Contains(result.stdout, wantChild) {
+				t.Fatalf("stdout=%q, want one %q", result.stdout, wantChild)
+			}
+			if result.stderr != boundary || strings.Contains(result.stderr, "error: exit status") {
+				t.Fatalf("stderr=%q", result.stderr)
+			}
+			progress := strings.Index(result.stdout, "Watching run")
+			if strings.HasPrefix(command.name, "pr") {
+				progress = strings.Index(result.stdout, "checks:")
+			}
+			if child := strings.Index(result.stdout, fakeGHArgvPrefix); progress < 0 || child <= progress {
+				t.Fatalf("stdout ordering=%q", result.stdout)
+			}
+		})
+	}
 }
 
 func TestGHArgvNames(t *testing.T) {
@@ -214,6 +302,17 @@ func writeCLIEnvelope(t *testing.T, w http.ResponseWriter, body any) {
 	}
 }
 
+func writeCLIFallback(t *testing.T, w http.ResponseWriter, reason string) {
+	t.Helper()
+	w.WriteHeader(http.StatusFailedDependency)
+	response := apiErrorResponse{Error: apiError{
+		Code: "fallback_local", Message: "Run locally", Details: apiErrorDetails{FallbackReason: reason},
+	}}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		t.Errorf("write CLI fallback: %v", err)
+	}
+}
+
 func fakeGH(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), executableName("fake-gh"))
@@ -221,6 +320,23 @@ func fakeGH(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is Unix-only")
 	}
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+const fakeGHArgvPrefix = "octopool-fake-gh-argv:"
+
+func fakeGHExit(t *testing.T, exitCode int) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-only")
+	}
+	path := filepath.Join(t.TempDir(), executableName("fake-gh"))
+	content := `#!/bin/sh
+printf '` + fakeGHArgvPrefix + `%s\n' "$*"
+exit ` + strconv.Itoa(exitCode) + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}

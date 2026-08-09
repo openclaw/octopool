@@ -660,14 +660,148 @@ func TestWatchTickBailsImmediatelyOnTypedRelayError(t *testing.T) {
 	}
 }
 
-func TestWatchFallbackOnlyBeforeProgress(t *testing.T) {
-	fallback := localFallbackError{Reason: "route denied"}
-	if err := watchError(fallback, false); !shouldRunRealGH(err) {
-		t.Fatalf("first-tick error should preserve fallback: %v", err)
+func TestWatchErrorClassification(t *testing.T) {
+	explicitRelay := &relayResponseError{
+		Status: http.StatusFailedDependency,
+		apiError: apiError{
+			Code: "fallback_local", Details: apiErrorDetails{FallbackReason: "relay_overloaded"},
+		},
 	}
-	if err := watchError(fallback, true); shouldRunRealGH(err) || err.Error() != fallback.Error() {
-		t.Fatalf("post-progress error should fail locally: %v", err)
+	explicit, _ := localFallbackFromRelayError(explicitRelay)
+	auth, _ := localFallbackFromRelayError(&relayResponseError{
+		Status:   http.StatusUnauthorized,
+		apiError: apiError{Code: "invalid_auth"},
+	})
+	for _, test := range []struct {
+		name     string
+		err      error
+		progress bool
+		action   ghAction
+	}{
+		{name: "explicit before progress", err: explicit, action: ghFail},
+		{name: "explicit after progress", err: explicit, progress: true, action: ghHandoffAfterOutput},
+		{name: "auth after progress", err: auth, progress: true, action: ghFail},
+		{name: "local fallback after progress", err: localFallbackError{Reason: "pagination_exhausted"}, progress: true, action: ghFail},
+		{name: "service error after progress", err: &relayResponseError{Status: http.StatusServiceUnavailable, apiError: apiError{Code: "admin_unconfigured"}}, progress: true, action: ghFail},
+		{name: "transport error after progress", err: errors.New("connection reset"), progress: true, action: ghFail},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := ghWatchCompleted(watchError(test.err, test.progress))
+			if result.action != test.action {
+				t.Fatalf("action=%v, want %v; err=%v", result.action, test.action, result.err)
+			}
+		})
 	}
+}
+
+func TestGHWatchExplicitRelayFallbackBeforeProgressDelegates(t *testing.T) {
+	t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
+	relayTestServer(t, func(map[string]any) any { return relayFallbackFixture("relay_overloaded") })
+	var stdout, stderr bytes.Buffer
+	if err := runGH(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(stdout.String(), fakeGHArgvPrefix) != 1 {
+		t.Fatalf("stdout=%q, want one real-gh invocation", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Watching run") ||
+		!strings.Contains(stderr.String(), "falling back to real gh") ||
+		strings.Contains(stderr.String(), "continuing watch") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestGHWatchNoFallbackBlocksBeforeAndAfterProgress(t *testing.T) {
+	for _, afterProgress := range []bool{false, true} {
+		name := "before progress"
+		if afterProgress {
+			name = "after progress"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
+			recordWatchSleeps(t)
+			calls := 0
+			relayTestServer(t, func(map[string]any) any {
+				calls++
+				if !afterProgress || calls > 1 {
+					return relayFallbackFixture("relay_overloaded")
+				}
+				return map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 1}
+			})
+			var stdout, stderr bytes.Buffer
+			err := runGH(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &stdout, &stderr)
+			if err == nil || strings.Contains(stdout.String(), fakeGHArgvPrefix) {
+				t.Fatalf("err=%v stdout=%q", err, stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("disabled fallback must not print a handoff: %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestGHRunWatchMissingAttemptDoesNotHandoff(t *testing.T) {
+	t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
+	recordWatchSleeps(t)
+	relayTestServer(t, func(map[string]any) any {
+		return map[string]any{"status": "completed", "conclusion": "success"}
+	})
+	var stdout, stderr bytes.Buffer
+	err := runGH(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &stdout, &stderr)
+	if err == nil || strings.Contains(stdout.String(), fakeGHArgvPrefix) {
+		t.Fatalf("err=%v stdout=%q", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Watching run") || stderr.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestGHPRChecksWatchAuthFailureDoesNotHandoff(t *testing.T) {
+	t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
+	recordWatchSleeps(t)
+	relayTestServer(t, func(body map[string]any) any {
+		path := body["path"].(string)
+		switch {
+		case strings.HasSuffix(path, "/pulls/7"):
+			headers, _ := body["headers"].(map[string]any)
+			if headers["cache-control"] == "max-age=0" {
+				return relayErrorFixture(http.StatusUnauthorized, apiError{
+					Code: "invalid_auth", Message: "Invalid caller token",
+				})
+			}
+			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+		case strings.HasSuffix(path, "/check-runs"):
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+		case strings.HasSuffix(path, "/status"):
+			return map[string]any{"total_count": 0, "statuses": []any{}}
+		default:
+			t.Fatalf("unexpected path %q", path)
+			return nil
+		}
+	})
+	var stdout, stderr bytes.Buffer
+	err := runGH(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &stdout, &stderr)
+	if err == nil || strings.Contains(stdout.String(), fakeGHArgvPrefix) {
+		t.Fatalf("err=%v stdout=%q", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "checks:") {
+		t.Fatalf("expected progress before confirmation failure: %q", stdout.String())
+	}
+}
+
+func relayFallbackFixture(reason string) relayTestResponse {
+	return relayErrorFixture(http.StatusFailedDependency, apiError{
+		Code: "fallback_local", Message: "Run locally", Details: apiErrorDetails{FallbackReason: reason},
+	})
+}
+
+func relayErrorFixture(status int, apiErr apiError) relayTestResponse {
+	return relayTestResponse{Status: status, Body: apiErrorResponse{Error: apiErr}}
 }
 
 func recordWatchSleeps(t *testing.T) *[]time.Duration {

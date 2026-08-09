@@ -17,6 +17,7 @@ const (
 	ghDelegate ghAction = iota
 	ghComplete
 	ghFail
+	ghHandoffAfterOutput
 )
 
 type ghResult struct {

@@ -32,6 +32,20 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 			return result.err
 		case ghDelegate:
 			return execRealGH(ctx, floorGHWatchDelegateArgs(args), stdout, stderr)
+		case ghHandoffAfterOutput:
+			var handoff watchFallbackHandoffError
+			if !errors.As(result.err, &handoff) {
+				return errors.New("invalid gh watch handoff outcome")
+			}
+			if envDefault("OCTOPOOL_NO_FALLBACK", "") != "" {
+				return handoff.fallback
+			}
+			fmt.Fprintf(
+				stderr,
+				"octopool: relay requested local fallback (%s); continuing watch with real gh\n",
+				watchSafeText(handoff.fallback.Reason),
+			)
+			return execRealGH(ctx, floorGHWatchDelegateArgs(args), stdout, stderr)
 		default:
 			return errors.New("invalid gh dispatch outcome")
 		}

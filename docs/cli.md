@@ -182,8 +182,13 @@ verified PR head SHA, allowing file pages to share a five-minute state-scoped ca
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share
 one upstream PR read at most 60 seconds old, and the check/status reads for that SHA use
 the normal cache TTLs. Native `gh run watch` and `gh pr checks --watch` polling also stays
-on the relay, floors intervals at 30 seconds, and backs off to 120 seconds. Ask for raw
-`gh api` conditional requests only when instant freshness matters more than quota.
+on the relay, floors intervals at 30 seconds, and backs off to 120 seconds. If the relay
+explicitly returns `fallback_local` during an active watch, the shim prints one handoff
+boundary and continues the original command with real `gh`; real `gh` then owns output and
+the exact exit status. Its first snapshot may repeat the last relay-rendered state. Client-side
+incompleteness, auth reinterpretation, transport/decode failures, and ordinary relay service
+errors remain terminal after progress and do not spend local GitHub quota. Ask for raw `gh api`
+conditional requests only when instant freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
 
@@ -325,7 +330,7 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns
-  `fallback_local`, useful for proving relay/cache coverage.
+  `fallback_local`, including during an active watch, useful for proving relay/cache coverage.
 - `OCTOPOOL_RELAY_RETRIES` — how many times transient pool-exhaustion fallbacks
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
   `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and

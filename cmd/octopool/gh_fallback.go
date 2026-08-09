@@ -14,6 +14,7 @@ import (
 
 type localFallbackError struct {
 	Reason string
+	Relay  *relayResponseError
 }
 
 func (err localFallbackError) Error() string {
@@ -28,6 +29,14 @@ func isLocalFallback(err error) bool {
 	return errors.As(err, &fallback)
 }
 
+func explicitRelayFallback(err error) (localFallbackError, bool) {
+	var fallback localFallbackError
+	if !errors.As(err, &fallback) || fallback.Relay == nil || fallback.Relay.Code != "fallback_local" {
+		return localFallbackError{}, false
+	}
+	return fallback, true
+}
+
 func shouldRunRealGH(err error) bool {
 	return isLocalFallback(err) || errors.Is(err, errOctopoolNotLoggedIn)
 }
@@ -35,9 +44,9 @@ func shouldRunRealGH(err error) bool {
 func localFallbackFromRelayError(relay *relayResponseError) (localFallbackError, bool) {
 	switch relay.Code {
 	case "fallback_local":
-		return localFallbackError{Reason: relayFallbackReason(relay)}, true
+		return localFallbackError{Reason: relayFallbackReason(relay), Relay: relay}, true
 	case "missing_auth", "invalid_auth":
-		return localFallbackError{Reason: "octopool auth unavailable"}, true
+		return localFallbackError{Reason: "octopool auth unavailable", Relay: relay}, true
 	default:
 		return localFallbackError{}, false
 	}

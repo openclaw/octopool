@@ -47,6 +47,25 @@ type watchBackoff struct {
 	limit   time.Duration
 }
 
+type watchFallbackHandoffError struct {
+	fallback localFallbackError
+}
+
+func (err watchFallbackHandoffError) Error() string {
+	return err.fallback.Error()
+}
+
+func ghWatchCompleted(err error) ghResult {
+	if err == nil {
+		return ghResult{action: ghComplete}
+	}
+	var handoff watchFallbackHandoffError
+	if errors.As(err, &handoff) {
+		return ghResult{action: ghHandoffAfterOutput, err: handoff}
+	}
+	return ghFailed(err)
+}
+
 func newWatchBackoff(requested time.Duration) watchBackoff {
 	start := max(requested, watchMinInterval)
 	return watchBackoff{current: start, limit: max(watchMaxInterval, start)}
@@ -96,7 +115,7 @@ func handleGHRunWatch(ctx context.Context, args []string, stdout io.Writer) ghRe
 		return ghDelegated()
 	}
 	opts.repo = repo
-	return ghCompleted(relayRunWatch(ctx, stdout, opts))
+	return ghWatchCompleted(relayRunWatch(ctx, stdout, opts))
 }
 
 func parseGHRunWatchOptions(args []string) (ghRunWatchOptions, bool) {
@@ -209,7 +228,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			}
 			attempt, ok := positiveJSONInt(confirmed["run_attempt"])
 			if !ok {
-				return localFallbackError{Reason: "workflow run response did not include run_attempt"}
+				return watchError(localFallbackError{Reason: "workflow run response did not include run_attempt"}, progressPrinted)
 			}
 			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, opts.id, attempt, &backoff)
 			if err != nil {
@@ -335,7 +354,7 @@ func handleGHPRChecksWatch(ctx context.Context, args []string, stdout io.Writer)
 		return ghDelegated()
 	}
 	opts.repo = repo
-	return ghCompleted(relayPRChecksWatch(ctx, stdout, opts))
+	return ghWatchCompleted(relayPRChecksWatch(ctx, stdout, opts))
 }
 
 func parseGHPRChecksWatchOptions(args []string) (ghPRChecksWatchOptions, bool) {
@@ -563,7 +582,13 @@ func bodySafeText(raw string) string {
 }
 
 func watchError(err error, progressPrinted bool) error {
-	if progressPrinted && shouldRunRealGH(err) {
+	if !progressPrinted {
+		return err
+	}
+	if fallback, ok := explicitRelayFallback(err); ok {
+		return watchFallbackHandoffError{fallback: fallback}
+	}
+	if shouldRunRealGH(err) {
 		return errors.New(err.Error())
 	}
 	return err

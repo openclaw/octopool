@@ -27,6 +27,9 @@ func TestParseLocalFallback(t *testing.T) {
 	if err.Reason != "route_denied" {
 		t.Fatalf("reason = %q", err.Reason)
 	}
+	if err.Relay != relay || err.Relay.Code != "fallback_local" {
+		t.Fatal("decoded fallback_local must retain explicit relay provenance")
+	}
 }
 
 func TestParseRelayResponseErrorRedactsMalformedBody(t *testing.T) {
@@ -65,6 +68,13 @@ func TestGHRelayClientInvalidAuthUsesLocalFallback(t *testing.T) {
 	_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/openclaw/openclaw"})
 	if !isLocalFallback(err) {
 		t.Fatalf("expected local fallback, got %v", err)
+	}
+	if _, explicit := explicitRelayFallback(err); explicit {
+		t.Fatal("auth reinterpretation must not gain explicit relay fallback provenance")
+	}
+	var fallback localFallbackError
+	if !errors.As(err, &fallback) || fallback.Relay == nil || fallback.Relay.Code != "invalid_auth" {
+		t.Fatalf("auth fallback provenance = %#v", fallback.Relay)
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("calls = %d", got)
