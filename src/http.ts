@@ -22,7 +22,25 @@ export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit)
   });
 }
 
+// D1 and Durable Objects throw untyped Errors when their request queues back up
+// ("D1 DB is overloaded. Requests queued for too long."). Without this mapping the
+// worker boundary reports internal_error 500, which callers cannot distinguish
+// from a bug and therefore never retry or fall back on.
+export function backendOverloadedError(error: unknown): HttpError | undefined {
+  if (error instanceof HttpError || !(error instanceof Error)) {
+    return undefined;
+  }
+  if (!/is overloaded|queued for too long/i.test(error.message)) {
+    return undefined;
+  }
+  return new HttpError(503, "relay_overloaded", "Octopool backend is overloaded; retry shortly");
+}
+
 export function errorResponse(error: unknown, requestId?: string): Response {
+  const overloaded = backendOverloadedError(error);
+  if (overloaded !== undefined) {
+    error = overloaded;
+  }
   if (error instanceof HttpError) {
     return jsonResponse(
       {

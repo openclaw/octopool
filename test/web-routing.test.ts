@@ -123,6 +123,18 @@ describe("web routing helpers", () => {
     expect(shouldUseWebError(request)).toBe(false);
   });
 
+  it("reports backend overload as a typed retryable error, not internal_error", async () => {
+    const response = errorResponse(
+      new Error("D1_ERROR: D1 DB is overloaded. Requests queued for too long."),
+      "req-overload",
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "relay_overloaded", request_id: "req-overload" },
+    });
+  });
+
   it("includes safe error details in API error responses", async () => {
     const response = errorResponse(
       new HttpError(401, "github_auth_failed", "GitHub token check failed with 403", {

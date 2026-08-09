@@ -1,12 +1,13 @@
 import type { GitHubRate } from "./github-rate";
-import { HttpError } from "./http";
+import { backendOverloadedError, HttpError } from "./http";
 
 export function localFallbackError(error: unknown): HttpError | undefined {
-  if (!(error instanceof HttpError) || !localFallbackReasons.has(error.code)) {
+  const typed = error instanceof HttpError ? error : backendOverloadedError(error);
+  if (typed === undefined || !localFallbackReasons.has(typed.code)) {
     return undefined;
   }
   return new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-    reason: error.code,
+    reason: typed.code,
   });
 }
 
@@ -34,6 +35,7 @@ const localFallbackReasons = new Set([
   "logs_denied",
   "no_identity",
   "owner_denied",
+  "relay_overloaded",
   "repo_not_public",
   "repo_public_check_failed",
   "route_denied",

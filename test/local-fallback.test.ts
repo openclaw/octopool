@@ -11,6 +11,21 @@ describe("local gh fallback signal", () => {
     expect(fallback?.details).toMatchObject({ reason: "route_denied" });
   });
 
+  it("converts backend overload errors into a typed retryable fallback", () => {
+    const fallback = localFallbackError(
+      new Error("D1_ERROR: D1 DB is overloaded. Requests queued for too long."),
+    );
+
+    expect(fallback?.status).toBe(424);
+    expect(fallback?.code).toBe("fallback_local");
+    expect(fallback?.details).toMatchObject({ reason: "relay_overloaded" });
+
+    expect(localFallbackError(new Error("Durable Object is overloaded"))?.details).toMatchObject({
+      reason: "relay_overloaded",
+    });
+    expect(localFallbackError(new Error("TypeError: fetch failed"))).toBeUndefined();
+  });
+
   it("does not hide auth or malformed-request failures behind local fallback", () => {
     expect(localFallbackError(new HttpError(401, "missing_auth", "Missing bearer token"))).toBe(
       undefined,

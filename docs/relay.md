@@ -261,6 +261,11 @@ direct-fetch bypass.
   `type:issue|pr` / `state:open|closed`; repository search accepts plain terms only. Invalid
   queries return `424 fallback_local` with reason `search_denied`.
 
+When a Cloudflare backend (D1 or the pool Durable Object) rejects work because its
+request queue backed up, the relay returns `424 fallback_local` with reason
+`relay_overloaded` (other surfaces report `503 relay_overloaded`) instead of an untyped
+`internal_error`, so the shim can back off and delegate to real `gh`.
+
 Every repo route additionally passes a public-visibility check before a pooled identity
 or cache entry is used — see [Cache & public-repo guard](cache.md).
 The complete list of relay paths eligible for anonymous API or public web/raw/Git

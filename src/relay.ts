@@ -118,6 +118,22 @@ export async function relayGitHub(
   ctx: ExecutionContext,
   requestId: string,
 ): Promise<Response> {
+  try {
+    return await relayGitHubRequest(request, env, ctx, requestId);
+  } catch (error) {
+    // Backend overload can strike before handleRelayError owns the request
+    // (auth/policy D1 reads) or inside its stale-cache reads; the shim must
+    // still see typed fallback_local instead of a dead-end internal_error.
+    throw localFallbackError(error) ?? error;
+  }
+}
+
+async function relayGitHubRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  requestId: string,
+): Promise<Response> {
   const started = Date.now();
   const body = await parseJsonObject(request);
   const relayRequest = validateRelayRequest(body);

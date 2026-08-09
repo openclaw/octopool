@@ -63,7 +63,7 @@ var relayRetryDelays = []time.Duration{time.Second, 3 * time.Second}
 func transientFallbackReason(reason string) bool {
 	switch reason {
 	case "identities_cooling_down", "identity_pool_depleted",
-		"github_identity_depleted", "github_rate_limited":
+		"github_identity_depleted", "github_rate_limited", "relay_overloaded":
 		return true
 	default:
 		return false

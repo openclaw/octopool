@@ -140,3 +140,17 @@ type discardWriter struct{}
 func (discardWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
+
+func TestTransientFallbackReasons(t *testing.T) {
+	for _, reason := range []string{
+		"identities_cooling_down", "identity_pool_depleted",
+		"github_identity_depleted", "github_rate_limited", "relay_overloaded",
+	} {
+		if !transientFallbackReason(reason) {
+			t.Fatalf("%s should retry before local fallback", reason)
+		}
+	}
+	if transientFallbackReason("route_denied") {
+		t.Fatal("route_denied must not retry; it always resolves locally")
+	}
+}

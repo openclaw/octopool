@@ -2,6 +2,10 @@
 
 ## 0.5.6 - Unreleased
 
+### Fixes
+
+- Report Cloudflare backend overload (D1/Durable Object request queues backing up) as typed `relay_overloaded` — `424 fallback_local` on the relay so the shim backs off and delegates to real `gh` — instead of an untyped `internal_error` 500 that dead-ended paged `gh api` bursts.
+
 ### Changes
 
 - Redesign the operator dashboard as an editorial ledger: serif display type, hairline-rule sections, tick-marked rate gauges with low-headroom coloring, and right-aligned tabular numerals.
