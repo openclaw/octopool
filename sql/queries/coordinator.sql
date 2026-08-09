@@ -105,7 +105,15 @@ ON CONFLICT(cache_key) DO UPDATE SET
   owner_token = excluded.owner_token,
   expires_at = excluded.expires_at;
 
--- name: DeleteCacheFill :exec
+-- name: RenewCacheFill :exec
+UPDATE cache_fills
+SET expires_at = ?3
+WHERE cache_key = ?1
+  AND owner_token = ?2
+  AND expires_at > ?4;
+
+-- name: CompleteCacheFill :exec
 DELETE FROM cache_fills
 WHERE cache_key = ?1
-  AND owner_token = ?2;
+  AND owner_token = ?2
+  AND expires_at > ?3;

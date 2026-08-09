@@ -27,10 +27,10 @@ export async function writeEdgeJSON(
   key: string,
   value: unknown,
   ttlSeconds: number,
-): Promise<void> {
+): Promise<boolean> {
   const cache = defaultEdgeCache();
   if (cache === undefined || ttlSeconds <= 0) {
-    return;
+    return false;
   }
   try {
     await cache.put(
@@ -41,8 +41,10 @@ export async function writeEdgeJSON(
         },
       }),
     );
-  } catch {
-    // The D1 cache remains authoritative when an edge cache operation fails.
+    return true;
+  } catch (error) {
+    console.error("edge cache write failed", { namespace, error });
+    return false;
   }
 }
 

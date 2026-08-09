@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Make cache fills outcome-aware at the pool coordinator: followers wake on confirmed shared, edge-only, or failed publication, cold colos reacquire serially without polling D1, and renewable fenced ownership prevents valid upstream work from outliving its lease.
 - Keep megabyte-class response bodies (paged run lists, check-run sweeps) out of the shared D1 cache — they stay per-colo edge-cached — so write bursts no longer queue the D1 primary into "overloaded" failures.
 - Report Cloudflare backend overload (D1/Durable Object request queues backing up) as typed `relay_overloaded` — `424 fallback_local` on the relay so the shim backs off and delegates to real `gh` — instead of an untyped `internal_error` 500 that dead-ended paged `gh api` bursts.
 - Retry transient relay `internal_error` and malformed 502/503/504 responses without falling back to local GitHub quota, preserve correlated request IDs in CLI failures, and log unexpected Worker exceptions safely for diagnosis.

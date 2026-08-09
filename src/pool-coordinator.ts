@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import type { CacheFillAcquisition, CacheFillOutcome } from "./cache-fill";
 import { queries } from "./generated/sql";
 import type { CoordinatorSnapshot, RecordResult, SelectionRequest, SelectionResult } from "./types";
 
@@ -25,7 +26,22 @@ export function poolCoordinatorStub(env: Env, pool: string): DurableObjectStub<P
   return env.POOL_COORDINATOR.get(id, { locationHint: "wnam" });
 }
 
+type CacheFillRow = {
+  owner_token: string;
+  expires_at: number;
+};
+
+type CacheFillWaiterGroup = {
+  ownerToken: string;
+  expiresAt: number;
+  completion: Promise<Exclude<CacheFillAcquisition, { kind: "owner" }>>;
+  resolve(result: Exclude<CacheFillAcquisition, { kind: "owner" }>): void;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
 export class PoolCoordinator extends DurableObject<Env> {
+  private readonly cacheFillWaiters = new Map<string, CacheFillWaiterGroup>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.ctx.blockConcurrencyWhile(async () => {
@@ -41,13 +57,14 @@ export class PoolCoordinator extends DurableObject<Env> {
     });
   }
 
-  claimCacheFill(cacheKey: string): string | null {
+  acquireCacheFill(cacheKey: string): Promise<CacheFillAcquisition> | CacheFillAcquisition {
     const now = Date.now();
-    const fill = this.ctx.storage.sql
-      .exec<{ owner_token: string; expires_at: number }>(queries.getCacheFill, cacheKey)
-      .toArray()[0];
+    const fill = this.cacheFill(cacheKey);
     if (fill !== undefined && fill.expires_at > now) {
-      return null;
+      return this.waitForCacheFill(cacheKey, fill);
+    }
+    if (fill !== undefined) {
+      this.wakeCacheFill(cacheKey, fill.owner_token, { kind: "retry" });
     }
     const ownerToken = crypto.randomUUID();
     this.ctx.storage.sql.exec(
@@ -56,11 +73,38 @@ export class PoolCoordinator extends DurableObject<Env> {
       ownerToken,
       now + CACHE_FILL_LEASE_MS,
     );
-    return ownerToken;
+    return { kind: "owner", token: ownerToken };
   }
 
-  finishCacheFill(cacheKey: string, ownerToken: string): void {
-    this.ctx.storage.sql.exec(queries.deleteCacheFill, cacheKey, ownerToken);
+  renewCacheFill(cacheKey: string, ownerToken: string): boolean {
+    const now = Date.now();
+    const expiresAt = now + CACHE_FILL_LEASE_MS;
+    const updated = this.ctx.storage.sql.exec(
+      queries.renewCacheFill,
+      cacheKey,
+      ownerToken,
+      expiresAt,
+      now,
+    );
+    if (updated.rowsWritten === 0) {
+      return false;
+    }
+    this.extendCacheFillWaiter(cacheKey, ownerToken, expiresAt);
+    return true;
+  }
+
+  completeCacheFill(cacheKey: string, ownerToken: string, outcome: CacheFillOutcome): boolean {
+    const deleted = this.ctx.storage.sql.exec(
+      queries.completeCacheFill,
+      cacheKey,
+      ownerToken,
+      Date.now(),
+    );
+    if (deleted.rowsWritten === 0) {
+      return false;
+    }
+    this.wakeCacheFill(cacheKey, ownerToken, { kind: "completed", outcome });
+    return true;
   }
 
   selectIdentity(request: SelectionRequest): SelectionResult {
@@ -173,6 +217,76 @@ export class PoolCoordinator extends DurableObject<Env> {
       .exec<RateRow>(queries.getRateState, identityId, resource)
       .toArray()[0];
     return rate !== undefined && rate.reset_at > now && rate.remaining <= 0;
+  }
+
+  private cacheFill(cacheKey: string): CacheFillRow | undefined {
+    return this.ctx.storage.sql.exec<CacheFillRow>(queries.getCacheFill, cacheKey).toArray()[0];
+  }
+
+  private waitForCacheFill(cacheKey: string, fill: CacheFillRow): Promise<CacheFillAcquisition> {
+    let group = this.cacheFillWaiters.get(cacheKey);
+    if (group === undefined || group.ownerToken !== fill.owner_token) {
+      if (group !== undefined) {
+        this.wakeCacheFill(cacheKey, group.ownerToken, { kind: "retry" });
+      }
+      let resolve!: CacheFillWaiterGroup["resolve"];
+      const completion = new Promise<Exclude<CacheFillAcquisition, { kind: "owner" }>>(
+        (complete) => {
+          resolve = complete;
+        },
+      );
+      group = {
+        ownerToken: fill.owner_token,
+        expiresAt: fill.expires_at,
+        completion,
+        resolve,
+      };
+      this.cacheFillWaiters.set(cacheKey, group);
+      this.scheduleCacheFillExpiry(cacheKey, group, fill.expires_at);
+    } else if (fill.expires_at > group.expiresAt) {
+      this.scheduleCacheFillExpiry(cacheKey, group, fill.expires_at);
+    }
+    return group.completion;
+  }
+
+  private scheduleCacheFillExpiry(
+    cacheKey: string,
+    group: CacheFillWaiterGroup,
+    expiresAt: number,
+  ): void {
+    group.expiresAt = expiresAt;
+    if (group.timer !== undefined) {
+      clearTimeout(group.timer);
+    }
+    group.timer = setTimeout(
+      () => {
+        this.wakeCacheFill(cacheKey, group.ownerToken, { kind: "retry" });
+      },
+      Math.max(1, expiresAt - Date.now()),
+    );
+  }
+
+  private extendCacheFillWaiter(cacheKey: string, ownerToken: string, expiresAt: number): void {
+    const group = this.cacheFillWaiters.get(cacheKey);
+    if (group !== undefined && group.ownerToken === ownerToken) {
+      this.scheduleCacheFillExpiry(cacheKey, group, expiresAt);
+    }
+  }
+
+  private wakeCacheFill(
+    cacheKey: string,
+    ownerToken: string,
+    result: Exclude<CacheFillAcquisition, { kind: "owner" }>,
+  ): void {
+    const group = this.cacheFillWaiters.get(cacheKey);
+    if (group === undefined || group.ownerToken !== ownerToken) {
+      return;
+    }
+    this.cacheFillWaiters.delete(cacheKey);
+    if (group.timer !== undefined) {
+      clearTimeout(group.timer);
+    }
+    group.resolve(result);
   }
 }
 

@@ -10,6 +10,7 @@ import { defaultGitHubJSONAccept } from "./github-response";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
+import type { CacheFillOutcome } from "./cache-fill";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
 const TERMINAL_CI_TTL_SECONDS = 3_600;
@@ -38,6 +39,11 @@ export type CachedGitHubResponse = GitHubRelayResponse & {
   identity?: Pick<Identity, "id" | "kind">;
   created_at: string;
   expires_at: string;
+};
+
+export type GitHubCacheRead = {
+  cached: CachedGitHubResponse;
+  source: "edge" | "shared";
 };
 
 export function githubCacheRevalidationHeaders(
@@ -96,6 +102,34 @@ export async function readGitHubCache(
   ctx?: ExecutionContext,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
+  return (await readGitHubCacheWithSource(env, cacheKey, ctx, maxAgeSeconds))?.cached;
+}
+
+export async function readGitHubCacheWithSource(
+  env: Env,
+  cacheKey: string,
+  ctx?: ExecutionContext,
+  maxAgeSeconds?: number,
+): Promise<GitHubCacheRead | undefined> {
+  const edge = await readEdgeGitHubCache(cacheKey, maxAgeSeconds);
+  if (edge !== undefined) {
+    return { cached: edge, source: "edge" };
+  }
+  const row = await env.DB.prepare(queries.readGitHubCache).bind(cacheKey).first<CacheRow>();
+  const cached = cacheRowResponse(row);
+  if (cached === undefined || !withinRequestedMaxAge(cached, maxAgeSeconds)) {
+    return undefined;
+  }
+  if (ctx !== undefined) {
+    ctx.waitUntil(writeEdgeCachedResponse(cacheKey, cached));
+  }
+  return { cached, source: "shared" };
+}
+
+export async function readEdgeGitHubCache(
+  cacheKey: string,
+  maxAgeSeconds?: number,
+): Promise<CachedGitHubResponse | undefined> {
   const edge = await readEdgeJSON<CachedGitHubResponse>(EDGE_CACHE_NAMESPACE, cacheKey);
   if (edge !== undefined) {
     if (freshCachedResponse(edge)) {
@@ -108,15 +142,7 @@ export async function readGitHubCache(
       await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey);
     }
   }
-  const row = await env.DB.prepare(queries.readGitHubCache).bind(cacheKey).first<CacheRow>();
-  const cached = cacheRowResponse(row);
-  if (cached === undefined || !withinRequestedMaxAge(cached, maxAgeSeconds)) {
-    return undefined;
-  }
-  if (ctx !== undefined) {
-    ctx.waitUntil(writeEdgeCachedResponse(cacheKey, cached));
-  }
-  return cached;
+  return undefined;
 }
 
 function withinRequestedMaxAge(cached: CachedGitHubResponse, maxAgeSeconds?: number): boolean {
@@ -195,9 +221,9 @@ export async function writeGitHubCache(
   route: RouteInfo,
   response: GitHubRelayResponse,
   identity?: Identity,
-): Promise<void> {
+): Promise<CacheFillOutcome> {
   if (response.status < 200 || response.status >= 300) {
-    return;
+    return "failed";
   }
   const ttlSeconds = cacheTTLSeconds(route, response);
   const staleSeconds = staleCacheSeconds(route, ttlSeconds);
@@ -212,34 +238,42 @@ export async function writeGitHubCache(
     ...(identity === undefined ? {} : { identity: { id: identity.id, kind: identity.kind } }),
   };
   const bodyJson = JSON.stringify(response.body);
-  const writes: Promise<unknown>[] = [writeEdgeCachedResponse(cacheKey, cached)];
+  const edgeWrite = writeEdgeCachedResponse(cacheKey, cached);
+  let sharedWrite = Promise.resolve(false);
   // UTF-8 bytes, not String.length: UTF-16 code units undercount multibyte
   // content by up to 3x, which would let Unicode-heavy rows past the cap.
   if (new TextEncoder().encode(bodyJson).byteLength <= MAX_D1_CACHE_BODY_BYTES) {
-    writes.push(
-      env.DB.prepare(queries.writeGitHubCache)
-        .bind(
-          cacheKey,
-          request.pool,
-          request.method,
-          request.path,
-          JSON.stringify(stableRecord(request.query ?? {})),
-          JSON.stringify(stableRecord(cacheVaryHeaders(request.headers))),
-          route.routeKey,
-          route.kind,
-          response.status,
-          JSON.stringify(response.headers),
-          bodyJson,
-          response.body_encoding ?? "json",
-          identity?.id ?? null,
-          identity?.kind ?? null,
-          expiresAt,
-          staleExpiresAt,
-        )
-        .run(),
-    );
+    sharedWrite = env.DB.prepare(queries.writeGitHubCache)
+      .bind(
+        cacheKey,
+        request.pool,
+        request.method,
+        request.path,
+        JSON.stringify(stableRecord(request.query ?? {})),
+        JSON.stringify(stableRecord(cacheVaryHeaders(request.headers))),
+        route.routeKey,
+        route.kind,
+        response.status,
+        JSON.stringify(response.headers),
+        bodyJson,
+        response.body_encoding ?? "json",
+        identity?.id ?? null,
+        identity?.kind ?? null,
+        expiresAt,
+        staleExpiresAt,
+      )
+      .run()
+      .then(() => true)
+      .catch((error: unknown) => {
+        console.error("github shared cache write failed", error);
+        return false;
+      });
   }
-  await Promise.all(writes);
+  const [edgePublished, sharedPublished] = await Promise.all([edgeWrite, sharedWrite]);
+  if (sharedPublished) {
+    return "shared";
+  }
+  return edgePublished ? "edge_only" : "failed";
 }
 
 function freshCachedResponse(cached: CachedGitHubResponse): boolean {
@@ -256,7 +290,7 @@ function freshCachedResponse(cached: CachedGitHubResponse): boolean {
   return Number.isFinite(expiresAt) && expiresAt > Date.now();
 }
 
-function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse): Promise<void> {
+function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse): Promise<boolean> {
   const expiresAt = parseSQLiteTimestamp(cached.expires_at);
   const ttlSeconds = Math.floor((expiresAt - Date.now()) / 1000);
   return writeEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey, cached, ttlSeconds);

@@ -1,9 +1,13 @@
 import { envSecret } from "./auth";
+import {
+  acquireOwnedCacheFill,
+  type CacheFillCoordinator,
+  type CacheFillOutcome,
+} from "./cache-fill";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { HttpError, parsePositiveInt } from "./http";
-import type { PoolCoordinator } from "./pool-coordinator";
 import { capabilitiesForRouteKind } from "./route-manifest";
 import type { RouteInfo } from "./types";
 
@@ -16,20 +20,15 @@ type PublicRepoProof = {
   expires_at: string;
 };
 
-type PublicProofCoordinator = Pick<
-  DurableObjectStub<PoolCoordinator>,
-  "claimCacheFill" | "finishCacheFill"
->;
+type PublicRepoProofSource = "edge" | "shared";
 
 const EDGE_CACHE_NAMESPACE = "public-repo-v1";
-const PROOF_WAIT_MS = 4_000;
-const PROOF_POLL_MS = 100;
 
 export async function ensurePublicGitHubRepo(
   env: Env,
   route: RouteInfo,
   cacheCreatedAt?: string,
-  coordinator?: PublicProofCoordinator,
+  coordinator?: CacheFillCoordinator,
 ): Promise<void> {
   if (route.owner === undefined || route.repo === undefined) {
     return;
@@ -38,34 +37,60 @@ export async function ensurePublicGitHubRepo(
   const repo = route.repo.toLowerCase();
   if (
     cacheCreatedAt !== undefined &&
-    (await cachedPublicGitHubRepoCovers(env, route, cacheCreatedAt, true))
+    (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, { requireFresh: true })) !==
+      undefined
   ) {
     return;
   }
   const proofKey = `public-repo:${owner}/${repo}`;
   const proofStartedAt = sqliteTimestamp(new Date());
-  let leaseToken: string | undefined;
-  if (coordinator !== undefined) {
-    for (;;) {
-      const claimed = await coordinator.claimCacheFill(proofKey);
-      if (claimed !== null) {
-        leaseToken = claimed;
-        break;
+  if (coordinator === undefined) {
+    await refreshPublicGitHubRepoProof(env, owner, repo, route, cacheCreatedAt);
+    return;
+  }
+
+  for (;;) {
+    const acquisition = await acquireOwnedCacheFill(coordinator, proofKey);
+    if (acquisition.kind !== "owner") {
+      if (acquisition.kind === "completed") {
+        const source =
+          acquisition.outcome === "shared"
+            ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
+                requireFresh: true,
+              })
+            : acquisition.outcome === "edge_only"
+              ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
+                  requireFresh: true,
+                  source: "edge",
+                })
+              : undefined;
+        if (source !== undefined) {
+          return;
+        }
       }
-      if (await waitForConcurrentPublicProof(env, route, proofStartedAt)) {
+      continue;
+    }
+
+    const ownerFill = acquisition.owner;
+    try {
+      if (
+        cacheCreatedAt !== undefined &&
+        (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, {
+          requireFresh: true,
+          source: "shared",
+        })) === "shared"
+      ) {
+        await ownerFill.complete("shared");
         return;
       }
-    }
-  }
-  try {
-    await refreshPublicGitHubRepoProof(env, owner, repo, route, cacheCreatedAt);
-  } finally {
-    if (coordinator !== undefined && leaseToken !== undefined) {
-      try {
-        await coordinator.finishCacheFill(proofKey, leaseToken);
-      } catch (error) {
-        console.error("public repo proof fill cleanup failed", error);
+      const outcome = await ownerFill.publish(() =>
+        refreshPublicGitHubRepoProof(env, owner, repo, route, cacheCreatedAt),
+      );
+      if (outcome !== undefined) {
+        return;
       }
+    } finally {
+      await ownerFill.fail();
     }
   }
 }
@@ -95,7 +120,7 @@ async function refreshPublicGitHubRepoProof(
   repo: string,
   route: RouteInfo,
   cacheCreatedAt?: string,
-): Promise<void> {
+): Promise<CacheFillOutcome> {
   if (route.tokenFreeOnly) {
     const pageProof = await fetchPublicRepoPageProof(env, owner, repo);
     if (pageProof === false) {
@@ -108,8 +133,7 @@ async function refreshPublicGitHubRepoProof(
         "GitHub public repository page check failed",
       );
     }
-    await storePublicRepoProof(env, owner, repo);
-    return;
+    return storePublicRepoProof(env, owner, repo);
   }
   let response = await fetchPublicRepoProof(env, owner, repo, true);
   let historicalProofEligibleResponse: Response | undefined;
@@ -125,8 +149,7 @@ async function refreshPublicGitHubRepoProof(
       throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
     }
     if (pageProof === true) {
-      await storePublicRepoProof(env, owner, repo);
-      return;
+      return storePublicRepoProof(env, owner, repo);
     }
   }
   if (response.status === 404) {
@@ -135,11 +158,12 @@ async function refreshPublicGitHubRepoProof(
   if (!response.ok) {
     if (
       cacheCreatedAt !== undefined &&
-      (publicCheckMayUseHistoricalProof(response) ||
-        historicalProofEligibleResponse !== undefined) &&
-      (await cachedPublicGitHubRepoCovers(env, route, cacheCreatedAt))
+      (publicCheckMayUseHistoricalProof(response) || historicalProofEligibleResponse !== undefined)
     ) {
-      return;
+      const source = await coveringPublicRepoProofSource(env, route, cacheCreatedAt);
+      if (source !== undefined) {
+        return source === "shared" ? "shared" : "edge_only";
+      }
     }
     throw new HttpError(
       502,
@@ -151,7 +175,7 @@ async function refreshPublicGitHubRepoProof(
   if (body.private !== false) {
     throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
   }
-  await storePublicRepoProof(env, owner, repo);
+  return storePublicRepoProof(env, owner, repo);
 }
 
 function fetchPublicRepoProof(
@@ -242,7 +266,11 @@ async function fetchPublicRepoPageProof(
   return undefined;
 }
 
-async function storePublicRepoProof(env: Env, owner: string, repo: string): Promise<void> {
+async function storePublicRepoProof(
+  env: Env,
+  owner: string,
+  repo: string,
+): Promise<CacheFillOutcome> {
   const ttlSeconds = parsePositiveInt(
     (env as unknown as Record<string, string | undefined>).PUBLIC_REPO_TTL_SECONDS,
     30,
@@ -252,10 +280,28 @@ async function storePublicRepoProof(env: Env, owner: string, repo: string): Prom
     checked_at: sqliteTimestamp(checkedAt),
     expires_at: sqliteTimestamp(new Date(checkedAt.getTime() + ttlSeconds * 1000)),
   };
-  await Promise.all([
-    env.DB.prepare(queries.upsertPublicRepoProof).bind(owner, repo, `+${ttlSeconds} seconds`).run(),
-    writeEdgeJSON(EDGE_CACHE_NAMESPACE, publicProofKey(owner, repo), proof, ttlSeconds),
-  ]);
+  const sharedWrite = (async () => {
+    try {
+      await env.DB.prepare(queries.upsertPublicRepoProof)
+        .bind(owner, repo, `+${ttlSeconds} seconds`)
+        .run();
+      return true;
+    } catch (error) {
+      console.error("public repo shared proof write failed", error);
+      return false;
+    }
+  })();
+  const edgeWrite = writeEdgeJSON(
+    EDGE_CACHE_NAMESPACE,
+    publicProofKey(owner, repo),
+    proof,
+    ttlSeconds,
+  ).catch((error: unknown) => {
+    console.error("public repo edge proof write failed", error);
+    return false;
+  });
+  const [edgePublished, sharedPublished] = await Promise.all([edgeWrite, sharedWrite]);
+  return sharedPublished ? "shared" : edgePublished ? "edge_only" : "failed";
 }
 
 function publicCheckMayRetryUnauthenticated(response: Response): boolean {
@@ -271,52 +317,50 @@ function publicCheckMayUseHistoricalProof(response: Response): boolean {
   );
 }
 
-async function cachedPublicGitHubRepoCovers(
+async function coveringPublicRepoProofSource(
   env: Env,
   route: RouteInfo,
   cacheCreatedAt: string,
-  requireFresh = false,
-): Promise<boolean> {
+  options: { requireFresh?: boolean; source?: PublicRepoProofSource } = {},
+): Promise<PublicRepoProofSource | undefined> {
   if (route.owner === undefined || route.repo === undefined) {
-    return true;
+    return "shared";
   }
   const owner = route.owner.toLowerCase();
   const repo = route.repo.toLowerCase();
   const edgeKey = publicProofKey(owner, repo);
-  const edge = await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey);
-  if (edge !== undefined) {
-    if (publicProofCovers(edge, cacheCreatedAt)) {
-      return true;
+  if (options.source !== "shared") {
+    const edge = await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey);
+    if (edge !== undefined) {
+      if (publicProofCovers(edge, cacheCreatedAt)) {
+        return "edge";
+      }
+      await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey);
     }
-    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey);
+    if (options.source === "edge") {
+      return undefined;
+    }
   }
-  const query = requireFresh
+  const query = options.requireFresh
     ? queries.freshCoveringPublicRepoProof
     : queries.coveringPublicRepoProof;
-  const row = await env.DB.prepare(query)
-    .bind(owner, repo, cacheCreatedAt)
-    .first<PublicRepoProof>();
+  const row = await readD1PublicRepoProof(env, query, owner, repo, cacheCreatedAt);
   if (row === null || !publicProofCovers(row, cacheCreatedAt)) {
-    return false;
+    return undefined;
   }
   const ttlSeconds = Math.floor((parseSQLiteTimestamp(row.expires_at) - Date.now()) / 1000);
   await writeEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey, row, ttlSeconds);
-  return true;
+  return "shared";
 }
 
-async function waitForConcurrentPublicProof(
+function readD1PublicRepoProof(
   env: Env,
-  route: RouteInfo,
-  proofStartedAt: string,
-): Promise<boolean> {
-  const deadline = Date.now() + PROOF_WAIT_MS;
-  while (Date.now() < deadline) {
-    await sleep(PROOF_POLL_MS);
-    if (await cachedPublicGitHubRepoCovers(env, route, proofStartedAt, true)) {
-      return true;
-    }
-  }
-  return false;
+  query: string,
+  owner: string,
+  repo: string,
+  cacheCreatedAt: string,
+): Promise<PublicRepoProof | null> {
+  return env.DB.prepare(query).bind(owner, repo, cacheCreatedAt).first<PublicRepoProof>();
 }
 
 function publicProofCovers(proof: PublicRepoProof, cacheCreatedAt: string): boolean {
@@ -334,8 +378,4 @@ function publicProofCovers(proof: PublicRepoProof, cacheCreatedAt: string): bool
 
 function publicProofKey(owner: string, repo: string): string {
   return `${owner}/${repo}`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

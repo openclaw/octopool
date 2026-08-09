@@ -68,7 +68,8 @@ Durable Object partition key: `pool:<pool_id>`.
    normalized route/cache key.
 4. For cacheable routes, read the edge cache then D1. Validate cached identity eligibility
    and public-repository proof before serving.
-5. Claim an 8-second cache-fill lease. Followers wait briefly and reuse the leader's result.
+5. Acquire renewable, token-fenced cache-fill ownership. Followers wait on coordinator
+   completion (`shared`, `edge_only`, or `failed`) rather than polling cache storage.
 6. Try an exact token-free adapter: anonymous API, public page/raw content, or Git smart HTTP.
 7. Establish public-repository proof from the direct response or the explicit guard.
 8. If the route requires credentials, select a scoped identity through the pool coordinator,
@@ -77,7 +78,8 @@ Durable Object partition key: `pool:<pool_id>`.
 10. Return the relay envelope; asynchronously record the authenticated/validated outcome.
 11. If a safe read cannot be served, return `424 fallback_local` with a reason. The CLI
     reruns the original command with real `gh` unless local fallback is disabled.
-12. Always release an owned cache-fill lease.
+12. Complete the owned fill immediately after publication; every other owned exit completes
+    `failed`, while lost/stale tokens cannot release a newer owner.
 
 Conditional, log, large-payload, `rate_limit`, and otherwise non-cacheable requests bypass
 cache. A `cache-control: max-age=N` request directive instead treats fresh entries older
@@ -182,7 +184,7 @@ PoolCoordinator SQLite tables:
 - `leases`: 10-second route-to-identity bindings.
 - `rate_states`: last GitHub remaining/reset state by identity/resource.
 - `cooldowns`: global/resource/route exclusions.
-- `cache_fills`: 8-second ownership leases for duplicate misses.
+- `cache_fills`: renewable, token-fenced ownership for duplicate misses and follower wake-up.
 
 Runtime SQL lives in `sql/queries/*.sql`, is validated against `migrations/` and
 `sql/schema/coordinator.sql`, and generates `src/generated/sql.ts`. Secret values are not

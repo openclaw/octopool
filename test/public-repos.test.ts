@@ -5,6 +5,7 @@ import {
   recordPublicGitHubRepo,
 } from "../src/public-repos";
 import type { RouteInfo } from "../src/types";
+import { fakeCacheFillCoordinator } from "./cache-fill-test-support";
 
 describe("public repo guard", () => {
   afterEach(() => {
@@ -168,6 +169,7 @@ describe("public repo guard", () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(first).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -279,10 +281,7 @@ describe("public repo guard", () => {
   it("coalesces a concurrent public proof refresh through the pool coordinator", async () => {
     const fetchMock = vi.fn(async () => Response.json({ private: false }));
     vi.stubGlobal("fetch", fetchMock);
-    const coordinator = {
-      claimCacheFill: vi.fn(async () => null),
-      finishCacheFill: vi.fn(async () => undefined),
-    };
+    const coordinator = fakeCacheFillCoordinator([{ kind: "completed", outcome: "shared" }]);
     const database = {
       prepare: vi.fn(() => ({
         bind: vi.fn(() => ({
@@ -296,12 +295,12 @@ describe("public repo guard", () => {
       { ...env(), DB: database } as unknown as Env,
       route(),
       undefined,
-      coordinator as never,
+      coordinator,
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(coordinator.claimCacheFill).toHaveBeenCalledWith("public-repo:openclaw/octopool");
-    expect(coordinator.finishCacheFill).not.toHaveBeenCalled();
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledWith("public-repo:openclaw/octopool");
+    expect(coordinator.completeCacheFill).not.toHaveBeenCalled();
   });
 
   it("releases a public proof fill after the leader refreshes it", async () => {
@@ -309,30 +308,124 @@ describe("public repo guard", () => {
       "fetch",
       vi.fn(async () => Response.json({ private: false })),
     );
-    const coordinator = {
-      claimCacheFill: vi.fn(async () => "proof-lease"),
-      finishCacheFill: vi.fn(async () => undefined),
-    };
+    const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "proof-lease" }]);
 
-    await ensurePublicGitHubRepo(env(), route(), undefined, coordinator as never);
+    await ensurePublicGitHubRepo(env(), route(), undefined, coordinator);
 
-    expect(coordinator.finishCacheFill).toHaveBeenCalledWith(
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith(
       "public-repo:openclaw/octopool",
       "proof-lease",
+      "shared",
     );
   });
 
-  it("reclaims an expired public proof lease before refreshing", async () => {
-    vi.useFakeTimers();
+  it("fails an acquired owner when its D1 recheck throws", async () => {
+    const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "proof-lease" }]);
+    const first = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce(new Error("D1 recheck failed"));
+    const database = {
+      prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+    };
+
+    await expect(
+      ensurePublicGitHubRepo(
+        { ...env(), DB: database } as unknown as Env,
+        route(),
+        sqliteUTC(Date.now() - 1_000),
+        coordinator,
+      ),
+    ).rejects.toThrow("D1 recheck failed");
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith(
+      "public-repo:openclaw/octopool",
+      "proof-lease",
+      "failed",
+    );
+  });
+
+  it("completes a public proof fill as failed when D1 persistence fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ private: false })),
+    );
+    const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "proof-lease" }]);
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => null),
+          run: vi.fn(async () => {
+            throw new Error("D1 unavailable");
+          }),
+        })),
+      })),
+    };
+
+    await expect(
+      ensurePublicGitHubRepo(
+        { ...env(), DB: database } as unknown as Env,
+        route(),
+        undefined,
+        coordinator,
+      ),
+    ).resolves.toBeUndefined();
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith(
+      "public-repo:openclaw/octopool",
+      "proof-lease",
+      "failed",
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "public repo shared proof write failed",
+      expect.any(Error),
+    );
+  });
+
+  it("publishes edge-only when D1 persistence fails after the local edge write", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ private: false })),
+    );
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put: vi.fn(async () => undefined),
+        delete: vi.fn(async () => true),
+      },
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "proof-lease" }]);
+    const database = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          run: vi.fn(async () => {
+            throw new Error("D1 unavailable");
+          }),
+        })),
+      })),
+    };
+
+    await ensurePublicGitHubRepo(
+      { ...env(), DB: database } as unknown as Env,
+      route(),
+      undefined,
+      coordinator,
+    );
+
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith(
+      "public-repo:openclaw/octopool",
+      "proof-lease",
+      "edge_only",
+    );
+  });
+
+  it("retries coordinator ownership before refreshing an expired public proof", async () => {
     const fetchMock = vi.fn(async () => Response.json({ private: false }));
     vi.stubGlobal("fetch", fetchMock);
-    const coordinator = {
-      claimCacheFill: vi
-        .fn<() => Promise<string | null>>()
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce("replacement-lease"),
-      finishCacheFill: vi.fn(async () => undefined),
-    };
+    const coordinator = fakeCacheFillCoordinator([
+      { kind: "retry" },
+      { kind: "owner", token: "replacement-lease" },
+    ]);
     const database = {
       prepare: vi.fn((query: string) => ({
         bind: vi.fn(() => ({
@@ -343,21 +436,109 @@ describe("public repo guard", () => {
       })),
     };
 
-    const pending = ensurePublicGitHubRepo(
+    await ensurePublicGitHubRepo(
       { ...env(), DB: database } as unknown as Env,
       route(),
       undefined,
-      coordinator as never,
+      coordinator,
     );
-    await vi.advanceTimersByTimeAsync(4_100);
-    await pending;
 
-    expect(coordinator.claimCacheFill).toHaveBeenCalledTimes(2);
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(coordinator.finishCacheFill).toHaveBeenCalledWith(
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith(
       "public-repo:openclaw/octopool",
       "replacement-lease",
+      "shared",
     );
+  });
+
+  it("reacquires when final renewal loses ownership before proof publication", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ private: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    const coordinator = fakeCacheFillCoordinator([
+      { kind: "owner", token: "lost-owner" },
+      { kind: "owner", token: "replacement-owner" },
+    ]);
+    coordinator.renewCacheFill.mockResolvedValueOnce(false).mockResolvedValue(true);
+
+    await ensurePublicGitHubRepo(env(), route(), undefined, coordinator);
+
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(coordinator.completeCacheFill).toHaveBeenCalledTimes(1);
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith(
+      "public-repo:openclaw/octopool",
+      "replacement-owner",
+      "shared",
+    );
+  });
+
+  it("serves an edge-only completion in the same colo without a second D1 read", async () => {
+    const edgeMatch = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(Response.json(proof()));
+    vi.stubGlobal("caches", {
+      default: {
+        match: edgeMatch,
+        put: vi.fn(async () => undefined),
+        delete: vi.fn(async () => true),
+      },
+    });
+    const first = vi.fn(async () => null);
+    const coordinator = fakeCacheFillCoordinator([{ kind: "completed", outcome: "edge_only" }]);
+
+    await ensurePublicGitHubRepo(
+      {
+        ...env(),
+        DB: { prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })) },
+      } as unknown as Env,
+      route(),
+      sqliteUTC(Date.now() - 1_000),
+      coordinator,
+    );
+
+    expect(first).toHaveBeenCalledOnce();
+    expect(edgeMatch).toHaveBeenCalledTimes(2);
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledOnce();
+  });
+
+  it("reacquires after an edge-only completion misses in the local colo", async () => {
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put: vi.fn(async () => undefined),
+        delete: vi.fn(async () => true),
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ private: false })),
+    );
+    const coordinator = fakeCacheFillCoordinator([
+      { kind: "completed", outcome: "edge_only" },
+      { kind: "owner", token: "takeover" },
+    ]);
+    const first = vi.fn(async () => null);
+    const run = vi.fn(async () => ({}));
+
+    await ensurePublicGitHubRepo(
+      {
+        ...env(),
+        DB: { prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first, run })) })) },
+      } as unknown as Env,
+      route(),
+      sqliteUTC(Date.now() - 1_000),
+      coordinator,
+    );
+
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledTimes(2);
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith(
+      "public-repo:openclaw/octopool",
+      "takeover",
+      "shared",
+    );
+    expect(run).toHaveBeenCalledOnce();
   });
 
   it("serves a covering public proof from the edge without reading D1", async () => {
@@ -399,7 +580,7 @@ describe("public repo guard", () => {
       recordPublicGitHubRepo({ ...env(), DB: database } as unknown as Env, route()),
     ).resolves.toBeUndefined();
     expect(consoleError).toHaveBeenCalledWith(
-      "public repo proof persistence failed",
+      "public repo shared proof write failed",
       expect.any(Error),
     );
     consoleError.mockRestore();

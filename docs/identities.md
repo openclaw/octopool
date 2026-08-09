@@ -51,7 +51,8 @@ keeps four SQLite tables in DO storage:
 - `leases` — sticky route→identity binding, 10s TTL.
 - `rate_states` — last seen `remaining`/`reset_at` per identity and resource bucket.
 - `cooldowns` — per identity, scoped to `*`, `resource:<r>`, or a route key.
-- `cache_fills` — 8s ownership leases that coalesce concurrent identical cache misses.
+- `cache_fills` — renewable, token-fenced ownership for concurrent identical cache misses;
+  completion wakes followers with the confirmed publication outcome.
 
 `selectIdentity` logic:
 

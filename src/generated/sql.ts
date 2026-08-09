@@ -31,7 +31,10 @@ export const queries = {
   getCacheFill: "SELECT owner_token, expires_at\nFROM cache_fills\nWHERE cache_key = ?",
   upsertCacheFill:
     "INSERT INTO cache_fills (cache_key, owner_token, expires_at)\nVALUES (?1, ?2, ?3)\nON CONFLICT(cache_key) DO UPDATE SET\n  owner_token = excluded.owner_token,\n  expires_at = excluded.expires_at",
-  deleteCacheFill: "DELETE FROM cache_fills\nWHERE cache_key = ?1\n  AND owner_token = ?2",
+  renewCacheFill:
+    "UPDATE cache_fills\nSET expires_at = ?3\nWHERE cache_key = ?1\n  AND owner_token = ?2\n  AND expires_at > ?4",
+  completeCacheFill:
+    "DELETE FROM cache_fills\nWHERE cache_key = ?1\n  AND owner_token = ?2\n  AND expires_at > ?3",
   authenticateCaller:
     "SELECT callers.id, callers.name, callers.github_login, callers.org_login, callers.org_verified_at,\n       caller_tokens.id AS caller_token_id, caller_tokens.client_name\nFROM caller_tokens\nJOIN callers ON callers.id = caller_tokens.caller_id\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE caller_tokens.token_hash = ?1\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?2\nLIMIT 1",
   updateCallerOrgVerifiedAt:

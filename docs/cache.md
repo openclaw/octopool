@@ -60,7 +60,10 @@ Bodies whose serialized JSON exceeds 256 KiB (paged run lists, check-run sweeps)
 stored only in the data-center-local edge cache, not in D1: megabyte-class row writes
 were the dominant cause of `D1 DB is overloaded` queueing under paged bursts. Oversized
 entries lose cross-colo sharing and D1 stale fallback but keep the hot same-client
-repoll pattern warm.
+repoll pattern warm. A same-colo follower serves the confirmed edge publication directly;
+a follower in a cold colo reacquires coordinator ownership and performs one serialized
+takeover fill. This can produce one fill per cold colo, but never overlapping ownerless
+upstream requests.
 
 Cacheable requests can instead bound acceptable staleness with a
 `cache-control: max-age=N` header. A fresh entry older than `N` seconds is treated as a
@@ -243,11 +246,17 @@ get up to an hour; immutable-ish commit views can get up to a day. Stale serves 
 the public-repo guard and active-identity check before returning.
 
 Cache publication is awaited before returning a miss response, closing the response/write
-race for immediate repeat reads. Concurrent identical misses also claim a short pool-scoped
-fill lease in the Durable Object; followers wait for the leader's publication and serve
-the resulting hit instead of duplicating the GitHub request. Public-repository proof
-refreshes use the same coordinator pattern, so simultaneous expired-proof checks share one
-GitHub request. Audit writes remain deferred.
+race for immediate repeat reads. Concurrent identical misses acquire renewable,
+token-fenced ownership in the pool Durable Object. Followers wait on coordinator completion,
+not Cache API or D1 polling. `shared` completion triggers one edge+D1 read; `edge_only`
+triggers one local-edge read; an absent promised result, `failed` publication, owner expiry,
+or Durable Object recovery returns to atomic acquisition before any upstream work. Owners
+renew while valid upstream calls run, verify ownership immediately before publication, and
+complete before audit work; stale tokens cannot publish completion or release a newer owner.
+Public-repository proof refreshes use the same acquisition, renewal, completion, and fencing
+lifecycle on the pool coordinator colocated with the D1 primary, reporting `shared` only after
+confirmed D1 persistence. Edge-only publication remains local to the serving colo. Audit writes
+remain deferred.
 An hourly scheduled task deletes cache entries after each entry's route-specific
 `stale_expires_at` deadline in bounded batches, preserving every configured stale-serving
 window while keeping D1 growth bounded. R2 expiry is handled by the operator-configured

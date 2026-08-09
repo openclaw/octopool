@@ -1,128 +1,203 @@
 import { describe, expect, it, vi } from "vitest";
-import { coalesceGitHubCacheMiss, finishGitHubCacheFill } from "../src/cache-coalesce";
+import { coalesceGitHubCacheMiss } from "../src/cache-coalesce";
+import { acquireOwnedCacheFill } from "../src/cache-fill";
+import type { GitHubCacheRead } from "../src/cache";
+import { fakeCacheFillCoordinator } from "./cache-fill-test-support";
 
 describe("cache miss coalescing", () => {
-  it("lets the first request lead the fill", async () => {
-    const coordinator = {
-      claimCacheFill: vi.fn(async () => "lease-token"),
-      finishCacheFill: vi.fn(async () => undefined),
-    };
-    const result = await coalesceGitHubCacheMiss(env([]), coordinator as never, "cache-key");
+  it("rechecks the cache after becoming the owner", async () => {
+    const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "leader" }]);
+    const readShared = vi.fn(async () => undefined);
 
-    expect(result).toEqual({ leaseToken: "lease-token" });
-    expect(coordinator.claimCacheFill).toHaveBeenCalledWith("cache-key");
-  });
-
-  it("waits for a concurrent leader to publish", async () => {
-    const coordinator = {
-      claimCacheFill: vi.fn(async () => null),
-      finishCacheFill: vi.fn(async () => undefined),
-    };
-    const cached = {
-      status: 200,
-      response_headers_json: "{}",
-      body_json: '{"status":"completed"}',
-      body_encoding: "json",
-      identity_id: null,
-      identity_kind: null,
-      created_at: "2026-06-14 00:00:00",
-      expires_at: "2026-06-14 01:00:00",
-    };
-    const result = await coalesceGitHubCacheMiss(
-      env([null, cached]),
-      coordinator as never,
-      "cache-key",
-      {
-        waitMs: 10,
-        pollMs: 1,
-        sleep: async () => undefined,
-      },
-    );
-
-    expect(result).toMatchObject({
-      cached: { status: 200, body: { status: "completed" } },
+    const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+      readShared,
     });
+
+    expect(result.owner?.token).toBe("leader");
+    expect(readShared).toHaveBeenCalledOnce();
+    await result.owner?.fail();
+    expect(coordinator.completeCacheFill).toHaveBeenCalledWith("cache-key", "leader", "failed");
   });
 
-  it("ignores published entries older than the requested max-age while waiting", async () => {
-    const coordinator = {
-      claimCacheFill: vi.fn(async () => null),
-      finishCacheFill: vi.fn(async () => undefined),
-    };
-    const aged = {
-      status: 200,
-      response_headers_json: "{}",
-      body_json: '{"head":{"sha":"old"}}',
-      body_encoding: "json",
-      identity_id: null,
-      identity_kind: null,
-      created_at: sqliteUTC(Date.now() - 60_000),
-      expires_at: sqliteUTC(Date.now() + 60_000),
-    };
-    const result = await coalesceGitHubCacheMiss(
-      env([aged, aged, aged]),
-      coordinator as never,
-      "cache-key",
-      {
-        waitMs: 3,
-        pollMs: 1,
-        maxAgeSeconds: 20,
-        sleep: async () => undefined,
+  it.each([
+    {
+      name: "shared-cache recheck",
+      readShared: async () => {
+        throw new Error("recheck failed");
       },
-    );
+      acceptCached: undefined,
+    },
+    {
+      name: "cached acceptance",
+      readShared: async () => sharedRead(),
+      acceptCached: async () => {
+        throw new Error("acceptance failed");
+      },
+    },
+  ])("fails an acquired owner when $name throws", async ({ readShared, acceptCached }) => {
+    vi.useFakeTimers();
+    try {
+      const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "leader" }]);
+      await expect(
+        coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+          readShared,
+          ...(acceptCached === undefined ? {} : { acceptCached }),
+        }),
+      ).rejects.toThrow();
 
-    expect(result).toEqual({});
+      expect(coordinator.completeCacheFill).toHaveBeenCalledWith("cache-key", "leader", "failed");
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(coordinator.renewCacheFill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("only releases fills owned by the current request", async () => {
-    const coordinator = {
-      claimCacheFill: vi.fn(async () => "leader-token"),
-      finishCacheFill: vi.fn(async () => undefined),
-    };
+  it("rereads the shared cache once after completion", async () => {
+    const coordinator = fakeCacheFillCoordinator([{ kind: "completed", outcome: "shared" }]);
+    const readShared = vi.fn(async () => sharedRead());
+    const readEdge = vi.fn(async () => undefined);
 
-    await finishGitHubCacheFill(coordinator as never, "leader", "leader-token");
-    await finishGitHubCacheFill(coordinator as never, "follower", undefined);
+    const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+      readShared,
+      readEdge,
+    });
 
-    expect(coordinator.finishCacheFill).toHaveBeenCalledTimes(1);
-    expect(coordinator.finishCacheFill).toHaveBeenCalledWith("leader", "leader-token");
+    expect(result.cached).toMatchObject({ body: { status: "completed" } });
+    expect(readShared).toHaveBeenCalledOnce();
+    expect(readEdge).not.toHaveBeenCalled();
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledOnce();
   });
 
-  it("does not replace relay failures when cleanup fails", async () => {
-    const coordinator = {
-      claimCacheFill: vi.fn(async () => "lease-token"),
-      finishCacheFill: vi.fn(async () => {
-        throw new Error("coordinator unavailable");
-      }),
-    };
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("serves an edge-only completion from the same colo without D1", async () => {
+    const coordinator = fakeCacheFillCoordinator([{ kind: "completed", outcome: "edge_only" }]);
+    const readShared = vi.fn(async () => undefined);
+    const readEdge = vi.fn(async () => sharedRead().cached);
 
-    await expect(
-      finishGitHubCacheFill(coordinator as never, "cache-key", "lease-token"),
-    ).resolves.toBeUndefined();
-    expect(consoleError).toHaveBeenCalledWith(
-      "github cache fill cleanup failed",
-      expect.any(Error),
-    );
-    consoleError.mockRestore();
+    const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+      readShared,
+      readEdge,
+    });
+
+    expect(result.cached).toMatchObject({ body: { status: "completed" } });
+    expect(readEdge).toHaveBeenCalledOnce();
+    expect(readShared).not.toHaveBeenCalled();
+  });
+
+  it("reacquires immediately after an edge-only remote-colo miss", async () => {
+    const coordinator = fakeCacheFillCoordinator([
+      { kind: "completed", outcome: "edge_only" },
+      { kind: "owner", token: "takeover" },
+    ]);
+    const readShared = vi.fn(async () => undefined);
+    const readEdge = vi.fn(async () => undefined);
+
+    const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+      readShared,
+      readEdge,
+    });
+
+    expect(result.owner?.token).toBe("takeover");
+    expect(readEdge).toHaveBeenCalledOnce();
+    expect(readShared).toHaveBeenCalledOnce();
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledTimes(2);
+    await result.owner?.fail();
+  });
+
+  it("does not read either cache as a completion channel after failed publication", async () => {
+    const coordinator = fakeCacheFillCoordinator([
+      { kind: "completed", outcome: "failed" },
+      { kind: "owner", token: "retry-owner" },
+    ]);
+    const readShared = vi.fn(async () => undefined);
+    const readEdge = vi.fn(async () => undefined);
+
+    const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+      readShared,
+      readEdge,
+    });
+
+    expect(result.owner?.token).toBe("retry-owner");
+    expect(readShared).toHaveBeenCalledOnce();
+    expect(readEdge).not.toHaveBeenCalled();
+    await result.owner?.fail();
+  });
+
+  it("blocks stale completion after renewal loss", async () => {
+    vi.useFakeTimers();
+    try {
+      const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "lost-owner" }]);
+      coordinator.renewCacheFill.mockResolvedValueOnce(false);
+      const acquisition = await acquireOwnedCacheFill(coordinator, "cache-key");
+      expect(acquisition.kind).toBe("owner");
+      if (acquisition.kind !== "owner") {
+        return;
+      }
+
+      await expect(acquisition.owner.renew()).resolves.toBe(false);
+      await expect(acquisition.owner.complete("shared")).resolves.toBe(false);
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(coordinator.renewCacheFill).toHaveBeenCalledOnce();
+      expect(coordinator.completeCacheFill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reuses one in-flight final renewal and leaves no queued timer after publication", async () => {
+    vi.useFakeTimers();
+    try {
+      const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "leader" }]);
+      let resolveRenewal!: (renewed: boolean) => void;
+      const renewal = new Promise<boolean>((resolve) => {
+        resolveRenewal = resolve;
+      });
+      coordinator.renewCacheFill.mockReturnValue(renewal);
+      const acquisition = await acquireOwnedCacheFill(coordinator, "cache-key");
+      expect(acquisition.kind).toBe("owner");
+      if (acquisition.kind !== "owner") {
+        return;
+      }
+
+      const explicitRenewal = acquisition.owner.renew();
+      const publication = acquisition.owner.publish(async () => "shared");
+      expect(coordinator.renewCacheFill).toHaveBeenCalledOnce();
+      resolveRenewal(true);
+      await expect(explicitRenewal).resolves.toBe(true);
+      await expect(publication).resolves.toBe("shared");
+      expect(coordinator.completeCacheFill).toHaveBeenCalledWith("cache-key", "leader", "shared");
+
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(coordinator.renewCacheFill).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-enters acquisition after a waiting RPC is reset", async () => {
+    const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "recovered-owner" }]);
+    coordinator.acquireCacheFill.mockRejectedValueOnce(new Error("Durable Object reset"));
+
+    const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+      readShared: async () => undefined,
+    });
+
+    expect(result.owner?.token).toBe("recovered-owner");
+    expect(coordinator.acquireCacheFill).toHaveBeenCalledTimes(2);
+    await result.owner?.fail();
   });
 });
 
-function sqliteUTC(ms: number): string {
-  return new Date(ms)
-    .toISOString()
-    .replace("T", " ")
-    .replace(/\.\d{3}Z$/, "");
-}
-
-function env(rows: unknown[]): Env {
-  let index = 0;
+function sharedRead(): GitHubCacheRead {
   return {
-    DB: {
-      prepare: () => ({
-        bind: () => ({
-          first: async () => rows[index++] ?? null,
-        }),
-      }),
+    source: "shared",
+    cached: {
+      status: 200,
+      headers: {},
+      body: { status: "completed" },
+      body_encoding: "json",
+      created_at: "2026-08-09 00:00:00",
+      expires_at: "2026-08-09 01:00:00",
     },
-  } as unknown as Env;
+  };
 }

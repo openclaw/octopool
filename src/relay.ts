@@ -9,7 +9,8 @@ import {
   shouldUseGitHubCache,
   writeGitHubCache,
 } from "./cache";
-import { coalesceGitHubCacheMiss, finishGitHubCacheFill } from "./cache-coalesce";
+import { coalesceGitHubCacheMiss } from "./cache-coalesce";
+import type { CacheFillOutcome, OwnedCacheFill } from "./cache-fill";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";
 import { supportsAnonymousGitHubAPI } from "./github-public-api";
@@ -91,7 +92,7 @@ type ActiveRelay = RelayBase & {
   sharedCacheKey: string | undefined;
   cacheKey: string | undefined;
   attemptedIdentityCacheKeys: { cacheKey: string; identity: Pick<Identity, "id" | "kind"> }[];
-  cacheFillToken: string | undefined;
+  cacheFill: OwnedCacheFill | undefined;
   cacheStatus: "miss" | "bypass";
   cacheable: boolean;
   identity: Identity | undefined;
@@ -167,9 +168,7 @@ async function relayGitHubRequest(
   } catch (error) {
     return await handleRelayError(base, active, error);
   } finally {
-    if (active?.cacheKey !== undefined) {
-      await finishGitHubCacheFill(active.coordinator, active.cacheKey, active.cacheFillToken);
-    }
+    await active?.cacheFill?.fail();
   }
 }
 
@@ -209,7 +208,7 @@ async function prepareRelay(
     sharedCacheKey: cacheKey,
     cacheKey,
     attemptedIdentityCacheKeys: [],
-    cacheFillToken: undefined,
+    cacheFill: undefined,
     cacheStatus: cacheKey === undefined ? "bypass" : "miss",
     cacheable: cacheKey !== undefined,
     identity: undefined,
@@ -340,26 +339,20 @@ async function coalesceRelayCacheMiss(
   if (state.cacheKey === undefined) {
     return undefined;
   }
-  const fill = await coalesceGitHubCacheMiss(
-    state.env,
-    state.coordinator,
-    state.cacheKey,
-    state.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: state.maxAgeSeconds },
-  );
-  state.cacheFillToken = fill.leaseToken;
-  if (
-    fill.cached === undefined ||
-    !(await cachedResponseAvailable(
-      state.env,
-      state.request.pool,
-      state.route,
-      fill.cached,
-      state.coordinator,
-      state.identity,
-    ))
-  ) {
-    return undefined;
-  }
+  const fill = await coalesceGitHubCacheMiss(state.env, state.coordinator, state.cacheKey, {
+    ctx: state.ctx,
+    ...(state.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: state.maxAgeSeconds }),
+    acceptCached: (cached) =>
+      cachedResponseAvailable(
+        state.env,
+        state.request.pool,
+        state.route,
+        cached,
+        state.coordinator,
+        state.identity,
+      ),
+  });
+  state.cacheFill = fill.owner;
   return fill.cached;
 }
 
@@ -367,8 +360,7 @@ async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response |
   try {
     return await attemptStaleRelayCacheRevalidation(state);
   } catch {
-    await restoreAfterFailedRevalidation(state);
-    return undefined;
+    return restoreSharedCacheFill(state);
   }
 }
 
@@ -391,7 +383,7 @@ async function attemptStaleRelayCacheRevalidation(
 
   const usesTokenFreeAPI = supportsAnonymousGitHubAPI(state.request, state.route);
   if (usesTokenFreeAPI || capabilities.fallback === "github_public") {
-    if (state.cacheFillToken === undefined) {
+    if (state.cacheFill === undefined) {
       const coalesced = await coalesceRelayCacheMiss(state);
       if (coalesced !== undefined) {
         return serveCachedGitHubResponse(
@@ -400,7 +392,7 @@ async function attemptStaleRelayCacheRevalidation(
           cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
         );
       }
-      if (state.cacheFillToken === undefined) {
+      if (state.cacheFill === undefined) {
         return restoreSharedCacheFill(state);
       }
     }
@@ -445,25 +437,13 @@ async function attemptStaleRelayCacheRevalidation(
   await switchRelayCacheKey(state, identityCacheKey);
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
-    if (
-      await cachedResponseAvailable(
-        state.env,
-        state.request.pool,
-        state.route,
-        coalesced,
-        state.coordinator,
-        identity,
-      )
-    ) {
-      return serveCachedGitHubResponse(
-        state.env,
-        state.ctx,
-        cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
-      );
-    }
-    return restoreSharedCacheFill(state);
+    return serveCachedGitHubResponse(
+      state.env,
+      state.ctx,
+      cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
+    );
   }
-  if (state.cacheFillToken === undefined) {
+  if (state.cacheFill === undefined) {
     return restoreSharedCacheFill(state);
   }
   const github = await callRevalidationAPI(state, candidates[0]!, false, identity);
@@ -587,29 +567,6 @@ async function finishRevalidation(
   });
 }
 
-async function restoreAfterFailedRevalidation(state: ActiveRelay): Promise<void> {
-  if (
-    state.identity === undefined &&
-    state.cacheKey === state.sharedCacheKey &&
-    (state.cacheKey === undefined || state.cacheFillToken !== undefined)
-  ) {
-    return;
-  }
-  try {
-    state.identity = undefined;
-    await switchRelayCacheKey(state, state.sharedCacheKey);
-    if (state.cacheKey !== undefined && state.cacheFillToken === undefined) {
-      state.cacheFillToken = (await state.coordinator.claimCacheFill(state.cacheKey)) ?? undefined;
-    }
-  } catch {
-    state.identity = undefined;
-    state.cacheKey = state.sharedCacheKey;
-    state.cacheFillToken = undefined;
-    state.cacheStatus = state.sharedCacheKey === undefined ? "bypass" : "miss";
-    state.cacheable = state.sharedCacheKey !== undefined;
-  }
-}
-
 async function restoreSharedCacheFill(state: ActiveRelay): Promise<Response | undefined> {
   const coalesced = await restoreSharedCacheFillState(state);
   if (coalesced === undefined) {
@@ -636,11 +593,11 @@ async function restoreSharedCacheFillState(
   state: ActiveRelay,
 ): Promise<CachedGitHubResponse | undefined> {
   state.identity = undefined;
-  if (state.cacheKey === state.sharedCacheKey && state.cacheKey !== undefined) {
-    await finishGitHubCacheFill(state.coordinator, state.cacheKey, state.cacheFillToken);
-    state.cacheFillToken = undefined;
-  } else {
+  if (state.cacheKey !== state.sharedCacheKey) {
     await switchRelayCacheKey(state, state.sharedCacheKey);
+  }
+  if (state.cacheKey === undefined || state.cacheFill !== undefined) {
+    return undefined;
   }
   return coalesceRelayCacheMiss(state);
 }
@@ -759,10 +716,10 @@ async function switchRelayCacheKey(
     return;
   }
   if (state.cacheKey !== undefined) {
-    await finishGitHubCacheFill(state.coordinator, state.cacheKey, state.cacheFillToken);
+    await state.cacheFill?.fail();
   }
   state.cacheKey = cacheKey;
-  state.cacheFillToken = undefined;
+  state.cacheFill = undefined;
   state.cacheStatus = cacheKey === undefined ? "bypass" : "miss";
   state.cacheable = cacheKey !== undefined;
 }
@@ -773,15 +730,23 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   if (completedRunJobsResponse(result.github)) {
     state.route = await proveRunAttemptCompleted(state);
   }
-  if (state.cacheKey !== undefined) {
-    await publishGitHubCache(
-      state.env,
-      state.cacheKey,
-      state.cacheRequest,
-      state.route,
-      result.github,
-      result.identity,
+  const cacheKey = state.cacheKey;
+  if (cacheKey !== undefined) {
+    const owner = state.cacheFill;
+    if (owner === undefined) {
+      throw new Error("cache fill upstream work completed without ownership");
+    }
+    await owner.publish(() =>
+      publishGitHubCache(
+        state.env,
+        cacheKey,
+        state.cacheRequest,
+        state.route,
+        result.github,
+        result.identity,
+      ),
     );
+    state.cacheFill = undefined;
   }
   if (
     !state.runListExactFallback &&
@@ -1126,11 +1091,12 @@ async function publishGitHubCache(
   route: Parameters<typeof writeGitHubCache>[3],
   response: Parameters<typeof writeGitHubCache>[4],
   identity?: Identity,
-): Promise<void> {
+): Promise<CacheFillOutcome> {
   try {
-    await writeGitHubCache(env, cacheKey, request, route, response, identity);
+    return await writeGitHubCache(env, cacheKey, request, route, response, identity);
   } catch (error) {
     console.error("github cache write failed", error);
+    return "failed";
   }
 }
 

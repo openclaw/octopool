@@ -676,7 +676,9 @@ describe("github cache policy", () => {
       },
     } as unknown as Env;
 
-    await writeGitHubCache(env, "cache-key", request, route, response({ number: 42 }));
+    await expect(
+      writeGitHubCache(env, "cache-key", request, route, response({ number: 42 })),
+    ).resolves.toBe("shared");
 
     expect(run).toHaveBeenCalledOnce();
     expect(put).toHaveBeenCalledOnce();
@@ -713,25 +715,91 @@ describe("github cache policy", () => {
       },
     } as unknown as Env;
 
-    await writeGitHubCache(
-      env,
-      "cache-key",
-      request,
-      route,
-      response({ blob: "x".repeat(300_000) }),
-    );
+    await expect(
+      writeGitHubCache(env, "cache-key", request, route, response({ blob: "x".repeat(300_000) })),
+    ).resolves.toBe("edge_only");
 
     // 120k CJK chars pass a UTF-16 code-unit count but exceed the cap in UTF-8 bytes.
-    await writeGitHubCache(
-      env,
-      "cache-key-multibyte",
-      request,
-      route,
-      response({ blob: "语".repeat(120_000) }),
-    );
+    await expect(
+      writeGitHubCache(
+        env,
+        "cache-key-multibyte",
+        request,
+        route,
+        response({ blob: "语".repeat(120_000) }),
+      ),
+    ).resolves.toBe("edge_only");
 
     expect(run).not.toHaveBeenCalled();
     expect(put).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports failed when an edge-only cache put rejects", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put: vi.fn(async () => {
+          throw new Error("cache put rejected");
+        }),
+        delete: vi.fn(async () => true),
+      },
+    });
+    const run = vi.fn(async () => ({}));
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/42",
+    });
+    const route = classifyRoute(request, policy);
+    const env = {
+      DB: { prepare: () => ({ bind: () => ({ run }) }) },
+    } as unknown as Env;
+
+    await expect(
+      writeGitHubCache(env, "cache-key", request, route, response({ blob: "x".repeat(300_000) })),
+    ).resolves.toBe("failed");
+    expect(run).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(
+      "edge cache write failed",
+      expect.objectContaining({ namespace: "github-v1" }),
+    );
+  });
+
+  it("reports edge-only when D1 fails after a confirmed edge publication", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put: vi.fn(async () => undefined),
+        delete: vi.fn(async () => true),
+      },
+    });
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/42",
+    });
+    const route = classifyRoute(request, policy);
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            run: async () => {
+              throw new Error("D1 unavailable");
+            },
+          }),
+        }),
+      },
+    } as unknown as Env;
+
+    await expect(
+      writeGitHubCache(env, "cache-key", request, route, response({ number: 42 })),
+    ).resolves.toBe("edge_only");
+    expect(consoleError).toHaveBeenCalledWith(
+      "github shared cache write failed",
+      expect.any(Error),
+    );
   });
 
   it("serves only stale cache rows inside the route grace window", async () => {

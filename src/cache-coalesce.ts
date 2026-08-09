@@ -1,58 +1,59 @@
-import { readGitHubCache, type CachedGitHubResponse } from "./cache";
-import type { PoolCoordinator } from "./pool-coordinator";
-
-const CACHE_FILL_WAIT_MS = 4_000;
-const CACHE_FILL_POLL_MS = 100;
-
-type CacheFillCoordinator = Pick<
-  DurableObjectStub<PoolCoordinator>,
-  "claimCacheFill" | "finishCacheFill"
->;
+import {
+  readEdgeGitHubCache,
+  readGitHubCacheWithSource,
+  type CachedGitHubResponse,
+  type GitHubCacheRead,
+} from "./cache";
+import {
+  acquireOwnedCacheFill,
+  type CacheFillCoordinator,
+  type OwnedCacheFill,
+} from "./cache-fill";
 
 export async function coalesceGitHubCacheMiss(
   env: Env,
   coordinator: CacheFillCoordinator,
   cacheKey: string,
   options: {
-    waitMs?: number;
-    pollMs?: number;
+    ctx?: ExecutionContext;
     maxAgeSeconds?: number;
-    sleep?: (ms: number) => Promise<void>;
+    acceptCached?: (cached: CachedGitHubResponse) => Promise<boolean>;
+    readShared?: () => Promise<GitHubCacheRead | undefined>;
+    readEdge?: () => Promise<CachedGitHubResponse | undefined>;
   } = {},
-): Promise<{ leaseToken?: string; cached?: CachedGitHubResponse }> {
-  const leaseToken = await coordinator.claimCacheFill(cacheKey);
-  if (leaseToken !== null) {
-    return { leaseToken };
-  }
-  const waitMs = options.waitMs ?? CACHE_FILL_WAIT_MS;
-  const pollMs = options.pollMs ?? CACHE_FILL_POLL_MS;
-  const wait = options.sleep ?? sleep;
-  const deadline = Date.now() + waitMs;
-  while (Date.now() < deadline) {
-    await wait(pollMs);
-    const cached = await readGitHubCache(env, cacheKey, undefined, options.maxAgeSeconds);
-    if (cached !== undefined) {
+): Promise<{ owner?: OwnedCacheFill; cached?: CachedGitHubResponse }> {
+  const readShared =
+    options.readShared ??
+    (() => readGitHubCacheWithSource(env, cacheKey, options.ctx, options.maxAgeSeconds));
+  const readEdge = options.readEdge ?? (() => readEdgeGitHubCache(cacheKey, options.maxAgeSeconds));
+  const accepted = options.acceptCached ?? (async () => true);
+
+  for (;;) {
+    const acquisition = await acquireOwnedCacheFill(coordinator, cacheKey);
+    if (acquisition.kind === "owner") {
+      try {
+        const rechecked = await readShared();
+        if (rechecked !== undefined && (await accepted(rechecked.cached))) {
+          await acquisition.owner.complete(rechecked.source === "shared" ? "shared" : "edge_only");
+          return { cached: rechecked.cached };
+        }
+        return { owner: acquisition.owner };
+      } catch (error) {
+        await acquisition.owner.fail();
+        throw error;
+      }
+    }
+
+    let cached: CachedGitHubResponse | undefined;
+    if (acquisition.kind === "completed" && acquisition.outcome === "shared") {
+      cached = (await readShared())?.cached;
+    } else if (acquisition.kind === "completed" && acquisition.outcome === "edge_only") {
+      cached = await readEdge();
+    }
+    if (cached !== undefined && (await accepted(cached))) {
       return { cached };
     }
+    // Failed publication, owner expiry, or an unexpectedly absent completed
+    // result always returns to the coordinator before any upstream work.
   }
-  return {};
-}
-
-export async function finishGitHubCacheFill(
-  coordinator: CacheFillCoordinator,
-  cacheKey: string,
-  leaseToken: string | undefined,
-): Promise<void> {
-  if (leaseToken === undefined) {
-    return;
-  }
-  try {
-    await coordinator.finishCacheFill(cacheKey, leaseToken);
-  } catch (error) {
-    console.error("github cache fill cleanup failed", error);
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
