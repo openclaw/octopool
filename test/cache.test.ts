@@ -689,6 +689,51 @@ describe("github cache policy", () => {
     });
   });
 
+  it("keeps oversized bodies out of D1 while still writing the edge cache", async () => {
+    const put = vi.fn(async () => undefined);
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put,
+        delete: vi.fn(async () => true),
+      },
+    });
+    const run = vi.fn(async () => ({}));
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/42",
+    });
+    const route = classifyRoute(request, policy);
+    const env = {
+      DB: {
+        prepare: () => ({
+          bind: () => ({ run }),
+        }),
+      },
+    } as unknown as Env;
+
+    await writeGitHubCache(
+      env,
+      "cache-key",
+      request,
+      route,
+      response({ blob: "x".repeat(300_000) }),
+    );
+
+    // 120k CJK chars pass a UTF-16 code-unit count but exceed the cap in UTF-8 bytes.
+    await writeGitHubCache(
+      env,
+      "cache-key-multibyte",
+      request,
+      route,
+      response({ blob: "语".repeat(120_000) }),
+    );
+
+    expect(run).not.toHaveBeenCalled();
+    expect(put).toHaveBeenCalledTimes(2);
+  });
+
   it("serves only stale cache rows inside the route grace window", async () => {
     const route = classifyRoute(
       validateRelayRequest({

@@ -56,6 +56,12 @@ Only successful `2xx` responses on cacheable routes are stored. The edge + D1 ca
   dedicated R2 cache described below), or
 - the request carries a conditional header (`if-none-match` / `if-modified-since`).
 
+Bodies whose serialized JSON exceeds 256 KiB (paged run lists, check-run sweeps) are
+stored only in the data-center-local edge cache, not in D1: megabyte-class row writes
+were the dominant cause of `D1 DB is overloaded` queueing under paged bursts. Oversized
+entries lose cross-colo sharing and D1 stale fallback but keep the hot same-client
+repoll pattern warm.
+
 Cacheable requests can instead bound acceptable staleness with a
 `cache-control: max-age=N` header. A fresh entry older than `N` seconds is treated as a
 miss and refetched, and the refill writes through to the shared cache, so concurrent

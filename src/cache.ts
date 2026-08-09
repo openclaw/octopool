@@ -15,6 +15,12 @@ import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./t
 const TERMINAL_CI_TTL_SECONDS = 3_600;
 const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
 const EDGE_CACHE_NAMESPACE = "github-v1";
+// Megabyte-class bodies (paged run lists, check-run sweeps) are the dominant D1
+// write cost and the trigger for "D1 DB is overloaded" queueing under bursts.
+// The per-colo edge cache still serves the hot same-client repoll pattern, so
+// oversized bodies stay edge-only; they lose cross-colo sharing and D1 stale
+// fallback, which is the accepted tradeoff for keeping the primary responsive.
+const MAX_D1_CACHE_BODY_BYTES = 262_144;
 
 type CacheRow = {
   status: number;
@@ -205,29 +211,35 @@ export async function writeGitHubCache(
     expires_at: expiresAt,
     ...(identity === undefined ? {} : { identity: { id: identity.id, kind: identity.kind } }),
   };
-  await Promise.all([
-    env.DB.prepare(queries.writeGitHubCache)
-      .bind(
-        cacheKey,
-        request.pool,
-        request.method,
-        request.path,
-        JSON.stringify(stableRecord(request.query ?? {})),
-        JSON.stringify(stableRecord(cacheVaryHeaders(request.headers))),
-        route.routeKey,
-        route.kind,
-        response.status,
-        JSON.stringify(response.headers),
-        JSON.stringify(response.body),
-        response.body_encoding ?? "json",
-        identity?.id ?? null,
-        identity?.kind ?? null,
-        expiresAt,
-        staleExpiresAt,
-      )
-      .run(),
-    writeEdgeCachedResponse(cacheKey, cached),
-  ]);
+  const bodyJson = JSON.stringify(response.body);
+  const writes: Promise<unknown>[] = [writeEdgeCachedResponse(cacheKey, cached)];
+  // UTF-8 bytes, not String.length: UTF-16 code units undercount multibyte
+  // content by up to 3x, which would let Unicode-heavy rows past the cap.
+  if (new TextEncoder().encode(bodyJson).byteLength <= MAX_D1_CACHE_BODY_BYTES) {
+    writes.push(
+      env.DB.prepare(queries.writeGitHubCache)
+        .bind(
+          cacheKey,
+          request.pool,
+          request.method,
+          request.path,
+          JSON.stringify(stableRecord(request.query ?? {})),
+          JSON.stringify(stableRecord(cacheVaryHeaders(request.headers))),
+          route.routeKey,
+          route.kind,
+          response.status,
+          JSON.stringify(response.headers),
+          bodyJson,
+          response.body_encoding ?? "json",
+          identity?.id ?? null,
+          identity?.kind ?? null,
+          expiresAt,
+          staleExpiresAt,
+        )
+        .run(),
+    );
+  }
+  await Promise.all(writes);
 }
 
 function freshCachedResponse(cached: CachedGitHubResponse): boolean {
