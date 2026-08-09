@@ -9,12 +9,10 @@ describe("Worker error boundary", () => {
     const headerSecret = "header-secret-marker";
     const bodySecret = "body-secret-marker";
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn<typeof fetch>()
-        .mockRejectedValue(new Error(`failure ${querySecret} ${headerSecret} ${bodySecret}`)),
-    );
+    const failure = new Error(`synthetic failure\n${querySecret}\n${headerSecret}\n${bodySecret}`);
+    failure.name = `CustomError-${querySecret}`;
+    failure.stack = `${failure.stack ?? ""}\n    at ${headerSecret} (/tmp/${bodySecret}.ts:999:7)\n${querySecret}`;
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(failure));
 
     const response = await callWorker(`/v1/github/request?debug=${querySecret}`, {
       method: "POST",
@@ -38,7 +36,7 @@ describe("Worker error boundary", () => {
       request_id: string;
       method: string;
       pathname: string;
-      error: { name: string; stack?: string };
+      error: { name: string; frames?: { extension: string; line: number; column: number }[] };
     };
     expect(event).toMatchObject({
       event: "octopool.worker.unexpected_exception",
@@ -48,7 +46,12 @@ describe("Worker error boundary", () => {
       error: { name: "Error" },
     });
     expect(event.request_id).toBeTruthy();
-    expect(event.error.stack).toContain("worker-errors.test.ts");
+    expect(event.error.frames?.length).toBeGreaterThan(0);
+    expect(event.error.frames?.[0]).toEqual({
+      extension: "ts",
+      line: expect.any(Number),
+      column: expect.any(Number),
+    });
     const serializedEvent = JSON.stringify(event);
     expect(serializedEvent).not.toContain(querySecret);
     expect(serializedEvent).not.toContain(headerSecret);

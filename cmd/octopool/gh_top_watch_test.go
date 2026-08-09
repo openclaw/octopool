@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -636,6 +637,26 @@ func TestWatchTickBailsImmediatelyOnDeterministicRefusal(t *testing.T) {
 	}
 	if len(*sleeps) != 0 {
 		t.Fatalf("sleeps=%v, want none before deterministic refusal surfaces", *sleeps)
+	}
+}
+
+func TestWatchTickBailsImmediatelyOnTypedRelayError(t *testing.T) {
+	sleeps := recordWatchSleeps(t)
+	backoff := newWatchBackoff(30 * time.Second)
+	calls := 0
+	want := &relayResponseError{
+		Status:   http.StatusInternalServerError,
+		apiError: apiError{Code: "internal_error", RequestID: "request-final"},
+	}
+	err := retryWatchTick(t.Context(), &backoff, func() error {
+		calls++
+		return want
+	})
+	if err != want || calls != 1 {
+		t.Fatalf("err=%v calls=%d, want final typed relay error once", err, calls)
+	}
+	if len(*sleeps) != 0 {
+		t.Fatalf("sleeps=%v, want none after client retry exhaustion", *sleeps)
 	}
 }
 

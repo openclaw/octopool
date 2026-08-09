@@ -71,6 +71,12 @@ func retryWatchTick(ctx context.Context, backoff *watchBackoff, poll func() erro
 		if shouldRunRealGH(err) {
 			return err
 		}
+		// The relay client already exhausted its typed response retry policy.
+		// Watch retries remain for transport, parse, and operation-level failures.
+		var relay *relayResponseError
+		if errors.As(err, &relay) {
+			return err
+		}
 		if attempt+1 < watchMaxErrors {
 			if sleepErr := backoff.sleep(ctx); sleepErr != nil {
 				return sleepErr
