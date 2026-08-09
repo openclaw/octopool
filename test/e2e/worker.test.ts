@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { PoolCoordinator } from "../../src/index";
+import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import type { CoordinatorSnapshot } from "../../src/types";
 import {
@@ -214,7 +215,7 @@ describe("Worker end-to-end relay", () => {
     expect(tokens).toContain("test-primary-token");
     expect(tokens).toContain("test-secondary-token");
 
-    const coordinator = env.POOL_COORDINATOR.getByName(`pool:${POOL}`);
+    const coordinator = poolCoordinatorStub(env, POOL);
     const snapshot = await runInDurableObject(
       coordinator,
       (instance: PoolCoordinator): CoordinatorSnapshot => instance.snapshot(),
