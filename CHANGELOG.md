@@ -10,6 +10,7 @@
 
 ### Changes
 
+- Move the primary data region to Western North America: new `wnam` D1 database (config, tokens, identities, proofs, and audit history migrated; cache rebuilt) and a relocated pool coordinator, cutting ~140ms of transatlantic latency from every D1/coordinator round trip for US callers.
 - Redesign the operator dashboard as an editorial ledger: serif display type, hairline-rule sections, tick-marked rate gauges with low-headroom coloring, and right-aligned tabular numerals.
 
 ## 0.5.5 - 2026-08-08

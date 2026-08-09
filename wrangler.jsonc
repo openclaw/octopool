@@ -26,8 +26,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "octopool",
-      "database_id": "28122808-8a3c-4524-a1c0-70b5984744b7",
+      "database_name": "octopool-wnam",
+      "database_id": "a4b252b5-2553-4896-b33a-14689a2152be",
     },
   ],
   "r2_buckets": [

@@ -21,7 +21,7 @@ import { HttpError, jsonResponse, parseJsonObject } from "./http";
 import { isRecord } from "./object";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
-import type { PoolCoordinator } from "./pool-coordinator";
+import { poolCoordinatorStub, type PoolCoordinator } from "./pool-coordinator";
 import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import {
   anonymousGitHubResponseProvesPublicRepo,
@@ -158,7 +158,7 @@ async function relayGitHubRequest(
     callerId: caller.id,
     callerTokenId: caller.caller_token_id,
     clientName: caller.client_name,
-    coordinator: env.POOL_COORDINATOR.getByName(`pool:${relayRequest.pool}`),
+    coordinator: poolCoordinatorStub(env, relayRequest.pool),
   };
   let active: ActiveRelay | undefined;
   try {

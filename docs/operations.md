@@ -49,11 +49,17 @@ because `octopool.dev` lives in a different Cloudflare account from the authorit
 ### 2. Create the data plane
 
 ```sh
-wrangler d1 create octopool
+# pick the location hint nearest your callers (e.g. wnam, enam, weur);
+# D1 location is fixed at creation and cannot be changed later
+wrangler d1 create octopool --location wnam
 # copy the printed database_id into wrangler.jsonc d1_databases[].database_id
 
 wrangler d1 migrations apply octopool --remote
 ```
+
+The pool coordinator's location hint in `src/pool-coordinator.ts`
+(`poolCoordinatorStub`) should match the D1 location so per-request coordinator
+calls do not cross regions.
 
 The `PoolCoordinator` Durable Object class is provisioned by the migration tag in
 `wrangler.jsonc` on first `wrangler deploy` — no separate step.

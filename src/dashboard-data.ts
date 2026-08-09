@@ -6,6 +6,7 @@ import {
   type CacheTotalsRow,
   type UsageAggregateRow,
 } from "./metrics";
+import { poolCoordinatorStub } from "./pool-coordinator";
 import { requireDashboardAdmin } from "./web-session";
 
 export async function dashboardData(request: Request, env: Env): Promise<Response> {
@@ -15,7 +16,7 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
     throw new HttpError(400, "pool_invalid", "Pool id is invalid");
   }
   const operator = await requireDashboardAdmin(request, env, pool);
-  const coordinator = env.POOL_COORDINATOR.getByName(`pool:${pool}`);
+  const coordinator = poolCoordinatorStub(env, pool);
   const [
     identities,
     cache,
