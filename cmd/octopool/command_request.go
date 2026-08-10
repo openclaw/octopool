@@ -11,9 +11,7 @@ import (
 func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("request", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	url := fs.String("url", defaultAuthURL(authFile{}), "Octopool base URL")
-	pool := fs.String("pool", defaultAuthPool(authFile{}), "pool id")
-	tokenEnv := fs.String("token-env", "OCTOPOOL_TOKEN", "caller token env var")
+	requestFlags := newCallerRequestFlags(fs)
 	method := fs.String("method", "GET", "GitHub method")
 	path := fs.String("path", "", "GitHub API path")
 	queryValues := multiFlag{}
@@ -27,23 +25,19 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	} else if handled {
 		return nil
 	}
-	auth, err := loadAuth()
+	auth, err := requestFlags.applyAuth(fs)
 	if err != nil {
 		return err
 	}
-	applyAuthFlagDefaults(fs, auth, url, pool)
 	if *path == "" {
 		return errors.New("--path is required")
 	}
-	if err := validateAuthURLForRequest(auth, *url, *tokenEnv); err != nil {
-		return err
-	}
-	token, err := callerToken(*tokenEnv)
+	token, err := requestFlags.authorize(auth)
 	if err != nil {
 		return err
 	}
 	body := map[string]any{
-		"pool":   *pool,
+		"pool":   *requestFlags.pool,
 		"method": strings.ToUpper(*method),
 		"path":   *path,
 	}
@@ -56,7 +50,7 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(routeHintValues) > 0 {
 		body["route_hint"] = valuesMap(routeHintValues)
 	}
-	return postJSON(ctx, stdout, apiURL(*url, "/v1/github/request"), token, body)
+	return postJSON(ctx, stdout, apiURL(*requestFlags.baseURL, "/v1/github/request"), token, body)
 }
 
 type multiFlag []string

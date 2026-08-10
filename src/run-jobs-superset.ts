@@ -1,4 +1,5 @@
 import { PUBLIC_SHAPES } from "./github-public-shapes";
+import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-public-utils";
 import { isRecord } from "./object";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
@@ -25,15 +26,13 @@ export function runJobsSupersetView(
   const query = request.query ?? {};
   const allowed = new Set(["filter", "page", "per_page"]);
   if (
-    Object.entries(query).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    ) ||
-    (query.page !== undefined && query.page !== "1") ||
+    !validScalarQuery(query, allowed) ||
+    !firstPageQuery(query) ||
     (query.filter !== undefined && query.filter !== "latest")
   ) {
     return undefined;
   }
-  const limit = pageSize(query.per_page);
+  const limit = boundedPageSize(query.per_page, { strict: true });
   if (query.per_page !== undefined && limit === undefined) {
     return undefined;
   }
@@ -138,14 +137,4 @@ export function filterRunJobsSuperset(
       jobs: response.body.jobs.slice(0, view.limit),
     },
   };
-}
-
-function pageSize(value: string | string[] | undefined): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (Array.isArray(value) || !/^(?:[1-9]|[1-9][0-9]|100)$/.test(value)) {
-    return undefined;
-  }
-  return Number(value);
 }

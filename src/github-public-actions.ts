@@ -1,6 +1,14 @@
 import { responseCapBytes } from "./github-limits";
 import { decodeURIComponentSafe, encodedPathSegments } from "./github-path";
-import { parseJSONBytes, publicJSONResponse, scalarQuery } from "./github-public-utils";
+import {
+  boundedPageSize,
+  firstPageQuery,
+  htmlWebRequest,
+  parseJSONBytes,
+  publicJSONResponse,
+  scalarQuery,
+  validScalarQuery,
+} from "./github-public-utils";
 import { defaultGitHubJSONAccept } from "./github-response";
 import {
   parseActionsJobGroupsJSON,
@@ -72,36 +80,30 @@ function actionsRunListRequest(
   if (query.search !== "") {
     url.searchParams.set("query", query.search);
   }
-  return {
-    url: url.toString(),
-    headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env),
-    usesApiQuota: false,
-    payload: async (body, headers, status) => {
-      const parsed = parseActionsRunListHTML(
-        new TextDecoder().decode(body),
-        route.owner!,
-        route.repo!,
-      );
-      if (parsed === undefined) {
-        return undefined;
-      }
-      if (parsed.workflow_runs.length < Math.min(parsed.total_count, query.perPage)) {
-        return undefined;
-      }
-      parsed.workflow_runs = parsed.workflow_runs.slice(0, query.perPage);
-      const runs = await Promise.all(
-        parsed.workflow_runs.map((run) =>
-          isFullGitSHA(run.head_sha) ? run : enrichActionsRun(env, route, run),
-        ),
-      );
-      if (runs.some((run) => run === undefined)) {
-        return undefined;
-      }
-      parsed.workflow_runs = runs as Record<string, unknown>[];
-      return publicJSONResponse(headers, status, parsed);
-    },
-  };
+  return htmlWebRequest(env, url.toString(), async (body, headers, status) => {
+    const parsed = parseActionsRunListHTML(
+      new TextDecoder().decode(body),
+      route.owner!,
+      route.repo!,
+    );
+    if (parsed === undefined) {
+      return undefined;
+    }
+    if (parsed.workflow_runs.length < Math.min(parsed.total_count, query.perPage)) {
+      return undefined;
+    }
+    parsed.workflow_runs = parsed.workflow_runs.slice(0, query.perPage);
+    const runs = await Promise.all(
+      parsed.workflow_runs.map((run) =>
+        isFullGitSHA(run.head_sha) ? run : enrichActionsRun(env, route, run),
+      ),
+    );
+    if (runs.some((run) => run === undefined)) {
+      return undefined;
+    }
+    parsed.workflow_runs = runs as Record<string, unknown>[];
+    return publicJSONResponse(headers, status, parsed);
+  });
 }
 
 function actionsRunRequest(
@@ -118,8 +120,9 @@ function actionsRunRequest(
   if (id === undefined) {
     return undefined;
   }
-  return {
-    url: `https://github.com/${encodedPathSegments([
+  return htmlWebRequest(
+    env,
+    `https://github.com/${encodedPathSegments([
       route.owner!,
       route.repo!,
       "actions",
@@ -127,10 +130,7 @@ function actionsRunRequest(
       id,
       ...(attempt === undefined ? [] : ["attempts", attempt]),
     ])}`,
-    headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env),
-    usesApiQuota: false,
-    payload: async (body, headers, status) => {
+    async (body, headers, status) => {
       const parsed = parseActionsRunHTML(
         new TextDecoder().decode(body),
         route.owner!,
@@ -141,7 +141,7 @@ function actionsRunRequest(
         parsed === undefined ? undefined : await completeActionsRunSHA(env, route, parsed);
       return complete === undefined ? undefined : publicJSONResponse(headers, status, complete);
     },
-  };
+  );
 }
 
 function actionsRunJobsRequest(
@@ -196,16 +196,11 @@ function actionsListQuery(
   query: Record<string, string | string[]> | undefined,
 ): { perPage: number; search: string } | undefined {
   const allowed = new Set(["per_page", "page", "branch", "status"]);
-  if (
-    Object.entries(query ?? {}).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    ) ||
-    (scalarQuery(query, "page") !== undefined && scalarQuery(query, "page") !== "1")
-  ) {
+  if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
     return undefined;
   }
-  const perPage = Number(scalarQuery(query, "per_page") ?? "25");
-  if (!Number.isInteger(perPage) || perPage < 1 || perPage > 25) {
+  const perPage = boundedPageSize(query?.per_page, { defaultValue: 25, max: 25 });
+  if (perPage === undefined) {
     return undefined;
   }
   if (scalarQuery(query, "branch") !== undefined || scalarQuery(query, "status") !== undefined) {
@@ -219,16 +214,14 @@ function actionsJobsQuery(
 ): { perPage: number } | undefined {
   const allowed = new Set(["per_page", "page", "filter"]);
   if (
-    Object.entries(query ?? {}).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    ) ||
-    (scalarQuery(query, "page") !== undefined && scalarQuery(query, "page") !== "1") ||
+    !validScalarQuery(query, allowed) ||
+    !firstPageQuery(query) ||
     (scalarQuery(query, "filter") !== undefined && scalarQuery(query, "filter") !== "latest")
   ) {
     return undefined;
   }
-  const perPage = Number(scalarQuery(query, "per_page") ?? "30");
-  return Number.isInteger(perPage) && perPage >= 1 && perPage <= 100 ? { perPage } : undefined;
+  const perPage = boundedPageSize(query?.per_page, { defaultValue: 30 });
+  return perPage === undefined ? undefined : { perPage };
 }
 
 async function enrichActionsRun(

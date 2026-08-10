@@ -1,7 +1,12 @@
 import { bytesToBase64 } from "./encoding";
 import { responseCapBytes } from "./github-limits";
 import { encodedPathSegments, safeRelativePath } from "./github-path";
-import { decodePathStrict, publicResponseHeaders, scalarQuery } from "./github-public-utils";
+import {
+  decodePathStrict,
+  publicJSONResponse,
+  publicResponseHeaders,
+  scalarQuery,
+} from "./github-public-utils";
 import { defaultGitHubJSONAccept } from "./github-response";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
@@ -90,30 +95,24 @@ export function rawContentRequest(
       const apiPath = `/repos/${route.owner}/${route.repo}/contents/${contentPath}`;
       const apiURL = `https://api.github.com${apiPath}?ref=${encodeURIComponent(ref)}`;
       const htmlURL = `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "blob", ref, contentPath])}`;
-      return {
-        status,
-        headers: publicResponseHeaders(headers, "application/json"),
-        body: {
-          type: "file",
-          encoding: "base64",
-          name: contentPath.split("/").at(-1) ?? contentPath,
-          path: contentPath,
-          sha,
-          size: body.byteLength,
-          content: bytesToBase64(body),
-          url: apiURL,
-          html_url: htmlURL,
-          git_url: `https://api.github.com/repos/${route.owner}/${route.repo}/git/blobs/${sha}`,
-          download_url: rawURL,
-          _links: {
-            self: apiURL,
-            git: `https://api.github.com/repos/${route.owner}/${route.repo}/git/blobs/${sha}`,
-            html: htmlURL,
-          },
+      return publicJSONResponse(headers, status, {
+        type: "file",
+        encoding: "base64",
+        name: contentPath.split("/").at(-1) ?? contentPath,
+        path: contentPath,
+        sha,
+        size: body.byteLength,
+        content: bytesToBase64(body),
+        url: apiURL,
+        html_url: htmlURL,
+        git_url: `https://api.github.com/repos/${route.owner}/${route.repo}/git/blobs/${sha}`,
+        download_url: rawURL,
+        _links: {
+          self: apiURL,
+          git: `https://api.github.com/repos/${route.owner}/${route.repo}/git/blobs/${sha}`,
+          html: htmlURL,
         },
-        body_encoding: "json",
-        backend: "web",
-      };
+      });
     },
   };
 }

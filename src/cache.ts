@@ -406,23 +406,11 @@ function completedRun(response?: GitHubRelayResponse): boolean {
 }
 
 function completedRunList(response?: GitHubRelayResponse): boolean {
-  if (!isRecord(response?.body) || !Array.isArray(response.body.workflow_runs)) {
-    return false;
-  }
-  return (
-    response.body.workflow_runs.length > 0 &&
-    response.body.workflow_runs.every((item) => isRecord(item) && item.status === "completed")
-  );
+  return completedCollection(response, "workflow_runs");
 }
 
 function completedJobs(response?: GitHubRelayResponse): boolean {
-  if (!isRecord(response?.body) || !Array.isArray(response.body.jobs)) {
-    return false;
-  }
-  return (
-    response.body.jobs.length > 0 &&
-    response.body.jobs.every((item) => isRecord(item) && item.status === "completed")
-  );
+  return completedCollection(response, "jobs");
 }
 
 function completedJob(response?: GitHubRelayResponse): boolean {
@@ -430,23 +418,19 @@ function completedJob(response?: GitHubRelayResponse): boolean {
 }
 
 function completedChecks(response?: GitHubRelayResponse): boolean {
-  if (!isRecord(response?.body) || !Array.isArray(response.body.check_runs)) {
-    return false;
-  }
-  return (
-    response.body.check_runs.length > 0 &&
-    response.body.check_runs.every((item) => isRecord(item) && item.status === "completed")
-  );
+  return completedCollection(response, "check_runs");
 }
 
 function completedCheckSuites(response?: GitHubRelayResponse): boolean {
-  if (!isRecord(response?.body) || !Array.isArray(response.body.check_suites)) {
+  return completedCollection(response, "check_suites");
+}
+
+function completedCollection(response: GitHubRelayResponse | undefined, key: string): boolean {
+  if (!isRecord(response?.body) || !Array.isArray(response.body[key])) {
     return false;
   }
-  return (
-    response.body.check_suites.length > 0 &&
-    response.body.check_suites.every((item) => isRecord(item) && item.status === "completed")
-  );
+  const items = response.body[key];
+  return items.length > 0 && items.every((item) => isRecord(item) && item.status === "completed");
 }
 
 function completedStatus(response?: GitHubRelayResponse): boolean {

@@ -1,6 +1,14 @@
 import { responseCapBytes } from "./github-limits";
 import { encodedPathSegments } from "./github-path";
-import { decodePathStrict, publicResponseHeaders, scalarQuery } from "./github-public-utils";
+import {
+  boundedPageSize,
+  decodePathStrict,
+  firstPageQuery,
+  htmlWebRequest,
+  publicJSONResponse,
+  scalarQuery,
+  validScalarQuery,
+} from "./github-public-utils";
 import { defaultGitHubJSONAccept } from "./github-response";
 import {
   parseIssueHTML,
@@ -106,61 +114,35 @@ export function summaryPageRequest(
     url = new URL(
       `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions"])}`,
     );
-    return {
-      url: url.toString(),
-      headers: { accept: "text/html", "user-agent": "octopool" },
-      capBytes: responseCapBytes(env),
-      usesApiQuota: false,
-      payload: async (body, headers, status) => {
-        const html = new TextDecoder().decode(body);
-        const workflows = await completeWorkflowList(env, route, html);
-        if (workflows === undefined) {
-          return undefined;
-        }
-        const bodyValue =
-          route.kind === "workflow_view"
-            ? workflows.find(
-                (workflow) =>
-                  String(workflow.id) === workflowRef ||
-                  workflow.path === `.github/workflows/${workflowRef}`,
-              )
-            : {
-                total_count: workflows.length,
-                workflows: workflows.slice(0, query.perPage),
-              };
-        if (bodyValue === undefined) {
-          return undefined;
-        }
-        return {
-          status,
-          headers: publicResponseHeaders(headers, "application/json"),
-          body: bodyValue,
-          body_encoding: "json",
-          backend: "web",
-        };
-      },
-    };
+    return htmlWebRequest(env, url.toString(), async (body, headers, status) => {
+      const html = new TextDecoder().decode(body);
+      const workflows = await completeWorkflowList(env, route, html);
+      if (workflows === undefined) {
+        return undefined;
+      }
+      const bodyValue =
+        route.kind === "workflow_view"
+          ? workflows.find(
+              (workflow) =>
+                String(workflow.id) === workflowRef ||
+                workflow.path === `.github/workflows/${workflowRef}`,
+            )
+          : {
+              total_count: workflows.length,
+              workflows: workflows.slice(0, query.perPage),
+            };
+      if (bodyValue === undefined) {
+        return undefined;
+      }
+      return publicJSONResponse(headers, status, bodyValue);
+    });
   } else {
     return undefined;
   }
-  return {
-    url: url.toString(),
-    headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env),
-    usesApiQuota: false,
-    payload: (body, headers, status) => {
-      const parsed = parse(new TextDecoder().decode(body));
-      return parsed === undefined
-        ? undefined
-        : {
-            status,
-            headers: publicResponseHeaders(headers, "application/json"),
-            body: parsed,
-            body_encoding: "json",
-            backend: "web",
-          };
-    },
-  };
+  return htmlWebRequest(env, url.toString(), (body, headers, status) => {
+    const parsed = parse(new TextDecoder().decode(body));
+    return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed);
+  });
 }
 
 async function completeWorkflowList(
@@ -210,11 +192,7 @@ function issueListPageQuery(
     kind === "issue"
       ? new Set(["per_page", "page", "state", "creator", "assignee", "labels"])
       : new Set(["per_page", "page", "state"]);
-  if (
-    Object.entries(query ?? {}).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    )
-  ) {
+  if (!validScalarQuery(query, allowed)) {
     return undefined;
   }
   const pageQuery = simplePageQuery(query, allowed);
@@ -257,16 +235,11 @@ function simplePageQuery(
   query: Record<string, string | string[]> | undefined,
   allowed = new Set(["per_page", "page"]),
 ): { perPage: number } | undefined {
-  if (
-    Object.entries(query ?? {}).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    ) ||
-    (scalarQuery(query, "page") !== undefined && scalarQuery(query, "page") !== "1")
-  ) {
+  if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
     return undefined;
   }
-  const perPage = Number(scalarQuery(query, "per_page") ?? "30");
-  return Number.isInteger(perPage) && perPage >= 1 && perPage <= 100 ? { perPage } : undefined;
+  const perPage = boundedPageSize(query?.per_page, { defaultValue: 30 });
+  return perPage === undefined ? undefined : { perPage };
 }
 
 function searchQualifier(key: string, value: string): string | undefined {
@@ -317,27 +290,13 @@ export function releasePageRequest(
   } else {
     return undefined;
   }
-  return {
-    url,
-    headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env),
-    usesApiQuota: false,
-    payload: (body, headers, status, responseURL) => {
-      const parsed = parseReleaseHTML(
-        new TextDecoder().decode(body),
-        route.owner!,
-        route.repo!,
-        responseURL,
-      );
-      return parsed === undefined
-        ? undefined
-        : {
-            status,
-            headers: publicResponseHeaders(headers, "application/json"),
-            body: parsed,
-            body_encoding: "json",
-            backend: "web",
-          };
-    },
-  };
+  return htmlWebRequest(env, url, (body, headers, status, responseURL) => {
+    const parsed = parseReleaseHTML(
+      new TextDecoder().decode(body),
+      route.owner!,
+      route.repo!,
+      responseURL,
+    );
+    return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed);
+  });
 }

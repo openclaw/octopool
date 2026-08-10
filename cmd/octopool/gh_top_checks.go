@@ -165,41 +165,13 @@ func prCheckItemsForSHAWithHeaders(
 }
 
 func checkRunItems(envelope relayEnvelope) ([]any, int, error) {
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, 0, err
-	}
-	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, 0, err
-	}
-	items, ok := response["check_runs"].([]any)
-	if !ok {
-		return nil, 0, errors.New("check-runs response did not include check_runs")
-	}
-	total := len(items)
-	if value, ok := response["total_count"].(float64); ok {
-		total = int(value)
-	}
-	return items, total, nil
+	return envelopeCollectionPage(envelope, "check_runs")
 }
 
 func statusItems(envelope relayEnvelope) ([]any, int, error) {
-	body, err := envelopeBodyBytes(envelope)
+	rawItems, total, err := envelopeCollectionPage(envelope, "statuses")
 	if err != nil {
 		return nil, 0, err
-	}
-	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, 0, err
-	}
-	rawItems, ok := response["statuses"].([]any)
-	if !ok {
-		return nil, 0, errors.New("status response did not include statuses")
-	}
-	total := len(rawItems)
-	if value, ok := response["total_count"].(float64); ok {
-		total = int(value)
 	}
 	items := make([]any, 0, len(rawItems))
 	for _, raw := range rawItems {

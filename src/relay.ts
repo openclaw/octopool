@@ -492,9 +492,7 @@ async function callRevalidationAPI(
       const response = await callAnonymousGitHubAPI(state.env, request, state.route);
       return response === undefined
         ? undefined
-        : completeRunJobsSuperset(response, state.runJobsSuperset, (pageRequest) =>
-            callAnonymousGitHubAPI(state.env, pageRequest, state.route),
-          );
+        : completeRunJobsSuperset(response, state.runJobsSuperset, anonymousRunJobsPage(state));
     }
     if (identity !== undefined) {
       state.paginatedIdentityRateRecorded = false;
@@ -502,17 +500,11 @@ async function callRevalidationAPI(
         state.route,
         await callGitHub(state.env, identity, request, state.route),
       );
-      return completeRunJobsSuperset(response, state.runJobsSuperset, async (pageRequest) => {
-        await recordFirstPaginatedIdentityRate(state, identity, response);
-        const page = sanitizeGitHubResponse(
-          state.route,
-          await callGitHub(state.env, identity, pageRequest, state.route),
-        );
-        await state.coordinator.recordResult(
-          coordinatorResult(state, identity, page.status, rateFromHeaders(page.headers)),
-        );
-        return page;
-      });
+      return completeRunJobsSuperset(
+        response,
+        state.runJobsSuperset,
+        identityRunJobsPage(state, identity, response),
+      );
     }
     return sanitizeGitHubResponse(
       state.route,
@@ -632,9 +624,7 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
   }
   const completed =
     response.backend === "github"
-      ? await completeRunJobsSuperset(response, state.runJobsSuperset, (pageRequest) =>
-          callAnonymousGitHubAPI(state.env, pageRequest, state.route),
-        )
+      ? await completeRunJobsSuperset(response, state.runJobsSuperset, anonymousRunJobsPage(state))
       : response;
   const github = sanitizeGitHubResponse(state.route, completed);
   if (anonymousGitHubResponseProvesPublicRepo(state.route)) {
@@ -722,17 +712,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     const github = await completeRunJobsSuperset(
       firstPage,
       state.runJobsSuperset,
-      async (pageRequest) => {
-        await recordFirstPaginatedIdentityRate(state, identity, firstPage);
-        const page = sanitizeGitHubResponse(
-          state.route,
-          await callGitHub(state.env, identity, pageRequest, state.route),
-        );
-        await state.coordinator.recordResult(
-          coordinatorResult(state, identity, page.status, rateFromHeaders(page.headers)),
-        );
-        return page;
-      },
+      identityRunJobsPage(state, identity, firstPage),
     );
     const rate = rateFromHeaders(github.headers);
     const identityFallback = githubResponseLocalFallbackReason(github.status, rate);
@@ -912,6 +892,30 @@ async function recordFirstPaginatedIdentityRate(
     coordinatorResult(state, identity, response.status, rateFromHeaders(response.headers)),
   );
   state.paginatedIdentityRateRecorded = true;
+}
+
+function anonymousRunJobsPage(
+  state: ActiveRelay,
+): (request: RelayRequest) => Promise<GitHubRelayResponse | undefined> {
+  return (request) => callAnonymousGitHubAPI(state.env, request, state.route);
+}
+
+function identityRunJobsPage(
+  state: ActiveRelay,
+  identity: Identity,
+  firstPage: GitHubRelayResponse,
+): (request: RelayRequest) => Promise<GitHubRelayResponse> {
+  return async (request) => {
+    await recordFirstPaginatedIdentityRate(state, identity, firstPage);
+    const page = sanitizeGitHubResponse(
+      state.route,
+      await callGitHub(state.env, identity, request, state.route),
+    );
+    await state.coordinator.recordResult(
+      coordinatorResult(state, identity, page.status, rateFromHeaders(page.headers)),
+    );
+    return page;
+  };
 }
 
 async function handleRelayError(

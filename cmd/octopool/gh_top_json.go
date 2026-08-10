@@ -43,6 +43,31 @@ func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
 	return bytes.TrimSpace(body), err
 }
 
+func envelopeCollectionPage(envelope relayEnvelope, key string) ([]any, int, error) {
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return nil, 0, err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, 0, err
+	}
+	items, ok := response[key].([]any)
+	if !ok {
+		labels := map[string]string{
+			"check_runs": "check-runs",
+			"statuses":   "status",
+			"jobs":       "workflow jobs",
+		}
+		return nil, 0, fmt.Errorf("%s response did not include %s", labels[key], key)
+	}
+	total := len(items)
+	if value, ok := response["total_count"].(float64); ok {
+		total = int(value)
+	}
+	return items, total, nil
+}
+
 func filterJSONFields(raw []byte, fields []string, fieldMap map[string][]string) ([]byte, error) {
 	var value any
 	if err := json.Unmarshal(raw, &value); err != nil {

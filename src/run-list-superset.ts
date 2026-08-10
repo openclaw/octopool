@@ -1,4 +1,5 @@
 import { PUBLIC_SHAPES } from "./github-public-shapes";
+import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-public-utils";
 import { isRecord } from "./object";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
@@ -42,7 +43,7 @@ export function runListShapeView(request: RelayRequest, route: RouteInfo): RunLi
   if (limit === undefined) {
     return undefined;
   }
-  const perPage = boundedPageSize(request.query.per_page);
+  const perPage = boundedPageSize(request.query.per_page, { strict: true });
   return { limit: Math.min(perPage ?? MAX_PAGE_SIZE, limit) };
 }
 
@@ -71,16 +72,11 @@ export function runListSupersetView(
   }
   const query = request.query ?? {};
   const allowed = new Set(["branch", "status", "page", "per_page", "limit"]);
-  if (
-    Object.entries(query).some(
-      ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
-    ) ||
-    (query.page !== undefined && query.page !== "1")
-  ) {
+  if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
     return undefined;
   }
-  const perPage = boundedPageSize(query.per_page);
-  const limit = boundedPageSize(query.limit);
+  const perPage = boundedPageSize(query.per_page, { strict: true });
+  const limit = boundedPageSize(query.limit, { strict: true });
   if (
     (query.per_page !== undefined && perPage === undefined) ||
     (query.limit !== undefined && limit === undefined) ||
@@ -181,14 +177,4 @@ function cappedPageSize(value: string | string[] | undefined): number | undefine
   }
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? Math.min(parsed, MAX_PAGE_SIZE) : undefined;
-}
-
-function boundedPageSize(value: string | string[] | undefined): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (Array.isArray(value) || !/^(?:[1-9]|[1-9][0-9]|100)$/.test(value)) {
-    return undefined;
-  }
-  return Number(value);
 }

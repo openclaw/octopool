@@ -39,10 +39,7 @@ export async function ensurePublicGitHubRepo(
   const edgeProof = await rejectFreshNegativePublicRepoProof(env, owner, repo);
   if (
     cacheCreatedAt !== undefined &&
-    (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, {
-      requireFresh: true,
-      edgeProof,
-    })) !== undefined
+    (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, { edgeProof })) !== undefined
   ) {
     return;
   }
@@ -61,12 +58,10 @@ export async function ensurePublicGitHubRepo(
         const source =
           acquisition.outcome === "shared"
             ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
-                requireFresh: true,
                 edgeProof: completedEdgeProof,
               })
             : acquisition.outcome === "edge_only"
               ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
-                  requireFresh: true,
                   source: "edge",
                   edgeProof: completedEdgeProof,
                 })
@@ -83,7 +78,6 @@ export async function ensurePublicGitHubRepo(
       if (
         cacheCreatedAt !== undefined &&
         (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, {
-          requireFresh: true,
           source: "shared",
         })) === "shared"
       ) {
@@ -338,7 +332,6 @@ async function coveringPublicRepoProofSource(
   route: RouteInfo,
   cacheCreatedAt: string,
   options: {
-    requireFresh?: boolean;
     source?: PublicRepoProofSource;
     edgeProof?: PublicRepoProof | undefined;
   } = {},
@@ -362,10 +355,13 @@ async function coveringPublicRepoProofSource(
       return undefined;
     }
   }
-  const query = options.requireFresh
-    ? queries.freshCoveringPublicRepoProof
-    : queries.coveringPublicRepoProof;
-  const row = await readD1PublicRepoProof(env, query, owner, repo, cacheCreatedAt);
+  const row = await readD1PublicRepoProof(
+    env,
+    queries.coveringPublicRepoProof,
+    owner,
+    repo,
+    cacheCreatedAt,
+  );
   if (row === null || !publicProofCovers(row, cacheCreatedAt)) {
     return undefined;
   }

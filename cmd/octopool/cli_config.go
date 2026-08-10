@@ -48,17 +48,43 @@ func defaultAuthPool(auth authFile) string {
 	return envDefault("OCTOPOOL_POOL", firstNonEmpty(auth.Pool, "maintainers"))
 }
 
-func applyAuthFlagDefaults(fs *flag.FlagSet, auth authFile, baseURL *string, pool *string) {
+type callerRequestFlags struct {
+	baseURL  *string
+	pool     *string
+	tokenEnv *string
+}
+
+func newCallerRequestFlags(fs *flag.FlagSet) callerRequestFlags {
+	return callerRequestFlags{
+		baseURL:  fs.String("url", defaultAuthURL(authFile{}), "Octopool base URL"),
+		pool:     fs.String("pool", defaultAuthPool(authFile{}), "pool id"),
+		tokenEnv: fs.String("token-env", "OCTOPOOL_TOKEN", "caller token env var"),
+	}
+}
+
+func (flags callerRequestFlags) applyAuth(fs *flag.FlagSet) (authFile, error) {
+	auth, err := loadAuth()
+	if err != nil {
+		return authFile{}, err
+	}
 	set := map[string]bool{}
 	fs.Visit(func(item *flag.Flag) {
 		set[item.Name] = true
 	})
 	if !set["url"] {
-		*baseURL = defaultAuthURL(auth)
+		*flags.baseURL = defaultAuthURL(auth)
 	}
 	if !set["pool"] {
-		*pool = defaultAuthPool(auth)
+		*flags.pool = defaultAuthPool(auth)
 	}
+	return auth, nil
+}
+
+func (flags callerRequestFlags) authorize(auth authFile) (string, error) {
+	if err := validateAuthURLForRequest(auth, *flags.baseURL, *flags.tokenEnv); err != nil {
+		return "", err
+	}
+	return callerToken(*flags.tokenEnv)
 }
 
 func validateAuthURLForRequest(auth authFile, effectiveURL string, tokenEnvName string) error {

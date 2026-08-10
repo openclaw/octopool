@@ -419,16 +419,6 @@ WHERE lower(owner) = ?1
   AND expires_at > CURRENT_TIMESTAMP
 LIMIT 1;
 
--- name: FreshCoveringPublicRepoProof :one
-SELECT checked_at, expires_at
-FROM github_public_repos
-WHERE lower(owner) = ?1
-  AND lower(repo) = ?2
-  AND is_public = 1
-  AND checked_at >= datetime(?3, '-5 seconds')
-  AND expires_at > CURRENT_TIMESTAMP
-LIMIT 1;
-
 -- name: FreshNegativePublicRepoProof :one
 SELECT checked_at, expires_at, is_public
 FROM github_public_repos

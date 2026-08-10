@@ -1,4 +1,6 @@
+import { responseCapBytes } from "./github-limits";
 import { githubResponseHeaders } from "./github-response";
+import type { WebRequest } from "./github-web-types";
 import type { GitHubRelayResponse } from "./types";
 
 export function scalarQuery(
@@ -7,6 +9,35 @@ export function scalarQuery(
 ): string | undefined {
   const value = query?.[key];
   return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+export function validScalarQuery(
+  query: Record<string, string | string[]> | undefined,
+  allowed: ReadonlySet<string>,
+): boolean {
+  return !Object.entries(query ?? {}).some(
+    ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
+  );
+}
+
+export function firstPageQuery(query: Record<string, string | string[]> | undefined): boolean {
+  const page = scalarQuery(query, "page");
+  return page === undefined || page === "1";
+}
+
+export function boundedPageSize(
+  value: string | string[] | undefined,
+  options: { defaultValue?: number; max?: number; strict?: boolean } = {},
+): number | undefined {
+  if (value === undefined) {
+    return options.defaultValue;
+  }
+  if (Array.isArray(value) || (options.strict === true && !/^[1-9][0-9]*$/.test(value))) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  const max = options.max ?? 100;
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= max ? parsed : undefined;
 }
 
 export function decodePathStrict(value: string): string | undefined {
@@ -44,5 +75,15 @@ export function publicJSONResponse(
     body,
     body_encoding: bodyEncoding,
     backend: "web",
+  };
+}
+
+export function htmlWebRequest(env: Env, url: string, payload: WebRequest["payload"]): WebRequest {
+  return {
+    url,
+    headers: { accept: "text/html", "user-agent": "octopool" },
+    capBytes: responseCapBytes(env),
+    usesApiQuota: false,
+    payload,
   };
 }

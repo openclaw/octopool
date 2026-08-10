@@ -1,8 +1,8 @@
 import { responseCapBytes } from "./github-limits";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
 import { encodedPathSegments, safeRelativePath } from "./github-path";
-import { defaultGitHubJSONAccept, githubResponseHeaders } from "./github-response";
-import { decodePathStrict } from "./github-public-utils";
+import { defaultGitHubJSONAccept } from "./github-response";
+import { decodePathStrict, publicJSONResponse } from "./github-public-utils";
 import { parseRepositoryNodeIDHTML } from "./github-html";
 import { fetchPublicPage } from "./github-web-transport";
 import type { WebRequest } from "./github-web-types";
@@ -69,18 +69,7 @@ export function gitRefRequest(
               requested,
               route.kind === "git_matching_refs",
             );
-      return parsed === undefined
-        ? undefined
-        : {
-            status,
-            headers: githubResponseHeaders(headers, {
-              contentType: "application/json",
-              includeCacheControl: true,
-            }),
-            body: parsed,
-            body_encoding: "json",
-            backend: "web",
-          };
+      return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed);
     },
   };
 }

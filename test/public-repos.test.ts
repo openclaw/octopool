@@ -336,7 +336,7 @@ describe("public repo guard", () => {
 
   it("filters negative rows out of both shared covering-proof queries", () => {
     expect(queries.coveringPublicRepoProof).toContain("AND is_public = 1");
-    expect(queries.freshCoveringPublicRepoProof).toContain("AND is_public = 1");
+    expect(queries.coveringPublicRepoProof).toContain("AND is_public = 1");
   });
 
   it("re-checks GitHub after a negative proof expires", async () => {
@@ -411,7 +411,7 @@ describe("public repo guard", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(prepare).toHaveBeenCalledWith(queries.freshNegativePublicRepoProof);
-    expect(prepare).toHaveBeenCalledWith(queries.freshCoveringPublicRepoProof);
+    expect(prepare).toHaveBeenCalledWith(queries.coveringPublicRepoProof);
     expect(prepare).toHaveBeenCalledWith(queries.coveringPublicRepoProof);
   });
 

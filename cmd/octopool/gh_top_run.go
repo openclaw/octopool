@@ -157,21 +157,9 @@ func runJobs(envelope relayEnvelope) ([]any, error) {
 }
 
 func runJobsPage(envelope relayEnvelope) ([]any, int, error) {
-	body, err := envelopeBodyBytes(envelope)
+	rawJobs, total, err := envelopeCollectionPage(envelope, "jobs")
 	if err != nil {
 		return nil, 0, err
-	}
-	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, 0, err
-	}
-	rawJobs, ok := response["jobs"].([]any)
-	if !ok {
-		return nil, 0, errors.New("workflow jobs response did not include jobs")
-	}
-	total := len(rawJobs)
-	if value, ok := response["total_count"].(float64); ok {
-		total = int(value)
 	}
 	jobs := make([]any, 0, len(rawJobs))
 	for _, rawJob := range rawJobs {
