@@ -300,7 +300,7 @@ function classifyCooldown(result: RecordResult): { key: string; ttlMs: number } 
     return { key: "*", ttlMs: retryAfterMs };
   }
   if (result.status === 403 && result.rate?.remaining !== undefined && result.rate.remaining > 0) {
-    return { key: "*", ttlMs: 120_000 };
+    return { key: result.routeKey, ttlMs: 120_000 };
   }
   if (result.status === 429) {
     return { key: `resource:${result.resource}`, ttlMs: 120_000 };

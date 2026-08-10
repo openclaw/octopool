@@ -44,7 +44,7 @@ export function gitRefRequest(
       accept: "application/x-git-upload-pack-advertisement",
       "user-agent": "octopool",
     },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: async (body, headers, status) => {
       const refs = parseGitUploadPackAdvertisement(body);
@@ -53,7 +53,7 @@ export function gitRefRequest(
       }
       const repositoryPage = await fetchPublicPage(
         `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "issues"])}?q=is%3Aissue`,
-        responseCapBytes(env, route),
+        responseCapBytes(env),
         env,
       );
       const repositoryNodeID =

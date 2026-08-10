@@ -109,7 +109,7 @@ export function summaryPageRequest(
     return {
       url: url.toString(),
       headers: { accept: "text/html", "user-agent": "octopool" },
-      capBytes: responseCapBytes(env, route),
+      capBytes: responseCapBytes(env),
       usesApiQuota: false,
       payload: async (body, headers, status) => {
         const html = new TextDecoder().decode(body);
@@ -146,7 +146,7 @@ export function summaryPageRequest(
   return {
     url: url.toString(),
     headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: (body, headers, status) => {
       const parsed = parse(new TextDecoder().decode(body));
@@ -183,7 +183,7 @@ async function completeWorkflowList(
         "actions",
         "workflows_partial",
       ])}?query=&page=${page}`,
-      responseCapBytes(env, route),
+      responseCapBytes(env),
       env,
     );
     const parsed =
@@ -320,7 +320,7 @@ export function releasePageRequest(
   return {
     url,
     headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: (body, headers, status, responseURL) => {
       const parsed = parseReleaseHTML(

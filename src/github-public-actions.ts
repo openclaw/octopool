@@ -75,7 +75,7 @@ function actionsRunListRequest(
   return {
     url: url.toString(),
     headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: async (body, headers, status) => {
       const parsed = parseActionsRunListHTML(
@@ -128,7 +128,7 @@ function actionsRunRequest(
       ...(attempt === undefined ? [] : ["attempts", attempt]),
     ])}`,
     headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: async (body, headers, status) => {
       const parsed = parseActionsRunHTML(
@@ -165,7 +165,7 @@ function actionsRunJobsRequest(
       "user-agent": "octopool",
       "x-requested-with": "XMLHttpRequest",
     },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: async (body, headers, status) => {
       const parsed = parseJSONBytes(body);
@@ -177,7 +177,7 @@ function actionsRunJobsRequest(
         summaries.slice(0, query.perPage).map(async (summary) => {
           const page = await fetchPublicPage(
             `https://github.com${summary.href}`,
-            responseCapBytes(env, route),
+            responseCapBytes(env),
             env,
           );
           return page === undefined
@@ -246,7 +246,7 @@ async function enrichActionsRun(
   }
   const page = await fetchPublicPage(
     `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions", "runs", String(run.id)])}`,
-    responseCapBytes(env, route),
+    responseCapBytes(env),
     env,
   );
   const parsed =
@@ -274,7 +274,7 @@ async function completeActionsRunSHA(
   }
   const patch = await fetchPublicPage(
     `https://github.com/${encodedPathSegments([route.owner, route.repo, "commit", `${run.head_sha}.patch`])}`,
-    responseCapBytes(env, route),
+    responseCapBytes(env),
     env,
     "text/plain",
   );

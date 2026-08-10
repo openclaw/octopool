@@ -28,7 +28,6 @@ describe("identity loading", () => {
       routeKey: "GET /repos/steipete/ReleaseBar",
       cacheable: true,
       largePayload: false,
-      fullResponseCap: false,
       logs: false,
     });
 

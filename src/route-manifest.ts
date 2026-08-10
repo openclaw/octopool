@@ -3,7 +3,6 @@ type RouteResource = "core" | "search";
 type RouteOptions = {
   cacheable?: boolean;
   largePayload?: boolean;
-  fullResponseCap?: boolean;
   search?: boolean;
   logs?: boolean;
   publicApi?: boolean;
@@ -28,7 +27,6 @@ type RouteRule<Kind extends string> = {
   resource: RouteResource;
   cacheable: boolean;
   largePayload: boolean;
-  fullResponseCap: boolean;
   search: boolean;
   logs: boolean;
   capabilities: RouteCapabilities;
@@ -101,7 +99,6 @@ function route<const Kind extends string>(
     resource,
     cacheable: options.cacheable ?? true,
     largePayload: options.largePayload ?? false,
-    fullResponseCap: options.fullResponseCap ?? false,
     search: options.search ?? false,
     logs: options.logs ?? false,
     capabilities: {
@@ -250,9 +247,7 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/commits/{sha}/status", "commit_status"),
   route("/repos/{owner}/{repo}/commits/{commitRef}/status", "commit_status_ref"),
   route("/repos/{owner}/{repo}/statuses/{sha}", "ref_statuses"),
-  route("/repos/{owner}/{repo}/actions/runs", "run_list", "core", {
-    fullResponseCap: true,
-  }),
+  route("/repos/{owner}/{repo}/actions/runs", "run_list"),
   route("/repos/{owner}/{repo}/actions/runs/{id}", "run_view"),
   route("/repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}", "run_view"),
   route("/repos/{owner}/{repo}/actions/runs/{id}/jobs", "run_jobs"),
@@ -309,9 +304,7 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/git/matching-refs/{gitRef}", "git_matching_refs"),
   route("/repos/{owner}/{repo}/actions/workflows", "workflow_list"),
   route("/repos/{owner}/{repo}/actions/workflows/{workflow}", "workflow_view"),
-  route("/repos/{owner}/{repo}/actions/workflows/{workflow}/runs", "workflow_run_list", "core", {
-    fullResponseCap: true,
-  }),
+  route("/repos/{owner}/{repo}/actions/workflows/{workflow}/runs", "workflow_run_list"),
   localRoute("/repos/{owner}/{repo}/releases", "release_list", "core", {
     publicApi: false,
   }),

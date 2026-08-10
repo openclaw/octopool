@@ -254,7 +254,7 @@ describe("route policy", () => {
     });
   });
 
-  it("uses the configured response cap for cacheable Actions run lists", () => {
+  it("keeps Actions run lists cacheable without a special response-cap flag", () => {
     for (const path of [
       "/repos/openclaw/openclaw/actions/runs",
       "/repos/openclaw/openclaw/actions/workflows/ci.yml/runs",
@@ -267,7 +267,6 @@ describe("route policy", () => {
       expect(classifyRoute(request, policy)).toMatchObject({
         cacheable: true,
         largePayload: false,
-        fullResponseCap: true,
       });
     }
   });

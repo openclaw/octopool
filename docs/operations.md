@@ -146,7 +146,8 @@ Plain vars (in `wrangler.jsonc`):
 
 - `ALLOWED_GITHUB_ORG` — the only GitHub org that can mint caller tokens.
 - `DEFAULT_ALLOWED_OWNERS` — comma-separated owners served by scoped identity routing.
-- `MAX_RESPONSE_BYTES` — 2 MiB default; large-payload routes use this cap.
+- `MAX_RESPONSE_BYTES` — single response-body cap for every route (2 MiB default; the hosted
+  deployment sets 4 MiB).
 - `REQUEST_TIMEOUT_MS` — 15s default.
 - `ORG_VERIFY_TTL_SECONDS` — 24h default; how long an org-membership verification stays
   fresh before octopool re-checks at request time.

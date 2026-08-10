@@ -59,7 +59,6 @@ export type RouteInfo = {
   state_hint_source?: "cached" | "live";
   cacheable: boolean;
   largePayload: boolean;
-  fullResponseCap: boolean;
   logs: boolean;
 };
 

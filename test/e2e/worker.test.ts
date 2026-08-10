@@ -235,6 +235,91 @@ describe("Worker end-to-end relay", () => {
     );
   });
 
+  it("scopes permission 403 cooldowns to the failed route", async () => {
+    await seedPool({ secondary: true });
+    const routeA = "/repos/openclaw/octopool";
+    const routeB = "/repos/openclaw/octopool/issues/42";
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const token = bearer(request);
+      if (token === "test-org-token") {
+        return jsonResponse({ private: false });
+      }
+      if (token === undefined) {
+        return jsonResponse({ message: "public backend unavailable" }, 503);
+      }
+      if (request.url.endsWith(routeA) && token === "test-primary-token") {
+        return jsonResponse(
+          { message: "Resource not accessible by integration" },
+          403,
+          rateHeaders({ remaining: 4_998 }),
+        );
+      }
+      if (request.url.endsWith(routeA) && token === "test-secondary-token") {
+        return jsonResponse(
+          { id: 7, full_name: "openclaw/octopool", private: false },
+          200,
+          rateHeaders({ remaining: 4_997 }),
+        );
+      }
+      if (request.url.endsWith(routeB) && token === "test-primary-token") {
+        return jsonResponse(
+          { id: 42, number: 42, title: "Route-scoped cooldown" },
+          200,
+          rateHeaders({ remaining: 4_997 }),
+        );
+      }
+      return jsonResponse({ message: "unexpected identity request" }, 500);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const retried = await relay(routeA);
+    expect(retried.status).toBe(200);
+    expect(await retried.json<RelayEnvelope>()).toMatchObject({
+      identity: { id: "secondary", kind: "pat" },
+      relay: { route_kind: "repo_view" },
+    });
+
+    const unrelated = await relay(routeB);
+    expect(unrelated.status).toBe(200);
+    expect(await unrelated.json<RelayEnvelope>()).toMatchObject({
+      identity: { id: "primary", kind: "pat" },
+      relay: { route_kind: "issue_view" },
+    });
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) =>
+          new Request(request, init).url.endsWith(routeA) &&
+          bearer(request, init) === "test-secondary-token",
+      ),
+    ).toHaveLength(1);
+    expect(
+      upstream.mock.calls.filter(
+        ([request, init]) =>
+          new Request(request, init).url.endsWith(routeB) &&
+          bearer(request, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM audit_events WHERE fallback_reason = 'identities_cooling_down'",
+      ).first(),
+    ).toEqual({ count: 0 });
+
+    const coordinator = poolCoordinatorStub(env, POOL);
+    const snapshot = await runInDurableObject(
+      coordinator,
+      (instance: PoolCoordinator): CoordinatorSnapshot => instance.snapshot(),
+    );
+    expect(snapshot.cooldowns).toEqual([
+      expect.objectContaining({
+        identity_id: "primary",
+        route_key: "GET /repos/openclaw/octopool",
+        status: 403,
+      }),
+    ]);
+  });
+
   it("serves fresh identity cache before excluding a rate-depleted identity", async () => {
     await seedPool();
     const upstream = githubUpstream({

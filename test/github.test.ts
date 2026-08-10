@@ -29,7 +29,7 @@ describe("github api provider", () => {
     );
   });
 
-  it("uses the configured cap for Actions run lists", () => {
+  it("uses the configured cap for every route", () => {
     const runList = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -41,11 +41,12 @@ describe("github api provider", () => {
       path: "/repos/openclaw/octopool",
     });
 
-    expect(responseCapBytes(env(), classifyRoute(runList, policy))).toBe(2_097_152);
-    expect(responseCapBytes(env(), classifyRoute(repo, policy))).toBe(1_048_576);
+    expect(classifyRoute(runList, policy).kind).toBe("run_list");
+    expect(classifyRoute(repo, policy).kind).toBe("repo_view");
+    expect(responseCapBytes(env())).toBe(2_097_152);
   });
 
-  it("accepts Actions run lists above the normal route cap", async () => {
+  it("accepts Actions run lists below the configured cap", async () => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",

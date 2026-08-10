@@ -143,7 +143,6 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
       publicOnly: !allowedOwner,
       cacheable: rule.cacheable,
       largePayload: rule.largePayload === true,
-      fullResponseCap: rule.fullResponseCap === true,
       logs: rule.logs === true,
     };
     if (routeOwner !== undefined) {

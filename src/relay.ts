@@ -1132,7 +1132,7 @@ async function revalidateCachedTerminalLog(
   }
   state.terminalLogCached = undefined;
   try {
-    const probe = await probeGitHubLog(state.env, identity, state.request, state.route);
+    const probe = await probeGitHubLog(state.env, identity, state.request);
     if (probe.kind === "exists") {
       await publishTerminalLogCache(state.env, key, cached);
       state.ctx.waitUntil(

@@ -58,7 +58,7 @@ describe("Worker end-to-end relay security boundaries", () => {
         return jsonResponse({ private: false });
       }
       if (bearer(request) === "test-primary-token") {
-        return jsonResponse({ payload: "x".repeat(1_048_576) });
+        return jsonResponse({ payload: "x".repeat(4_194_304) });
       }
       expect(bearer(request)).toBeUndefined();
       return jsonResponse({ message: "anonymous backend unavailable" }, 503);
@@ -85,6 +85,44 @@ describe("Worker end-to-end relay security boundaries", () => {
       cache_status: "miss",
       cacheable: 1,
     });
+  });
+
+  it("serves pooled responses between 1 MiB and the configured cap", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (bearer(request) === "test-org-token") {
+        return jsonResponse({ private: false });
+      }
+      if (bearer(request) === "test-primary-token") {
+        return jsonResponse({
+          total_count: 1,
+          check_runs: [{ id: 42, name: "x".repeat(1_100_000) }],
+        });
+      }
+      expect(bearer(request)).toBeUndefined();
+      return jsonResponse({ message: "anonymous backend unavailable" }, 503);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay(
+      "/repos/openclaw/octopool/commits/0123456789abcdef0123456789abcdef01234567/check-runs",
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: { total_count: 1, check_runs: [{ id: 42 }] },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "miss", cacheable: true, route_kind: "commit_check_runs" },
+    });
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
+    ).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare(
+        "SELECT identity_id, backend, status FROM audit_events WHERE route_kind = 'commit_check_runs'",
+      ).first(),
+    ).toEqual({ identity_id: "primary", backend: "github_identity", status: 200 });
   });
 
   it("follows an allowed Actions log redirect without forwarding authorization", async () => {

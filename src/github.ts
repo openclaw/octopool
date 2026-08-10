@@ -34,7 +34,6 @@ export async function probeGitHubLog(
   env: Env,
   identity: Identity,
   request: RelayRequest,
-  route: RouteInfo,
 ): Promise<GitHubLogProbe> {
   const token = await githubToken(env, identity);
   const response = await fetch(githubUrl(request), {
@@ -51,7 +50,7 @@ export async function probeGitHubLog(
   if (response.status !== 404) {
     return { kind: "unknown", status: response.status, headers };
   }
-  const bodyBytes = await readGitHubBody(response, responseCapBytes(env, route));
+  const bodyBytes = await readGitHubBody(response, responseCapBytes(env));
   const contentType = response.headers.get("content-type") ?? "";
   const { body, encoding } = decodeBody(bodyBytes, contentType);
   return {
@@ -81,11 +80,11 @@ async function callGitHubAPI(
   });
   if (response.status >= 300 && response.status < 400 && response.status !== 304) {
     if (route.logs) {
-      return fetchGitHubLogRedirect(response, responseCapBytes(env, route), timeoutMs);
+      return fetchGitHubLogRedirect(response, responseCapBytes(env), timeoutMs);
     }
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
   }
-  const bodyBytes = await readGitHubBody(response, responseCapBytes(env, route));
+  const bodyBytes = await readGitHubBody(response, responseCapBytes(env));
   const contentType = response.headers.get("content-type") ?? "";
   const { body, encoding } = decodeBody(bodyBytes, contentType);
   return {

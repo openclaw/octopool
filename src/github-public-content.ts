@@ -45,7 +45,7 @@ export function mediaWebRequest(
   return {
     url,
     headers: { accept: `${contentType}, text/plain, */*`, "user-agent": "octopool" },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: (body, headers, status) => ({
       status,
@@ -83,7 +83,7 @@ export function rawContentRequest(
   return {
     url: rawURL,
     headers: { accept: "text/plain, */*", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env, route),
+    capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: (body, headers, status) => {
       const sha = gitBlobSHA(body);
