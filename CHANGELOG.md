@@ -11,6 +11,7 @@
 - Continue active `gh run watch` and `gh pr checks --watch` commands through real `gh` only when the relay explicitly requests local fallback, with a visible one-way handoff and exact child exit status.
 - Cache negative public-repo proofs so a private repository is proven private once per `PUBLIC_REPO_NEGATIVE_TTL_SECONDS` (default 1h) instead of on every request — the hosted pool was spending 6.5k org-token GitHub calls a week re-proving the same 36 private repos, and each one also cost the caller a full GitHub round trip before being told to fall back. Only definitive answers are cached; rate-limited and inconclusive checks still re-check, and a negative proof never authorizes serving cached content.
 - Hand oversized GitHub responses to local `gh` instead of dead-ending the caller: a body over `MAX_RESPONSE_BYTES` now returns `424 fallback_local` rather than a hard `502 github_response_too_large`, which broke ordinary reads like `gh api repos/<owner>/<repo>/actions/runs?per_page=100` on large repositories.
+- Fall through to a pooled identity when the anonymous GitHub API exhausts its shared quota instead of sending `user_view` requests to local `gh` while pooled quota remains available.
 
 ### Changes
 

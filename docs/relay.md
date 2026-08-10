@@ -94,9 +94,10 @@ and patch hosts.
   and public repository metadata collections can be served from unauthenticated GitHub API
   responses before spending pooled identity quota.
 - `GET /user` is relayed as the caller's public profile: Octopool rewrites it to
-  `GET /users/:login` for the authenticated caller and serves it token-free, so identity
-  probes never spend pooled or local quota. Private `/user` fields (plan, private repo
-  counts, email visibility) are not included; callers that need them fall back to real `gh`.
+  `GET /users/:login` for the authenticated caller and serves it through the anonymous API,
+  falling through to a pooled identity only when anonymous quota is exhausted. Private
+  `/user` fields (plan, private repo counts, email visibility) are not included; callers that
+  need them fall back to real `gh`.
 - `GET /orgs/:org` is intentionally not relayed because authenticated GitHub responses can
   include additional org fields that are not present in unauthenticated public API responses.
 - `GET /users/:login/starred` and `/subscriptions` are intentionally not relayed because

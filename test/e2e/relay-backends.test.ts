@@ -94,6 +94,113 @@ describe("Worker end-to-end relay backends", () => {
     ).toEqual({ backend: "github_api" });
   });
 
+  it("falls through from depleted anonymous quota to a pooled identity", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe("https://api.github.com/users/octocat");
+      if (bearer(request) === undefined) {
+        return jsonResponse({ message: "API rate limit exceeded" }, 403, anonymousRateHeaders(0));
+      }
+      expect(bearer(request)).toBe("test-primary-token");
+      return jsonResponse({ id: 8, login: "octocat", name: "The Octocat" });
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/users/octocat");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: { id: 8, login: "octocat", name: "The Octocat" },
+      identity: { id: "primary", kind: "pat" },
+      relay: { cache: "miss", route_kind: "user_view" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(
+      await env.DB.prepare(
+        "SELECT identity_id, backend FROM audit_events WHERE cache_status = 'miss' LIMIT 1",
+      ).first(),
+    ).toEqual({ identity_id: "primary", backend: "github_identity" });
+  });
+
+  it("falls through from an anonymous 429 to a pooled identity", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe("https://api.github.com/users/octocat");
+      if (bearer(request) === undefined) {
+        return jsonResponse({ message: "rate limited" }, 429);
+      }
+      expect(bearer(request)).toBe("test-primary-token");
+      return jsonResponse({ id: 8, login: "octocat" });
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/users/octocat");
+    expect(response.status).toBe(200);
+    expect(await response.json<RelayEnvelope>()).toMatchObject({
+      status: 200,
+      body: { id: 8, login: "octocat" },
+      identity: { id: "primary", kind: "pat" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves anonymous depletion fallback when no pooled identity is eligible", async () => {
+    await seedPool();
+    await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'primary'").run();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(bearer(request)).toBeUndefined();
+      return jsonResponse({ message: "API rate limit exceeded" }, 403, anonymousRateHeaders(0));
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/users/octocat");
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "github_identity_depleted" } },
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the anonymous reason when the pooled attempt also fails", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (bearer(request) === undefined) {
+        return jsonResponse({ message: "API rate limit exceeded" }, 403, anonymousRateHeaders(0));
+      }
+      expect(bearer(request)).toBe("test-primary-token");
+      return jsonResponse({ message: "rate limited" }, 429);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/users/octocat");
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "github_identity_depleted" } },
+    });
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not spend pooled quota for a non-quota anonymous failure", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(bearer(request)).toBeUndefined();
+      return jsonResponse({ message: "Bad credentials" }, 401);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay("/users/octocat");
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "github_identity_unauthorized" } },
+    });
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it("serves GET /user as the caller's public profile", async () => {
     await seedPool();
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
@@ -363,9 +470,13 @@ describe("Worker end-to-end relay backends", () => {
 });
 
 function publicRateHeaders(): HeadersInit {
+  return anonymousRateHeaders(59);
+}
+
+function anonymousRateHeaders(remaining: number): HeadersInit {
   return {
     "x-ratelimit-limit": "60",
-    "x-ratelimit-remaining": "59",
+    "x-ratelimit-remaining": String(remaining),
     "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3_600),
   };
 }

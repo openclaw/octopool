@@ -628,12 +628,20 @@ async function callPublicBackend(state: ActiveRelay): Promise<Response> {
     github.status,
     rateFromHeaders(github.headers),
   );
-  if (fallbackReason !== undefined) {
-    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-      reason: fallbackReason,
-    });
+  if (fallbackReason === undefined) {
+    return finalizeRelaySuccess(state, { github, backend: "github_public" });
   }
-  return finalizeRelaySuccess(state, { github, backend: "github_public" });
+  if (fallbackReason === "github_rate_limited" || fallbackReason === "github_identity_depleted") {
+    try {
+      return await callIdentityPool(state);
+    } catch {
+      // The anonymous request already had a clean local fallback. Preserve it
+      // if the opportunistic pooled attempt cannot serve the request.
+    }
+  }
+  throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+    reason: fallbackReason,
+  });
 }
 
 async function callIdentityPool(state: ActiveRelay): Promise<Response> {
