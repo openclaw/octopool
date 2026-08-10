@@ -16,6 +16,7 @@ type statsResponse struct {
 	Pool            string                `json:"pool"`
 	Window          statsWindow           `json:"window"`
 	Operator        statsOperator         `json:"operator"`
+	ClientFilter    string                `json:"client_filter"`
 	PoolUsage       statsAggregate        `json:"pool_usage"`
 	CallerUsage     statsAggregate        `json:"caller_usage"`
 	ClientUsage     statsAggregate        `json:"client_usage"`
@@ -97,6 +98,7 @@ func runStats(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.SetOutput(io.Discard)
 	requestFlags := newCallerRequestFlags(fs)
 	since := fs.String("since", "24h", "stats window, e.g. 30m, 24h, 7d")
+	client := fs.String("client", "", "client name to filter client usage and routes")
 	jsonOutput := fs.Bool("json", false, "print raw JSON")
 	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool stats [flags]"); err != nil {
 		return err
@@ -114,6 +116,9 @@ func runStats(ctx context.Context, args []string, stdout io.Writer) error {
 	query := url.Values{}
 	if strings.TrimSpace(*since) != "" {
 		query.Set("since", strings.TrimSpace(*since))
+	}
+	if strings.TrimSpace(*client) != "" {
+		query.Set("client", strings.TrimSpace(*client))
 	}
 	endpoint := apiURL(*requestFlags.baseURL, "/v1/pools/"+urlPath(*requestFlags.pool)+"/stats")
 	if encoded := query.Encode(); encoded != "" {
@@ -147,6 +152,13 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		"window: " + firstNonEmpty(stats.Window.Label, "24h"),
 		fmt.Sprintf("operator: %s", firstNonEmpty(stats.Operator.GitHubLogin, "unknown")),
 		fmt.Sprintf("client: %s", firstNonEmpty(stats.Operator.ClientName, "legacy")),
+	}
+	clientUsageLabel := "this client"
+	if stats.ClientFilter != "" {
+		lines = append(lines, "client filter: "+stats.ClientFilter)
+		clientUsageLabel = stats.ClientFilter
+	}
+	lines = append(lines,
 		fmt.Sprintf(
 			"requests: %s (%s service errors, %s local fallbacks)",
 			intFmt(stats.PoolUsage.Requests),
@@ -180,7 +192,8 @@ func renderStats(w io.Writer, stats statsResponse) error {
 			percent(stats.CallerUsage.CacheHitRate),
 		),
 		fmt.Sprintf(
-			"this client: %s requests, %s saved, %s backend",
+			"%s: %s requests, %s saved, %s backend",
+			clientUsageLabel,
 			intFmt(stats.ClientUsage.Requests),
 			intFmt(stats.ClientUsage.SavedGitHubCalls),
 			intFmt(stats.ClientUsage.BackendRequests),
@@ -192,7 +205,7 @@ func renderStats(w io.Writer, stats statsResponse) error {
 			intFmt(stats.Cache.ExpiredEntries),
 			byteFmt(stats.Cache.BodyBytes),
 		),
-	}
+	)
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err

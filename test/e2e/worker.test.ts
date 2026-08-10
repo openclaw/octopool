@@ -47,12 +47,14 @@ type UsageEnvelope = {
 type StatsEnvelope = {
   pool: string;
   operator: { github_login: string; client_name: string };
+  client_filter?: string;
   pool_usage: UsageEnvelope;
   caller_usage: UsageEnvelope;
   client_usage: UsageEnvelope;
   clients: (UsageEnvelope & { client_name: string })[];
   routes: (UsageEnvelope & { route_kind: string })[];
   caller_routes: (UsageEnvelope & { route_kind: string })[];
+  client_routes: (UsageEnvelope & { route_kind: string })[];
   backends: { backend: string; route_kind: string; requests: number }[];
   fallback_reasons: { reason: string; route_kind: string; requests: number }[];
   cache: { total_entries: number };
@@ -679,14 +681,27 @@ describe("Worker end-to-end relay", () => {
 });
 
 describe("Worker end-to-end read models", () => {
-  it("isolates pool and caller stats through the canonical usage queries", async () => {
+  it("filters client stats within the authenticated caller", async () => {
     await seedPool();
     await seedCaller("other", "other-token", "other");
+    await env.DB.prepare(
+      "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name) VALUES (?, ?, ?, ?)",
+    )
+      .bind("caller-ci-token", "caller", "unused-ci-hash", "ci-runner")
+      .run();
     await seedAudit("request-1", "caller", "repo_view", "miss", 200, {
       backend: "github_web",
     });
     await seedAudit("request-2", "caller", "repo_view", "hit", 200);
-    await seedAudit("request-3", "other", "actions_log", "unknown", 424, {
+    await seedAudit("request-3", "caller", "workflow_run_list", "miss", 200, {
+      callerTokenId: "caller-ci-token",
+      clientName: "ci-runner",
+    });
+    await seedAudit("request-4", "caller", "workflow_run_list", "hit", 200, {
+      callerTokenId: "caller-ci-token",
+      clientName: "ci-runner",
+    });
+    await seedAudit("request-5", "other", "actions_log", "unknown", 424, {
       errorCode: "fallback_local",
       fallbackReason: "owner_denied",
       cacheable: 0,
@@ -701,18 +716,18 @@ describe("Worker end-to-end read models", () => {
       pool: POOL,
       operator: { github_login: "caller", client_name: "test-mac" },
       pool_usage: {
-        requests: 3,
+        requests: 5,
         errors: 1,
         fallbacks: 1,
-        cache_hits: 1,
-        cache_misses: 1,
+        cache_hits: 2,
+        cache_misses: 2,
       },
       caller_usage: {
-        requests: 2,
+        requests: 4,
         errors: 0,
         fallbacks: 0,
-        cache_hits: 1,
-        cache_misses: 1,
+        cache_hits: 2,
+        cache_misses: 2,
       },
       client_usage: {
         requests: 2,
@@ -723,13 +738,25 @@ describe("Worker end-to-end read models", () => {
       },
       cache: { total_entries: 0 },
     });
+    expect(body).not.toHaveProperty("client_filter");
     expect(body.pool_usage.eligible_cache_hit_rate).toBe(0.5);
     expect(body.caller_usage.eligible_cache_hit_rate).toBe(0.5);
-    expect(body.clients).toEqual([
-      expect.objectContaining({ client_name: "test-mac", requests: 2 }),
+    expect(body.clients).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ client_name: "ci-runner", requests: 2 }),
+        expect.objectContaining({ client_name: "test-mac", requests: 2 }),
+      ]),
+    );
+    expect(body.routes.map(({ route_kind }) => route_kind)).toEqual([
+      "repo_view",
+      "workflow_run_list",
+      "actions_log",
     ]);
-    expect(body.routes.map(({ route_kind }) => route_kind)).toEqual(["repo_view", "actions_log"]);
     expect(body.caller_routes).toEqual([
+      expect.objectContaining({ route_kind: "repo_view", requests: 2 }),
+      expect.objectContaining({ route_kind: "workflow_run_list", requests: 2 }),
+    ]);
+    expect(body.client_routes).toEqual([
       expect.objectContaining({ route_kind: "repo_view", requests: 2 }),
     ]);
     expect(body.backends).toEqual([
@@ -738,6 +765,42 @@ describe("Worker end-to-end read models", () => {
     expect(body.fallback_reasons).toEqual([
       expect.objectContaining({ reason: "owner_denied", route_kind: "actions_log", requests: 1 }),
     ]);
+
+    const filteredResponse = await callWorker(
+      `/v1/pools/${POOL}/stats?since=24h&client=ci-runner`,
+      { headers: { authorization: `Bearer ${CALLER_TOKEN}` } },
+    );
+    expect(filteredResponse.status).toBe(200);
+    const filtered = await filteredResponse.json<StatsEnvelope>();
+    expect(filtered).toMatchObject({
+      operator: { github_login: "caller", client_name: "test-mac" },
+      client_filter: "ci-runner",
+      client_usage: { requests: 2, cache_hits: 1, cache_misses: 1 },
+    });
+    expect(filtered.client_routes).toEqual([
+      expect.objectContaining({ route_kind: "workflow_run_list", requests: 2 }),
+    ]);
+
+    const foreignResponse = await callWorker(`/v1/pools/${POOL}/stats?since=24h&client=other-mac`, {
+      headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+    });
+    expect(foreignResponse.status).toBe(200);
+    const foreign = await foreignResponse.json<StatsEnvelope>();
+    expect(foreign).toMatchObject({
+      operator: { github_login: "caller", client_name: "test-mac" },
+      client_filter: "other-mac",
+      client_usage: { requests: 0, cache_hits: 0, cache_misses: 0 },
+      client_routes: [],
+    });
+
+    const invalidResponse = await callWorker(
+      `/v1/pools/${POOL}/stats?since=24h&client=not%20a%20hostname`,
+      { headers: { authorization: `Bearer ${CALLER_TOKEN}` } },
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(await invalidResponse.json()).toMatchObject({
+      error: { code: "client_name_invalid" },
+    });
   });
 
   it("composes the authenticated dashboard from D1 and Durable Object state", async () => {

@@ -36,6 +36,35 @@ func TestCLIEndToEndServiceCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("stats client filter", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/v1/pools/maintainers/stats" {
+				http.Error(w, "unexpected stats request", http.StatusBadRequest)
+				t.Errorf("request = %s %s", r.Method, r.URL.Path)
+				return
+			}
+			if r.URL.Query().Get("since") != "24h" || r.URL.Query().Get("client") != "ci-runner" {
+				http.Error(w, "unexpected stats query", http.StatusBadRequest)
+				t.Errorf("query = %q", r.URL.RawQuery)
+				return
+			}
+			writeCommandJSON(t, w, map[string]any{
+				"pool":          "maintainers",
+				"operator":      map[string]any{"client_name": "test-mac"},
+				"client_filter": "ci-runner",
+				"client_usage":  map[string]any{"requests": 3, "saved_github_requests": 2, "backend_requests": 1},
+			})
+		}))
+		t.Cleanup(server.Close)
+
+		result := runCLI(t, bin, server.URL, nil, "stats", "-client", "ci-runner")
+		if result.err != nil ||
+			!strings.Contains(result.stdout, "client: test-mac\nclient filter: ci-runner\n") ||
+			!strings.Contains(result.stdout, "ci-runner: 3 requests, 2 saved, 1 backend") {
+			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+		}
+	})
+
 	t.Run("request forwards options", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/github/request" {

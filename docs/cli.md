@@ -263,7 +263,7 @@ is not stored by Octopool; retry the same login command after reset instead of r
 Fetches `GET /v1/pools/<pool>/health` using the stored token. Returns identity counts and
 policy version.
 
-### `octopool stats [--pool <id>] [--since 24h] [--json]`
+### `octopool stats [--pool <id>] [--since 24h] [--client <name>] [--json]`
 
 Fetches `GET /v1/pools/<pool>/stats` using the stored token. The default human output
 shows the pool request count, service errors, expected local fallbacks, raw and
@@ -274,6 +274,9 @@ route and bounded source (`github_web`, anonymous `github_api`, or `github_ident
 groups local delegation by fallback reason. No request bodies, query values, or credentials
 enter these aggregates.
 `--since` accepts `30m`, `24h`, or `7d` style windows, capped at 30 days.
+`--client` filters `client_usage` and `client_routes` to that named client while retaining
+the authenticated caller's scope. Human output identifies both the calling client and the
+filter; JSON includes `client_filter` only when the filter is active.
 
 ```sh
 octopool stats
@@ -299,6 +302,12 @@ Use `--json` for dashboards or scripts that want the raw aggregate:
 
 ```sh
 octopool stats --since 7d --json
+```
+
+Filter the client-specific aggregates without changing the calling client identity:
+
+```sh
+octopool stats -client ci-runner
 ```
 
 ### `octopool request --path <p> [--method GET] [--query k=v] [--header k=v] [--route-hint k=v]`

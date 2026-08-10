@@ -6,7 +6,7 @@ import {
   verifyGitHubOrgMemberWithToken,
 } from "./auth";
 import { clearConfigCache } from "./config-cache";
-import { normalizeClientName } from "./client-name";
+import { parseClientName } from "./client-name";
 import { ensureCliCaller } from "./callers";
 import { requestedLoginPool } from "./config";
 import { ensurePool } from "./db";
@@ -16,7 +16,7 @@ import { HttpError, jsonResponse, parseJsonObject, requireString } from "./http"
 export async function loginGitHubCLI(request: Request, env: Env): Promise<Response> {
   const body = await parseJsonObject(request);
   const githubToken = requireString(body.github_token, "github_token");
-  const clientName = parseClientName(body.client_name);
+  const clientName = body.client_name === undefined ? "legacy" : parseClientName(body.client_name);
   const pool = requestedLoginPool(env, body.pool);
   const user = await githubUserFromToken(env, githubToken);
   const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
@@ -60,24 +60,6 @@ export async function createCaller(request: Request, env: Env): Promise<Response
     },
     201,
   );
-}
-
-function parseClientName(value: unknown): string {
-  if (value === undefined) {
-    return "legacy";
-  }
-  if (typeof value !== "string") {
-    throw new HttpError(400, "client_name_invalid", "client_name must be a string");
-  }
-  const clientName = normalizeClientName(value);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(clientName)) {
-    throw new HttpError(
-      400,
-      "client_name_invalid",
-      "client_name must be 1-80 hostname-safe characters",
-    );
-  }
-  return clientName;
 }
 
 export async function upsertIdentity(request: Request, env: Env, pool: string): Promise<Response> {

@@ -114,3 +114,26 @@ func TestRenderStatsNoRoutes(t *testing.T) {
 		t.Fatalf("missing empty routes:\n%s", got)
 	}
 }
+
+func TestRenderStatsClientFilter(t *testing.T) {
+	var out bytes.Buffer
+	stats := statsResponse{
+		Pool:         "maintainers",
+		Operator:     statsOperator{ClientName: "steipete-mbp"},
+		ClientFilter: "ci-runner",
+		ClientUsage:  statsAggregate{Requests: 4, SavedGitHubCalls: 1, BackendRequests: 3},
+	}
+	if err := renderStats(&out, stats); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "client: steipete-mbp\nclient filter: ci-runner\n") {
+		t.Fatalf("missing client filter after calling client:\n%s", got)
+	}
+	if !strings.Contains(got, "ci-runner: 4 requests, 1 saved, 3 backend") {
+		t.Fatalf("missing filtered usage label:\n%s", got)
+	}
+	if strings.Contains(got, "this client:") {
+		t.Fatalf("unexpected unfiltered usage label:\n%s", got)
+	}
+}

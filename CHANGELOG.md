@@ -20,6 +20,7 @@
 
 ### Changes
 
+- Add a caller-scoped `client` filter to the stats API and `octopool stats` so operators can inspect route-level behavior for any of their own clients.
 - Cut awaited round trips per relay request — warm 1MB cache hits drop from ~1.0s to ~0.3s: 30s isolate-local cache for caller auth, pool policy, and identity lists (authoritative rechecks still read D1 directly) and public-repo proof TTL raised to 15 minutes in the hosted deployment. Smart Placement was measured and rejected: it relocates execution and the edge cache away from caller colos, slowing this workload 2-3x.
 - Move the primary data region to Western North America: new `wnam` D1 database (config, tokens, identities, proofs, and audit history migrated; cache rebuilt) and a relocated pool coordinator, cutting ~140ms of transatlantic latency from every D1/coordinator round trip for US callers.
 - Redesign the operator dashboard as an editorial ledger: serif display type, hairline-rule sections, tick-marked rate gauges with low-headroom coloring, and right-aligned tabular numerals.

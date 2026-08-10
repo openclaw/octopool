@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { normalizeAggregate } from "../src/metrics";
-import { parseStatsWindow } from "../src/stats";
+import { parseStatsWindow, poolStats } from "../src/stats";
 import { HttpError } from "../src/http";
+import type { Caller } from "../src/types";
 
 describe("stats windows", () => {
   it("defaults to 24h", () => {
@@ -88,3 +89,72 @@ describe("stats aggregates", () => {
     });
   });
 });
+
+describe("client-filtered stats", () => {
+  const caller: Caller = {
+    id: "caller-id",
+    name: "Caller",
+    github_login: "caller",
+    org_login: "openclaw",
+    org_verified_at: null,
+    caller_token_id: "caller-token-id",
+    client_name: "test-mac",
+  };
+
+  it("keeps the calling client by default and emits no filter field", async () => {
+    const bindings: unknown[][] = [];
+    const response = await poolStats(statsEnv(bindings), "maintainers", caller, {
+      label: "24h",
+      seconds: 86_400,
+    });
+
+    expect(response).not.toHaveProperty("client_filter");
+    expect(clientScopedBindings(bindings)).toEqual([
+      ["maintainers", "-86400 seconds", "caller-id", "test-mac"],
+      ["maintainers", "-86400 seconds", "caller-id", "test-mac"],
+    ]);
+  });
+
+  it("binds a filtered client together with the authenticated caller id", async () => {
+    const bindings: unknown[][] = [];
+    const response = await poolStats(
+      statsEnv(bindings),
+      "maintainers",
+      caller,
+      { label: "24h", seconds: 86_400 },
+      "ci-runner",
+    );
+
+    expect(response).toMatchObject({
+      operator: { github_login: "caller", client_name: "test-mac" },
+      client_filter: "ci-runner",
+    });
+    expect(clientScopedBindings(bindings)).toEqual([
+      ["maintainers", "-86400 seconds", "caller-id", "ci-runner"],
+      ["maintainers", "-86400 seconds", "caller-id", "ci-runner"],
+    ]);
+  });
+});
+
+function statsEnv(bindings: unknown[][]): Env {
+  const prepare = vi.fn(() => ({
+    bind: (...values: unknown[]) => {
+      bindings.push(values);
+      return {
+        first: async () => null,
+        all: async () => ({ results: [] }),
+      };
+    },
+  }));
+  return { DB: { prepare } } as unknown as Env;
+}
+
+function clientScopedBindings(bindings: unknown[][]): unknown[][] {
+  return bindings.filter(
+    (values) =>
+      values.length === 4 &&
+      values[2] === "caller-id" &&
+      typeof values[3] === "string" &&
+      values[3] !== "",
+  );
+}

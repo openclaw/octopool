@@ -62,7 +62,14 @@ export function parseStatsWindow(raw: string | null): StatsWindow {
   return { label: `${amount}${unit}`, seconds };
 }
 
-export async function poolStats(env: Env, pool: string, caller: Caller, window: StatsWindow) {
+export async function poolStats(
+  env: Env,
+  pool: string,
+  caller: Caller,
+  window: StatsWindow,
+  clientFilter?: string,
+) {
+  const statsClientName = clientFilter ?? caller.client_name;
   const [
     poolUsage,
     callerUsage,
@@ -77,10 +84,10 @@ export async function poolStats(env: Env, pool: string, caller: Caller, window: 
   ] = await Promise.all([
     aggregateUsage(env, pool, window.seconds),
     aggregateUsage(env, pool, window.seconds, caller.id),
-    aggregateUsage(env, pool, window.seconds, caller.id, caller.client_name),
+    aggregateUsage(env, pool, window.seconds, caller.id, statsClientName),
     routeUsage(env, pool, window.seconds),
     routeUsage(env, pool, window.seconds, caller.id),
-    routeUsage(env, pool, window.seconds, caller.id, caller.client_name),
+    routeUsage(env, pool, window.seconds, caller.id, statsClientName),
     loadClientUsage(env, pool, window.seconds, caller.id),
     loadBackendUsage(env, pool, window.seconds),
     loadFallbackReasons(env, pool, window.seconds),
@@ -94,6 +101,7 @@ export async function poolStats(env: Env, pool: string, caller: Caller, window: 
       github_login: caller.github_login,
       client_name: caller.client_name,
     },
+    ...(clientFilter === undefined ? {} : { client_filter: clientFilter }),
     pool_usage: poolUsage,
     caller_usage: callerUsage,
     client_usage: currentClientUsage,

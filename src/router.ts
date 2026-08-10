@@ -1,4 +1,5 @@
 import { authenticateAdmin, authenticateCaller } from "./auth";
+import { parseClientName } from "./client-name";
 import { defaultLoginPool } from "./config";
 import { dashboardData } from "./dashboard-data";
 import { dashboardResponse } from "./dashboard";
@@ -77,7 +78,9 @@ export async function routeRequest(
     const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/stats$/, "pool");
     const caller = await authenticateCaller(request, env, pool);
     const window = parseStatsWindow(url.searchParams.get("since"));
-    return jsonResponse(await poolStats(env, pool, caller, window));
+    const rawClientFilter = url.searchParams.get("client");
+    const clientFilter = rawClientFilter === null ? undefined : parseClientName(rawClientFilter);
+    return jsonResponse(await poolStats(env, pool, caller, window, clientFilter));
   }
   if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/health$/.test(url.pathname)) {
     const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/health$/, "pool");
