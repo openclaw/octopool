@@ -31,6 +31,10 @@ export function githubResponseLocalFallbackReason(
 }
 
 const localFallbackReasons = new Set([
+  // A body over MAX_RESPONSE_BYTES is one the relay can never serve, no matter
+  // how often it is retried; the caller's own gh has no such cap, so this is a
+  // handoff rather than a failure.
+  "github_response_too_large",
   "identities_cooling_down",
   "logs_denied",
   "no_identity",

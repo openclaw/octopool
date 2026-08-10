@@ -50,7 +50,7 @@ describe("Worker end-to-end relay security boundaries", () => {
     });
   });
 
-  it("rejects oversized pooled responses without caching them", async () => {
+  it("hands oversized pooled responses to local gh without caching them", async () => {
     await seedPool();
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
@@ -66,25 +66,22 @@ describe("Worker end-to-end relay security boundaries", () => {
     vi.stubGlobal("fetch", upstream);
 
     const response = await relay("/repos/openclaw/oversized");
-    expect(response.status).toBe(502);
-    expect(await response.json()).toEqual({
-      error: {
-        code: "github_response_too_large",
-        message: "GitHub response exceeded relay cap",
-        request_id: expect.any(String),
-      },
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "github_response_too_large" } },
     });
     expect(
       await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
     ).toEqual({ count: 0 });
     expect(
       await env.DB.prepare(
-        "SELECT identity_id, status, error_code, cache_status, cacheable FROM audit_events",
+        "SELECT identity_id, status, error_code, fallback_reason, cache_status, cacheable FROM audit_events",
       ).first(),
     ).toEqual({
       identity_id: "primary",
-      status: 502,
-      error_code: "github_response_too_large",
+      status: 424,
+      error_code: "fallback_local",
+      fallback_reason: "github_response_too_large",
       cache_status: "miss",
       cacheable: 1,
     });

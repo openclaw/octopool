@@ -26,6 +26,16 @@ describe("local gh fallback signal", () => {
     expect(localFallbackError(new Error("TypeError: fetch failed"))).toBeUndefined();
   });
 
+  it("hands oversized GitHub responses to local gh instead of dead-ending the caller", () => {
+    const fallback = localFallbackError(
+      new HttpError(502, "github_response_too_large", "GitHub response exceeded relay cap"),
+    );
+
+    expect(fallback?.status).toBe(424);
+    expect(fallback?.code).toBe("fallback_local");
+    expect(fallback?.details).toMatchObject({ reason: "github_response_too_large" });
+  });
+
   it("does not hide auth or malformed-request failures behind local fallback", () => {
     expect(localFallbackError(new HttpError(401, "missing_auth", "Missing bearer token"))).toBe(
       undefined,
