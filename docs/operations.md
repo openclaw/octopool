@@ -54,7 +54,7 @@ because `octopool.dev` lives in a different Cloudflare account from the authorit
 wrangler d1 create octopool --location wnam
 # copy the printed database_id into wrangler.jsonc d1_databases[].database_id
 
-wrangler d1 migrations apply octopool --remote
+wrangler d1 migrations apply DB --remote
 ```
 
 The pool coordinator's location hint in `src/pool-coordinator.ts`
@@ -193,7 +193,7 @@ D1 schema lives in `migrations/`:
 - `0012_caller_clients.sql` — concurrent per-client caller tokens and audit attribution.
 - `0013_audit_backends.sql` — bounded upstream-source attribution for route-level stats.
 
-Apply with `wrangler d1 migrations apply octopool` (add `--remote` for production).
+Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
 
 ## Build, test, deploy
 

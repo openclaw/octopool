@@ -132,7 +132,7 @@ If you don't need OpenClaw's second-host proxy, ignore `wrangler.public-proxy.js
 wrangler d1 create octopool
 # copy the printed database_id into wrangler.jsonc d1_databases[].database_id
 
-wrangler d1 migrations apply octopool --remote
+wrangler d1 migrations apply DB --remote
 ```
 
 The `PoolCoordinator` Durable Object class is created by the migration tag in `wrangler.jsonc` on first deploy — no separate step.

@@ -3,3 +3,7 @@ packages: []
 allowBuilds:
   "@google/genai": true
   protobufjs: true
+
+overrides:
+  hono@<4.12.34: 4.12.34
+  "undici@>=8.0.0 <8.9.0": 8.10.0

@@ -40,7 +40,7 @@ jobs:
       - name: Set up pnpm
         run: |
           corepack enable
-          corepack prepare pnpm@11.18.0 --activate
+          corepack prepare pnpm@11.20.0 --activate
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -75,5 +75,5 @@ jobs:
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: "v2.17.0"
+          version: "v2.17.1"
           args: release --snapshot --clean --skip=publish
