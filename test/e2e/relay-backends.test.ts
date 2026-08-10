@@ -301,6 +301,77 @@ describe("Worker end-to-end relay backends", () => {
     });
   });
 
+  it("falls back locally for releases without ever trying a pooled identity", async () => {
+    await seedPool();
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        return new URL(request.url).hostname === "github.com"
+          ? jsonResponse({ message: "page unavailable" }, 404)
+          : jsonResponse({ message: "API rate limit exceeded" }, 403, anonymousRateHeaders(0));
+      }),
+    );
+
+    const response = await relay("/repos/openclaw/octopool/releases/tags/v0.5.5", undefined, {
+      headers: { "x-octopool-public-shape": "release-summary-v1" },
+    });
+
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({ error: { code: "fallback_local" } });
+    expect(
+      requests.some(
+        (request) =>
+          request.url === "https://api.github.com/repos/openclaw/octopool/releases/tags/v0.5.5" &&
+          bearer(request) === undefined,
+      ),
+    ).toBe(true);
+    expect(
+      requests.every(
+        (request) =>
+          !["test-primary-token", "test-secondary-token"].includes(bearer(request) ?? ""),
+      ),
+    ).toBe(true);
+  });
+
+  it("serves and caches a release from anonymous API after its public page fails", async () => {
+    await seedPool();
+    const requests: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (new URL(request.url).hostname === "github.com") {
+          return jsonResponse({ message: "page unavailable" }, 404);
+        }
+        expect(bearer(request)).toBeUndefined();
+        return jsonResponse(
+          { id: 55, tag_name: "v0.5.5", name: "Octopool 0.5.5", draft: false },
+          200,
+          publicRateHeaders(),
+        );
+      }),
+    );
+    const options = { headers: { "x-octopool-public-shape": "release-summary-v1" } };
+
+    const first = await relay("/repos/openclaw/octopool/releases/tags/v0.5.5", undefined, options);
+    expect(await first.json<RelayEnvelope>()).toMatchObject({
+      body: { id: 55, tag_name: "v0.5.5", draft: false },
+      relay: { backend: "web", cache: "miss", route_kind: "release_view" },
+    });
+    const second = await relay("/repos/openclaw/octopool/releases/tags/v0.5.5", undefined, options);
+    expect((await second.json<RelayEnvelope>()).relay.cache).toBe("hit");
+    expect(requests).toHaveLength(2);
+    expect(
+      await env.DB.prepare(
+        "SELECT backend FROM audit_events WHERE route_kind = 'release_view' AND cache_status = 'miss'",
+      ).first(),
+    ).toEqual({ backend: "github_api" });
+  });
+
   it("serves policy-disabled repo search from anonymous API and shared cache", async () => {
     await seedPool();
     await env.DB.prepare("UPDATE pools SET policy_json = ? WHERE id = 'maintainers'")

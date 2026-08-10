@@ -21,7 +21,7 @@ describe("route manifest", () => {
   });
 
   it("defines backend eligibility on every concrete route", () => {
-    expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(111);
+    expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(115);
     expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(27);
     expect(ROUTES.filter((route) => route.capabilities.fallback === "github_public")).toHaveLength(
       1,

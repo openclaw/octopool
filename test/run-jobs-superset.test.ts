@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { githubCacheKey } from "../src/cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import {
+  completeRunJobsSuperset,
   filterRunJobsSuperset,
   runJobsSupersetIncomplete,
   runJobsSupersetView,
@@ -84,4 +85,46 @@ describe("Actions job-list superset", () => {
       ),
     ).toBe(true);
   });
+
+  it("merges bounded API pages in order while preserving GitHub's total", async () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs/42/jobs",
+      query: { per_page: "100" },
+      headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+    });
+    const view = runJobsSupersetView(request, classifyRoute(request, policy));
+    const pages: string[] = [];
+    const response = await completeRunJobsSuperset(
+      {
+        status: 200,
+        headers: { "content-type": "application/json" },
+        body: { total_count: 250, jobs: jobs(1, 100) },
+        body_encoding: "json",
+      },
+      view,
+      async (pageRequest) => {
+        const page = String(pageRequest.query?.page);
+        pages.push(page);
+        return {
+          status: 200,
+          headers: { "content-type": "application/json" },
+          body: {
+            total_count: 250,
+            jobs: page === "2" ? jobs(101, 100) : jobs(201, 50),
+          },
+          body_encoding: "json",
+        };
+      },
+    );
+
+    expect(pages).toEqual(["2", "3"]);
+    expect(response.body).toMatchObject({ total_count: 250 });
+    expect((response.body as { jobs: unknown[] }).jobs).toHaveLength(250);
+  });
 });
+
+function jobs(first: number, count: number): { id: number }[] {
+  return Array.from({ length: count }, (_, index) => ({ id: first + index }));
+}

@@ -15,6 +15,8 @@
 - Fall through to a pooled identity when the anonymous GitHub API exhausts its shared quota instead of sending `user_view` requests to local `gh` while pooled quota remains available.
 - Apply `MAX_RESPONSE_BYTES` uniformly to every GitHub route and raise the hosted cap to 4 MiB so already-paid-for responses between 1 MiB and the configured limit are served instead of retried locally.
 - Scope permission and SSO 403 cooldowns to the failed route so an identity with remaining quota can continue serving unrelated routes.
+- Follow up to three authenticated or anonymous API pages for shaped Actions job reads so matrix runs with up to 300 jobs share one complete cached superset instead of falling back locally after the first 100.
+- Fall back from public release pages to the anonymous GitHub API while keeping every release route barred from pooled identities, preventing draft releases from entering shared caches.
 
 ### Changes
 

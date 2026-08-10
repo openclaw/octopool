@@ -305,18 +305,10 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/actions/workflows", "workflow_list"),
   route("/repos/{owner}/{repo}/actions/workflows/{workflow}", "workflow_view"),
   route("/repos/{owner}/{repo}/actions/workflows/{workflow}/runs", "workflow_run_list"),
-  localRoute("/repos/{owner}/{repo}/releases", "release_list", "core", {
-    publicApi: false,
-  }),
-  localRoute("/repos/{owner}/{repo}/releases/latest", "release_latest", "core", {
-    publicApi: false,
-  }),
-  localRoute("/repos/{owner}/{repo}/releases/tags/{tag}", "release_view", "core", {
-    publicApi: false,
-  }),
-  localRoute("/repos/{owner}/{repo}/releases/{id}", "release_view", "core", {
-    publicApi: false,
-  }),
+  localRoute("/repos/{owner}/{repo}/releases", "release_list"),
+  localRoute("/repos/{owner}/{repo}/releases/latest", "release_latest"),
+  localRoute("/repos/{owner}/{repo}/releases/tags/{tag}", "release_view"),
+  localRoute("/repos/{owner}/{repo}/releases/{id}", "release_view"),
   localRoute("/repos/{owner}/{repo}/releases/{id}/assets", "release_assets"),
   localRoute("/repos/{owner}/{repo}/releases/assets/{id}", "release_asset"),
   route("/search/issues", "search_issues", "search", { search: true }),

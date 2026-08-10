@@ -83,8 +83,8 @@ Current shape IDs are `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summa
 | `GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs`         | `https://github.com/{owner}/{repo}/actions/workflows/{workflow}`                                                    | Up to 25 unfiltered runs; shared per-workflow public-page superset |
 | `GET /repos/{owner}/{repo}/actions/runs/{id}`                         | `https://github.com/{owner}/{repo}/actions/runs/{id}`                                                               | Run summary; no query                                              |
 | `GET /repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}/jobs` | `https://github.com/{owner}/{repo}/actions/runs/{id}/job_groups_batch?attempt={attempt}`, then each public job page | Exact attempt; up to 25 job pages                                  |
-| `GET /repos/{owner}/{repo}/releases/latest`                           | `https://github.com/{owner}/{repo}/releases/latest`                                                                 | Release summary used by `gh release view`                          |
-| `GET /repos/{owner}/{repo}/releases/tags/{tag}`                       | `https://github.com/{owner}/{repo}/releases/tag/{tag}`                                                              | Release summary used by `gh release view`; no query                |
+| `GET /repos/{owner}/{repo}/releases/latest`                           | `https://github.com/{owner}/{repo}/releases/latest`                                                                 | Release summary used by `gh release view`; anonymous API fallback  |
+| `GET /repos/{owner}/{repo}/releases/tags/{tag}`                       | `https://github.com/{owner}/{repo}/releases/tag/{tag}`                                                              | Release summary used by `gh release view`; anonymous API fallback  |
 
 Supported field sets:
 

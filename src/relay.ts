@@ -40,6 +40,7 @@ import {
   type RunListSupersetView,
 } from "./run-list-superset";
 import {
+  completeRunJobsSuperset,
   filterRunJobsSuperset,
   runJobsSupersetIncomplete,
   runJobsSupersetView,
@@ -96,6 +97,7 @@ type ActiveRelay = RelayBase & {
   cacheStatus: "miss" | "bypass";
   cacheable: boolean;
   identity: Identity | undefined;
+  paginatedIdentityRateRecorded: boolean;
 };
 
 type RelaySuccess = {
@@ -212,6 +214,7 @@ async function prepareRelay(
     cacheStatus: cacheKey === undefined ? "bypass" : "miss",
     cacheable: cacheKey !== undefined,
     identity: undefined,
+    paginatedIdentityRateRecorded: false,
   };
 }
 
@@ -486,13 +489,30 @@ async function callRevalidationAPI(
   };
   try {
     if (tokenFree) {
-      return await callAnonymousGitHubAPI(state.env, request, state.route);
+      const response = await callAnonymousGitHubAPI(state.env, request, state.route);
+      return response === undefined
+        ? undefined
+        : completeRunJobsSuperset(response, state.runJobsSuperset, (pageRequest) =>
+            callAnonymousGitHubAPI(state.env, pageRequest, state.route),
+          );
     }
     if (identity !== undefined) {
-      return sanitizeGitHubResponse(
+      state.paginatedIdentityRateRecorded = false;
+      const response = sanitizeGitHubResponse(
         state.route,
         await callGitHub(state.env, identity, request, state.route),
       );
+      return completeRunJobsSuperset(response, state.runJobsSuperset, async (pageRequest) => {
+        await recordFirstPaginatedIdentityRate(state, identity, response);
+        const page = sanitizeGitHubResponse(
+          state.route,
+          await callGitHub(state.env, identity, pageRequest, state.route),
+        );
+        await state.coordinator.recordResult(
+          coordinatorResult(state, identity, page.status, rateFromHeaders(page.headers)),
+        );
+        return page;
+      });
     }
     return sanitizeGitHubResponse(
       state.route,
@@ -610,7 +630,13 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
   if (response === undefined) {
     return undefined;
   }
-  const github = sanitizeGitHubResponse(state.route, response);
+  const completed =
+    response.backend === "github"
+      ? await completeRunJobsSuperset(response, state.runJobsSuperset, (pageRequest) =>
+          callAnonymousGitHubAPI(state.env, pageRequest, state.route),
+        )
+      : response;
+  const github = sanitizeGitHubResponse(state.route, completed);
   if (anonymousGitHubResponseProvesPublicRepo(state.route)) {
     await recordPublicGitHubRepo(state.env, state.route);
   } else {
@@ -688,9 +714,25 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     if (coalesced !== undefined) {
       return serveFreshCachedRelayResponse(state, coalesced, { coalesced: true });
     }
-    const github = sanitizeGitHubResponse(
+    const firstPage = sanitizeGitHubResponse(
       state.route,
       await callGitHub(state.env, identity, state.cacheRequest, state.route),
+    );
+    state.paginatedIdentityRateRecorded = false;
+    const github = await completeRunJobsSuperset(
+      firstPage,
+      state.runJobsSuperset,
+      async (pageRequest) => {
+        await recordFirstPaginatedIdentityRate(state, identity, firstPage);
+        const page = sanitizeGitHubResponse(
+          state.route,
+          await callGitHub(state.env, identity, pageRequest, state.route),
+        );
+        await state.coordinator.recordResult(
+          coordinatorResult(state, identity, page.status, rateFromHeaders(page.headers)),
+        );
+        return page;
+      },
     );
     const rate = rateFromHeaders(github.headers);
     const identityFallback = githubResponseLocalFallbackReason(github.status, rate);
@@ -734,7 +776,18 @@ async function switchRelayCacheKey(
 
 async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): Promise<Response> {
   const cacheStatus = result.revalidated === true ? "hit" : state.cacheStatus;
-  rejectIncompleteRunJobs(state, result.github);
+  if (runJobsSupersetIncomplete(result.github, state.runJobsSuperset)) {
+    if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
+      state.ctx.waitUntil(
+        state.coordinator.recordResult(
+          coordinatorResult(state, result.identity, result.github.status, result.rate),
+        ),
+      );
+    }
+    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+      reason: "pagination_exhausted",
+    });
+  }
   if (completedRunJobsResponse(result.github)) {
     state.route = await proveRunAttemptCompleted(state);
   }
@@ -798,7 +851,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
       cacheable: state.cacheable,
     }),
   ];
-  if (result.identity !== undefined) {
+  if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
     background.push(
       state.coordinator.recordResult(
         coordinatorResult(
@@ -845,6 +898,20 @@ function coordinatorResult(
     status,
     ...(rate === undefined ? {} : { rate }),
   };
+}
+
+async function recordFirstPaginatedIdentityRate(
+  state: ActiveRelay,
+  identity: Identity,
+  response: GitHubRelayResponse,
+): Promise<void> {
+  if (state.paginatedIdentityRateRecorded) {
+    return;
+  }
+  await state.coordinator.recordResult(
+    coordinatorResult(state, identity, response.status, rateFromHeaders(response.headers)),
+  );
+  state.paginatedIdentityRateRecorded = true;
 }
 
 async function handleRelayError(

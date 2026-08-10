@@ -3,6 +3,7 @@ import { isRecord } from "./object";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const MAX_PAGE_SIZE = 100;
+const MAX_API_JOBS = 300;
 const DEFAULT_PAGE_SIZE = 30;
 const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length", "link"]);
 
@@ -59,6 +60,63 @@ export function runJobsSupersetIncomplete(
     total < 0 ||
     total !== response.body.jobs.length
   );
+}
+
+export async function completeRunJobsSuperset(
+  response: GitHubRelayResponse,
+  view: RunJobsSupersetView | undefined,
+  fetchPage: (request: RelayRequest) => Promise<GitHubRelayResponse | undefined>,
+): Promise<GitHubRelayResponse> {
+  if (
+    view === undefined ||
+    response.status < 200 ||
+    response.status >= 300 ||
+    !isRecord(response.body) ||
+    !Array.isArray(response.body.jobs)
+  ) {
+    return response;
+  }
+  const total = response.body.total_count;
+  if (
+    typeof total !== "number" ||
+    !Number.isSafeInteger(total) ||
+    total <= response.body.jobs.length ||
+    total > MAX_API_JOBS
+  ) {
+    return response;
+  }
+
+  const jobs = [...response.body.jobs];
+  const pageCount = Math.ceil(total / MAX_PAGE_SIZE);
+  for (let page = 2; page <= pageCount; page++) {
+    let next: GitHubRelayResponse | undefined;
+    try {
+      next = await fetchPage({
+        ...view.cacheRequest,
+        query: { ...view.cacheRequest.query, page: String(page) },
+      });
+    } catch {
+      return response;
+    }
+    if (
+      next === undefined ||
+      next.status < 200 ||
+      next.status >= 300 ||
+      !isRecord(next.body) ||
+      next.body.total_count !== total ||
+      !Array.isArray(next.body.jobs)
+    ) {
+      return response;
+    }
+    jobs.push(...next.body.jobs);
+  }
+  if (jobs.length !== total) {
+    return response;
+  }
+  return {
+    ...response,
+    body: { ...response.body, total_count: total, jobs },
+  };
 }
 
 export function filterRunJobsSuperset(

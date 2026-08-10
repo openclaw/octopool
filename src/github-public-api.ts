@@ -39,6 +39,7 @@ export function publicAPIRequest(
 ): WebRequest | undefined {
   if (
     request.method !== "GET" ||
+    releaseRoute(route) ||
     !capabilitiesForRouteKind(route.kind).publicApi ||
     !defaultGitHubJSONAccept(request.headers?.accept)
   ) {
