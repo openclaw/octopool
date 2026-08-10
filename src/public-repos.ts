@@ -18,6 +18,7 @@ type GitHubRepoResponse = {
 type PublicRepoProof = {
   checked_at: string;
   expires_at: string;
+  is_public?: boolean | number;
 };
 
 type PublicRepoProofSource = "edge" | "shared";
@@ -35,10 +36,13 @@ export async function ensurePublicGitHubRepo(
   }
   const owner = route.owner.toLowerCase();
   const repo = route.repo.toLowerCase();
+  const edgeProof = await rejectFreshNegativePublicRepoProof(env, owner, repo);
   if (
     cacheCreatedAt !== undefined &&
-    (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, { requireFresh: true })) !==
-      undefined
+    (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, {
+      requireFresh: true,
+      edgeProof,
+    })) !== undefined
   ) {
     return;
   }
@@ -53,15 +57,18 @@ export async function ensurePublicGitHubRepo(
     const acquisition = await acquireOwnedCacheFill(coordinator, proofKey);
     if (acquisition.kind !== "owner") {
       if (acquisition.kind === "completed") {
+        const completedEdgeProof = await rejectFreshNegativePublicRepoProof(env, owner, repo);
         const source =
           acquisition.outcome === "shared"
             ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
                 requireFresh: true,
+                edgeProof: completedEdgeProof,
               })
             : acquisition.outcome === "edge_only"
               ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
                   requireFresh: true,
                   source: "edge",
+                  edgeProof: completedEdgeProof,
                 })
               : undefined;
         if (source !== undefined) {
@@ -124,6 +131,7 @@ async function refreshPublicGitHubRepoProof(
   if (route.tokenFreeOnly) {
     const pageProof = await fetchPublicRepoPageProof(env, owner, repo);
     if (pageProof === false) {
+      await storePublicRepoProof(env, owner, repo, false);
       throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
     }
     if (pageProof === undefined) {
@@ -146,6 +154,7 @@ async function refreshPublicGitHubRepoProof(
   if (!response.ok && publicCheckMayUseHistoricalProof(response)) {
     const pageProof = await fetchPublicRepoPageProof(env, owner, repo);
     if (pageProof === false) {
+      await storePublicRepoProof(env, owner, repo, false);
       throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
     }
     if (pageProof === true) {
@@ -153,6 +162,7 @@ async function refreshPublicGitHubRepoProof(
     }
   }
   if (response.status === 404) {
+    await storePublicRepoProof(env, owner, repo, false);
     throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
   }
   if (!response.ok) {
@@ -173,6 +183,7 @@ async function refreshPublicGitHubRepoProof(
   }
   const body = (await response.json()) as GitHubRepoResponse;
   if (body.private !== false) {
+    await storePublicRepoProof(env, owner, repo, false);
     throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
   }
   return storePublicRepoProof(env, owner, repo);
@@ -270,20 +281,22 @@ async function storePublicRepoProof(
   env: Env,
   owner: string,
   repo: string,
+  isPublic = true,
 ): Promise<CacheFillOutcome> {
-  const ttlSeconds = parsePositiveInt(
-    (env as unknown as Record<string, string | undefined>).PUBLIC_REPO_TTL_SECONDS,
-    30,
-  );
+  const vars = env as unknown as Record<string, string | undefined>;
+  const ttlSeconds = isPublic
+    ? parsePositiveInt(vars.PUBLIC_REPO_TTL_SECONDS, 30)
+    : parsePositiveInt(vars.PUBLIC_REPO_NEGATIVE_TTL_SECONDS, 3_600);
   const checkedAt = new Date();
   const proof: PublicRepoProof = {
     checked_at: sqliteTimestamp(checkedAt),
     expires_at: sqliteTimestamp(new Date(checkedAt.getTime() + ttlSeconds * 1000)),
+    is_public: isPublic,
   };
   const sharedWrite = (async () => {
     try {
       await env.DB.prepare(queries.upsertPublicRepoProof)
-        .bind(owner, repo, `+${ttlSeconds} seconds`)
+        .bind(owner, repo, isPublic ? 1 : 0, `+${ttlSeconds} seconds`)
         .run();
       return true;
     } catch (error) {
@@ -301,6 +314,9 @@ async function storePublicRepoProof(
     return false;
   });
   const [edgePublished, sharedPublished] = await Promise.all([edgeWrite, sharedWrite]);
+  if (!isPublic && !edgePublished) {
+    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, publicProofKey(owner, repo));
+  }
   return sharedPublished ? "shared" : edgePublished ? "edge_only" : "failed";
 }
 
@@ -321,7 +337,11 @@ async function coveringPublicRepoProofSource(
   env: Env,
   route: RouteInfo,
   cacheCreatedAt: string,
-  options: { requireFresh?: boolean; source?: PublicRepoProofSource } = {},
+  options: {
+    requireFresh?: boolean;
+    source?: PublicRepoProofSource;
+    edgeProof?: PublicRepoProof | undefined;
+  } = {},
 ): Promise<PublicRepoProofSource | undefined> {
   if (route.owner === undefined || route.repo === undefined) {
     return "shared";
@@ -330,8 +350,9 @@ async function coveringPublicRepoProofSource(
   const repo = route.repo.toLowerCase();
   const edgeKey = publicProofKey(owner, repo);
   if (options.source !== "shared") {
-    const edge = await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey);
-    if (edge !== undefined) {
+    const edge =
+      options.edgeProof ?? (await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey));
+    if (edge !== undefined && publicProofIsPublic(edge)) {
       if (publicProofCovers(edge, cacheCreatedAt)) {
         return "edge";
       }
@@ -349,8 +370,36 @@ async function coveringPublicRepoProofSource(
     return undefined;
   }
   const ttlSeconds = Math.floor((parseSQLiteTimestamp(row.expires_at) - Date.now()) / 1000);
-  await writeEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey, row, ttlSeconds);
+  await writeEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey, { ...row, is_public: true }, ttlSeconds);
   return "shared";
+}
+
+async function rejectFreshNegativePublicRepoProof(
+  env: Env,
+  owner: string,
+  repo: string,
+): Promise<PublicRepoProof | undefined> {
+  const edgeKey = publicProofKey(owner, repo);
+  const edge = await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey);
+  if (edge !== undefined && publicProofIsFresh(edge)) {
+    if (!publicProofIsPublic(edge)) {
+      throwRepoNotPublic();
+    }
+    return edge;
+  }
+  if (edge !== undefined && !publicProofIsPublic(edge)) {
+    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey);
+  }
+
+  const row = await env.DB.prepare(queries.freshNegativePublicRepoProof)
+    .bind(owner, repo)
+    .first<PublicRepoProof>();
+  if (row === null || row === undefined || publicProofIsPublic(row) || !publicProofIsFresh(row)) {
+    return undefined;
+  }
+  const ttlSeconds = Math.floor((parseSQLiteTimestamp(row.expires_at) - Date.now()) / 1000);
+  await writeEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey, { ...row, is_public: false }, ttlSeconds);
+  throwRepoNotPublic();
 }
 
 function readD1PublicRepoProof(
@@ -374,6 +423,24 @@ function publicProofCovers(proof: PublicRepoProof, cacheCreatedAt: string): bool
     checkedAt >= cacheAt - 5_000 &&
     expiresAt > Date.now()
   );
+}
+
+function publicProofIsFresh(proof: PublicRepoProof): boolean {
+  if (typeof proof.checked_at !== "string" || typeof proof.expires_at !== "string") {
+    return false;
+  }
+  return (
+    Number.isFinite(parseSQLiteTimestamp(proof.checked_at)) &&
+    parseSQLiteTimestamp(proof.expires_at) > Date.now()
+  );
+}
+
+function publicProofIsPublic(proof: PublicRepoProof): boolean {
+  return proof.is_public === undefined || proof.is_public === true || proof.is_public === 1;
+}
+
+function throwRepoNotPublic(): never {
+  throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
 }
 
 function publicProofKey(owner: string, repo: string): string {

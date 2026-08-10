@@ -9,7 +9,7 @@
 - Report Cloudflare backend overload (D1/Durable Object request queues backing up) as typed `relay_overloaded` — `424 fallback_local` on the relay so the shim backs off and delegates to real `gh` — instead of an untyped `internal_error` 500 that dead-ended paged `gh api` bursts.
 - Retry transient relay `internal_error` and malformed 502/503/504 responses without falling back to local GitHub quota, preserve correlated request IDs in CLI failures, and log unexpected Worker exceptions safely for diagnosis.
 - Continue active `gh run watch` and `gh pr checks --watch` commands through real `gh` only when the relay explicitly requests local fallback, with a visible one-way handoff and exact child exit status.
-
+- Cache negative public-repo proofs so a private repository is proven private once per `PUBLIC_REPO_NEGATIVE_TTL_SECONDS` (default 1h) instead of on every request — the hosted pool was spending 6.5k org-token GitHub calls a week re-proving the same 36 private repos, and each one also cost the caller a full GitHub round trip before being told to fall back. Only definitive answers are cached; rate-limited and inconclusive checks still re-check, and a negative proof never authorizes serving cached content.
 ### Changes
 
 - Cut awaited round trips per relay request — warm 1MB cache hits drop from ~1.0s to ~0.3s: 30s isolate-local cache for caller auth, pool policy, and identity lists (authoritative rechecks still read D1 directly) and public-repo proof TTL raised to 15 minutes in the hosted deployment. Smart Placement was measured and rejected: it relocates execution and the edge cache away from caller colos, slowing this workload 2-3x.

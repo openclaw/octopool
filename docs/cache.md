@@ -281,6 +281,10 @@ is public.
   check to avoid shared unauthenticated GitHub quota; Octopool still requires the
   response body to say `private: false`.
 - `404` or `private !== false` → `403 repo_not_public`.
+- Definitive non-public results are cached separately for
+  `PUBLIC_REPO_NEGATIVE_TTL_SECONDS` (default 3600s), avoiding repeated GitHub checks
+  while never authorizing cached repository content. Rate limits, upstream failures,
+  and inconclusive page checks are not cached as negative proofs.
 - If both authenticated and anonymous API checks are rate-limited or unavailable, Octopool
   can prove visibility from GitHub's public repository page marker without an API token.
 - A successful anonymous request for a direct repository resource is also accepted as the

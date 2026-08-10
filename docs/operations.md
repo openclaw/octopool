@@ -154,7 +154,8 @@ Plain vars (in `wrangler.jsonc`):
 
 Optional vars (set as needed): `PUBLIC_REPO_TTL_SECONDS` (default 30; the hosted
 deployment sets 900 — see the public-repo guard notes in `cache.md` for the trade),
-`DEFAULT_LOGIN_POOL` (default `maintainers`).
+`PUBLIC_REPO_NEGATIVE_TTL_SECONDS` (default 3600), `DEFAULT_LOGIN_POOL` (default
+`maintainers`).
 
 Secrets (via `wrangler secret put`, never in D1/KV/logs):
 

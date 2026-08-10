@@ -115,11 +115,13 @@ export const queries = {
   touchWebSession:
     "UPDATE web_sessions\nSET last_seen_at = CURRENT_TIMESTAMP\nWHERE session_hash = ?1",
   upsertPublicRepoProof:
-    "INSERT INTO github_public_repos (owner, repo, checked_at, expires_at)\nVALUES (?1, ?2, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?3))\nON CONFLICT(owner, repo) DO UPDATE SET\n  checked_at = excluded.checked_at,\n  expires_at = excluded.expires_at",
+    "INSERT INTO github_public_repos (owner, repo, is_public, checked_at, expires_at)\nVALUES (?1, ?2, ?3, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?4))\nON CONFLICT(owner, repo) DO UPDATE SET\n  is_public = excluded.is_public,\n  checked_at = excluded.checked_at,\n  expires_at = excluded.expires_at",
   coveringPublicRepoProof:
-    "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
+    "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND is_public = 1\n  AND checked_at >= datetime(?3, '-5 seconds')\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   freshCoveringPublicRepoProof:
-    "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND checked_at >= datetime(?3, '-5 seconds')\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
+    "SELECT checked_at, expires_at\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND is_public = 1\n  AND checked_at >= datetime(?3, '-5 seconds')\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
+  freshNegativePublicRepoProof:
+    "SELECT checked_at, expires_at, is_public\nFROM github_public_repos\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND is_public = 0\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   freshPRStateProof:
     "SELECT 1\nFROM github_pr_state_proofs\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND number = ?3\n  AND state_hint = ?4\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   upsertPRStateProof:
