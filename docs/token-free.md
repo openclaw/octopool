@@ -236,6 +236,7 @@ GET /repos/{owner}/{repo}/stats/participation
 GET /repos/{owner}/{repo}/stats/punch_card
 GET /repos/{owner}/{repo}/git/blobs/{sha}
 GET /repos/{owner}/{repo}/git/commits/{sha}
+GET /repos/{owner}/{repo}/git/tags/{sha}
 GET /repos/{owner}/{repo}/git/trees/{sha}
 GET /repos/{owner}/{repo}/git/ref/{ref}
 GET /repos/{owner}/{repo}/git/matching-refs/{ref}

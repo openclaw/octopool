@@ -220,6 +220,7 @@ following read-only shapes are enabled. A safe CLI-shaped request outside this s
 - `repo_stats_punch_card`
 - `git_blob`
 - `git_commit`
+- `git_tag`
 - `git_tree`
 - `git_ref`
 - `git_matching_refs`

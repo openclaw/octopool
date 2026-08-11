@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"bytes"
+	"io"
+	"strings"
+	"testing"
+)
 
 func TestParseGHAPIArgs(t *testing.T) {
 	request, fallback, err := parseGHAPIArgs([]string{
@@ -185,5 +190,51 @@ func TestParseGHAPIArgsFallsBackForMutation(t *testing.T) {
 	}
 	if !fallback {
 		t.Fatal("expected fallback")
+	}
+}
+
+func TestRunGHAPIPlaceholderPathExecutesLocallyWithoutRelay(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(map[string]any) any {
+		requests++
+		return nil
+	})
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{"api", "repos/:owner/:repo"}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 0 {
+		t.Fatalf("relay requests = %d, want 0", requests)
+	}
+	if !strings.HasPrefix(out.String(), "real-gh:api repos/:owner/:repo") {
+		t.Fatalf("output = %q, want real gh execution", out.String())
+	}
+}
+
+func TestRunGHAPIColonOutsidePlaceholderSegmentRelays(t *testing.T) {
+	requests := 0
+	relayTestServer(t, func(body map[string]any) any {
+		requests++
+		query, _ := body["query"].(map[string]any)
+		if body["path"] != "/repos/openclaw/octopool/contents/README.md" || query["ref"] != "heads/foo:bar" {
+			t.Fatalf("relay body = %#v", body)
+		}
+		return map[string]any{"relayed": true}
+	})
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+
+	var out bytes.Buffer
+	if err := runGH(t.Context(), []string{
+		"api", "repos/openclaw/octopool/contents/README.md?ref=heads/foo:bar",
+	}, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("relay requests = %d, want 1", requests)
+	}
+	if strings.Contains(out.String(), "real-gh:") || !strings.Contains(out.String(), `"relayed":true`) {
+		t.Fatalf("output = %q, want relay response", out.String())
 	}
 }

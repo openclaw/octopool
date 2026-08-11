@@ -4,8 +4,8 @@ import { ROUTES } from "../src/route-manifest";
 
 describe("route manifest", () => {
   it("has unique route identities and patterns", () => {
-    expect(ROUTES).toHaveLength(119);
-    expect(new Set(ROUTES.map((route) => route.kind)).size).toBe(115);
+    expect(ROUTES).toHaveLength(120);
+    expect(new Set(ROUTES.map((route) => route.kind)).size).toBe(116);
     expect(new Set(ROUTES.map((route) => route.id)).size).toBe(ROUTES.length);
     expect(new Set(ROUTES.map((route) => route.pattern.source)).size).toBe(ROUTES.length);
   });
@@ -21,7 +21,7 @@ describe("route manifest", () => {
   });
 
   it("defines backend eligibility on every concrete route", () => {
-    expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(115);
+    expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(116);
     expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(27);
     expect(ROUTES.filter((route) => route.capabilities.fallback === "github_public")).toHaveLength(
       1,
@@ -30,7 +30,26 @@ describe("route manifest", () => {
       ROUTES.filter(
         (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
       ),
-    ).toHaveLength(116);
+    ).toHaveLength(117);
+  });
+
+  it("routes annotated tag objects through the immutable Git object policy", () => {
+    const route = ROUTES.find((candidate) => candidate.kind === "git_tag");
+    expect(route).toMatchObject({
+      template: "/repos/{owner}/{repo}/git/tags/{sha}",
+      routeKeyTemplate: "/repos/{owner}/{repo}/git/tags/:sha",
+      cacheable: true,
+      capabilities: {
+        publicApi: true,
+        fallback: "pool",
+        anonymousRepoProof: true,
+      },
+    });
+    expect(route?.pattern.test("/repos/openclaw/octopool/git/tags/0123456789abcdef")).toBe(true);
+    expect(cachePolicyForRouteKind("git_tag")).toEqual({
+      fresh: { kind: "static", seconds: 86_400 },
+      staleSeconds: 86_400,
+    });
   });
 
   it("splits SHA-shaped and ref-named commit paths onto distinct routes", () => {

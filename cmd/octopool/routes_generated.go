@@ -122,6 +122,7 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/stats/punch_card$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/git/blobs/(?:[0-9A-Fa-f]{7,64})$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/git/commits/(?:[0-9A-Fa-f]{7,64})$`),
+	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/git/tags/(?:[0-9A-Fa-f]{7,64})$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/git/trees/(?:[0-9A-Fa-f]{7,64})$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/git/ref/(?:.+)$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/git/matching-refs/(?:.+)$`),

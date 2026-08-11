@@ -17,6 +17,7 @@
 - Scope permission and SSO 403 cooldowns to the failed route so an identity with remaining quota can continue serving unrelated routes.
 - Follow up to three authenticated or anonymous API pages for shaped Actions job reads so matrix runs with up to 300 jobs share one complete cached superset instead of falling back locally after the first 100.
 - Fall back from public release pages to the anonymous GitHub API while keeping every release route barred from pooled identities, preventing draft releases from entering shared caches.
+- Run `gh api` paths containing GitHub CLI repository-context placeholder segments directly through real `gh`, avoiding guaranteed relay-denial round trips.
 
 ### Changes
 
@@ -24,6 +25,7 @@
 - Cut awaited round trips per relay request — warm 1MB cache hits drop from ~1.0s to ~0.3s: 30s isolate-local cache for caller auth, pool policy, and identity lists (authoritative rechecks still read D1 directly) and public-repo proof TTL raised to 15 minutes in the hosted deployment. Smart Placement was measured and rejected: it relocates execution and the edge cache away from caller colos, slowing this workload 2-3x.
 - Move the primary data region to Western North America: new `wnam` D1 database (config, tokens, identities, proofs, and audit history migrated; cache rebuilt) and a relocated pool coordinator, cutting ~140ms of transatlantic latency from every D1/coordinator round trip for US callers.
 - Redesign the operator dashboard as an editorial ledger: serif display type, hairline-rule sections, tick-marked rate gauges with low-headroom coloring, and right-aligned tabular numerals.
+- Add cacheable anonymous and pooled fallback coverage for immutable annotated tag objects through `GET /repos/{owner}/{repo}/git/tags/{sha}`.
 
 ## 0.5.5 - 2026-08-08
 

@@ -159,9 +159,20 @@ func safeRelayPath(path string) bool {
 		!strings.Contains(path, "\\") &&
 		!strings.Contains(path, "?") &&
 		!strings.Contains(path, "#") &&
+		!hasGHPlaceholderSegment(path) &&
 		!hasDotSegment(path) &&
 		!strings.Contains(lower, "%2e") &&
 		!strings.Contains(lower, "%5c")
+}
+
+func hasGHPlaceholderSegment(path string) bool {
+	for _, segment := range strings.Split(path, "/") {
+		if len(segment) >= 2 && segment[0] == ':' &&
+			(segment[1] >= 'A' && segment[1] <= 'Z' || segment[1] >= 'a' && segment[1] <= 'z') {
+			return true
+		}
+	}
+	return false
 }
 
 func hasDotSegment(path string) bool {

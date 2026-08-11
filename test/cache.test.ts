@@ -539,6 +539,18 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(gitRef, response({ ref: "refs/heads/main" }))).toBe(120);
+
+    const gitTag = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/openclaw/git/tags/0123456789abcdef0123456789abcdef01234567",
+      }),
+      policy,
+    );
+    expect(gitTag.kind).toBe("git_tag");
+    expect(cacheTTLSeconds(gitTag, response({ tag: "v1.2.3" }))).toBe(86_400);
+    expect(staleCacheSeconds(gitTag, 86_400)).toBe(86_400);
   });
 
   it("caps ref-named commit route TTLs because refs move", () => {

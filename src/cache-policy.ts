@@ -120,6 +120,7 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
     case "commit_view":
     case "git_blob":
     case "git_commit":
+    case "git_tag":
     case "git_tree":
       return staticCache(86_400);
     case "release_latest":
@@ -287,6 +288,7 @@ function staleCacheSeconds(kind: RouteKind): number {
     case "commit_view":
     case "git_blob":
     case "git_commit":
+    case "git_tag":
     case "git_tree":
       return 86_400;
     case "run_artifacts":

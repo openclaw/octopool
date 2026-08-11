@@ -134,7 +134,7 @@ function normalizeRouteKeyTemplate(template: string): string {
     .replace(/\/actions\/jobs\/\{id\}/g, "/actions/jobs/:id")
     .replace(/\/check-runs\/\{id\}/g, "/check-runs/:id")
     .replace(/\/milestones\/\{id\}/g, "/milestones/:id")
-    .replace(/\/git\/(blobs|commits|trees)\/\{sha\}/g, "/git/$1/:sha")
+    .replace(/\/git\/(blobs|commits|tags|trees)\/\{sha\}/g, "/git/$1/:sha")
     .replace(/\/git\/ref\/\{gitRef\}/g, "/git/ref/:ref")
     .replace(/\/git\/matching-refs\/\{gitRef\}/g, "/git/matching-refs/:ref")
     .replace(/\/actions\/workflows\/\{workflow\}\/runs/g, "/actions/workflows/:workflow/runs")
@@ -299,6 +299,7 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/stats/punch_card", "repo_stats_punch_card"),
   route("/repos/{owner}/{repo}/git/blobs/{sha}", "git_blob"),
   route("/repos/{owner}/{repo}/git/commits/{sha}", "git_commit"),
+  route("/repos/{owner}/{repo}/git/tags/{sha}", "git_tag"),
   route("/repos/{owner}/{repo}/git/trees/{sha}", "git_tree"),
   route("/repos/{owner}/{repo}/git/ref/{gitRef}", "git_ref"),
   route("/repos/{owner}/{repo}/git/matching-refs/{gitRef}", "git_matching_refs"),
