@@ -25,9 +25,9 @@ const MAX_D1_CACHE_BODY_BYTES = 262_144;
 
 type CacheRow = {
   status: number;
-  response_headers_json: string;
-  body_json: string;
-  body_encoding: "json" | "text" | "base64";
+  response_headers_json: unknown;
+  body_json: unknown;
+  body_encoding: unknown;
   identity_id: string | null;
   identity_kind: "pat" | "github_app" | null;
   created_at: string;
@@ -181,13 +181,29 @@ export function staleCacheSeconds(route: RouteInfo, freshTtlSeconds?: number): n
 }
 
 function cacheRowResponse(row: CacheRow | null): CachedGitHubResponse | undefined {
-  if (row === null) {
+  if (
+    row === null ||
+    typeof row.response_headers_json !== "string" ||
+    typeof row.body_json !== "string" ||
+    !validBodyEncoding(row.body_encoding)
+  ) {
+    return undefined;
+  }
+  let headers: Record<string, string> | undefined;
+  let body: unknown;
+  try {
+    headers = parseJSONRecord(row.response_headers_json);
+    body = JSON.parse(row.body_json) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (headers === undefined || !validCachedBody(body, row.body_encoding)) {
     return undefined;
   }
   return {
     status: row.status,
-    headers: parseJSONRecord(row.response_headers_json),
-    body: JSON.parse(row.body_json) as unknown,
+    headers,
+    body,
     body_encoding: row.body_encoding,
     created_at: row.created_at,
     expires_at: row.expires_at,
@@ -476,16 +492,21 @@ export async function pruneExpiredGitHubCache(env: Env, limit = 500): Promise<nu
   return result.meta.changes;
 }
 
-function parseJSONRecord(raw: string): Record<string, string> {
+function parseJSONRecord(raw: string): Record<string, string> | undefined {
   const value: unknown = JSON.parse(raw);
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return {};
+  if (!isRecord(value) || Object.values(value).some((item) => typeof item !== "string")) {
+    return undefined;
   }
-  const out: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === "string") {
-      out[key] = item;
-    }
+  return value as Record<string, string>;
+}
+
+function validBodyEncoding(value: unknown): value is "json" | "text" | "base64" {
+  return value === "json" || value === "text" || value === "base64";
+}
+
+function validCachedBody(body: unknown, encoding: "json" | "text" | "base64"): boolean {
+  if (encoding === "json") {
+    return true;
   }
-  return out;
+  return typeof body === "string" || (encoding === "text" && body === null);
 }

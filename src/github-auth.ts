@@ -1,5 +1,6 @@
 import { base64ToBytes, bytesToBase64URL } from "./encoding";
-import { HttpError, parsePositiveInt } from "./http";
+import { requestTimeoutMs } from "./github-limits";
+import { HttpError } from "./http";
 import type { Identity } from "./types";
 
 const installationTokenCache = new Map<string, { token: string; expiresAt: number }>();
@@ -38,7 +39,7 @@ async function githubAppInstallationToken(env: Env, identity: Identity): Promise
         "user-agent": "octopool",
         "x-github-api-version": "2022-11-28",
       },
-      signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+      signal: AbortSignal.timeout(requestTimeoutMs(env)),
     },
   );
   if (!response.ok) {

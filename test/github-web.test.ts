@@ -758,7 +758,7 @@ describe("github web provider", () => {
             updatedAt: "2026-05-27T23:19:04Z",
             author: actor("phoward38", "Patrick Howard"),
             labels: connection([]),
-            assignedActors: { nodes: [] },
+            assignedActors: connection([]),
             milestone: null,
           },
         }),
@@ -925,12 +925,38 @@ describe("github web provider", () => {
     ]);
   });
 
+  it.each([
+    ["missing", undefined],
+    ["malformed", { hasNextPage: "false" }],
+    ["incomplete", { hasNextPage: true }],
+  ])("rejects %s embedded connection pageInfo and uses the exact API", async (_name, pageInfo) => {
+    const exact = [{ id: 99, number: 99, title: "Exact API result" }];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(issueListPage([{}], pageInfo)))
+      .mockResolvedValueOnce(Response.json(exact));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/issues",
+      headers: { "x-octopool-public-shape": "issue-list-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({ body: exact, backend: "github" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(fetchMock.mock.calls[1]![0] as string).hostname).toBe("api.github.com");
+  });
+
   it("prefers embedded labels with GraphQL IDs and URLs", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(
         embeddedPage("RepositoryLabelIndexPageQuery", {
           labels: {
             totalCount: 1,
+            pageInfo: { hasNextPage: false },
             edges: [
               {
                 node: {
@@ -1622,12 +1648,15 @@ function embeddedPage(queryName: string, repository: Record<string, unknown>): s
   })}</script>`;
 }
 
-function issueListPage(nodes: Record<string, unknown>[]): string {
+function issueListPage(
+  nodes: Record<string, unknown>[],
+  pageInfo: unknown = { hasNextPage: false },
+): string {
   return embeddedPage("IssueIndexPageQuery", {
     search: {
       edges: nodes.map((node) => ({ node })),
       issueCount: nodes.length,
-      pageInfo: { hasNextPage: false },
+      pageInfo,
     },
   });
 }

@@ -61,7 +61,7 @@ export function parseIssueListHTML(
     search === undefined ||
     pageInfo === undefined ||
     edges === undefined ||
-    pageInfo.hasNextPage === true ||
+    pageInfo.hasNextPage !== false ||
     (typeof search.issueCount === "number" && search.issueCount !== edges.length)
   ) {
     return undefined;
@@ -197,9 +197,11 @@ export function parseLabelListHTML(
 ): Record<string, unknown>[] | undefined {
   const repository = preloadedRepository(html, "RepositoryLabelIndexPageQuery");
   const labels = repository === undefined ? undefined : recordValue(repository.labels);
+  const pageInfo = labels === undefined ? undefined : recordValue(labels.pageInfo);
   const edges = labels === undefined ? undefined : arrayValue(labels.edges);
   if (
     labels === undefined ||
+    pageInfo?.hasNextPage !== false ||
     edges === undefined ||
     typeof labels.totalCount !== "number" ||
     labels.totalCount !== edges.length
@@ -349,7 +351,7 @@ function connectionNodes(value: unknown): unknown[] | undefined {
     return undefined;
   }
   const pageInfo = recordValue(connection.pageInfo);
-  if (pageInfo?.hasNextPage === true) {
+  if (pageInfo?.hasNextPage !== false) {
     return undefined;
   }
   const nodes = arrayValue(connection.nodes);

@@ -110,7 +110,7 @@ and patch hosts.
   `cache_expires_at` are included on those responses.
 - `backend` is present as `web` or `github_public` when a cache miss or identity-less cache hit
   was served without a pooled API identity.
-- `lease_reason` is `sticky`, `highest_remaining`, or `fallback` — see
+- `lease_reason` is `sticky` or `highest_remaining` — see
   [Identities & routing](identities.md).
 
 ## Supported routes

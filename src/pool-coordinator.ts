@@ -121,6 +121,7 @@ export class PoolCoordinator extends DurableObject<Env> {
       !this.isQuotaExhausted(lease.identity_id, request.resource, now)
     ) {
       return {
+        kind: "selected",
         identityId: lease.identity_id,
         reason: "sticky",
         leaseTtlSeconds: Math.ceil((lease.expires_at - now) / 1000),
@@ -148,13 +149,14 @@ export class PoolCoordinator extends DurableObject<Env> {
     }
 
     if (best === undefined) {
-      throw new Error("all_identity_candidates_cooling_down");
+      return { kind: "unavailable", reason: "all_identity_candidates_cooling_down" };
     }
     const ttlMs = 10_000;
     this.ctx.storage.sql.exec(queries.upsertLease, request.routeKey, best.id, now + ttlMs);
     return {
+      kind: "selected",
       identityId: best.id,
-      reason: bestScore === Number.NEGATIVE_INFINITY ? "fallback" : "highest_remaining",
+      reason: "highest_remaining",
       leaseTtlSeconds: ttlMs / 1000,
     };
   }

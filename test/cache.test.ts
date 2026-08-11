@@ -307,6 +307,33 @@ describe("github cache policy", () => {
     expect(edgeDelete).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["invalid body JSON", { body_json: "{" }],
+    ["non-string body JSON", { body_json: 42 }],
+    ["invalid header JSON", { response_headers_json: "{" }],
+    ["non-record headers", { response_headers_json: "[]" }],
+    ["non-string header values", { response_headers_json: '{"etag":42}' }],
+    [
+      "a non-text body for text encoding",
+      { body_json: '{"message":"oops"}', body_encoding: "text" },
+    ],
+  ])("treats fresh D1 rows with %s as cache misses", async (_name, corrupt) => {
+    vi.stubGlobal("caches", {
+      default: {
+        match: vi.fn(async () => undefined),
+        put: vi.fn(async () => undefined),
+        delete: vi.fn(async () => true),
+      },
+    });
+    const env = cacheRowEnv({
+      created_at: sqliteUTC(Date.now() - 1_000),
+      expires_at: sqliteUTC(Date.now() + 60_000),
+      ...corrupt,
+    });
+
+    await expect(readGitHubCache(env, "cache-key")).resolves.toBeUndefined();
+  });
+
   it("bypasses conditional and rate-limit reads", () => {
     const pr = validateRelayRequest({
       pool: "maintainers",
@@ -853,6 +880,34 @@ describe("github cache policy", () => {
     await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
   });
 
+  it.each([
+    ["invalid body JSON", { body_json: "{" }],
+    ["non-string body JSON", { body_json: 42 }],
+    ["invalid header JSON", { response_headers_json: "{" }],
+    ["non-record headers", { response_headers_json: "[]" }],
+    ["non-string header values", { response_headers_json: '{"etag":42}' }],
+    [
+      "a non-text body for text encoding",
+      { body_json: '{"message":"oops"}', body_encoding: "text" },
+    ],
+  ])("treats stale D1 rows with %s as cache misses", async (_name, corrupt) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/42",
+    });
+    const env = cacheRowEnv({
+      created_at: sqliteUTC(Date.now() - 120_000),
+      expires_at: sqliteUTC(Date.now() - 60_000),
+      stale_expires_at: sqliteUTC(Date.now() + 60_000),
+      ...corrupt,
+    });
+
+    await expect(
+      readStaleGitHubCache(env, "cache-key", classifyRoute(request, policy)),
+    ).resolves.toBeUndefined();
+  });
+
   it("rejects rows past their persisted stale deadline", async () => {
     const route = classifyRoute(
       validateRelayRequest({
@@ -950,6 +1005,25 @@ function response(body: unknown): GitHubRelayResponse {
     headers: {},
     body,
   };
+}
+
+function cacheRowEnv(overrides: Record<string, unknown>): Env {
+  const row = {
+    status: 200,
+    response_headers_json: "{}",
+    body_json: '{"number":42}',
+    body_encoding: "json",
+    identity_id: null,
+    identity_kind: null,
+    created_at: sqliteUTC(Date.now() - 1_000),
+    expires_at: sqliteUTC(Date.now() + 60_000),
+    ...overrides,
+  };
+  return {
+    DB: {
+      prepare: () => ({ bind: () => ({ first: async () => row }) }),
+    },
+  } as unknown as Env;
 }
 
 function sqliteUTC(ms: number): string {

@@ -165,8 +165,8 @@ first. Otherwise the highest `remaining + weight` candidate wins; unknown rate s
 from the default 5000 budget. Exhausted or cooling candidates are skipped.
 
 Results update `rate_states` and create global, resource, or route cooldowns for auth,
-secondary-limit, retry-after, and quota failures. Selection reasons are `sticky`,
-`highest_remaining`, or `fallback`.
+secondary-limit, retry-after, and quota failures. Selection reasons are `sticky` or
+`highest_remaining`.
 
 ## Storage model
 
@@ -174,7 +174,7 @@ D1 tables:
 
 - `pools`, `callers`, `caller_pools`, `caller_tokens`
 - `identities`, `identity_scopes`
-- `oauth_states`, `web_sessions`
+- `web_sessions`
 - `github_cache_entries`, `github_public_repos`, `github_pr_state_proofs`
 - `github_public_api_rates`
 - `audit_events`

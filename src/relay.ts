@@ -62,8 +62,8 @@ import type {
   RelayRequest,
   RouteInfo,
   PoolPolicy,
+  SelectionLeaseReason,
   SelectionRequest,
-  SelectionResult,
 } from "./types";
 
 type RelayBase = {
@@ -104,7 +104,7 @@ type RelaySuccess = {
   github: GitHubRelayResponse;
   identity?: Identity;
   backend?: "web" | "github_public";
-  leaseReason?: SelectionResult["reason"];
+  leaseReason?: SelectionLeaseReason;
   rate?: GitHubRate;
   revalidated?: boolean;
   upstreamStatus?: number;
@@ -418,10 +418,9 @@ async function attemptStaleRelayCacheRevalidation(
     return undefined;
   }
 
-  let selection: SelectionResult;
+  let selection;
   try {
     selection = await selectIdentity(state.coordinator, {
-      pool: state.request.pool,
       routeKey: state.route.routeKey,
       resource: state.route.resource,
       candidates: identities.map((identity) => ({ id: identity.id, weight: identity.weight })),
@@ -680,7 +679,6 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
       return identityCached;
     }
     const selection = await selectIdentity(state.coordinator, {
-      pool: state.request.pool,
       routeKey: state.route.routeKey,
       resource: state.route.resource,
       candidates,
@@ -1194,7 +1192,7 @@ async function publishTerminalLogCache(
 async function revalidateCachedTerminalLog(
   state: ActiveRelay,
   identity: Identity,
-  leaseReason: SelectionResult["reason"],
+  leaseReason: SelectionLeaseReason,
 ): Promise<Response | undefined> {
   const cached = state.terminalLogCached;
   const key = state.terminalLogCacheKey;
@@ -1377,18 +1375,11 @@ async function selectIdentity(
   coordinator: DurableObjectStub<PoolCoordinator>,
   request: SelectionRequest,
 ) {
-  try {
-    return await coordinator.selectIdentity(request);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("all_identity_candidates_cooling_down")) {
-      throw new HttpError(
-        503,
-        "identities_cooling_down",
-        "All identity candidates are cooling down",
-      );
-    }
-    throw error;
+  const selection = await coordinator.selectIdentity(request);
+  if (selection.kind === "unavailable") {
+    throw new HttpError(503, "identities_cooling_down", "All identity candidates are cooling down");
   }
+  return selection;
 }
 
 async function cachedIdentityAvailable(

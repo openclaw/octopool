@@ -1,4 +1,5 @@
-import { HttpError, parsePositiveInt } from "./http";
+import { requestTimeoutMs } from "./github-limits";
+import { HttpError } from "./http";
 import { readBodyCapped } from "./response-body";
 
 export async function fetchWebResponse(
@@ -75,7 +76,7 @@ export async function fetchPublicPage(
   const fetched = await fetchWebResponse(
     url,
     { accept, "user-agent": "octopool" },
-    parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000),
+    requestTimeoutMs(env),
     true,
   );
   if (fetched === undefined || fetched.response.status < 200 || fetched.response.status >= 300) {

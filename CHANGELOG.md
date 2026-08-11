@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Treat malformed shared-cache rows as misses instead of surfacing relay 500s.
+- Fall through to the exact GitHub API when embedded page data is incomplete instead of serving a possibly partial list.
 - Target the configured `DB` binding in Wrangler D1 migration and local cache-proof commands so renamed databases keep working with current Wrangler releases.
 - Make cache fills outcome-aware at the pool coordinator: followers wake on confirmed shared, edge-only, or failed publication, cold colos reacquire serially without polling D1, and renewable fenced ownership prevents valid upstream work from outliving its lease.
 - Keep megabyte-class response bodies (paged run lists, check-run sweeps) out of the shared D1 cache — they stay per-colo edge-cached — so write bursts no longer queue the D1 primary into "overloaded" failures.

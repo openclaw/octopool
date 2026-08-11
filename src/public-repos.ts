@@ -6,6 +6,7 @@ import {
 } from "./cache-fill";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
+import { requestTimeoutMs } from "./github-limits";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { HttpError, parsePositiveInt } from "./http";
 import { capabilitiesForRouteKind } from "./route-manifest";
@@ -193,7 +194,7 @@ function fetchPublicRepoProof(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
     {
       headers: publicRepoCheckHeaders(env, authenticated),
-      signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+      signal: AbortSignal.timeout(requestTimeoutMs(env)),
     },
   );
 }
@@ -223,7 +224,7 @@ async function fetchPublicRepoPageProof(
       {
         headers: { accept: "text/html", "user-agent": "octopool" },
         redirect: "manual",
-        signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+        signal: AbortSignal.timeout(requestTimeoutMs(env)),
       },
     );
   } catch {

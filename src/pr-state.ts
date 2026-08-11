@@ -1,6 +1,6 @@
 import { isStateAwarePRRoute } from "./cache-policy";
 import { queries } from "./generated/sql";
-import { parsePositiveInt } from "./http";
+import { requestTimeoutMs } from "./github-limits";
 import type { RelayRequest, RouteInfo } from "./types";
 
 type PullResponse = {
@@ -58,7 +58,7 @@ async function verifyPRStateHintInternal(
           "user-agent": "octopool",
           "x-github-api-version": "2022-11-28",
         },
-        signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+        signal: AbortSignal.timeout(requestTimeoutMs(env)),
       },
     );
     if (!response.ok) {

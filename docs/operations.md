@@ -193,6 +193,8 @@ D1 schema lives in `migrations/`:
 - `0011_cache_stale_retention.sql` — per-entry stale deadlines and indexed cache cleanup.
 - `0012_caller_clients.sql` — concurrent per-client caller tokens and audit attribution.
 - `0013_audit_backends.sql` — bounded upstream-source attribution for route-level stats.
+- `0014_public_repo_negative_proofs.sql` — cached definitive private-repository proofs.
+- `0015_drop_oauth_states.sql` — remove obsolete database-backed OAuth state.
 
 Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
 

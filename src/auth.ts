@@ -1,7 +1,8 @@
 import { bytesToBase64URL } from "./encoding";
 import { cachedConfigLookup } from "./config-cache";
 import { normalizeClientName } from "./client-name";
-import { HttpError, parsePositiveInt, requestBearer } from "./http";
+import { requestTimeoutMs } from "./github-limits";
+import { HttpError, requestBearer } from "./http";
 import { queries } from "./generated/sql";
 import type { Caller } from "./types";
 
@@ -307,5 +308,5 @@ function githubHeaders(token?: string): Record<string, string> {
 }
 
 function githubRequestSignal(env: Env): AbortSignal {
-  return AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000));
+  return AbortSignal.timeout(requestTimeoutMs(env));
 }

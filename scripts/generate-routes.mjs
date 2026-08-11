@@ -36,27 +36,29 @@ const lines = [
   "",
 ];
 
-await writeFile(outputPath, lines.join("\n"));
+const outputs = [
+  [outputPath, lines.join("\n")],
+  await renderSection(
+    new URL("../docs/relay.md", import.meta.url),
+    "supported-route-kinds",
+    [...new Set(ROUTES.map((route) => route.kind))].map((kind) => `- \`${kind}\``).join("\n"),
+  ),
+  await renderSection(
+    new URL("../docs/token-free.md", import.meta.url),
+    "token-free-api-routes",
+    [
+      "```text",
+      ...ROUTES.filter(
+        (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
+      ).map((route) => `GET ${docsTemplate(route.template)}`),
+      "```",
+    ].join("\n"),
+  ),
+];
 
-await replaceSection(
-  new URL("../docs/relay.md", import.meta.url),
-  "supported-route-kinds",
-  [...new Set(ROUTES.map((route) => route.kind))].map((kind) => `- \`${kind}\``).join("\n"),
-);
+await Promise.all(outputs.map(([file, output]) => writeFile(file, output)));
 
-await replaceSection(
-  new URL("../docs/token-free.md", import.meta.url),
-  "token-free-api-routes",
-  [
-    "```text",
-    ...ROUTES.filter(
-      (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
-    ).map((route) => `GET ${docsTemplate(route.template)}`),
-    "```",
-  ].join("\n"),
-);
-
-async function replaceSection(file, name, content) {
+async function renderSection(file, name, content) {
   const start = `<!-- ${name}:start -->`;
   const end = `<!-- ${name}:end -->`;
   const input = await readFile(file, "utf8");
@@ -66,7 +68,7 @@ async function replaceSection(file, name, content) {
     throw new Error(`Missing generated section ${name} in ${file.pathname}`);
   }
   const output = `${input.slice(0, startIndex + start.length)}\n\n${content}\n\n${input.slice(endIndex)}`;
-  await writeFile(file, output);
+  return [file, output];
 }
 
 function docsTemplate(template) {

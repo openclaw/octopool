@@ -78,17 +78,24 @@ export type SelectionCandidate = {
 };
 
 export type SelectionRequest = {
-  pool: string;
   routeKey: string;
   resource: string;
   candidates: SelectionCandidate[];
 };
 
-export type SelectionResult = {
-  identityId: string;
-  reason: "highest_remaining" | "sticky" | "fallback";
-  leaseTtlSeconds: number;
-};
+export type SelectionLeaseReason = "highest_remaining" | "sticky";
+
+export type SelectionResult =
+  | {
+      kind: "selected";
+      identityId: string;
+      reason: SelectionLeaseReason;
+      leaseTtlSeconds: number;
+    }
+  | {
+      kind: "unavailable";
+      reason: "all_identity_candidates_cooling_down";
+    };
 
 export type RecordResult = {
   identityId: string;

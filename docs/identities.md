@@ -60,7 +60,7 @@ keeps four SQLite tables in DO storage:
    not quota-exhausted, reuse it (`reason: sticky`).
 2. Otherwise score each non-cooling candidate by `remaining + weight` (unknown rate
    assumes a fresh 5000 budget; an exhausted-but-unreset identity is skipped) and take
-   the best (`reason: highest_remaining`, or `fallback`).
+   the best (`reason: highest_remaining`).
 3. If every candidate is cooling down, the Worker returns `503 identities_cooling_down`.
 
 The winning route gets a fresh 10s lease so concurrent callers stick to the same identity

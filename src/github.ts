@@ -1,9 +1,9 @@
 import { bytesToBase64 } from "./encoding";
 import { githubToken } from "./github-auth";
-import { responseCapBytes } from "./github-limits";
+import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import { githubResponseHeaders } from "./github-response";
-import { HttpError, parsePositiveInt } from "./http";
+import { HttpError } from "./http";
 import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
@@ -40,7 +40,7 @@ export async function probeGitHubLog(
     method: "GET",
     headers: githubHeaders(token, request.headers),
     redirect: "manual",
-    signal: AbortSignal.timeout(parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000)),
+    signal: AbortSignal.timeout(requestTimeoutMs(env)),
   });
   const headers = githubResponseHeaders(response.headers);
   if (response.status === 302) {
@@ -71,7 +71,7 @@ async function callGitHubAPI(
   token?: string,
 ): Promise<GitHubRelayResponse> {
   const url = githubUrl(request);
-  const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
+  const timeoutMs = requestTimeoutMs(env);
   const response = await fetch(url, {
     method: "GET",
     headers: githubHeaders(token, request.headers),

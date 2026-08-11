@@ -1,4 +1,4 @@
-import { parsePositiveInt } from "./http";
+import { requestTimeoutMs } from "./github-limits";
 import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./github-public-api";
 import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
@@ -28,7 +28,7 @@ export async function callGitHubWeb(
     ];
   }
   for (const web of requests) {
-    const timeoutMs = parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000);
+    const timeoutMs = requestTimeoutMs(env);
     const fetched = await fetchWebResponse(web.url, web.headers, timeoutMs);
     if (fetched === undefined) {
       continue;
@@ -70,7 +70,7 @@ export async function callAnonymousGitHubAPI(
   const fetched = await fetchWebResponse(
     api.url,
     { ...api.headers, ...conditionalHeaders(request.headers) },
-    parsePositiveInt(env.REQUEST_TIMEOUT_MS, 15_000),
+    requestTimeoutMs(env),
   );
   if (fetched === undefined) {
     return undefined;
