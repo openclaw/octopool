@@ -18,6 +18,29 @@ func envDefault(name string, fallback string) string {
 	return value
 }
 
+// Escape hatch for callers that must read GitHub's current state (a gate, a
+// post-merge confirmation) rather than a shared cache entry that can be up to
+// its route TTL old.
+func freshReadRequested() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTOPOOL_FRESH"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// Opt-out for callers that know their reads are cached and do not want the
+// per-request note (dashboards, tight polling loops).
+func quietCacheNotices() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OCTOPOOL_QUIET_CACHE"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func requiredEnv(name string) (string, error) {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {

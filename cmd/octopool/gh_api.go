@@ -109,12 +109,19 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	if !strings.HasPrefix(request.path, "/") {
 		request.path = "/" + request.path
 	}
+	if freshReadRequested() {
+		if _, set := request.headers["cache-control"]; !set {
+			request.headers["cache-control"] = "max-age=0"
+		}
+	}
 	return request, request.method != "GET", nil
 }
 
 func safeRelayHeader(header string) bool {
 	switch header {
-	case "accept", "x-github-api-version", "if-none-match", "if-modified-since":
+	// cache-control carries no credentials and is how a caller asks the relay
+	// for a live read instead of a shared cache entry.
+	case "accept", "x-github-api-version", "if-none-match", "if-modified-since", "cache-control":
 		return true
 	default:
 		return false

@@ -17,6 +17,20 @@ func supportedPRListState(state string) bool {
 	}
 }
 
+// Fields whose value is a merge-gate decision: a stale answer here reads as a
+// confident fact ("branch still at the old SHA", "PR still open") seconds after
+// a push or merge, so these reads skip the shared cache.
+func needsLivePRRead(fields []string) bool {
+	for _, field := range fields {
+		switch field {
+		case "headRefOid", "baseRefOid", "state", "merged", "mergedAt", "mergeable",
+			"mergeStateStatus", "closedAt":
+			return true
+		}
+	}
+	return false
+}
+
 func needsHydratedPR(fields []string) bool {
 	for _, field := range fields {
 		switch field {
@@ -118,7 +132,7 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 		return err
 	}
 	headers := hydratedPRViewHeaders(opts)
-	if hasJSONField(opts.json, "files") {
+	if hasJSONField(opts.json, "files") || needsLivePRRead(opts.json) || freshReadRequested() {
 		if headers == nil {
 			headers = map[string]string{}
 		}

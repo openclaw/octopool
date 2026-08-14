@@ -19,6 +19,64 @@ type relayEnvelope struct {
 	Headers      map[string]string `json:"headers"`
 	Body         json.RawMessage   `json:"body"`
 	BodyEncoding string            `json:"body_encoding"`
+	Relay        relayMeta         `json:"relay"`
+}
+
+type relayMeta struct {
+	Cache          string `json:"cache"`
+	CacheExpiresAt string `json:"cache_expires_at"`
+	RouteKind      string `json:"route_kind"`
+}
+
+// Routes whose body states something the caller is likely acting on right now
+// (which SHA is at the head, whether the PR merged, whether CI finished). A
+// cache hit here is correct but can trail a push or merge by the route TTL, and
+// silently reads as current fact.
+func volatileRouteKind(kind string) bool {
+	switch kind {
+	case "pr_view", "pr_list", "issue_view", "issue_list", "run_view", "run_list",
+		"checks", "check_suites", "status", "status_list", "jobs", "job", "commit_view", "ref_view":
+		return true
+	default:
+		return false
+	}
+}
+
+// One line, on stderr, so `--json` consumers keep a clean stdout. Without it a
+// cached answer is indistinguishable from a live one, which is how a stale head
+// SHA or a "still open" merged PR reads as truth.
+func noteCachedRead(envelope relayEnvelope) {
+	if freshReadRequested() || quietCacheNotices() {
+		return
+	}
+	if envelope.Relay.Cache != "hit" && envelope.Relay.Cache != "stale" {
+		return
+	}
+	if !volatileRouteKind(envelope.Relay.RouteKind) {
+		return
+	}
+	fmt.Fprintf(
+		os.Stderr,
+		"octopool: %s served from shared cache (%s)%s; set OCTOPOOL_FRESH=1 for a live read\n",
+		envelope.Relay.RouteKind,
+		envelope.Relay.Cache,
+		cacheExpirySuffix(envelope.Relay.CacheExpiresAt),
+	)
+}
+
+func cacheExpirySuffix(expiresAt string) string {
+	if expiresAt == "" {
+		return ""
+	}
+	expires, err := time.Parse(time.RFC3339, strings.Replace(strings.TrimSpace(expiresAt), " ", "T", 1))
+	if err != nil {
+		return ""
+	}
+	remaining := time.Until(expires).Round(time.Second)
+	if remaining <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(", refreshes in %s", remaining)
 }
 
 var errOctopoolNotLoggedIn = errors.New("not logged in; run: octopool login")
@@ -158,6 +216,7 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	if err := json.Unmarshal(out, &envelope); err != nil {
 		return relayEnvelope{}, err
 	}
+	noteCachedRead(envelope)
 	return envelope, nil
 }
 

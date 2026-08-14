@@ -320,6 +320,33 @@ state-aware PR subresource cache probes.
 
 Admin provisioning. Requires an admin token. See [Admin & provisioning](admin.md).
 
+## Cache freshness
+
+Shared cache hits are the point of the relay, but a cached answer describes the state at
+fill time, not now. A PR read stays fresh for two minutes while the PR is open, so directly
+after a `git push` the cached copy still reports the previous head SHA, and directly after a
+merge it still reports the PR as open. Nothing about the response looks different, which is
+how a stale answer gets read as current fact.
+
+Three things keep that honest:
+
+- **Gate fields read live.** `gh pr view --json` reads that include `headRefOid`,
+  `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`, or
+  `closedAt` send `cache-control: max-age=0` automatically. These are the values callers
+  branch on, so they always come from GitHub. Descriptive fields (`title`, `body`, `labels`,
+  `author`) stay cached.
+- **Cached decision reads announce themselves.** When a PR, issue, run, or checks route is
+  served from the shared cache, the CLI prints one line to stderr naming the route, whether
+  it was a hit or a stale serve, and when it refreshes. stdout stays untouched, so `--json`
+  and `--jq` consumers are unaffected. Silence it with `OCTOPOOL_QUIET_CACHE=1`.
+- **Anything can be forced live.** `OCTOPOOL_FRESH=1` applies `max-age=0` to every relayed
+  read, and `gh api -H "cache-control: max-age=0"` now relays instead of falling back to
+  local `gh`, so a raw API read can be made live without spending your own token quota.
+
+Note that `git push` never passes through Octopool, so the relay cannot invalidate a PR
+entry when a branch moves. That is why the gate fields read live rather than relying on
+invalidation.
+
 ## Token and URL safety
 
 - A saved caller token is only sent to the saved Octopool URL. Overriding `--url` (or
@@ -338,6 +365,12 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_TOKEN` — caller token override (required to use a non-saved URL).
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
+- `OCTOPOOL_FRESH=1` — send `cache-control: max-age=0` on every relayed read, so answers
+  come from GitHub instead of the shared cache. Use it right after a `git push` or a merge,
+  when a cached answer would still describe the previous state. Costs pool quota; leave it
+  off for ordinary reads.
+- `OCTOPOOL_QUIET_CACHE=1` — suppress the one-line stderr note printed when a
+  decision-shaped route (PR/issue/run/checks) is served from the shared cache.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns
   `fallback_local`, including during an active watch, useful for proving relay/cache coverage.
 - `OCTOPOOL_RELAY_RETRIES` — how many times transient pool-exhaustion fallbacks

@@ -29,10 +29,17 @@ func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {
 }
 
 func publicShapeHeaders(opts ghTopOptions, supported map[string]bool, shape string) map[string]string {
+	headers := map[string]string{}
 	if supportedJSONFields(opts, supported) {
-		return map[string]string{"x-octopool-public-shape": shape}
+		headers["x-octopool-public-shape"] = shape
 	}
-	return nil
+	if needsLivePRRead(opts.json) || freshReadRequested() {
+		headers["cache-control"] = "max-age=0"
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
 }
 
 func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
