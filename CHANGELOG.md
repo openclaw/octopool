@@ -4,6 +4,9 @@
 
 ### Fixes
 
+- Read merge-gate PR fields live instead of from the shared cache: `gh pr view --json` reads containing `headRefOid`, `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`, or `closedAt` now send `cache-control: max-age=0`. A cached PR entry stays fresh for two minutes while the PR is open, so right after a push it reported the previous head SHA and right after a merge it still reported the PR as open — and `git push` never reaches the relay, so the entry cannot be invalidated when the branch moves.
+- Announce cached decision reads: PR, issue, run, and checks routes served from the shared cache print one stderr line naming the route, hit or stale, and when it refreshes, leaving stdout clean for `--json`/`--jq`. Silence with `OCTOPOOL_QUIET_CACHE=1`.
+- Add `OCTOPOOL_FRESH=1` to force `cache-control: max-age=0` on every relayed read, and relay an explicit `cache-control` header from `gh api` instead of delegating to local `gh`, so a raw live read no longer spends the caller's own GitHub quota.
 - Treat malformed shared-cache rows as misses instead of surfacing relay 500s.
 - Fall through to the exact GitHub API when embedded page data is incomplete instead of serving a possibly partial list.
 - Target the configured `DB` binding in Wrangler D1 migration and local cache-proof commands so renamed databases keep working with current Wrangler releases.
