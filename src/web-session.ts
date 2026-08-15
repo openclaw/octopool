@@ -10,6 +10,7 @@ import { ensureWebCaller } from "./callers";
 import { defaultLoginPool } from "./config";
 import { base64ToBytesSafe, bytesToBase64URL } from "./encoding";
 import { queries } from "./generated/sql";
+import { requestTimeoutMs } from "./github-limits";
 import { effectiveOrigin } from "./hosts";
 import { HttpError, jsonResponse } from "./http";
 import { sqliteTimestamp } from "./sqlite-time";
@@ -189,6 +190,7 @@ async function exchangeGitHubCode(request: Request, env: Env, code: string): Pro
       code,
       redirect_uri: `${githubOAuthCallbackOrigin(request, env)}/login/github/callback`,
     }),
+    signal: AbortSignal.timeout(requestTimeoutMs(env)),
   });
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok || typeof body !== "object" || body === null || Array.isArray(body)) {
