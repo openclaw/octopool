@@ -13,6 +13,34 @@ import {
 const APP = "https://octopool.openclaw.ai";
 
 describe("Worker end-to-end web sessions", () => {
+  it("returns a typed browser error when the GitHub OAuth exchange fails", async () => {
+    let exchangeHadSignal = false;
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (url.hostname === "github.com" && url.pathname === "/login/oauth/access_token") {
+        exchangeHadSignal = request.signal instanceof AbortSignal;
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+      return jsonResponse({ message: "unexpected OAuth request" }, 500);
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const start = await callWorker(`${APP}/login/github`);
+    const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+    const callback = await callWorker(
+      `${APP}/login/github/callback?code=oauth-code&state=${encodeURIComponent(state)}`,
+      { headers: { cookie: `octopool_oauth_state=${encodeURIComponent(state)}` } },
+    );
+
+    expect(exchangeHadSignal).toBe(true);
+    expect(callback.status).toBe(502);
+    expect(callback.headers.get("content-type")).toContain("text/html");
+    const html = await callback.text();
+    expect(html).toContain("github_oauth_failed");
+    expect(html).toContain("GitHub OAuth token exchange failed");
+  });
+
   it("completes OAuth, persists a hashed session, serves authenticated pages, and logs out", async () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);

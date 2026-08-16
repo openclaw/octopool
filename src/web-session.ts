@@ -177,21 +177,26 @@ async function exchangeGitHubCode(request: Request, env: Env, code: string): Pro
   ) {
     throw new HttpError(503, "github_oauth_unconfigured", "GitHub OAuth is not configured");
   }
-  const response = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/x-www-form-urlencoded",
-      "user-agent": "octopool",
-    },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-      redirect_uri: `${githubOAuthCallbackOrigin(request, env)}/login/github/callback`,
-    }),
-    signal: AbortSignal.timeout(requestTimeoutMs(env)),
-  });
+  let response: Response;
+  try {
+    response = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/x-www-form-urlencoded",
+        "user-agent": "octopool",
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: `${githubOAuthCallbackOrigin(request, env)}/login/github/callback`,
+      }),
+      signal: AbortSignal.timeout(requestTimeoutMs(env)),
+    });
+  } catch {
+    throw new HttpError(502, "github_oauth_failed", "GitHub OAuth token exchange failed");
+  }
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok || typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new HttpError(502, "github_oauth_failed", "GitHub OAuth token exchange failed");
