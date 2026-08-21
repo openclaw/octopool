@@ -1,5 +1,5 @@
 import { decodeURIComponentSafe } from "./github-path";
-import { decodeHTML, textMatch } from "./github-html-utils";
+import { decodeHTML, stripHTMLTags, textMatch } from "./github-html-utils";
 
 export function parseReleaseHTML(
   html: string,
@@ -44,22 +44,18 @@ function releaseTag(responseURL: string): string | undefined {
 }
 
 function htmlToText(value: string): string {
-  return decodeHTML(
-    value
-      .replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
-        const label = String(text)
-          .replace(/<[^>]+>/g, "")
-          .trim();
-        return label === "" ? "" : `[${label}](${decodeHTML(String(href))})`;
-      })
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<li\b[^>]*>/gi, "- ")
-      .replace(/<\/li>/gi, "\n")
-      .replace(/<\/(?:p|h[1-6]|ul|ol)>/gi, "\n\n")
-      .replace(/<code\b[^>]*>/gi, "`")
-      .replace(/<\/code>/gi, "`")
-      .replace(/<[^>]+>/g, ""),
-  )
+  const formatted = value
+    .replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
+      const label = stripHTMLTags(String(text)).trim();
+      return label === "" ? "" : `[${label}](${decodeHTML(String(href))})`;
+    })
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "- ")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<\/(?:p|h[1-6]|ul|ol)>/gi, "\n\n")
+    .replace(/<code\b[^>]*>/gi, "`")
+    .replace(/<\/code>/gi, "`");
+  return decodeHTML(stripHTMLTags(formatted))
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Harden GitHub HTML text extraction and docs table-of-contents generation so malformed tag fragments cannot survive text conversion.
+
 ## 0.5.6 - 2026-08-13
 
 ### Fixes

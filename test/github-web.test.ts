@@ -673,7 +673,7 @@ describe("github web provider", () => {
           <nav><li class="breadcrumb-item-selected">v0.8.0</li></nav>
           <h1>0.8.0</h1>
           released this <relative-time datetime="2026-06-10T07:55:39Z"></relative-time>
-          <div data-test-selector="body-content" class="markdown-body"><h2>Fixed</h2><ul><li>Use public HTML.</li></ul></div>
+          <div data-test-selector="body-content" class="markdown-body"><h2>Fixed</h2><ul><li>Use public HTML.</li></ul><p><a href="https://example.test">Docs<script</a></p><p>Before<script</p></div>
           </div>
           <div class="Box-footer"></div>
         `),
@@ -700,7 +700,7 @@ describe("github web provider", () => {
       draft: false,
       prerelease: false,
       published_at: "2026-06-10T07:55:39Z",
-      body: "Fixed\n\n- Use public HTML.",
+      body: "Fixed\n\n- Use public HTML.\n\n[Docs](https://example.test)\n\nBefore",
     });
   });
 

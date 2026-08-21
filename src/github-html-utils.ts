@@ -1,5 +1,5 @@
 export function plainHTML(value: string): string {
-  return decodeHTML(value.replace(/<[^>]+>/g, "")).trim();
+  return decodeHTML(stripHTMLTags(value)).trim();
 }
 
 export function htmlAttribute(attributes: string, name: string): string | undefined {
@@ -9,7 +9,23 @@ export function htmlAttribute(attributes: string, name: string): string | undefi
 
 export function textMatch(input: string, pattern: RegExp): string | undefined {
   const value = pattern.exec(input)?.[1];
-  return value === undefined ? undefined : decodeHTML(value.replace(/<[^>]+>/g, "")).trim();
+  return value === undefined ? undefined : decodeHTML(stripHTMLTags(value)).trim();
+}
+
+export function stripHTMLTags(value: string): string {
+  let text = "";
+  let insideTag = false;
+  // An unmatched "<" starts malformed markup; drop that tail instead of returning an active tag.
+  for (const character of value) {
+    if (character === "<") {
+      insideTag = true;
+    } else if (character === ">" && insideTag) {
+      insideTag = false;
+    } else if (!insideTag) {
+      text += character;
+    }
+  }
+  return text;
 }
 
 export function decodeHTML(value: string): string {

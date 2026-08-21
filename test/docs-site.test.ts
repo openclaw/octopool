@@ -41,7 +41,10 @@ describe("docs site generator", () => {
           "",
         ].join("\n"),
       );
-      writeFileSync(path.join(tmp, "docs", "cli.md"), "# CLI\n");
+      writeFileSync(
+        path.join(tmp, "docs", "cli.md"),
+        ["# CLI", "", "## First *section*", "", "## Second `section` <script", ""].join("\n"),
+      );
 
       execFileSync("node", [path.join(root, "scripts/build-docs-site.mjs")], {
         cwd: tmp,
@@ -56,6 +59,12 @@ describe("docs site generator", () => {
         'name="twitter:description" content="Shared &lt;relay&gt; &quot;quotes&quot;"',
       );
       expect(index).not.toContain('content="Shared <relay> "quotes""');
+      const cli = readFileSync(path.join(tmp, "dist/docs-site/cli.html"), "utf8");
+      expect(cli).toContain('class="toc-l2" href="#first-section">First section</a>');
+      expect(cli).toContain(
+        'class="toc-l2" href="#second-section-script">Second section &amp;lt;script</a>',
+      );
+      expect(cli).not.toContain("<script</a>");
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

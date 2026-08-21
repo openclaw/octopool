@@ -431,10 +431,7 @@ function tocFromHtml(html) {
   const re = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h[23]>/g;
   let m;
   while ((m = re.exec(html))) {
-    const text = m[3]
-      .replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")
-      .replace(/<[^>]+>/g, "")
-      .trim();
+    const text = stripHtmlTags(m[3].replace(/<a class="anchor"[^>]*>.*?<\/a>/, "")).trim();
     items.push({ level: Number(m[1]), id: m[2], text });
   }
   if (items.length < 2) return "";
@@ -648,6 +645,22 @@ function escapeHtml(value) {
     /[&<>"']/g,
     (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char],
   );
+}
+
+function stripHtmlTags(value) {
+  let text = "";
+  let insideTag = false;
+  // An unmatched "<" starts malformed markup; drop that tail instead of returning an active tag.
+  for (const character of value) {
+    if (character === "<") {
+      insideTag = true;
+    } else if (character === ">" && insideTag) {
+      insideTag = false;
+    } else if (!insideTag) {
+      text += character;
+    }
+  }
+  return text;
 }
 
 function escapeAttr(value) {
