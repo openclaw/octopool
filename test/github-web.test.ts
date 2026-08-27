@@ -844,6 +844,71 @@ describe("github web provider", () => {
     });
   });
 
+  it.each([
+    ["draft", "DRAFT", "open", true, null, null],
+    ["open", "OPEN", "open", false, null, null],
+    ["closed", "CLOSED", "closed", false, "2026-08-27T04:41:05Z", null],
+    ["closed draft", "CLOSED", "closed", true, "2026-08-27T04:41:05Z", null],
+    ["merged", "MERGED", "closed", false, "2026-08-27T04:41:05Z", "2026-08-27T04:41:05Z"],
+  ])(
+    "preserves source states for %s PR summaries and exact REST reads",
+    async (_name, webState, restState, draft, closedAt, mergedAt) => {
+      const headSha = "96b73e3bc5c058b57ca73ee3337ec351c3c727df";
+      const rest = {
+        state: restState,
+        draft,
+        closed_at: closedAt,
+        merged_at: mergedAt,
+        head: { sha: headSha },
+      };
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url === "https://github.com/openclaw/octopool/pull/11") {
+          return new Response(
+            pullRequestPage({
+              number: 11,
+              relayId: "PR_fixture",
+              title: "Lifecycle fixture",
+              state: webState,
+              createdTime: "2026-08-26T00:00:00Z",
+              closedTime: closedAt,
+              mergedTime: mergedAt,
+              headBranch: "fix",
+              headSha,
+              baseBranch: "main",
+            }),
+          );
+        }
+        expect(url).toBe("https://api.github.com/repos/openclaw/octopool/pulls/11");
+        return Response.json(rest);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const summary = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/pulls/11",
+        headers: { "x-octopool-public-shape": "pr-summary-v1" },
+      });
+      const exact = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: summary.path,
+      });
+      const web = await callGitHubWeb(env(), summary, classifyRoute(summary, policy));
+      // The CLI owns GraphQL lifecycle projection; the relay caches source-shaped data.
+      expect(web?.body).toMatchObject({
+        state: webState,
+        closed_at: closedAt,
+        merged_at: mergedAt,
+        head: { sha: headSha },
+      });
+      expect(web?.body).not.toHaveProperty("draft");
+      const api = await callGitHubWeb(env(), exact, classifyRoute(exact, policy));
+      expect(api?.body).toEqual(rest);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
   it("prefers embedded issue and PR lists when the whole result fits", async () => {
     const issueNode = {
       __typename: "Issue",

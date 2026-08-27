@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -25,16 +26,6 @@ func needsLivePRRead(fields []string) bool {
 		switch field {
 		case "headRefOid", "baseRefOid", "state", "merged", "mergedAt", "mergeable",
 			"mergeStateStatus", "closedAt":
-			return true
-		}
-	}
-	return false
-}
-
-func needsHydratedPR(fields []string) bool {
-	for _, field := range fields {
-		switch field {
-		case "files", "commits", "comments", "reviews":
 			return true
 		}
 	}
@@ -64,14 +55,7 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		if !machineReadable(opts) || !supportedJSONFields(opts, supportedPRFields) {
 			return ghDelegated()
 		}
-		if needsHydratedPR(opts.json) {
-			return ghCompleted(relayHydratedPRView(ctx, stdout, repo, number, opts))
-		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
-			method:  "GET",
-			path:    repoPath(repo, "pulls", number),
-			headers: publicShapeHeaders(opts, supportedPublicPRViewFields, publicShapePullRequestSummary),
-		}, opts, fieldMapPR))
+		return ghCompleted(relayPRView(ctx, stdout, repo, number, opts))
 	case "list":
 		repo, ok := repoOnly(opts)
 		if !ok || !supportedPRListState(opts.state) || limitOverOnePage(opts) || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
@@ -126,21 +110,25 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	}
 }
 
-func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
-	client, err := newGHRelayClient()
-	if err != nil {
-		return err
-	}
-	headers := hydratedPRViewHeaders(opts)
+func relayPRView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
+	headers := prViewHeaders(opts)
 	if hasJSONField(opts.json, "files") || needsLivePRRead(opts.json) || freshReadRequested() {
 		if headers == nil {
 			headers = map[string]string{}
 		}
 		headers["cache-control"] = "max-age=0"
 	}
-	prEnvelope, err := client.do(ctx, ghAPIRequest{
+	request := ghAPIRequest{
 		method: "GET", path: repoPath(repo, "pulls", number), headers: headers,
-	})
+	}
+	if !safeRelayRequest(request) {
+		return errors.New("internal error: top-level gh command built an unsupported relay request")
+	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	prEnvelope, err := client.do(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -152,6 +140,7 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 	if err := json.Unmarshal(body, &pr); err != nil {
 		return err
 	}
+	normalizePRViewState(pr)
 	filesHeadSHA := ""
 	for _, field := range opts.json {
 		switch field {
@@ -212,9 +201,29 @@ func relayHydratedPRView(ctx context.Context, stdout io.Writer, repo string, num
 	return writeBytes(ctx, stdout, filtered, opts.jq)
 }
 
-func hydratedPRViewHeaders(opts ghTopOptions) map[string]string {
+func normalizePRViewState(pr map[string]any) {
+	state, ok := pr["state"].(string)
+	if !ok {
+		return
+	}
+	state = strings.ToUpper(state)
+	merged, _ := pr["merged"].(bool)
+	switch {
+	case merged || firstString(pr, "merged_at") != "" || state == "MERGED":
+		state = "MERGED"
+	case firstString(pr, "closed_at") != "" || state == "CLOSED":
+		state = "CLOSED"
+	case state == "DRAFT":
+		// pr-summary-v1 includes the page's display state, including in existing cache entries.
+		state = "OPEN"
+	}
+	pr["state"] = state
+}
+
+func prViewHeaders(opts ghTopOptions) map[string]string {
 	for _, field := range opts.json {
-		if needsHydratedPR([]string{field}) {
+		switch field {
+		case "files", "commits", "comments", "reviews":
 			continue
 		}
 		if !supportedPublicPRViewFields[field] {

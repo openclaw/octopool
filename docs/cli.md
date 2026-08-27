@@ -167,6 +167,11 @@ human-format reads. Supported `--json` fields are intentionally conservative. Co
 `gh` field names are mapped where the REST API uses different
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
+`gh pr view --json state` returns the GraphQL lifecycle `OPEN`, `CLOSED`, or `MERGED`
+regardless of the other requested fields or whether the relay uses a public page or REST.
+Draft status is separate: an open draft has `state: "OPEN"` and `isDraft: true` when
+requested. This conversion happens before field filtering and `--jq`; raw `gh api` REST
+states, PR search states, and human-format `DRAFT` display remain unchanged.
 Run views also support the nested `jobs` field; Octopool composes its job/step metadata from
 the cache, exact API responses, or bounded public GitHub pages.
 `gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request

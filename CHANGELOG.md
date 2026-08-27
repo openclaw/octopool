@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Normalize `gh pr view --json state` to `OPEN`, `CLOSED`, or `MERGED` across public-page and REST reads, keeping draft status separate and field subsets and `--jq` projections consistent.
 - Harden GitHub HTML text extraction and docs table-of-contents generation so malformed tag fragments cannot survive text conversion.
 
 ## 0.5.6 - 2026-08-13

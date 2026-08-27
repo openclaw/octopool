@@ -101,17 +101,20 @@ describe("github cache policy", () => {
     );
   });
 
-  it("keeps public summary shapes separate from exact REST cache entries", async () => {
+  it.each([
+    ["/repos/openclaw/openclaw/actions/runs", "actions-summary-v1"],
+    ["/repos/openclaw/openclaw/pulls/85341", "pr-summary-v1"],
+  ])("keeps %s public summaries separate from exact REST cache entries", async (path, shape) => {
     const summary = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/repos/openclaw/openclaw/actions/runs",
-      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+      path,
+      headers: { "x-octopool-public-shape": shape },
     });
     const exact = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/repos/openclaw/openclaw/actions/runs",
+      path,
     });
     const route = classifyRoute(summary, policy);
 
