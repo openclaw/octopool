@@ -306,7 +306,11 @@ describe("Actions run ownership", () => {
     ],
     [
       "duplicate embedded JSON",
-      (html: string) => html.replace(/(<script[\s\S]*?<\/script>)/, "$1$1"),
+      (html: string) =>
+        html.replace(
+          "</script>",
+          '</script><script data-target="react-partial.embeddedData">{}</script>',
+        ),
     ],
     [
       "duplicate page header",
