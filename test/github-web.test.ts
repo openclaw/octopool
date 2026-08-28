@@ -359,16 +359,24 @@ describe("github web provider", () => {
       .mockResolvedValueOnce(
         new Response(`
           <meta name="twitter:title" content="workflow-filtered &#183; openclaw/octopool@ef53e13">
+          <page-header>
           <span class="PageHeader-parentLink-label"> CI</span>
           <span class="actions-workflow-runs-status"><svg aria-label="completed successfully: "></svg></span>
           <h1 class="PageHeader-title"><span class="markdown-title">workflow-filtered</span><span>#65</span></h1>
+          </page-header>
+          <react-partial partial-name="actions-run-jobs-list"><script data-target="react-partial.embeddedData">{"props":{"summaryHref":"/openclaw/octopool/actions/runs/26906919053","summarySelected":true,"jobGroupsFetchUrl":"/openclaw/octopool/actions/runs/26906919053/job_groups_batch?attempt=1"}}</script></react-partial>
+          <div aria-label="Workflow run summary" data-url="/openclaw/octopool/actions/runs/26906919053/summary_partial">
           <span>Triggered via pull request <relative-time datetime="2026-06-03T18:14:57Z"></relative-time></span>
           <a class="branch-name" title="RomneyDa:fix/login-provisioning-guidance" href="/RomneyDa/octopool/tree/refs/heads/fix/login-provisioning-guidance">fix/login-provisioning-guidance</a>
           <span>Total duration</span><a class="h4 color-fg-default">19s</a>
+          <a href="/openclaw/octopool/commit/ef53e13">ef53e13</a>
+          </div>
         `),
       )
       .mockResolvedValueOnce(
-        new Response("From ef53e13233adb1af0730f8239d87149d60cb42ac Mon Sep 17 00:00:00 2001\n"),
+        new Response(
+          "From ef53e13233adb1af0730f8239d87149d60cb42ac Mon Sep 17 00:00:00 2001\nFrom: Fixture <fixture@example.com>\nDate: Wed, 3 Jun 2026 18:14:57 +0000\nSubject: [PATCH] fixture\n\ndiff --git a/example b/example\n",
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
@@ -525,14 +533,18 @@ describe("github web provider", () => {
       "fetch",
       vi.fn().mockResolvedValueOnce(
         new Response(`
+            <page-header>
             <span class="PageHeader-parentLink-label"> CI</span>
             <span class="actions-workflow-runs-status"><svg aria-label="completed successfully: "></svg></span>
             <h1 class="PageHeader-title"><span class="markdown-title">fix: harden setup</span><span>#79</span></h1>
+            </page-header>
+            <react-partial partial-name="actions-run-jobs-list"><script data-target="react-partial.embeddedData">{"props":{"summaryHref":"/openclaw/octopool/actions/runs/27328786454","summarySelected":true,"jobGroupsFetchUrl":"/openclaw/octopool/actions/runs/27328786454/job_groups_batch?attempt=2"}}</script></react-partial>
+            <div aria-label="Workflow run summary" data-url="/openclaw/octopool/actions/runs/27328786454/summary_partial">
             <span>Triggered via pull request <relative-time datetime="2026-06-11T06:38:49Z"></relative-time></span>
             <a href="/openclaw/octopool/commit/1e6a563d13924ba423febe3a4cb47eeb9d594322">1e6a563</a>
             <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
-            <div data-job-groups-fetch-url="/openclaw/octopool/actions/runs/27328786454/job_groups_batch?attempt=2"></div>
             <span>Total duration</span><a class="h4 color-fg-default">2m 49s</a>
+            </div>
           `),
       ),
     );
@@ -553,6 +565,7 @@ describe("github web provider", () => {
         status: "completed",
         conclusion: "success",
         run_attempt: 2,
+        head_sha: "1e6a563d13924ba423febe3a4cb47eeb9d594322",
         event: "pull_request",
       },
       backend: "web",

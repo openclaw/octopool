@@ -344,9 +344,11 @@ Three things keep that honest:
   served from the shared cache, the CLI prints one line to stderr naming the route, whether
   it was a hit or a stale serve, and when it refreshes. stdout stays untouched, so `--json`
   and `--jq` consumers are unaffected. Silence it with `OCTOPOOL_QUIET_CACHE=1`.
-- **Anything can be forced live.** `OCTOPOOL_FRESH=1` applies `max-age=0` to every relayed
-  read, and `gh api -H "cache-control: max-age=0"` now relays instead of falling back to
-  local `gh`, so a raw API read can be made live without spending your own token quota.
+- **Anything can request a live read.** `OCTOPOOL_FRESH=1` applies `max-age=0` at shared
+  relay request construction, including top-level `run view` and every jobs hydration
+  request. An explicit `cache-control` header retains precedence, including headers
+  passed through `gh api -H`. Ordinary reads retain caching. The relay's existing bounded
+  stale fallback still applies when upstream backends are unavailable.
 
 Note that `git push` never passes through Octopool, so the relay cannot invalidate a PR
 entry when a branch moves. That is why the gate fields read live rather than relying on
@@ -370,10 +372,10 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_TOKEN` — caller token override (required to use a non-saved URL).
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
-- `OCTOPOOL_FRESH=1` — send `cache-control: max-age=0` on every relayed read, so answers
-  come from GitHub instead of the shared cache. Use it right after a `git push` or a merge,
-  when a cached answer would still describe the previous state. Costs pool quota; leave it
-  off for ordinary reads.
+- `OCTOPOOL_FRESH=1` — default every relayed read to `cache-control: max-age=0`, including
+  run metadata and jobs; explicit cache-control headers take precedence. Use it right after
+  a `git push` or a merge, when a cached answer could describe the previous state. It can
+  cost API quota; leave it off for ordinary reads. Bounded stale outage fallback is unchanged.
 - `OCTOPOOL_QUIET_CACHE=1` — suppress the one-line stderr note printed when a
   decision-shaped route (PR/issue/run/checks) is served from the shared cache.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns

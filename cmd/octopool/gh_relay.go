@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -191,6 +192,14 @@ func transientRelayFailure(err error) bool {
 }
 
 func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
+	headers := request.headers
+	if _, explicit := headers["cache-control"]; freshReadRequested() && !explicit {
+		headers = maps.Clone(headers)
+		if headers == nil {
+			headers = make(map[string]string)
+		}
+		headers["cache-control"] = "max-age=0"
+	}
 	body := map[string]any{
 		"pool":   client.pool,
 		"method": request.method,
@@ -199,8 +208,8 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	if len(request.query) > 0 {
 		body["query"] = request.query
 	}
-	if len(request.headers) > 0 {
-		body["headers"] = request.headers
+	if len(headers) > 0 {
+		body["headers"] = headers
 	}
 	if len(request.routeHint) > 0 {
 		body["route_hint"] = request.routeHint

@@ -35,6 +35,14 @@ Default pagination
 media types and non-default query values still produce distinct entries. The key is
 pool-scoped, so pools never share cache entries.
 
+Actions summaries also include a server-controlled representation generation
+(`actions-summary-owned-v2`) in this common key. Run views, attempt-qualified views,
+and repository/workflow run lists, including canonical supersets and identity-specific
+entries, cannot reuse summaries cached before the ownership fix. Existing
+`actions-summary-v1` clients keep the same wire format but miss those old entries in
+edge, D1, stale fallback, fill coalescing, and conditional revalidation. Raw REST and
+unrelated shapes keep their existing keys; no cache purge is needed.
+
 PR file-list routes may include a validated
 `route_hint.pr_head_sha` or closed/merged `route_hint.pr_state` discriminator. Clients
 that already know the current PR state can use that to avoid mixing entries across head
@@ -115,6 +123,19 @@ The main transport classes are:
 Anonymous API rate snapshots are recorded by GitHub resource from API responses.
 When a public-page/raw/Git parser cannot satisfy a request, Octopool falls back to the
 anonymous API in the same request cycle.
+
+Actions run pages must identify the requested repository and run in both the summary
+region and embedded job navigation, with a matching attempt when requested. The head
+SHA must come from a commit link inside that run's summary; document titles and links
+elsewhere cannot supply it. List cards end at their own closing element, so a following
+card or region cannot lend its SHA. Missing or conflicting ownership falls back to exact
+anonymous REST, then the existing pool path. In particular, title-only pages use REST's
+historical top-level `head_sha`, never the mutable `pull_requests[].head.sha`.
+
+An abbreviated summary commit link can still expand without API quota, but only from
+a single well-formed patch with a full 40-character SHA matching that abbreviation.
+Merge patch series, mismatched headers, and ambiguous or incomplete patches fall back
+to REST. This deliberately uses more API reads for pages that cannot prove ownership.
 
 Successful web reads are cached in the same D1 table with no source identity. A cached
 web hit still re-checks that public proof covers the entry before returning it.

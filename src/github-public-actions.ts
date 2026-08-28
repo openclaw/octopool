@@ -136,6 +136,7 @@ function actionsRunRequest(
         route.owner!,
         route.repo!,
         Number(id),
+        attempt === undefined ? undefined : Number(attempt),
       );
       const complete =
         parsed === undefined ? undefined : await completeActionsRunSHA(env, route, parsed);
@@ -244,9 +245,19 @@ async function enrichActionsRun(
   );
   const parsed =
     page === undefined ? undefined : parseActionsRunHTML(page, route.owner, route.repo, run.id);
-  return parsed === undefined
-    ? undefined
-    : completeActionsRunSHA(env, route, { ...run, ...parsed });
+  if (parsed === undefined) {
+    return undefined;
+  }
+  const complete = await completeActionsRunSHA(env, route, { ...run, ...parsed });
+  if (
+    complete === undefined ||
+    (typeof run.head_sha === "string" &&
+      (!isFullGitSHA(complete.head_sha) ||
+        !complete.head_sha.toLowerCase().startsWith(run.head_sha.toLowerCase())))
+  ) {
+    return undefined;
+  }
+  return complete;
 }
 
 async function completeActionsRunSHA(
@@ -271,10 +282,10 @@ async function completeActionsRunSHA(
     env,
     "text/plain",
   );
-  const sha = patch === undefined ? undefined : parseCommitPatchSHA(patch);
+  const sha = patch === undefined ? undefined : parseCommitPatchSHA(patch, run.head_sha);
   return sha === undefined ? undefined : { ...run, head_sha: sha };
 }
 
 function isFullGitSHA(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9A-Fa-f]{40,64}$/.test(value);
+  return typeof value === "string" && /^[0-9A-Fa-f]{40}$/.test(value);
 }

@@ -357,10 +357,16 @@ describe("Worker end-to-end cache revalidation", () => {
       revalidationStarted = resolve;
     });
     let conditionalCalls = 0;
+    let publicRepoChecks = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
+        if (request.url === "https://api.github.com/repos/openclaw/octopool") {
+          publicRepoChecks++;
+          return jsonResponse({ private: false });
+        }
+        expect(request.url).toBe(`https://api.github.com${RUN_PATH}`);
         if (request.headers.get("if-none-match") === '"run-v1"') {
           conditionalCalls++;
           revalidationStarted();
@@ -373,6 +379,16 @@ describe("Worker end-to-end cache revalidation", () => {
 
     await relay(RUN_PATH);
     await expireCacheEntry("run_view");
+    // Cover the original entry, but require the follower to refresh proof for the new timestamp.
+    await env.DB.prepare(
+      `UPDATE github_public_repos
+       SET checked_at = datetime(
+         (SELECT created_at FROM github_cache_entries WHERE route_kind = 'run_view' LIMIT 1),
+         '-5 seconds'
+       )
+       WHERE owner = 'openclaw' AND repo = 'octopool'`,
+    ).run();
+    await deleteEdgeJSON("public-repo-v1", "openclaw/octopool");
     const leader = relay(RUN_PATH);
     await started;
     const follower = relay(RUN_PATH);
@@ -399,6 +415,7 @@ describe("Worker end-to-end cache revalidation", () => {
     ]);
     expect(conditionalCallsBeforePublish).toBe(1);
     expect(conditionalCalls).toBe(1);
+    expect(publicRepoChecks).toBe(1);
     expect(
       await env.DB.prepare(
         "SELECT COUNT(*) AS count FROM audit_events WHERE fallback_reason = 'cache_revalidated'",

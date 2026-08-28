@@ -22,18 +22,37 @@ export function parseActionsRunListHTML(
 ): { total_count: number; workflow_runs: Record<string, unknown>[] } | undefined {
   const totalMatch = /<strong>([0-9,]+) workflow runs?(?: results?)?<\/strong>/.exec(html);
   const total = totalMatch === null ? undefined : Number(totalMatch[1]!.replaceAll(",", ""));
-  const cards = actionsRunCards(html);
+  const cards = actionsDivRegions(html, (attributes) => {
+    const classes = new Set(htmlAttribute(attributes, "class")?.split(/\s+/));
+    return ["Box-row", "js-socket-channel", "js-updatable-content"].every((name) =>
+      classes.has(name),
+    );
+  });
+  if (cards === undefined) {
+    return undefined;
+  }
   const runs: Record<string, unknown>[] = [];
   const runPath = `/${escapeRegex(owner)}/${escapeRegex(repo)}/actions/runs/`;
 
   for (const card of cards) {
-    const anchor = new RegExp(`href="${runPath}([0-9]+)"[^>]*aria-label="([^"]+)"`).exec(card);
-    if (anchor === null) {
-      continue;
+    const anchors = [...card.matchAll(/<a\b([^>]*)>/g)]
+      .map((match) => ({
+        href: htmlAttribute(match[1]!, "href"),
+        label: htmlAttribute(match[1]!, "aria-label"),
+      }))
+      .filter(
+        (anchor) =>
+          anchor.label !== undefined &&
+          /^\/[^/]+\/[^/]+\/actions\/runs\/[0-9]+$/.test(anchor.href ?? ""),
+      );
+    const anchor = anchors[0];
+    const idText = new RegExp(`^${runPath}([0-9]+)$`).exec(anchor?.href ?? "")?.[1];
+    if (anchors.length !== 1 || anchor?.label === undefined || idText === undefined) {
+      return undefined;
     }
-    const state = runState(decodeHTML(anchor[2]!));
+    const state = runState(anchor.label);
     if (state === undefined) {
-      continue;
+      return undefined;
     }
     const title = textMatch(card, /class="[^"]*markdown-title[^"]*"[^>]*>([\s\S]*?)<\/span>/);
     const workflow = textMatch(
@@ -48,12 +67,18 @@ export function parseActionsRunListHTML(
       runNumber === undefined ||
       createdAt === undefined
     ) {
-      continue;
+      return undefined;
     }
-    const id = Number(anchor[1]);
-    const sha = new RegExp(
-      `href="/${escapeRegex(owner)}/${escapeRegex(repo)}/commit/([0-9A-Fa-f]{7,64})"`,
-    ).exec(card)?.[1];
+    const id = Number(idText);
+    const commit = actionsCommitSHA(card, owner, repo);
+    if (
+      commit === undefined ||
+      !Number.isSafeInteger(id) ||
+      id <= 0 ||
+      runs.some((run) => run.id === id)
+    ) {
+      return undefined;
+    }
     const branch = new RegExp(
       `href="/${escapeRegex(owner)}/${escapeRegex(repo)}/tree/refs/heads/([^"]+)"`,
     ).exec(card)?.[1];
@@ -67,7 +92,7 @@ export function parseActionsRunListHTML(
       conclusion: state.conclusion,
       html_url: `https://github.com/${owner}/${repo}/actions/runs/${id}`,
       head_branch: branch === undefined ? null : decodeURIComponentSafe(branch),
-      head_sha: sha ?? null,
+      head_sha: commit.sha ?? null,
       event: runEvent(card),
       created_at: createdAt,
       updated_at: addDuration(createdAt, duration) ?? createdAt,
@@ -85,31 +110,48 @@ export function parseActionsRunHTML(
   owner: string,
   repo: string,
   id: number,
+  attempt?: number,
 ): Record<string, unknown> | undefined {
-  const title = textMatch(
+  const runPath = `/${owner}/${repo}/actions/runs/${id}`;
+  const summaries = actionsDivRegions(
     html,
+    (attributes) => htmlAttribute(attributes, "aria-label") === "Workflow run summary",
+  );
+  const summary = summaries?.[0];
+  const summaryAttributes =
+    summary === undefined ? undefined : /^<div\b([^>]*)>/.exec(summary)?.[1];
+  const runAttempt = actionsRunAttempt(html, runPath);
+  if (
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    summaries?.length !== 1 ||
+    summary === undefined ||
+    summaryAttributes === undefined ||
+    htmlAttribute(summaryAttributes, "data-url") !== `${runPath}/summary_partial` ||
+    runAttempt === undefined ||
+    (attempt !== undefined && attempt !== runAttempt)
+  ) {
+    return undefined;
+  }
+  const pageHeaders = [...html.matchAll(/<page-header\b[^>]*>([\s\S]*?)<\/page-header>/g)];
+  const header = pageHeaders[0]?.[1];
+  if (pageHeaders.length !== 1 || header === undefined) {
+    return undefined;
+  }
+  const title = textMatch(
+    header,
     /<h1[^>]*class="[^"]*PageHeader-title[^"]*"[\s\S]*?<span class="markdown-title"[^>]*>([\s\S]*?)<\/span>/,
   );
-  const workflow = textMatch(html, /class="PageHeader-parentLink-label"[^>]*>([\s\S]*?)<\/span>/);
+  const workflow = textMatch(header, /class="PageHeader-parentLink-label"[^>]*>([\s\S]*?)<\/span>/);
   const stateLabel =
-    /class="[^"]*actions-workflow-runs-status[^"]*"[\s\S]*?aria-label="([^"]+)"/.exec(html)?.[1];
+    /class="[^"]*actions-workflow-runs-status[^"]*"[\s\S]*?aria-label="([^"]+)"/.exec(header)?.[1];
   const state = stateLabel === undefined ? undefined : runState(decodeHTML(stateLabel));
   const runNumber = new RegExp(
     `<span class="markdown-title"[\\s\\S]*?</span>\\s*<span[^>]*>\\s*#([0-9]+)`,
-  ).exec(html)?.[1];
-  const trigger = /Triggered via\s+([^<]+?)\s*<relative-time[^>]*datetime="([^"]+)"/.exec(html);
-  const sha =
-    new RegExp(
-      `href="/${escapeRegex(owner)}/${escapeRegex(repo)}/commit/([0-9A-Fa-f]{7,64})"`,
-    ).exec(html)?.[1] ??
-    new RegExp(
-      `(?:\\u00b7|&#183;)\\s*${escapeRegex(owner)}/${escapeRegex(repo)}@([0-9A-Fa-f]{7,64})`,
-    ).exec(html)?.[1];
-  const branch = actionsRunBranch(html, owner, repo);
-  const runAttemptText = new RegExp(
-    `/${escapeRegex(owner)}/${escapeRegex(repo)}/actions/runs/${id}/job_groups_batch\\?attempt=([0-9]+)`,
-  ).exec(html)?.[1];
-  const runAttempt = runAttemptText === undefined ? undefined : Number(runAttemptText);
+  ).exec(header)?.[1];
+  const trigger = /Triggered via\s+([^<]+?)\s*<relative-time[^>]*datetime="([^"]+)"/.exec(summary);
+  const sha = actionsCommitSHA(summary, owner, repo)?.sha;
+  const branch = actionsRunBranch(summary, owner, repo);
   if (
     title === undefined ||
     workflow === undefined ||
@@ -121,7 +163,7 @@ export function parseActionsRunHTML(
     return undefined;
   }
   const duration = /Total duration[\s\S]*?class="[^"]*color-fg-default[^"]*"[^>]*>\s*([^<]+)</.exec(
-    html,
+    summary,
   )?.[1];
   const createdAt = trigger[2]!;
   return {
@@ -140,14 +182,36 @@ export function parseActionsRunHTML(
       .replace(/[\s-]+/g, "_"),
     created_at: createdAt,
     updated_at: addDuration(createdAt, duration) ?? createdAt,
-    ...(runAttempt !== undefined && Number.isSafeInteger(runAttempt) && runAttempt > 0
-      ? { run_attempt: runAttempt }
-      : {}),
+    run_attempt: runAttempt,
   };
 }
 
-export function parseCommitPatchSHA(patch: string): string | undefined {
-  return /^From ([0-9A-Fa-f]{40,64})\s/m.exec(patch)?.[1];
+export function parseCommitPatchSHA(patch: string, abbreviation: string): string | undefined {
+  const normalized = patch.replaceAll("\r\n", "\n");
+  const envelope = /^From ([0-9A-Fa-f]{40}) Mon Sep 17 00:00:00 2001\n/.exec(normalized);
+  const sha = envelope?.[1]?.toLowerCase();
+  if (
+    !/^[0-9A-Fa-f]{7,39}$/.test(abbreviation) ||
+    sha === undefined ||
+    !sha.startsWith(abbreviation.toLowerCase()) ||
+    [...normalized.matchAll(/^From /gm)].length !== 1
+  ) {
+    return undefined;
+  }
+  const headerEnd = normalized.indexOf("\n\n");
+  const headers = normalized.slice(envelope![0].length, headerEnd);
+  const subjects = [...headers.matchAll(/^Subject: (.+(?:\n[ \t].+)*)$/gm)];
+  if (
+    headerEnd === -1 ||
+    subjects.length !== 1 ||
+    /\b[0-9]+\/[0-9]+\b/.test(subjects[0]![1]!) ||
+    [...headers.matchAll(/^From: .+$/gm)].length !== 1 ||
+    [...headers.matchAll(/^Date: .+$/gm)].length !== 1 ||
+    !/^diff --git /m.test(normalized.slice(headerEnd + 2))
+  ) {
+    return undefined;
+  }
+  return sha;
 }
 
 export function parseActionsJobGroupsJSON(
@@ -221,22 +285,86 @@ export function parseActionsJobHTML(
   };
 }
 
-function actionsRunCards(html: string): string[] {
-  const starts: number[] = [];
-  for (const match of html.matchAll(/<div\b[^>]*class="([^"]*)"[^>]*>/g)) {
-    if (match.index === undefined) {
+// Match the closing div, not the next card: following regions do not own this run's SHA.
+function actionsDivRegions(
+  html: string,
+  selected: (attributes: string) => boolean,
+): string[] | undefined {
+  const regions: string[] = [];
+  let depth = 0;
+  let start: number | undefined;
+  for (const match of html.matchAll(
+    /<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>|<\/?div\b[^>]*>/gi,
+  )) {
+    if (!/^<\/?div\b/i.test(match[0])) {
       continue;
     }
-    const classes = new Set(match[1]!.split(/\s+/));
-    if (
-      classes.has("Box-row") &&
-      classes.has("js-socket-channel") &&
-      classes.has("js-updatable-content")
-    ) {
-      starts.push(match.index);
+    if (match[0].startsWith("</")) {
+      if (start !== undefined && --depth === 0) {
+        regions.push(
+          html
+            .slice(start, match.index + match[0].length)
+            .replace(/<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ""),
+        );
+        start = undefined;
+      }
+    } else {
+      if (selected(match[0].slice(4, -1))) {
+        if (start !== undefined) return undefined;
+        start = match.index;
+      }
+      if (start !== undefined) depth++;
     }
   }
-  return starts.map((start, index) => html.slice(start, starts[index + 1] ?? html.length));
+  return start === undefined ? regions : undefined;
+}
+
+function actionsCommitSHA(
+  html: string,
+  owner: string,
+  repo: string,
+): { sha: string | undefined } | undefined {
+  const prefix = `/${owner}/${repo}/commit/`;
+  const shas = new Set<string>();
+  for (const anchor of html.matchAll(/<a\b([^>]*)>/g)) {
+    const href = htmlAttribute(anchor[1]!, "href");
+    if (href !== undefined && /^\/[^/]+\/[^/]+\/commit\//.test(href)) {
+      if (!href.startsWith(prefix)) return undefined;
+      const sha = href.slice(prefix.length);
+      if (!/^[0-9A-Fa-f]{7,40}$/.test(sha)) return undefined;
+      shas.add(sha.toLowerCase());
+    }
+  }
+  return shas.size > 1 ? undefined : { sha: [...shas][0] };
+}
+
+function actionsRunAttempt(html: string, runPath: string): number | undefined {
+  const partials = [
+    ...html.matchAll(/<react-partial\b([^>]*)>([\s\S]*?)<\/react-partial>/g),
+  ].filter((match) => htmlAttribute(match[1]!, "partial-name") === "actions-run-jobs-list");
+  if (partials.length !== 1) return undefined;
+  const scripts = [...partials[0]![2]!.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)].filter(
+    (match) => htmlAttribute(match[1]!, "data-target") === "react-partial.embeddedData",
+  );
+  if (scripts.length !== 1) return undefined;
+  try {
+    const data: unknown = JSON.parse(scripts[0]![2]!);
+    if (!isRecord(data) || !isRecord(data.props)) return undefined;
+    const props = data.props;
+    if (
+      props.summaryHref !== runPath ||
+      props.summarySelected !== true ||
+      typeof props.jobGroupsFetchUrl !== "string"
+    )
+      return undefined;
+    const match = new RegExp(
+      `^${escapeRegex(runPath)}/job_groups_batch\\?attempt=([1-9][0-9]*)$`,
+    ).exec(props.jobGroupsFetchUrl);
+    const attempt = Number(match?.[1]);
+    return Number.isSafeInteger(attempt) && attempt > 0 ? attempt : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function collectJobSummaries(

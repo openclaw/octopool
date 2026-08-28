@@ -74,6 +74,11 @@ export async function githubCacheKey(
     headers: stableRecord(cacheVaryHeaders(request.headers)),
     route_key: route.routeKey,
     state: cacheStateDiscriminator(route),
+    // Retire contaminated page shapes for existing clients in every cache/fill path.
+    ...(request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.actionsSummary &&
+    ["run_view", "run_list", "workflow_run_list"].includes(route.kind)
+      ? { representation: "actions-summary-owned-v2" }
+      : {}),
     ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),
   };
   return hashToken(JSON.stringify(stable));
