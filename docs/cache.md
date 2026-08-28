@@ -132,6 +132,17 @@ card or region cannot lend its SHA. Missing or conflicting ownership falls back 
 anonymous REST, then the existing pool path. In particular, title-only pages use REST's
 historical top-level `head_sha`, never the mutable `pull_requests[].head.sha`.
 
+These ownership regions use parse5's HTML DOM and source locations, not markup
+stripping or regular-expression boundaries. Scripts, comments, styles, templates,
+raw-text elements, and foreign content cannot supply commit links. Embedded job
+navigation is read only as JSON from its unique script element. HTML element and
+attribute names follow browser case rules, and entities are decoded only by the
+HTML parser. Parse errors, inferred or overlapping ownership boundaries, unusual
+element names, and duplicate identity evidence fall back to REST. Only bare
+fragments with an implicit document scaffold may omit the doctype; full documents
+must declare it. This conservative policy can increase API fallback for malformed
+or changed GitHub markup.
+
 An abbreviated summary commit link can still expand without API quota, but only from
 a single well-formed patch with a full 40-character SHA matching that abbreviation.
 Merge patch series, mismatched headers, and ambiguous or incomplete patches fall back

@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- Validate Actions run/attempt ownership and summary commit links, reject ambiguous or mismatched patch expansion, and fall back to historical REST heads instead of mutable PR heads; retire contaminated Actions summary cache entries with a server-controlled representation generation, including existing clients and run-list supersets.
+- Validate Actions run/attempt ownership and summary commit links with standard HTML DOM parsing, reject malformed regions and ambiguous or mismatched patch expansion, and fall back to historical REST heads instead of mutable PR heads; retire contaminated Actions summary cache entries with a server-controlled representation generation, including existing clients and run-list supersets.
 - Forward `OCTOPOOL_FRESH=1` on top-level run metadata and jobs hydration through shared relay request construction, preserving explicit cache-control headers and ordinary caching.
 
 ## 0.5.7 - 2026-08-26

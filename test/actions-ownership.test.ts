@@ -38,7 +38,9 @@ describe("Actions run ownership", () => {
 
   it("ignores unrelated links before and after the owned summary", () => {
     const decoy = `<aside><a href="/openclaw/Peekaboo/commit/${wrongPatchHead}">unrelated</a></aside>`;
-    const html = decoy + runPage(runIDs[0], historicalHead) + decoy;
+    const html = runPage(runIDs[0], historicalHead)
+      .replace("<body>", `<body>${decoy}`)
+      .replace("</body>", `${decoy}</body>`);
     expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)).toMatchObject({
       head_sha: historicalHead,
     });
@@ -86,6 +88,259 @@ describe("Actions run ownership", () => {
       `</relative-time><!-- ${decoy} --><script>${JSON.stringify(decoy)}</script>`,
     );
     expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)).toBeUndefined();
+  });
+
+  const decoyLink = `<a href="/openclaw/Peekaboo/commit/${wrongPatchHead}">wrong</a>`;
+  const malformedMarkup = [
+    ["script end-tag attributes", `<script>const value = '${decoyLink}';</script\t\n bar>`],
+    ["uppercase script end-tag attributes", `<SCRIPT>${decoyLink}</SCRIPT data-extra>`],
+    ["style end-tag attributes", `<style>${decoyLink}</STYLE data-extra>`],
+    ["comment reconstruction", `<scr<!--x-->ipt>const value = '${decoyLink}';</scr<!--x-->ipt>`],
+    ["nested comment reconstruction", `<!-- <!-- -->${decoyLink} -->`],
+    [
+      "duplicate href",
+      `<a href="/openclaw/Peekaboo/commit/${historicalHead}" href="/other/repo/commit/${wrongPatchHead}">ambiguous</a>`,
+    ],
+    ["unclosed raw text", `<script>${decoyLink}`],
+    ["misnested formatting", `<b><i>${decoyLink}</b></i>`],
+  ];
+
+  it.each(malformedMarkup)(
+    "falls back to the historical REST head for %s",
+    async (_name, markup) => {
+      const html = runPage().replace("</relative-time>", `</relative-time>${markup}`);
+      expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)).toBeUndefined();
+      const fetchMock = vi.fn(async (input: string) =>
+        input.startsWith("https://github.com/")
+          ? new Response(html)
+          : Response.json(exactRun(runIDs[0]!)),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      expect(await readRun(runIDs[0]!)).toMatchObject({
+        backend: "github",
+        body: exactRun(runIDs[0]!),
+      });
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        `https://github.com/openclaw/Peekaboo/actions/runs/${runIDs[0]}`,
+        `https://api.github.com/repos/openclaw/Peekaboo/actions/runs/${runIDs[0]}`,
+      ]);
+    },
+  );
+
+  it.each(malformedMarkup)("rejects malformed list ownership: %s", (_name, markup) => {
+    const card = runCard(runIDs[0]!).replace("</relative-time>", `</relative-time>${markup}`);
+    expect(
+      parseActionsRunListHTML(`<strong>1 workflow run</strong>${card}`, "openclaw", "Peekaboo"),
+    ).toBeUndefined();
+  });
+
+  const inertMarkup = [
+    ["script", `<script>${JSON.stringify(decoyLink)}</script>`],
+    [
+      "script containing fake div boundaries",
+      `<script>const markup = '</div><div>${decoyLink}</div>';</script>`,
+    ],
+    ["mixed-case script", `<ScRiPt>${JSON.stringify(decoyLink)}</sCrIpT>`],
+    ["style", `<style>${decoyLink}</STYLE>`],
+    ["template", `<template>${decoyLink}</template>`],
+    ["comment", `<!-- ${decoyLink} -->`],
+    ["textarea", `<textarea>${decoyLink}</TEXTAREA>`],
+    ["title", `<title>${decoyLink}</TITLE>`],
+    ["iframe", `<iframe>${decoyLink}</IFRAME>`],
+    ["xmp", `<xmp>${decoyLink}</XMP>`],
+    ["noembed", `<noembed>${decoyLink}</NOEMBED>`],
+    ["noframes", `<noframes>${decoyLink}</NOFRAMES>`],
+    ["noscript", `<noscript>${decoyLink}</noscript>`],
+    ["foreign content", `<svg><foreignObject>${decoyLink}</foreignObject></svg>`],
+    ["escaped text", `&lt;a href="/openclaw/Peekaboo/commit/${wrongPatchHead}"&gt;wrong&lt;/a&gt;`],
+  ];
+
+  it.each(inertMarkup)(
+    "ignores fake commit links in %s without losing a safe owned head",
+    (_name, markup) => {
+      for (const head of [undefined, historicalHead]) {
+        const html = runPage(runIDs[0], head).replace(
+          "</relative-time>",
+          `</relative-time>${markup}`,
+        );
+        expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)?.head_sha).toBe(head);
+        const card = runCard(runIDs[0]!, head).replace(
+          "</relative-time>",
+          `</relative-time>${markup}`,
+        );
+        expect(
+          parseActionsRunListHTML(`<strong>1 workflow run</strong>${card}`, "openclaw", "Peekaboo")
+            ?.workflow_runs[0]?.head_sha,
+        ).toBe(head ?? null);
+      }
+    },
+  );
+
+  it("parses uppercase elements and attributes, including embedded job JSON", async () => {
+    const html = runPage(runIDs[0], historicalHead)
+      .replace(
+        /(<\/?)([a-z][a-z-]*)/g,
+        (_match, prefix: string, tag: string) => prefix + tag.toUpperCase(),
+      )
+      .replace(
+        /(class|href|aria-label|data-url|datetime|partial-name|data-target)=/g,
+        (attribute) => attribute.toUpperCase(),
+      );
+    const fetchMock = vi.fn(async () => new Response(html));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await readRun(runIDs[0]!)).toMatchObject({
+      backend: "web",
+      body: { head_sha: historicalHead },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not decode DOM text or attributes twice", () => {
+    const html = runPage(runIDs[0], historicalHead)
+      .replace(
+        '<span class="markdown-title">fixture</span>',
+        '<span class="markdown-title">&amp;lt;fixture&amp;gt; &amp; &#x1f980;</span>',
+      )
+      .replace("refs/heads/fixture-branch", "refs/heads/feature&amp;amp;branch");
+    expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)).toMatchObject({
+      display_title: "&lt;fixture&gt; & 🦀",
+      head_branch: "feature&amp;branch",
+    });
+  });
+
+  it("accepts document mode and a bare fragment, but rejects a missing document doctype", () => {
+    const html = runPage(runIDs[0], historicalHead);
+    const fragment = html.slice(html.indexOf("<page-header>"), html.indexOf("</body>"));
+    expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)?.head_sha).toBe(
+      historicalHead,
+    );
+    expect(parseActionsRunHTML(fragment, "openclaw", "Peekaboo", runIDs[0]!)?.head_sha).toBe(
+      historicalHead,
+    );
+    expect(
+      parseActionsRunHTML(html.replace("<!DOCTYPE html>", ""), "openclaw", "Peekaboo", runIDs[0]!),
+    ).toBeUndefined();
+  });
+
+  it("ignores fake list cards and totals inside inert DOM content", () => {
+    for (const tag of ["script", "style", "template", "textarea"]) {
+      const decoy = `<${tag}><strong>0 workflow runs</strong>${runCard(runIDs[1]!, wrongPatchHead)}</${tag}>`;
+      expect(parseActionsRunListHTML(decoy, "openclaw", "Peekaboo")).toBeUndefined();
+      expect(
+        parseActionsRunListHTML(
+          `${decoy}<strong>1 workflow run</strong>${runCard(runIDs[0]!, historicalHead)}`,
+          "openclaw",
+          "Peekaboo",
+        )?.workflow_runs,
+      ).toMatchObject([{ id: runIDs[0], head_sha: historicalHead }]);
+    }
+  });
+
+  it("parses uppercase list elements and attributes", () => {
+    const html = `<strong>1 workflow run</strong>${runCard(runIDs[0]!, historicalHead)}`
+      .replace(
+        /(<\/?)([a-z][a-z-]*)/g,
+        (_match, prefix: string, tag: string) => prefix + tag.toUpperCase(),
+      )
+      .replace(/(class|href|aria-label|datetime)=/g, (attribute) => attribute.toUpperCase());
+    expect(parseActionsRunListHTML(html, "openclaw", "Peekaboo")?.workflow_runs).toMatchObject([
+      { id: runIDs[0], head_sha: historicalHead },
+    ]);
+  });
+
+  it("rejects unusual ancestor names around otherwise complete ownership regions", () => {
+    const html = runPage(runIDs[0], historicalHead)
+      .replace("<body>", "<body><scr<!--x-->ipt>")
+      .replace("</body>", "</scr<!--x-->ipt></body>");
+    expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)).toBeUndefined();
+  });
+
+  it("rejects duplicate commit links even when their SHAs agree", () => {
+    for (const page of [runPage(runIDs[0], historicalHead), runCard(runIDs[0]!, historicalHead)]) {
+      const html = page.replace(
+        `</relative-time>`,
+        `</relative-time><a href="/openclaw/Peekaboo/commit/${historicalHead}">duplicate</a>`,
+      );
+      expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)).toBeUndefined();
+      expect(parseActionsRunListHTML(html, "openclaw", "Peekaboo")).toBeUndefined();
+    }
+  });
+
+  it.each(["script", "style", "template", "textarea"])(
+    "does not take a page header or job navigation from %s",
+    (tag) => {
+      for (const region of [
+        /<page-header>[\s\S]*?<\/page-header>/,
+        /<react-partial[\s\S]*?<\/react-partial>/,
+      ]) {
+        const html = runPage(runIDs[0], historicalHead).replace(
+          region,
+          (markup) => `<${tag}>${markup}</${tag}>`,
+        );
+        expect(parseActionsRunHTML(html, "openclaw", "Peekaboo", runIDs[0]!)).toBeUndefined();
+      }
+    },
+  );
+
+  it.each([
+    [
+      "duplicate summary attribute",
+      (html: string) =>
+        html.replace(
+          "data-url=",
+          'DATA-URL="/other/repo/actions/runs/1/summary_partial" data-url=',
+        ),
+    ],
+    ["unclosed summary", (html: string) => html.replace("</div>\n  </body>", "\n  </body>")],
+    [
+      "nested summary",
+      (html: string) =>
+        html.replace(
+          "<div><span>Triggered",
+          '<div aria-label="Workflow run summary"><span>Triggered',
+        ),
+    ],
+    [
+      "duplicate navigation",
+      (html: string) => html.replace(/(<react-partial[\s\S]*?<\/react-partial>)/, "$1$1"),
+    ],
+    [
+      "duplicate embedded JSON",
+      (html: string) => html.replace(/(<script[\s\S]*?<\/script>)/, "$1$1"),
+    ],
+    [
+      "duplicate page header",
+      (html: string) => html.replace(/(<page-header>[\s\S]*?<\/page-header>)/, "$1$1"),
+    ],
+    [
+      "foreign commit identity",
+      (html: string) =>
+        html.replace(`/Peekaboo/commit/${historicalHead}`, `/other/commit/${historicalHead}`),
+    ],
+  ])("rejects ambiguous DOM ownership: %s", (_name, transform) => {
+    expect(
+      parseActionsRunHTML(
+        transform(runPage(runIDs[0], historicalHead)),
+        "openclaw",
+        "Peekaboo",
+        runIDs[0]!,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rejects nested list cards and unlabeled conflicting run links", () => {
+    for (const markup of [
+      runCard(runIDs[1]!, wrongPatchHead),
+      `<a href="/other/repo/actions/runs/1">wrong run</a>`,
+    ]) {
+      const card = runCard(runIDs[0]!, historicalHead).replace(
+        "</relative-time>",
+        `</relative-time>${markup}`,
+      );
+      expect(
+        parseActionsRunListHTML(`<strong>1 workflow run</strong>${card}`, "openclaw", "Peekaboo"),
+      ).toBeUndefined();
+    }
   });
 
   it.each([

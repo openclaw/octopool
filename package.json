@@ -23,6 +23,9 @@
     "test:e2e:cli-worker": "sh test/cli-worker-e2e.sh",
     "types": "wrangler types"
   },
+  "dependencies": {
+    "parse5": "8.0.1"
+  },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.21.0",
     "@types/node": "^26.2.0",

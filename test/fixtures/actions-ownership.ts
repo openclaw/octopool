@@ -6,7 +6,7 @@ export const runIDs = [33167365292, 33167365221];
 // Sanitized structure from the two saved run pages. Neither summary contains a commit link.
 export function runPage(id = runIDs[0]!, sha?: string, attempt = 1): string {
   const path = `/openclaw/Peekaboo/actions/runs/${id}`;
-  return `<html><head><title>fixture · openclaw/Peekaboo@224a80e · GitHub</title></head><body>
+  return `<!DOCTYPE html><html><head><title>fixture · openclaw/Peekaboo@224a80e · GitHub</title></head><body>
     <page-header>
       <span class="PageHeader-parentLink-label">${id === runIDs[0] ? "CI" : "CodeQL"}</span>
       <span class="actions-workflow-runs-status"><svg aria-label="failed: "></svg></span>
