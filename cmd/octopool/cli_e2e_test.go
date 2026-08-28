@@ -63,7 +63,8 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 
 	t.Run("unsupported command delegates to real gh", func(t *testing.T) {
 		fake := fakeGH(t)
-		result := runCLI(t, bin, "http://127.0.0.1:1", map[string]string{"OCTOPOOL_GH_PATH": fake}, "gh", "alias", "list")
+		server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) { t.Errorf("unexpected relay dispatch") })
+		result := runCLI(t, bin, server.URL, map[string]string{"OCTOPOOL_GH_PATH": fake}, "gh", "alias", "list")
 		if result.err != nil || strings.TrimSpace(result.stdout) != "real-gh:alias list" {
 			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
 		}
@@ -258,6 +259,8 @@ func runCLI(t *testing.T, bin string, serverURL string, extra map[string]string,
 	home := t.TempDir()
 	env := append(os.Environ(),
 		"HOME="+home,
+		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
+		"OCTOPOOL_STRING_REWRITE_FILE=",
 		"OCTOPOOL_TOKEN=test-token",
 		"OCTOPOOL_POOL=maintainers",
 		"OCTOPOOL_URL="+serverURL,
@@ -276,7 +279,10 @@ func runCLI(t *testing.T, bin string, serverURL string, extra map[string]string,
 func cliRelayServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/github/request" || r.Header.Get("Authorization") != "Bearer test-token" {
+		if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
+			return
+		}
+		if r.URL.Path != "/v1/github/request" || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer test-token" {
 			http.Error(w, "unexpected relay request", http.StatusBadRequest)
 			return
 		}

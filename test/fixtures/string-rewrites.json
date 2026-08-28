@@ -1,0 +1,191 @@
+{
+  "cases": [
+    {
+      "name": "synthetic literal",
+      "rules": [{ "pattern": "internal-model", "replacement": "gpt-5.6-sol" }],
+      "input": "use internal-model",
+      "output": "use gpt-5.6-sol"
+    },
+    {
+      "name": "family deletion",
+      "rules": [{ "pattern": "\\binternal-family-[A-Za-z0-9_-]+\\b", "replacement": "" }],
+      "input": "A internal-family-alpha B internal-family-beta_2 C",
+      "output": "A  B  C"
+    },
+    {
+      "name": "leftmost first alternation",
+      "rules": [{ "pattern": "ab|abc", "replacement": "X" }],
+      "input": "abc ab",
+      "output": "Xc X"
+    },
+    {
+      "name": "greedy",
+      "rules": [{ "pattern": "a.+b", "replacement": "X" }],
+      "input": "a1b a2b",
+      "output": "X"
+    },
+    {
+      "name": "lazy",
+      "rules": [{ "pattern": "a.+?b", "replacement": "X" }],
+      "input": "a1b a2b",
+      "output": "X X"
+    },
+    {
+      "name": "astral spans",
+      "rules": [{ "pattern": "(?:🦞|internal-model)", "replacement": "X" }],
+      "input": "😀🦞 internal-model 🦞😀",
+      "output": "😀X X X😀"
+    },
+    {
+      "name": "astral dot",
+      "rules": [{ "pattern": "x.y", "replacement": "X" }],
+      "input": "x😀y x🦞y",
+      "output": "X X"
+    },
+    {
+      "name": "ascii word boundaries",
+      "rules": [{ "pattern": "\\binternal-model\\b", "replacement": "X" }],
+      "input": "éinternal-modelé internal-models _internal-model",
+      "output": "éXé internal-models _internal-model"
+    },
+    {
+      "name": "newline dot",
+      "rules": [{ "pattern": "a.b", "replacement": "X" }],
+      "input": "a\nb a b",
+      "output": "a\nb X"
+    },
+    {
+      "name": "newline escape",
+      "rules": [{ "pattern": "a\\nb", "replacement": "X" }],
+      "input": "a\nb",
+      "output": "X"
+    },
+    {
+      "name": "dollar absolute end",
+      "rules": [{ "pattern": "internal-model$", "replacement": "X" }],
+      "input": "internal-model\n",
+      "output": "internal-model\n"
+    },
+    {
+      "name": "literal replacement dollars",
+      "rules": [{ "pattern": "(internal)-(model)", "replacement": "$1/$&" }],
+      "input": "internal-model",
+      "output": "$1/$&"
+    },
+    {
+      "name": "ordered rules",
+      "rules": [
+        { "pattern": "internal-model", "replacement": "intermediate" },
+        { "pattern": "intermediate", "replacement": "public" }
+      ],
+      "input": "internal-model",
+      "output": "public"
+    },
+    {
+      "name": "boundary created match",
+      "rules": [
+        { "pattern": "internal-model", "replacement": "X" },
+        { "pattern": "REMOVE", "replacement": "" }
+      ],
+      "input": "internal-REMOVEmodel",
+      "error": true
+    },
+    {
+      "name": "replacement recreates earlier match",
+      "rules": [
+        { "pattern": "internal-model", "replacement": "X" },
+        { "pattern": "placeholder", "replacement": "internal-model" }
+      ],
+      "input": "placeholder",
+      "error": true
+    },
+    {
+      "name": "self recreating replacement",
+      "rules": [{ "pattern": "internal-model", "replacement": "internal-model" }],
+      "input": "internal-model",
+      "error": true
+    },
+    {
+      "name": "contextual zero width",
+      "rules": [{ "pattern": "\\b", "replacement": "X" }],
+      "input": "word",
+      "error": true
+    },
+    {
+      "name": "contextual zero width after consuming branch",
+      "rules": [{ "pattern": "x|\\b", "replacement": "X" }],
+      "input": "x word",
+      "error": true
+    },
+    {
+      "name": "contextual zero width adjacent to deleted match",
+      "rules": [{ "pattern": "x|\\b", "replacement": "" }],
+      "input": "x",
+      "error": true
+    },
+    {
+      "name": "negated class and repetition",
+      "rules": [{ "pattern": "a[^0-9]{2,3}z", "replacement": "X" }],
+      "input": "a😀🦞z a12z",
+      "output": "X a12z"
+    },
+    {
+      "name": "ascii classes",
+      "rules": [{ "pattern": "\\d+\\s\\w+", "replacement": "X" }],
+      "input": "12 word ٣ word",
+      "output": "X ٣ word"
+    },
+    {
+      "name": "anchors",
+      "rules": [{ "pattern": "^internal-model$", "replacement": "X" }],
+      "input": "internal-model",
+      "output": "X"
+    },
+    {
+      "name": "empty policy",
+      "rules": [],
+      "input": "safe synthetic text",
+      "output": "safe synthetic text"
+    }
+  ],
+  "invalid_policies": [
+    { "name": "empty pattern", "rules": [{ "pattern": "", "replacement": "X" }] },
+    { "name": "empty matching star", "rules": [{ "pattern": "a*", "replacement": "X" }] },
+    { "name": "lookahead", "rules": [{ "pattern": "a(?=b)", "replacement": "X" }] },
+    { "name": "lookbehind", "rules": [{ "pattern": "(?<=a)b", "replacement": "X" }] },
+    { "name": "backreference", "rules": [{ "pattern": "(a)\\1", "replacement": "X" }] },
+    { "name": "inline flags", "rules": [{ "pattern": "(?i)internal-model", "replacement": "X" }] },
+    {
+      "name": "scoped inline flags",
+      "rules": [{ "pattern": "(?i:internal-model)", "replacement": "X" }]
+    },
+    { "name": "unicode properties", "rules": [{ "pattern": "\\p{L}+", "replacement": "X" }] },
+    { "name": "named capture", "rules": [{ "pattern": "(?P<name>a)", "replacement": "X" }] },
+    { "name": "octal", "rules": [{ "pattern": "\\141", "replacement": "X" }] },
+    { "name": "byte escape", "rules": [{ "pattern": "\\C", "replacement": "X" }] },
+    {
+      "name": "javascript unicode escape",
+      "rules": [{ "pattern": "\\u0061", "replacement": "X" }]
+    },
+    {
+      "name": "hex escape outside v1 subset",
+      "rules": [{ "pattern": "\\x61", "replacement": "X" }]
+    },
+    { "name": "quoted literal extension", "rules": [{ "pattern": "\\Qa\\E", "replacement": "X" }] },
+    { "name": "missing replacement", "rules": [{ "pattern": "a" }] },
+    { "name": "extra key", "rules": [{ "pattern": "a", "replacement": "X", "flags": "i" }] },
+    {
+      "name": "duplicate pattern",
+      "rules": [
+        { "pattern": "a", "replacement": "X" },
+        { "pattern": "a", "replacement": "X" }
+      ]
+    },
+    { "name": "invalid syntax", "rules": [{ "pattern": "[", "replacement": "X" }] },
+    { "name": "invalid unicode pattern", "rules": [{ "pattern": "\ud800", "replacement": "X" }] },
+    {
+      "name": "invalid unicode replacement",
+      "rules": [{ "pattern": "a", "replacement": "\udfff" }]
+    }
+  ]
+}

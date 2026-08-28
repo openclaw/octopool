@@ -1,0 +1,302 @@
+package main
+
+import (
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+type rewriteFlag struct {
+	name    string
+	value   string
+	boolean bool
+}
+type rewriteFlags struct {
+	values      map[string]string
+	positionals []string
+	ordered     []rewriteFlag
+}
+
+// Parse only a command-specific vocabulary. Short value flags support -tVALUE
+// and -t=VALUE; boolean clusters and repeated/conflicting aliases are refused.
+func parseRewriteFlags(args []string, values, booleans map[string]string) (rewriteFlags, error) {
+	out := rewriteFlags{values: map[string]string{}}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") {
+			out.positionals = append(out.positionals, arg)
+			continue
+		}
+		name, value, equals := strings.Cut(arg, "=")
+		if !strings.HasPrefix(arg, "--") && len(name) > 2 {
+			name = arg[:2]
+			value = strings.TrimPrefix(arg[2:], "=")
+			equals = true
+		}
+		canonical, boolean := booleans[name]
+		if boolean {
+			if equals && value != "true" && value != "false" {
+				return out, errRewriteBlocked
+			}
+			if !equals {
+				value = "true"
+			}
+		} else {
+			var ok bool
+			canonical, ok = values[name]
+			if !ok {
+				return out, errRewriteBlocked
+			}
+			if !equals {
+				i++
+				if i >= len(args) {
+					return out, errRewriteBlocked
+				}
+				value = args[i]
+			}
+		}
+		if _, exists := out.values[canonical]; exists {
+			return out, errRewriteBlocked
+		}
+		out.values[canonical] = value
+		out.ordered = append(out.ordered, rewriteFlag{canonical, value, boolean})
+	}
+	return out, nil
+}
+func rewriteFlagNames(spec string) map[string]string {
+	out := map[string]string{}
+	for _, entry := range strings.Fields(spec) {
+		aliases := strings.Split(entry, ",")
+		for _, alias := range aliases {
+			out[alias] = aliases[0]
+		}
+	}
+	return out
+}
+func (flags rewriteFlags) has(name string) bool { _, ok := flags.values[name]; return ok }
+
+type rewritePreparation struct {
+	preflight   []string
+	args        []string
+	stdin       io.Reader
+	directory   string
+	inputBytes  int
+	outputBytes int
+}
+
+func (prepared *rewritePreparation) cleanup() {
+	if prepared.directory != "" {
+		_ = os.RemoveAll(prepared.directory)
+	}
+}
+func (prepared *rewritePreparation) text(policy stringRewritePolicy, text string) (string, error) {
+	prepared.inputBytes += len(text)
+	if prepared.inputBytes > rewriteMaxContent {
+		return "", errRewriteBlocked
+	}
+	result, err := policy.rewrite(text)
+	if err != nil {
+		return "", err
+	}
+	prepared.outputBytes += len(result)
+	if prepared.outputBytes > rewriteMaxContent {
+		return "", errRewriteBlocked
+	}
+	return result, nil
+}
+func (prepared *rewritePreparation) snapshot(data []byte) (string, error) {
+	if len(data) > rewriteMaxContent {
+		return "", errRewriteBlocked
+	}
+	if prepared.directory == "" {
+		directory, err := os.MkdirTemp("", "octopool-content-")
+		if err != nil {
+			return "", errRewriteBlocked
+		}
+		prepared.directory = directory
+	}
+	file, err := os.CreateTemp(prepared.directory, "snapshot-")
+	if err != nil {
+		return "", errRewriteBlocked
+	}
+	path := file.Name()
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		return "", errRewriteBlocked
+	}
+	return filepath.Clean(path), nil
+}
+
+var rewriteRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+var rewriteRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./:-]*$`)
+
+func rewriteRepo(flags *rewriteFlags, policy stringRewritePolicy) error {
+	repo := flags.values["--repo"]
+	// Pin inferred repository context too: the child must not resolve another
+	// repository from its environment after the structural check.
+	if repo == "" {
+		var ok bool
+		repo, ok = repoFromOptionOrCurrent("")
+		if !ok {
+			return errRewriteBlocked
+		}
+	}
+	if !rewriteRepoPattern.MatchString(repo) || strings.Contains(repo, "..") {
+		return errRewriteBlocked
+	}
+	if err := policy.checkStructural(repo); err != nil {
+		return err
+	}
+	flags.values["--repo"] = repo
+	return nil
+}
+func rewriteContentCommand(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	switch args[0] + " " + args[1] {
+	case "pr create", "pr edit", "pr comment", "pr review", "issue create", "issue edit", "issue comment", "release create", "release edit":
+		return true
+	}
+	return false
+}
+
+func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.Reader, prepared *rewritePreparation) error {
+	command := args[0] + " " + args[1]
+	valueSpec := "--repo,-R"
+	booleanSpec := ""
+	switch command {
+	case "pr create":
+		valueSpec += " --title,-t --body,-b --body-file,-F --head,-H --base,-B"
+		booleanSpec = "--draft,-d --no-maintainer-edit"
+	case "pr edit", "issue edit":
+		valueSpec += " --title,-t --body,-b --body-file,-F"
+	case "issue create":
+		valueSpec += " --title,-t --body,-b --body-file,-F"
+	case "pr comment", "issue comment":
+		valueSpec += " --body,-b --body-file,-F"
+		booleanSpec = "--edit-last --create-if-none"
+	case "pr review":
+		valueSpec += " --body,-b --body-file,-F"
+		booleanSpec = "--approve,-a --request-changes,-r --comment,-c"
+	case "release create", "release edit":
+		valueSpec += " --title,-t --notes,-n --notes-file,-F"
+		booleanSpec = "--draft,-d --prerelease,-p --latest"
+		if args[1] == "create" {
+			booleanSpec += " --verify-tag"
+		}
+	default:
+		return errRewriteBlocked
+	}
+	flags, err := parseRewriteFlags(args[2:], rewriteFlagNames(valueSpec), rewriteFlagNames(booleanSpec))
+	if err != nil {
+		return err
+	}
+	if err := rewriteRepo(&flags, policy); err != nil {
+		return err
+	}
+	create := args[1] == "create"
+	release := args[0] == "release"
+	if create && !release {
+		if len(flags.positionals) != 0 {
+			return errRewriteBlocked
+		}
+	} else {
+		if len(flags.positionals) != 1 {
+			return errRewriteBlocked
+		}
+		selector := flags.positionals[0]
+		if release {
+			if !rewriteRefPattern.MatchString(selector) {
+				return errRewriteBlocked
+			}
+		} else if !isDigits(selector) {
+			return errRewriteBlocked
+		}
+		if err := policy.checkStructural(selector); err != nil {
+			return err
+		}
+	}
+	body, file := "--body", "--body-file"
+	if release {
+		body, file = "--notes", "--notes-file"
+	}
+	if flags.has(body) && flags.has(file) {
+		return errRewriteBlocked
+	}
+	hasBody := flags.has(body) || flags.has(file)
+	if create && (!flags.has("--title") || !hasBody) {
+		return errRewriteBlocked
+	}
+	if args[1] == "edit" && !flags.has("--title") && !hasBody {
+		return errRewriteBlocked
+	}
+	if (args[1] == "comment" || args[1] == "review") && !hasBody {
+		return errRewriteBlocked
+	}
+	if command == "pr create" {
+		// gh explicitly skips all pushing/forking when --head is present.
+		if !flags.has("--head") || !rewriteRefPattern.MatchString(flags.values["--head"]) || !flags.has("--base") || !rewriteRefPattern.MatchString(flags.values["--base"]) {
+			return errRewriteBlocked
+		}
+	}
+	if command == "release create" && flags.values["--verify-tag"] != "true" {
+		return errRewriteBlocked
+	}
+	if command == "pr review" {
+		count := 0
+		for _, key := range []string{"--approve", "--request-changes", "--comment"} {
+			if flags.values[key] == "true" {
+				count++
+			}
+		}
+		if count != 1 {
+			return errRewriteBlocked
+		}
+	}
+	prepared.args = append([]string{args[0], args[1]}, flags.positionals...)
+	prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
+	for _, flag := range flags.ordered {
+		if flag.name == "--repo" {
+			continue
+		}
+		switch flag.name {
+		case "--title", body, file:
+			text := flag.value
+			if flag.name == file {
+				data, err := readRewriteFile(flag.value, stdin, rewriteMaxContent-prepared.inputBytes)
+				if err != nil {
+					return err
+				}
+				text = string(data)
+			}
+			text, err = prepared.text(policy, text)
+			if err != nil {
+				return err
+			}
+			// Empty create fields can re-enable gh's prompts/default generation.
+			if create && strings.TrimSpace(text) == "" {
+				return errRewriteBlocked
+			}
+			if flag.name == "--title" {
+				prepared.args = append(prepared.args, "--title="+text)
+			} else {
+				path, err := prepared.snapshot([]byte(text))
+				if err != nil {
+					return err
+				}
+				prepared.args = append(prepared.args, file+"="+path)
+			}
+		default:
+			if err := policy.checkStructural(flag.value); err != nil {
+				return err
+			}
+			prepared.args = append(prepared.args, flag.name+"="+flag.value)
+		}
+	}
+	prepared.stdin = strings.NewReader("")
+	return nil
+}

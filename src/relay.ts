@@ -18,10 +18,13 @@ import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
-import { HttpError, jsonResponse, parseJsonObject } from "./http";
+import { HttpError, jsonResponse } from "./http";
 import { isRecord } from "./object";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
+import { loadStringRewritePolicy } from "./string-rewrite-policy";
+import { readStringRewriteJSON } from "./string-rewrite-json";
+import { guardStringRewriteRead, STRING_REWRITE_LIMITS } from "./string-rewrites";
 import { poolCoordinatorStub, type PoolCoordinator } from "./pool-coordinator";
 import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import {
@@ -138,19 +141,27 @@ async function relayGitHubRequest(
   requestId: string,
 ): Promise<Response> {
   const started = Date.now();
-  const body = await parseJsonObject(request);
-  const relayRequest = validateRelayRequest(body);
-  const [caller, policy] = await Promise.all([
-    authenticateCaller(request, env, relayRequest.pool),
-    loadPoolPolicy(env, relayRequest.pool),
-  ]);
-  if (policy === null) {
-    throw new HttpError(404, "pool_not_found", "Pool not found");
+  if (!request.headers.get("content-type")?.includes("application/json")) {
+    throw new HttpError(415, "unsupported_media_type", "Expected application/json");
   }
+  let body: unknown;
+  try {
+    body = await readStringRewriteJSON(request, STRING_REWRITE_LIMITS.contentBytes);
+  } catch {
+    throw new HttpError(400, "invalid_json", "Expected a valid JSON object");
+  }
+  const relayRequest = validateRelayRequest(body);
+  const caller = await authenticateCaller(request, env, relayRequest.pool);
   // `GET /user` is served as the caller's public profile so identity probes
   // (`gh api user -q .login`) stop bouncing as route_denied onto local tokens.
   if (relayRequest.path === "/user") {
     relayRequest.path = `/users/${encodeURIComponent(caller.github_login)}`;
+  }
+  const stringPolicy = await loadStringRewritePolicy(env);
+  guardStringRewriteRead(relayRequest, stringPolicy.compiled);
+  const policy = await loadPoolPolicy(env, relayRequest.pool);
+  if (policy === null) {
+    throw new HttpError(404, "pool_not_found", "Pool not found");
   }
   const base: RelayBase = {
     env,

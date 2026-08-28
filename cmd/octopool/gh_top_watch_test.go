@@ -573,6 +573,7 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 }
 
 func TestGHWatchDelegatesWithFlooredInterval(t *testing.T) {
+	emptyRewriteTestServer(t)
 	tests := []struct {
 		name string
 		args []string

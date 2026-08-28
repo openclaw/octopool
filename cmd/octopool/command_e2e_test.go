@@ -67,6 +67,9 @@ func TestCLIEndToEndServiceCommands(t *testing.T) {
 
 	t.Run("request forwards options", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
+				return
+			}
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/github/request" {
 				http.Error(w, "unexpected relay request", http.StatusBadRequest)
 				t.Errorf("request = %s %s", r.Method, r.URL.Path)

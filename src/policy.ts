@@ -281,18 +281,14 @@ function normalizeQuery(value: unknown): Record<string, string | string[]> | und
   const out: Record<string, string | string[]> = {};
   for (const [key, raw] of Object.entries(value)) {
     if (!safeQueryKey(key)) {
-      throw new HttpError(400, "invalid_query", `query key ${key} is not allowed`);
+      throw new HttpError(400, "invalid_query", "query key is not allowed");
     }
     if (typeof raw === "string") {
       out[key] = raw;
     } else if (Array.isArray(raw) && raw.every((item) => typeof item === "string")) {
       out[key] = raw;
     } else {
-      throw new HttpError(
-        400,
-        "invalid_query",
-        `query value ${key} must be a string or string array`,
-      );
+      throw new HttpError(400, "invalid_query", "query value must be a string or string array");
     }
   }
   return out;

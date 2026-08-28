@@ -14,12 +14,14 @@ func runAdmin(ctx context.Context, args []string, stdout io.Writer) error {
 		return errors.New("missing admin subcommand")
 	}
 	switch args[0] {
+	case "string-rewrites":
+		return runAdminStringRewrites(ctx, args[1:], stdout)
 	case "caller":
 		return runAdminCaller(ctx, args[1:], stdout)
 	case "identity":
 		return runAdminIdentity(ctx, args[1:], stdout)
 	case "help", "-h", "--help":
-		fmt.Fprintln(stdout, "usage: octopool admin <caller|identity> [flags]")
+		fmt.Fprintln(stdout, "usage: octopool admin <caller|identity|string-rewrites> [flags]")
 		return nil
 	default:
 		return fmt.Errorf("unknown admin subcommand %q", args[0])

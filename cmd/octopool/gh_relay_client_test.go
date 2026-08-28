@@ -61,20 +61,20 @@ func TestRelayRetryAttempts(t *testing.T) {
 	}
 }
 
-func TestGHRelayClientInvalidAuthUsesLocalFallback(t *testing.T) {
+func TestGHRelayClientInvalidAuthFailsClosed(t *testing.T) {
 	client, calls := newRelayTestClient(t, func(int64) (int, string) {
 		return http.StatusUnauthorized, `{"error":{"code":"invalid_auth","message":"Invalid caller token"}}`
 	})
 	_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/openclaw/openclaw"})
-	if !isLocalFallback(err) {
-		t.Fatalf("expected local fallback, got %v", err)
+	if err == nil || shouldRunRealGH(err) {
+		t.Fatalf("expected terminal auth error, got %v", err)
 	}
 	if _, explicit := explicitRelayFallback(err); explicit {
 		t.Fatal("auth reinterpretation must not gain explicit relay fallback provenance")
 	}
-	var fallback localFallbackError
-	if !errors.As(err, &fallback) || fallback.Relay == nil || fallback.Relay.Code != "invalid_auth" {
-		t.Fatalf("auth fallback provenance = %#v", fallback.Relay)
+	var relay *relayResponseError
+	if !errors.As(err, &relay) || relay.Code != "invalid_auth" {
+		t.Fatalf("auth error = %v", err)
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("calls = %d", got)
@@ -240,8 +240,8 @@ func TestShouldRunRealGH(t *testing.T) {
 	if !shouldRunRealGH(localFallbackError{Reason: "route_denied"}) {
 		t.Fatal("fallback_local should run real gh")
 	}
-	if !shouldRunRealGH(errOctopoolNotLoggedIn) {
-		t.Fatal("missing octopool login should run real gh")
+	if shouldRunRealGH(errOctopoolNotLoggedIn) {
+		t.Fatal("missing octopool login must fail closed")
 	}
 	if shouldRunRealGH(assertAnError{}) {
 		t.Fatal("ordinary errors should not run real gh")
@@ -295,8 +295,19 @@ func newRelayTestClient(
 	respond func(call int64) (status int, body string),
 ) (ghRelayClient, *atomic.Int64) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
 	calls := &atomic.Int64{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveEmptyRewritePolicy(t, w, r, "token", "maintainers") {
+			return
+		}
+		if r.URL.Path != "/v1/github/request" || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer token" {
+			t.Errorf("unexpected relay request")
+			w.WriteHeader(400)
+			return
+		}
 		status, body := respond(calls.Add(1))
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))

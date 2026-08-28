@@ -38,15 +38,13 @@ func explicitRelayFallback(err error) (localFallbackError, bool) {
 }
 
 func shouldRunRealGH(err error) bool {
-	return isLocalFallback(err) || errors.Is(err, errOctopoolNotLoggedIn)
+	return isLocalFallback(err)
 }
 
 func localFallbackFromRelayError(relay *relayResponseError) (localFallbackError, bool) {
 	switch relay.Code {
 	case "fallback_local":
 		return localFallbackError{Reason: relayFallbackReason(relay), Relay: relay}, true
-	case "missing_auth", "invalid_auth":
-		return localFallbackError{Reason: "octopool auth unavailable", Relay: relay}, true
 	default:
 		return localFallbackError{}, false
 	}
@@ -112,12 +110,22 @@ func execRealGHWithStdinAndEnv(
 	stderr io.Writer,
 	env []string,
 ) error {
+	prepared, err := prepareProtectedGH(ctx, args, stdin)
+	if err != nil {
+		return err
+	}
+	defer prepared.cleanup()
+	if len(prepared.preflight) != 0 {
+		if err := execRealGHWithStdinAndEnv(ctx, prepared.preflight, strings.NewReader(""), io.Discard, io.Discard, env); err != nil {
+			return errRewriteBlocked
+		}
+	}
 	path, err := resolveGHPath(envDefault("OCTOPOOL_GH_PATH", "gh"))
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.Stdin = stdin
+	cmd := exec.CommandContext(ctx, path, prepared.args...)
+	cmd.Stdin = prepared.stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	cmd.Env = env

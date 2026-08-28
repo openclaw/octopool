@@ -24,7 +24,8 @@
     "types": "wrangler types"
   },
   "dependencies": {
-    "parse5": "8.0.1"
+    "parse5": "8.0.1",
+    "re2js": "2.8.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.21.0",

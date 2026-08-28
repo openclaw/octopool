@@ -192,6 +192,10 @@ func transientRelayFailure(err error) bool {
 }
 
 func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
+	policy, err := client.stringRewritePolicy(ctx)
+	if err != nil {
+		return relayEnvelope{}, err
+	}
 	headers := request.headers
 	if _, explicit := headers["cache-control"]; freshReadRequested() && !explicit {
 		headers = maps.Clone(headers)
@@ -199,6 +203,11 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 			headers = make(map[string]string)
 		}
 		headers["cache-control"] = "max-age=0"
+	}
+	guardedRequest := request
+	guardedRequest.headers = headers
+	if err := policy.guardRequest(guardedRequest); err != nil {
+		return relayEnvelope{}, err
 	}
 	body := map[string]any{
 		"pool":   client.pool,

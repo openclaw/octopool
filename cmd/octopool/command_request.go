@@ -50,6 +50,21 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(routeHintValues) > 0 {
 		body["route_hint"] = valuesMap(routeHintValues)
 	}
+	client := ghRelayClient{baseURL: *requestFlags.baseURL, pool: *requestFlags.pool, token: token}
+	policy, err := client.stringRewritePolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if len(policy.Rules) != 0 && strings.ToUpper(*method) != "GET" {
+		return errRewriteBlocked
+	}
+	query := map[string]any{}
+	for key, value := range valuesMap(queryValues) {
+		query[key] = value
+	}
+	if err := policy.guardRequest(ghAPIRequest{method: strings.ToUpper(*method), path: *path, query: query, headers: valuesMap(headerValues), routeHint: valuesMap(routeHintValues)}); err != nil {
+		return err
+	}
 	return postJSON(ctx, stdout, apiURL(*requestFlags.baseURL, "/v1/github/request"), token, body)
 }
 

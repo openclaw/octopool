@@ -2,7 +2,8 @@
 
 The `octopool` Go CLI is the product entrypoint. It logs in against the relay, stores a
 caller token locally, and acts as a drop-in `gh` shim for the read-only GitHub commands
-Octopool supports — falling through to the real `gh` for everything else.
+Octopool supports. Local GitHub writes and read fallbacks pass through the string rewrite
+guard before the real `gh` runs.
 
 Source: `cmd/octopool/`.
 
@@ -227,8 +228,8 @@ All relay-controlled single-line text has terminal control characters removed. P
 issue bodies preserve newlines and tabs while removing other control characters and
 invalid UTF-8.
 
-The command falls through to the real `gh` without contacting Octopool when any of these
-hold:
+After successfully fetching an explicit empty string rewrite policy (and finding no
+local rules), the command retains its existing real-`gh` delegation when any of these hold:
 
 - method is not `GET`, or mutating field flags are present (`-f`, `-F`, `--field`,
   `--raw-field`).
@@ -249,8 +250,10 @@ Pagination is fail-closed: if bounded relay pagination cannot prove a complete P
 check set, or filtered issue list, the CLI delegates to real `gh` instead of returning a
 partial result. Non-integer `--limit`/`-L` values are rejected explicitly.
 
-Mutating and unsupported `gh` subcommands (`gh pr create`, unusual formatting flags, …)
-are passed straight through to the real GitHub CLI, with their exit codes preserved.
+With active string rewrite rules, supported explicit content commands are sanitized before
+local execution; unsupported commands and flags are blocked. With an empty effective policy,
+mutating and unsupported subcommands retain their usual delegation. Child exit codes and
+stdout/stderr are preserved.
 `gh auth status` normally delegates too. For `gh auth status --active --hostname <host>`,
 if GitHub's REST scope probe reports the active token as invalid while the same token still
 authenticates through GraphQL, the shim reports the account as authenticated and warns that
@@ -321,9 +324,108 @@ Debug/admin raw wrapper over `POST /v1/github/request`. Prints the full relay en
 `--route-hint pr_head_sha=<sha>` or `--route-hint pr_state=closed` can be used for
 state-aware PR subresource cache probes.
 
-### `octopool admin caller|identity ...`
+### `octopool admin caller|identity|string-rewrites ...`
 
 Admin provisioning. Requires an admin token. See [Admin & provisioning](admin.md).
+
+## Outbound string rewrite protection
+
+Every protected `gh` command requires an Octopool login and a fresh authoritative policy
+from `GET /v1/pools/<pool>/string-rewrites`. Each relay request and every final real-`gh`
+dispatch checks policy; a fallback cannot reuse approval for different arguments. There is
+no persistent policy cache, offline allowance, or fallback on authentication/policy errors.
+Policy HTTP requests reject redirects, use a five-second deadline, and bound the response
+to 65,536 bytes. Help/version and narrowly parsed GitHub authentication bootstrap commands
+remain available without a policy.
+
+The same strict JSON file configures server rules and optional local rules:
+
+```json
+{
+  "schema_version": 1,
+  "rules": [
+    { "pattern": "\\binternal-model\\b", "replacement": "gpt-5.6-sol" },
+    { "pattern": "\\binternal-family-[A-Za-z0-9_-]+\\b", "replacement": "" }
+  ]
+}
+```
+
+Local rules default to `string-rewrites.json` beside `auth.json`. Set
+`OCTOPOOL_STRING_REWRITE_FILE` to select another file. An absent default is optional;
+an explicitly configured missing or unreadable file fails closed. The local file is never
+uploaded. Server rules run first, then local rules; identical entries are deduplicated,
+conflicting replacements are rejected, and combined limits still apply.
+
+Rules use a portable RE2 subset: literal Unicode, captures/noncapturing groups, alternation,
+greedy/lazy repetition, bracket classes, dot, anchors, ASCII `\b`, `\w`, `\d`, `\s`
+and their uppercase complements, escaped punctuation, and `\n`, `\r`, `\t`, `\f`,
+`\a`, `\v`. Inline flags, lookaround, backreferences, named captures, Unicode properties,
+POSIX named classes, octal/hex/Unicode escapes, `\C`, and quoted-literal extensions are
+not accepted. Use literal Unicode characters instead of regex Unicode escapes. JSON
+escapes are decoded normally; invalid UTF-8, unpaired surrogates, duplicate keys, unknown
+fields, missing fields, and duplicate patterns are rejected.
+
+Each rule replaces all matches once, in order. Replacements are literal (`$1` stays `$1`);
+an empty replacement deletes text. A final scan checks every effective pattern again and
+blocks remaining or newly created matches. Empty-string patterns are rejected at load time;
+contextual zero-width matches abort before dispatch. Limits are 128 rules, 256 UTF-8 bytes
+per pattern, 1,024 per replacement, 65,536 per policy document, and 1,048,576 bytes of
+materialized/intermediate/final content. Match iteration is also bounded.
+
+With active rules, the initial local publication vocabulary is deliberately conservative:
+
+- PR/issue `create`, `edit`, `comment`, and PR `review`: explicit title/body flags, body
+  files, or stdin; numeric PR/issue selectors for existing items. PR creation requires
+  explicit `--head` and `--base`; the head must already be pushed. `--head` prevents gh
+  from implicitly pushing or forking. Reviews require one explicit review action.
+- Release `create`/`edit`: explicit title/notes or notes files; one tag and no asset uploads.
+  Creation requires `--verify-tag`, so gh cannot create a missing tag. Generated notes,
+  notes from tags, and other implicit content sources are blocked.
+- Raw REST API equivalents: allowlisted issue/PR/review/comment/release endpoints with
+  `-f`/`--raw-field`, `-F`/`--field`, or `--input` JSON. Literal and typed fields retain
+  their distinction; only typed `@file`/`@-` values read files/stdin. Nested review comments
+  use `--input` JSON. Bracket-style field accumulation, duplicate keys, mixed input/field
+  sources, unknown properties, and custom authentication headers are rejected. Raw release
+  creation first verifies the existing remote tag with a local authenticated GET.
+
+Long flags accept separate or equal values; supported short value flags also accept
+attached values. Repeated flags/aliases and boolean clusters are rejected. Metadata flags
+not listed by the guard are unsupported; use an allowlisted raw REST shape where applicable.
+Creation also rejects sanitized empty titles/bodies/notes to avoid implicit defaults.
+Repository context is pinned into an explicit `--repo` after validation. Input files are
+read into bounded snapshots, never modified, and never reopened by the child. Sanitized
+snapshots use a private 0700 directory and 0600 files, removed after execution, including
+nonzero exits. Active-policy child commands do not retain live stdin.
+
+Reads check decoded path segments, query keys/values, and safe forwarded headers, including
+bounded percent-decoding layers. Matches in structural values are blocked, never rewritten.
+This includes direct `octopool request` with local rules and approved local read fallbacks.
+While rules are active, local read fallback is limited to explicit allowlisted raw REST GETs.
+Top-level reads still use the relay, but a requested native fallback is refused because
+native gh can construct additional search/GraphQL requests. Use an explicit raw REST GET
+for local fallback; an empty effective policy preserves the previous fallback behavior.
+Opaque paths, raw GraphQL (apart from the fixed auth viewer probe), aliases/extensions,
+editor/web/template/fill modes, uploads, unknown commands/flags, and ambiguous encodings
+are blocked while rules are active. Some native gh shapes, including URL selectors and
+bracket-style REST fields, are intentionally unsupported.
+
+Admin imports always fetch the current revision before the conditional update:
+
+```sh
+octopool admin string-rewrites status
+octopool admin string-rewrites set --file rules.json
+cat rules.json | octopool admin string-rewrites set --file - --if-revision 7
+```
+
+`--if-revision` additionally compares the operator's expected revision. A conflict never
+overwrites a newer policy. Status and successful imports print only revision and rule count,
+not patterns, replacements, matched content, or local paths.
+
+Protection covers supported traffic through this updated shim and relay, using the policy
+snapshot checked before dispatch. Direct real `gh`, browsers, Git pushes, older clients'
+local writes, existing published content, and arbitrary deliberate obfuscation are outside
+this boundary. GitHub writes continue to use the user's local credentials; the Worker
+remains GET-only.
 
 ## Cache freshness
 
@@ -372,6 +474,8 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_TOKEN` — caller token override (required to use a non-saved URL).
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
+- `OCTOPOOL_STRING_REWRITE_FILE` — optional local policy JSON; an explicit unreadable or
+  missing file fails closed. Defaults to `string-rewrites.json` beside `auth.json`.
 - `OCTOPOOL_FRESH=1` — default every relayed read to `cache-control: max-age=0`, including
   run metadata and jobs; explicit cache-control headers take precedence. Use it right after
   a `git push` or a merge, when a cached answer could describe the previous state. It can

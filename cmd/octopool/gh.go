@@ -14,6 +14,44 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		fmt.Fprintln(stdout, "       octopool gh pr|issue|run|repo|release|workflow|label|gist|search ...")
 		return nil
 	}
+	if !rewriteBootstrapInvocation(args) {
+		policy, err := currentStringRewritePolicy(ctx)
+		if err != nil {
+			return err
+		}
+		if len(policy.Rules) != 0 {
+			if rewriteContentCommand(args) || args[0] == "api" {
+				// Content snapshots are prepared exactly once, at the final child
+				// boundary. Read API dispatch still uses the relay after validation.
+				if args[0] != "api" {
+					return execRealGH(ctx, args, stdout, stderr)
+				}
+				opts, err := parseRewriteAPI(args[1:])
+				if err != nil {
+					return err
+				}
+				if opts.method != "GET" {
+					return execRealGH(ctx, args, stdout, stderr)
+				}
+				request, err := rewriteAPIRequest(opts)
+				if err != nil {
+					return err
+				}
+				if err := policy.guardRequest(request); err != nil {
+					return err
+				}
+				if opts.inputSet || len(opts.fields) != 0 || !rewriteReadPath(request.path) {
+					return errRewriteBlocked
+				}
+			} else {
+				prepared := &rewritePreparation{}
+				if err := prepareRewriteRead(policy, args, prepared); err != nil {
+					return err
+				}
+				args = prepared.args
+			}
+		}
+	}
 	if isGHAuthStatus(args) {
 		return runGHAuthStatus(ctx, args, stdout, stderr)
 	}

@@ -82,7 +82,7 @@ func TestCLIEndToEndRelayProtocol(t *testing.T) {
 		}
 	})
 
-	t.Run("auth failure delegates to real gh", func(t *testing.T) {
+	t.Run("auth failure does not delegate to real gh", func(t *testing.T) {
 		server := cliRelayServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":{"code":"invalid_auth","message":"expired"}}`))
@@ -90,14 +90,15 @@ func TestCLIEndToEndRelayProtocol(t *testing.T) {
 		result := runCLI(t, bin, server.URL, map[string]string{"OCTOPOOL_GH_PATH": fakeGH(t)},
 			"gh", "api", "repos/openclaw/octopool",
 		)
-		if result.err != nil || strings.TrimSpace(result.stdout) != "real-gh:api repos/openclaw/octopool" {
+		if result.err == nil || result.stdout != "" || !strings.Contains(result.stderr, "invalid_auth") {
 			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
 		}
 	})
 
 	t.Run("real gh exit code passes through", func(t *testing.T) {
 		fake := fakeGHWithExit(t, 7)
-		result := runCLI(t, bin, "http://127.0.0.1:1", map[string]string{"OCTOPOOL_GH_PATH": fake},
+		server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) { t.Error("unexpected relay dispatch") })
+		result := runCLI(t, bin, server.URL, map[string]string{"OCTOPOOL_GH_PATH": fake},
 			"gh", "alias", "list",
 		)
 		var exitErr *exec.ExitError

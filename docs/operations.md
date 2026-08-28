@@ -195,8 +195,68 @@ D1 schema lives in `migrations/`:
 - `0013_audit_backends.sql` — bounded upstream-source attribution for route-level stats.
 - `0014_public_repo_negative_proofs.sql` — cached definitive private-repository proofs.
 - `0015_drop_oauth_states.sql` — remove obsolete database-backed OAuth state.
+- `0016_string_rewrites.sql` — authoritative deployment-wide singleton string policy;
+  seeds explicit empty rules at revision 1.
 
 Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
+
+## Activating string protection
+
+Apply migration 0016 before deploying the updated Worker. The seeded empty policy
+preserves existing behavior, but the new Worker requires the row to exist even when no
+rules are configured. Install an updated CLI for local publication protection, then
+import a private UTF-8 rules file with `octopool admin string-rewrites set --file <path>`.
+See [Admin](admin.md#deployment-wide-string-protection) for the exact file/API contract,
+portable regex subset, limits, and revision conflict handling. This is a deployment-wide
+setting, not a per-pool override.
+
+Each protected CLI operation downloads a fresh policy; the Worker separately reads the
+D1 primary and compiles the policy for each relay request after authentication and
+normalization, before classification, repository probes, caches, upstream calls, or
+audit metadata. A policy change therefore affects the next request even in a warm
+isolate or on a cache hit. An in-flight operation uses the snapshot checked before its
+dispatch; changing a policy does not recall an already dispatched request. During a
+rolling deployment, old Worker instances and older CLIs retain their old behavior.
+
+This costs a CLI-to-Worker round trip plus a primary D1 read for the policy download,
+another primary read for server-relayed traffic, and bounded regex compilation/matching.
+Even empty policies require the authoritative read. There is no persistent policy cache,
+stale-read window, read-replica shortcut, or offline fallback. Measure latency and CPU
+with representative rules and request sizes before broad activation, especially when
+callers are far from the D1 primary or approach the 128-rule limit.
+
+For reads the Worker inspects the normalized path and its segments, query keys and all
+values, and allowed forwarded header names/values. The JSON envelope is decoded once
+with strict UTF-8 and duplicate-key validation. The guard checks literal and once
+percent-decoded text, including decoded segment boundaries and query `+` as space.
+Residual `%HH` after decoding (such as `%2569`), malformed percent/UTF-8 encoding, and
+embedded backslash escape layers are rejected while rules are active. This conservative
+boundary may refuse legitimate literal percent/backslash searches; it prevents common
+double encoding from revealing an unchecked name downstream. Read inspection is bounded
+in aggregate, and the raw relay envelope is capped at 1 MiB. Inputs are never silently
+rewritten into different repository or search semantics.
+
+Matching reads return `403 string_rewrite_denied` with no content in the error. Policy
+load/corruption/overload returns `503 string_rewrite_policy_unavailable`, not a
+`424 fallback_local` instruction. These failures stop before request audit/cache writes
+and do not log patterns, matched text, or backend exception messages. API responses,
+including errors, are `no-store`. Protect policy GET access and D1 backups: rules can
+contain private names even though error responses and normal import output do not.
+
+If policy storage is missing or corrupt, restore the migration/schema and last reviewed
+valid singleton row through the operator's controlled D1 recovery process. PUT cannot
+repair an unreadable current policy, and a deleted row is not a supported way to clear
+rules. For a healthy policy, deliberate deactivation is an authenticated revision-checked
+PUT with `rules: []`. Do not remove the guard, suppress load failures, or treat a D1 outage
+as an empty policy. No live rollout or credentials are required for the unit and local
+Workerd integration tests; the ordinary Worker suite applies migration 0016 explicitly
+through the migration runner and exercises the same production checks.
+
+The Worker remains GET-only. Local GitHub writes use the caller's own credentials and
+need the updated CLI's supported content preparation. Direct real `gh`, browsers, Git
+pushes, old local-write clients, unsupported obfuscation, and other programs are outside
+this boundary. Previously published content and existing stored cache/audit records are
+not retroactively purged by importing a policy.
 
 ## Build, test, deploy
 
@@ -250,8 +310,8 @@ Override the host/resolver with `OCTOPOOL_E2E_HOST` / `OCTOPOOL_E2E_RESOLVER`.
 Observability is enabled at full sampling. Every validated request from an authenticated
 caller to an existing pool writes an `audit_events` row (caller, client, pool, route key/kind,
 identity, status, error/fallback classification, duration, cache hit/miss/bypass status,
-and coalesced-fill marker); parse, authentication, and pool-lookup failures occur before
-that boundary. Secrets and request bodies are never recorded.
+and coalesced-fill marker); parse, authentication, string-protection, and pool-lookup
+failures occur before that boundary. Secrets and request bodies are never recorded.
 
 The main Worker has an hourly cron trigger at minute 17. It deletes bounded batches of
 cache entries after each entry's route-specific stale deadline and audit rows older than

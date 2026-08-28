@@ -2,6 +2,10 @@
 
 ## 0.5.9 - Unreleased
 
+### Changes
+
+- Add file-configured regex replacement and purging with deployment-wide server rules, additive local rules, and fail-closed protection for supported GitHub submissions and relay inputs.
+
 ## 0.5.8 - 2026-08-28
 
 ### Fixes

@@ -42,6 +42,10 @@ export const queries = {
   ensurePool:
     "INSERT INTO pools (id, name, policy_json)\nVALUES (?1, ?1, ?2)\nON CONFLICT(id) DO NOTHING",
   getPoolPolicy: "SELECT policy_json\nFROM pools\nWHERE id = ?1",
+  getStringRewritePolicy:
+    "SELECT schema_version, revision, updated_at, rules_json\nFROM string_rewrite_policy\nWHERE id = 1",
+  replaceStringRewritePolicy:
+    "UPDATE string_rewrite_policy\nSET revision = revision + 1, updated_at = ?1, rules_json = ?2\nWHERE id = 1 AND schema_version = 1 AND revision = ?3\nRETURNING revision, updated_at",
   listActiveIdentitiesForPool:
     "SELECT id, kind, login, secret_ref, installation_id, weight\nFROM identities\nWHERE pool_id = ?1\n  AND status = 'active'",
   listActiveIdentitiesForRoute:

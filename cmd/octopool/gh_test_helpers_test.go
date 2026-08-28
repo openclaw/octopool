@@ -16,10 +16,15 @@ type relayTestResponse struct {
 func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
 	t.Setenv("OCTOPOOL_TOKEN", "test-token")
 	t.Setenv("OCTOPOOL_POOL", "maintainers")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/github/request" {
+		if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
+			return
+		}
+		if r.URL.Path != "/v1/github/request" || r.Method != "POST" {
 			http.Error(w, "unexpected relay path", http.StatusBadRequest)
 			return
 		}
@@ -65,4 +70,27 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 	}))
 	t.Cleanup(server.Close)
 	t.Setenv("OCTOPOOL_URL", server.URL)
+}
+
+// Explicitly emulate the authoritative empty deployment policy for legacy
+// dispatch fixtures. This is an HTTP route, never a production/test bypass.
+func serveEmptyRewritePolicy(t *testing.T, w http.ResponseWriter, r *http.Request, token, pool string) bool {
+	t.Helper()
+	if r.URL.Path != "/v1/pools/"+pool+"/string-rewrites" {
+		return false
+	}
+	if r.Method != "GET" || r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("Cache-Control") != "no-cache, no-store" {
+		t.Errorf("unexpected policy request method/auth/cache directive")
+		w.WriteHeader(http.StatusBadRequest)
+		return true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(`{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[]}`))
+	return true
+}
+
+func emptyRewriteTestServer(t *testing.T) {
+	t.Helper()
+	relayTestServer(t, func(map[string]any) any { t.Error("unexpected relay request"); return nil })
 }

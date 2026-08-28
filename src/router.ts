@@ -11,6 +11,7 @@ import { rootResponse } from "./landing";
 import { createCaller, loginGitHubCLI, upsertIdentity } from "./provisioning";
 import { relayGitHub } from "./relay";
 import { parseStatsWindow, poolStats } from "./stats";
+import { getStringRewritePolicy, putStringRewritePolicy } from "./string-rewrite-policy";
 import {
   finishGitHubWebLogin,
   logoutWebSession,
@@ -73,6 +74,20 @@ export async function routeRequest(
   }
   if (request.method === "POST" && url.pathname === "/v1/login/github-cli") {
     return loginGitHubCLI(request, env);
+  }
+  if (
+    url.pathname === "/v1/admin/string-rewrites" &&
+    (request.method === "GET" || request.method === "PUT")
+  ) {
+    await authenticateAdmin(request, env);
+    return request.method === "GET"
+      ? getStringRewritePolicy(env)
+      : putStringRewritePolicy(request, env);
+  }
+  if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/string-rewrites$/.test(url.pathname)) {
+    const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/string-rewrites$/, "pool");
+    await authenticateCaller(request, env, pool);
+    return getStringRewritePolicy(env);
   }
   if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/stats$/.test(url.pathname)) {
     const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/stats$/, "pool");

@@ -25,6 +25,17 @@ SELECT policy_json
 FROM pools
 WHERE id = ?1;
 
+-- name: GetStringRewritePolicy :one
+SELECT schema_version, revision, updated_at, rules_json
+FROM string_rewrite_policy
+WHERE id = 1;
+
+-- name: ReplaceStringRewritePolicy :one
+UPDATE string_rewrite_policy
+SET revision = revision + 1, updated_at = ?1, rules_json = ?2
+WHERE id = 1 AND schema_version = 1 AND revision = ?3
+RETURNING revision, updated_at;
+
 -- name: ListActiveIdentitiesForPool :many
 SELECT id, kind, login, secret_ref, installation_id, weight
 FROM identities

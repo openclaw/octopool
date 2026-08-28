@@ -28,7 +28,8 @@ Octopool moves that traffic off individual machines and onto Cloudflare:
 - **Public-page transports preserve token quota.** Public PR diffs, commit/compare diff and patch media, explicit-ref content files, workflow-filtered run lists, and shaped run job/step metadata use [token-free GitHub endpoints](https://docs.octopool.dev/token-free.html); supported top-level `gh run list/view` and `gh release view` reads prefer public pages before anonymous API and pooled PAT/App fallbacks.
 - **Tokens stay server-side.** Each named client authenticates to octopool with its own short caller token (issued in exchange for `gh auth token`), so one user's Macs remain independently active and measurable. Each caller retains at most 16 active client sessions, retiring the least recently updated stale session as new names appear. The underlying PATs and App private keys never leave the Worker — not into responses, not into audit rows, not into the cache.
 - **Org-gated, public-repo only.** Only verified members of one GitHub org can mint a caller token, and every repo route is checked against GitHub's public-visibility endpoint before a pooled identity or cache entry is used. Private-repo callers fall back to their own `gh`.
-- **Fails open to real `gh`.** The CLI is a drop-in `gh` shim. Safe read-shaped calls try Octopool first, so the server owns cache, app/PAT routing, and pool policy. Mutations and secret-bearing requests stay local; safe reads run your real `gh` only when Octopool explicitly returns `fallback_local`.
+- **Local writes, controlled fallback.** The CLI is a drop-in `gh` shim. Safe read-shaped calls try Octopool first, so the server owns cache, app/PAT routing, and pool policy. Writes retain your local GitHub identity; relay fallback never bypasses outbound protection.
+- **Server and local regex protection.** Import a JSON rules file to replace private terms with approved text or purge matches before supported submissions. Deployment-wide rules and optional additional local rules protect the shim; the Worker independently blocks matching read inputs. Policy failures and uninspectable commands fail closed rather than sending unchecked content. See [CLI protection](docs/cli.md) and [administration](docs/admin.md).
 
 If you're not running a maintainer team and you don't care about GitHub rate limits, you don't need this.
 
@@ -88,7 +89,7 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 octopool stats
 ```
 
-Install it as a transparent `gh` shim — safe reads try Octopool first, while mutations, unusual flags, and explicit server fallback signals pass through to your local `gh`:
+Install it as a `gh` shim — safe reads try Octopool first, while supported writes and explicit server fallback signals use your local `gh` after outbound-policy checks. Active rewrite rules block commands whose final content cannot be inspected:
 
 ```sh
 octopool install-shim
