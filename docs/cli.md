@@ -180,6 +180,10 @@ draft/lifecycle status, checks, or merge policy. Raw `gh api` REST reads retain 
 boolean, null, or absent `mergeable` values. `mergeCommit` and `mergeStateStatus` remain
 unsupported and delegate to real `gh`, including when requested alongside `mergeable`;
 `gh pr list --json mergeable` also delegates.
+Upgrade note: scripts relying on earlier Octopool boolean/null output must use explicit
+enum comparisons. Replace `.mergeable == true` with `.mergeable == "MERGEABLE"` and
+`.mergeable == false` with `.mergeable == "CONFLICTING"`; handle `"UNKNOWN"` separately.
+Do not rely on truthiness: all three enum strings are truthy in `jq`.
 Run views also support the nested `jobs` field; Octopool composes its job/step metadata from
 the cache, exact API responses, or bounded public GitHub pages.
 `gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request
