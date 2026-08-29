@@ -5,11 +5,12 @@ import { defaultGitHubJSONAccept } from "./github-response";
 import { decodePathStrict, publicJSONResponse } from "./github-public-utils";
 import { parseRepositoryNodeIDHTML } from "./github-html";
 import { fetchPublicPage } from "./github-web-transport";
+import type { GitHubEgressEnv } from "./github-egress";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
 export function gitRefRequest(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {

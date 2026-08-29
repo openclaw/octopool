@@ -1,4 +1,5 @@
 import { bytesToBase64 } from "./encoding";
+import type { GitHubEgressEnv } from "./github-egress";
 import { githubToken } from "./github-auth";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
@@ -13,7 +14,7 @@ export type GitHubLogProbe =
   | { kind: "unknown"; status: number; headers: Record<string, string> };
 
 export async function callGitHub(
-  env: Env,
+  env: GitHubEgressEnv,
   identity: Identity,
   request: RelayRequest,
   route: RouteInfo,
@@ -23,7 +24,7 @@ export async function callGitHub(
 }
 
 export async function callPublicGitHub(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): Promise<GitHubRelayResponse> {
@@ -31,12 +32,12 @@ export async function callPublicGitHub(
 }
 
 export async function probeGitHubLog(
-  env: Env,
+  env: GitHubEgressEnv,
   identity: Identity,
   request: RelayRequest,
 ): Promise<GitHubLogProbe> {
   const token = await githubToken(env, identity);
-  const response = await fetch(githubUrl(request), {
+  const response = await env.githubEgress.fetch(githubUrl(request), {
     method: "GET",
     headers: githubHeaders(token, request.headers),
     redirect: "manual",
@@ -65,14 +66,14 @@ export async function probeGitHubLog(
 }
 
 async function callGitHubAPI(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
   token?: string,
 ): Promise<GitHubRelayResponse> {
   const url = githubUrl(request);
   const timeoutMs = requestTimeoutMs(env);
-  const response = await fetch(url, {
+  const response = await env.githubEgress.fetch(url, {
     method: "GET",
     headers: githubHeaders(token, request.headers),
     redirect: "manual",
@@ -80,7 +81,7 @@ async function callGitHubAPI(
   });
   if (response.status >= 300 && response.status < 400 && response.status !== 304) {
     if (route.logs) {
-      return fetchGitHubLogRedirect(response, responseCapBytes(env), timeoutMs);
+      return fetchGitHubLogRedirect(env, response, responseCapBytes(env), timeoutMs);
     }
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
   }
@@ -96,12 +97,13 @@ async function callGitHubAPI(
 }
 
 async function fetchGitHubLogRedirect(
+  env: GitHubEgressEnv,
   response: Response,
   cap: number,
   timeoutMs: number,
 ): Promise<GitHubRelayResponse> {
   const url = githubLogRedirectURL(response);
-  const redirected = await fetch(url.toString(), {
+  const redirected = await env.githubEgress.fetch(url.toString(), {
     method: "GET",
     redirect: "manual",
     signal: AbortSignal.timeout(timeoutMs),

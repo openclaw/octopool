@@ -4,6 +4,7 @@ import { normalizeClientName } from "./client-name";
 import { requestTimeoutMs } from "./github-limits";
 import { HttpError, requestBearer } from "./http";
 import { queries } from "./generated/sql";
+import type { GitHubEgressEnv } from "./github-egress";
 import type { Caller } from "./types";
 
 type CallerRow = {
@@ -20,6 +21,7 @@ export async function authenticateCaller(
   request: Request,
   env: Env,
   pool: string,
+  beforeMembership?: () => Promise<GitHubEgressEnv["githubEgress"]>,
 ): Promise<Caller> {
   const token = requestBearer(request);
   const tokenHash = await hashToken(token);
@@ -37,7 +39,9 @@ export async function authenticateCaller(
     if (row.org_login.toLowerCase() !== allowedOrg) {
       throw new HttpError(403, "org_denied", `Caller is not a ${allowedOrg} org user`);
     }
-    await ensureFreshOrgMembership(env, row);
+    // Authenticate locally before loading/inspecting protected policy, but obtain
+    // the request transport before any membership refresh can leave the Worker.
+    await ensureFreshOrgMembership(env, row, await beforeMembership?.());
     return { ...row, client_name: normalizeClientName(row.client_name) };
   });
 }
@@ -151,7 +155,11 @@ export async function githubUserByLogin(
   return { id, login: resolvedLogin };
 }
 
-export async function verifyGitHubOrgMember(env: Env, login: string): Promise<string> {
+export async function verifyGitHubOrgMember(
+  env: Env,
+  login: string,
+  egress?: GitHubEgressEnv["githubEgress"],
+): Promise<string> {
   const token = envSecret(env, "OCTOPOOL_GITHUB_ORG_TOKEN");
   if (token === undefined || token.trim() === "") {
     throw new HttpError(
@@ -160,19 +168,20 @@ export async function verifyGitHubOrgMember(env: Env, login: string): Promise<st
       "GitHub org verifier token is not configured",
     );
   }
-  return verifyGitHubOrgMemberWithToken(env, token, login);
+  return verifyGitHubOrgMemberWithToken(env, token, login, egress);
 }
 
 export async function verifyGitHubOrgMemberWithToken(
   env: Env,
   token: string,
   login: string,
+  egress?: GitHubEgressEnv["githubEgress"],
 ): Promise<string> {
   const org = env.ALLOWED_GITHUB_ORG;
   let after: string | null = null;
 
   while (true) {
-    const response = await fetch("https://api.github.com/graphql", {
+    const response = await (egress?.fetch ?? fetch)("https://api.github.com/graphql", {
       method: "POST",
       headers: {
         ...githubHeaders(token),
@@ -268,14 +277,18 @@ async function parseOrgMembershipPage(response: Response): Promise<{
   };
 }
 
-export async function ensureFreshOrgMembership(env: Env, caller: CallerRow): Promise<void> {
+export async function ensureFreshOrgMembership(
+  env: Env,
+  caller: CallerRow,
+  egress?: GitHubEgressEnv["githubEgress"],
+): Promise<void> {
   const ttlSeconds = Number.parseInt(env.ORG_VERIFY_TTL_SECONDS, 10);
   const ttlMs = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds * 1000 : 86_400_000;
   const verifiedAt = caller.org_verified_at === null ? 0 : Date.parse(caller.org_verified_at);
   if (Number.isFinite(verifiedAt) && Date.now() - verifiedAt < ttlMs) {
     return;
   }
-  const now = await verifyGitHubOrgMember(env, caller.github_login);
+  const now = await verifyGitHubOrgMember(env, caller.github_login, egress);
   await env.DB.prepare(queries.updateCallerOrgVerifiedAt).bind(now, caller.id).run();
 }
 

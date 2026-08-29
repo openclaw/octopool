@@ -1,6 +1,7 @@
 import { RE2JS } from "re2js";
 import { HttpError } from "./http";
 import { isRecord } from "./object";
+import { containsRuleMaterial } from "./string-rewrite-material";
 import type { RelayRequest } from "./types";
 
 export const STRING_REWRITE_LIMITS = {
@@ -120,6 +121,7 @@ export function assertNoStringRewriteMatch(
 
 export function rewriteString(input: string, rules: readonly CompiledStringRewriteRule[]): string {
   utf8Size(input, STRING_REWRITE_LIMITS.contentBytes, denied);
+  if (containsRuleMaterial(input, new Set(rules.map((rule) => rule.pattern)))) throw denied();
   let output = input;
   let matches = 0;
   try {
@@ -151,6 +153,7 @@ export function rewriteString(input: string, rules: readonly CompiledStringRewri
       append(output.slice(offset));
       output = next + chunks.join("");
     }
+    if (containsRuleMaterial(output, new Set(rules.map((rule) => rule.pattern)))) throw denied();
     assertNoStringRewriteMatch(output, rules);
     return output;
   } catch {
@@ -162,6 +165,9 @@ export function guardStringRewriteRead(
   request: RelayRequest,
   rules: readonly CompiledStringRewriteRule[],
 ): void {
+  // Reject literal URL-parser controls before any downstream URL construction.
+  // Percent-encoded controls remain encoded on the wire and are inspected below.
+  if (/[\t\r\n]/.test(request.path)) throw denied();
   if (rules.length === 0) return;
   let bytes = 0;
   const inspect = (value: string) => {

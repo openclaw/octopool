@@ -1,4 +1,5 @@
 import { requestTimeoutMs } from "./github-limits";
+import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./github-public-api";
 import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
@@ -10,7 +11,7 @@ import { fetchWebResponse, readWebBody } from "./github-web-transport";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 export async function callGitHubWeb(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): Promise<GitHubRelayResponse | undefined> {
@@ -29,7 +30,7 @@ export async function callGitHubWeb(
   }
   for (const web of requests) {
     const timeoutMs = requestTimeoutMs(env);
-    const fetched = await fetchWebResponse(web.url, web.headers, timeoutMs);
+    const fetched = await fetchWebResponse(env, web.url, web.headers, timeoutMs);
     if (fetched === undefined) {
       continue;
     }
@@ -51,7 +52,8 @@ export async function callGitHubWeb(
       if (payload !== undefined) {
         return { ...payload, backend: web.usesApiQuota ? "github" : "web" };
       }
-    } catch {
+    } catch (error) {
+      rethrowStringRewriteDenial(error);
       continue;
     }
   }
@@ -59,7 +61,7 @@ export async function callGitHubWeb(
 }
 
 export async function callAnonymousGitHubAPI(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): Promise<GitHubRelayResponse | undefined> {
@@ -68,6 +70,7 @@ export async function callAnonymousGitHubAPI(
     return undefined;
   }
   const fetched = await fetchWebResponse(
+    env,
     api.url,
     { ...api.headers, ...conditionalHeaders(request.headers) },
     requestTimeoutMs(env),
@@ -92,7 +95,8 @@ export async function callAnonymousGitHubAPI(
   try {
     const body = await readWebBody(response, api.capBytes);
     return await api.payload(new Uint8Array(body), response.headers, response.status, responseURL);
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     return undefined;
   }
 }
@@ -108,7 +112,7 @@ function conditionalHeaders(headers: Record<string, string> | undefined): Record
   };
 }
 
-function webRequests(env: Env, request: RelayRequest, route: RouteInfo): WebRequest[] {
+function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteInfo): WebRequest[] {
   const media = mediaFormat(request.headers?.accept);
   if (media !== undefined) {
     const mediaRequest = mediaWebRequest(env, request, route, media);

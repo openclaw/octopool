@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { withGitHubEgress } from "../../src/github-egress";
 import { createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache, writeGitHubCache } from "../../src/cache";
@@ -140,7 +141,7 @@ describe("terminal Actions log cache", () => {
 
     await expect(
       terminalLogRunCompleted(
-        env,
+        withGitHubEgress(env, []),
         createExecutionContext(),
         request,
         classifyRoute(request, policy),
@@ -201,7 +202,7 @@ describe("terminal Actions log cache", () => {
       );
 
       const proof = await terminalLogCacheProof(
-        env,
+        withGitHubEgress(env, []),
         createExecutionContext(),
         logRequest,
         logRoute,

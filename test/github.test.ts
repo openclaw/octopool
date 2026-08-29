@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { callPublicGitHub } from "../src/github";
+import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { responseCapBytes } from "../src/github-limits";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 
@@ -70,10 +71,13 @@ describe("github api provider", () => {
   });
 });
 
-function env(overrides: Partial<Env> = {}): Env {
-  return {
-    REQUEST_TIMEOUT_MS: "15000",
-    MAX_RESPONSE_BYTES: "2097152",
-    ...overrides,
-  } as Env;
+function env(overrides: Partial<Env> = {}): GitHubEgressEnv {
+  return withGitHubEgress(
+    {
+      REQUEST_TIMEOUT_MS: "15000",
+      MAX_RESPONSE_BYTES: "2097152",
+      ...overrides,
+    } as Env,
+    [],
+  );
 }

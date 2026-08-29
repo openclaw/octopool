@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import {
   anonymousGitHubResponseProvesPublicRepo,
   ensurePublicGitHubRepo,
@@ -42,7 +43,10 @@ describe("public repo guard", () => {
     const bind = vi.fn(() => ({ first, run }));
     const prepare = vi.fn(() => ({ bind }));
 
-    await ensurePublicGitHubRepo({ ...env(), DB: { prepare } } as unknown as Env, route());
+    await ensurePublicGitHubRepo(
+      { ...env(), DB: { prepare } } as unknown as GitHubEgressEnv,
+      route(),
+    );
 
     expect(bind).toHaveBeenCalledWith("openclaw", "octopool", 1, "+30 seconds");
   });
@@ -63,7 +67,7 @@ describe("public repo guard", () => {
 
       await expect(
         ensurePublicGitHubRepo(
-          { ...env(), DB: database } as unknown as Env,
+          { ...env(), DB: database } as unknown as GitHubEgressEnv,
           route(),
           undefined,
           coordinator,
@@ -122,7 +126,7 @@ describe("public repo guard", () => {
       ...env(),
       PUBLIC_REPO_NEGATIVE_TTL_SECONDS: undefined,
       DB: { prepare: vi.fn(() => ({ bind })) },
-    } as unknown as Env;
+    } as unknown as GitHubEgressEnv;
 
     await expect(ensurePublicGitHubRepo(targetEnv, targetRoute)).rejects.toMatchObject({
       status: 403,
@@ -160,7 +164,7 @@ describe("public repo guard", () => {
     };
 
     await expect(
-      ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as Env, route()),
+      ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as GitHubEgressEnv, route()),
     ).rejects.toMatchObject({
       status: 502,
       code: "repo_public_check_failed",
@@ -182,7 +186,7 @@ describe("public repo guard", () => {
     };
 
     await expect(
-      ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as Env, {
+      ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as GitHubEgressEnv, {
         ...route(),
         tokenFreeOnly: true,
       }),
@@ -259,7 +263,7 @@ describe("public repo guard", () => {
       })),
     };
 
-    await ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as Env, route());
+    await ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as GitHubEgressEnv, route());
 
     expect(fetchMock).toHaveBeenCalledOnce();
   });
@@ -277,7 +281,7 @@ describe("public repo guard", () => {
     };
 
     await ensurePublicGitHubRepo(
-      { ...env(), DB: database } as unknown as Env,
+      { ...env(), DB: database } as unknown as GitHubEgressEnv,
       route(),
       "2026-05-28 00:00:00",
     );
@@ -301,7 +305,7 @@ describe("public repo guard", () => {
 
     await expect(
       ensurePublicGitHubRepo(
-        { ...env(), DB: { prepare } } as unknown as Env,
+        { ...env(), DB: { prepare } } as unknown as GitHubEgressEnv,
         route(),
         sqliteUTC(Date.now() - 1_000),
       ),
@@ -323,7 +327,7 @@ describe("public repo guard", () => {
     const prepare = vi.fn();
 
     await ensurePublicGitHubRepo(
-      { ...env(), DB: { prepare } } as unknown as Env,
+      { ...env(), DB: { prepare } } as unknown as GitHubEgressEnv,
       route(),
       sqliteUTC(Date.now() - 1_000),
     );
@@ -362,7 +366,7 @@ describe("public repo guard", () => {
       })),
     };
 
-    await ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as Env, route());
+    await ensurePublicGitHubRepo({ ...env(), DB: database } as unknown as GitHubEgressEnv, route());
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(edgeDelete).toHaveBeenCalledOnce();
@@ -404,7 +408,7 @@ describe("public repo guard", () => {
     }));
 
     await ensurePublicGitHubRepo(
-      { ...env(), DB: { prepare } } as unknown as Env,
+      { ...env(), DB: { prepare } } as unknown as GitHubEgressEnv,
       route(),
       sqliteUTC(checkedAt),
     );
@@ -448,7 +452,7 @@ describe("public repo guard", () => {
 
     await expect(
       ensurePublicGitHubRepo(
-        { ...env(), DB: { prepare } } as unknown as Env,
+        { ...env(), DB: { prepare } } as unknown as GitHubEgressEnv,
         route(),
         sqliteUTC(checkedAt),
       ),
@@ -544,7 +548,7 @@ describe("public repo guard", () => {
     };
 
     await ensurePublicGitHubRepo(
-      { ...env(), DB: database } as unknown as Env,
+      { ...env(), DB: database } as unknown as GitHubEgressEnv,
       route(),
       undefined,
       coordinator,
@@ -584,7 +588,7 @@ describe("public repo guard", () => {
 
     await expect(
       ensurePublicGitHubRepo(
-        { ...env(), DB: database } as unknown as Env,
+        { ...env(), DB: database } as unknown as GitHubEgressEnv,
         route(),
         sqliteUTC(Date.now() - 1_000),
         coordinator,
@@ -617,7 +621,7 @@ describe("public repo guard", () => {
 
     await expect(
       ensurePublicGitHubRepo(
-        { ...env(), DB: database } as unknown as Env,
+        { ...env(), DB: database } as unknown as GitHubEgressEnv,
         route(),
         undefined,
         coordinator,
@@ -660,7 +664,7 @@ describe("public repo guard", () => {
     };
 
     await ensurePublicGitHubRepo(
-      { ...env(), DB: database } as unknown as Env,
+      { ...env(), DB: database } as unknown as GitHubEgressEnv,
       route(),
       undefined,
       coordinator,
@@ -691,7 +695,7 @@ describe("public repo guard", () => {
     };
 
     await ensurePublicGitHubRepo(
-      { ...env(), DB: database } as unknown as Env,
+      { ...env(), DB: database } as unknown as GitHubEgressEnv,
       route(),
       undefined,
       coordinator,
@@ -747,7 +751,7 @@ describe("public repo guard", () => {
       {
         ...env(),
         DB: { prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })) },
-      } as unknown as Env,
+      } as unknown as GitHubEgressEnv,
       route(),
       sqliteUTC(Date.now() - 1_000),
       coordinator,
@@ -781,7 +785,7 @@ describe("public repo guard", () => {
       {
         ...env(),
         DB: { prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first, run })) })) },
-      } as unknown as Env,
+      } as unknown as GitHubEgressEnv,
       route(),
       sqliteUTC(Date.now() - 1_000),
       coordinator,
@@ -809,7 +813,7 @@ describe("public repo guard", () => {
     const prepare = vi.fn();
 
     await ensurePublicGitHubRepo(
-      { ...env(), DB: { prepare } } as unknown as Env,
+      { ...env(), DB: { prepare } } as unknown as GitHubEgressEnv,
       route(),
       sqliteUTC(Date.now() - 1_000),
     );
@@ -855,16 +859,19 @@ describe("public repo guard", () => {
   });
 });
 
-function env(): Env {
+function env(): GitHubEgressEnv {
   const first = vi.fn(async () => null);
   const run = vi.fn(async () => ({}));
   const bind = vi.fn(() => ({ first, run }));
   const prepare = vi.fn(() => ({ bind }));
-  return {
-    REQUEST_TIMEOUT_MS: "15000",
-    OCTOPOOL_GITHUB_ORG_TOKEN: "verifier-token",
-    DB: { prepare },
-  } as unknown as Env;
+  return withGitHubEgress(
+    {
+      REQUEST_TIMEOUT_MS: "15000",
+      OCTOPOOL_GITHUB_ORG_TOKEN: "verifier-token",
+      DB: { prepare },
+    } as unknown as Env,
+    [],
+  );
 }
 
 function route(): RouteInfo {

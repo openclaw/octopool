@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { callGitHubWeb } from "../src/github-web";
+import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 
 describe("github web provider", () => {
@@ -301,7 +302,7 @@ describe("github web provider", () => {
     });
     const route = classifyRoute(request, policy);
 
-    await callGitHubWeb({ ...env(), DB: database } as unknown as Env, request, route);
+    await callGitHubWeb({ ...env(), DB: database } as unknown as GitHubEgressEnv, request, route);
 
     expect(bound).toContainEqual([route.resource, 60, 0, 4102444800]);
   });
@@ -512,7 +513,7 @@ describe("github web provider", () => {
     });
 
     const response = await callGitHubWeb(
-      { ...env(), DB: { prepare } } as unknown as Env,
+      { ...env(), DB: { prepare } } as unknown as GitHubEgressEnv,
       request,
       classifyRoute(request, policy),
     );
@@ -1698,8 +1699,8 @@ describe("github web provider", () => {
   });
 });
 
-function env(overrides: Record<string, string> = {}): Env {
-  return { REQUEST_TIMEOUT_MS: "15000", ...overrides } as unknown as Env;
+function env(overrides: Record<string, string> = {}): GitHubEgressEnv {
+  return withGitHubEgress({ REQUEST_TIMEOUT_MS: "15000", ...overrides } as unknown as Env, []);
 }
 
 function actionsListHTML(title: string): string {

@@ -1,5 +1,10 @@
 import { authenticateCaller } from "./auth";
 import {
+  withGitHubEgress,
+  type GitHubEgressEnv,
+  rethrowStringRewriteDenial,
+} from "./github-egress";
+import {
   type CachedGitHubResponse,
   githubCacheRevalidationHeaders,
   githubCacheKey,
@@ -70,7 +75,7 @@ import type {
 } from "./types";
 
 type RelayBase = {
-  env: Env;
+  env: GitHubEgressEnv;
   ctx: ExecutionContext;
   requestId: string;
   started: number;
@@ -151,20 +156,32 @@ async function relayGitHubRequest(
     throw new HttpError(400, "invalid_json", "Expected a valid JSON object");
   }
   const relayRequest = validateRelayRequest(body);
-  const caller = await authenticateCaller(request, env, relayRequest.pool);
+  const loadProtection = async () => {
+    const policy = await loadStringRewritePolicy(env);
+    guardStringRewriteRead(relayRequest, policy.compiled);
+    return { policy, env: withGitHubEgress(env, policy.compiled) };
+  };
+  let protection: ReturnType<typeof loadProtection> | undefined;
+  const protectedRequest = () => (protection ??= loadProtection());
+  const caller = await authenticateCaller(
+    request,
+    env,
+    relayRequest.pool,
+    async () => (await protectedRequest()).env.githubEgress,
+  );
+  const { policy: stringPolicy, env: githubEnv } = await protectedRequest();
   // `GET /user` is served as the caller's public profile so identity probes
   // (`gh api user -q .login`) stop bouncing as route_denied onto local tokens.
   if (relayRequest.path === "/user") {
     relayRequest.path = `/users/${encodeURIComponent(caller.github_login)}`;
   }
-  const stringPolicy = await loadStringRewritePolicy(env);
   guardStringRewriteRead(relayRequest, stringPolicy.compiled);
   const policy = await loadPoolPolicy(env, relayRequest.pool);
   if (policy === null) {
     throw new HttpError(404, "pool_not_found", "Pool not found");
   }
   const base: RelayBase = {
-    env,
+    env: githubEnv,
     ctx,
     requestId,
     started,
@@ -373,7 +390,8 @@ async function coalesceRelayCacheMiss(
 async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response | undefined> {
   try {
     return await attemptStaleRelayCacheRevalidation(state);
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     return restoreSharedCacheFill(state);
   }
 }
@@ -520,7 +538,8 @@ async function callRevalidationAPI(
       state.route,
       await callPublicGitHub(state.env, request, state.route),
     );
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     return undefined;
   }
 }
@@ -565,7 +584,8 @@ async function finishRevalidation(
       candidate.cached.identity,
       true,
     );
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     available = false;
   }
   if (!available) {
@@ -605,7 +625,8 @@ async function guardRevalidationPublicRepo(state: ActiveRelay): Promise<boolean>
   try {
     await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
     return true;
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     await restoreSharedCacheFillState(state);
     return false;
   }
@@ -660,7 +681,8 @@ async function callPublicBackend(state: ActiveRelay): Promise<Response> {
   if (fallbackReason === "github_rate_limited" || fallbackReason === "github_identity_depleted") {
     try {
       return await callIdentityPool(state);
-    } catch {
+    } catch (error) {
+      rethrowStringRewriteDenial(error);
       // The anonymous request already had a clean local fallback. Preserve it
       // if the opportunistic pooled attempt cannot serve the request.
     }
@@ -932,6 +954,9 @@ async function handleRelayError(
   active: ActiveRelay | undefined,
   error: unknown,
 ): Promise<Response> {
+  // Do not persist a derived route key containing protected material, or turn
+  // a transport denial into a stale-cache/local fallback success.
+  rethrowStringRewriteDenial(error);
   const reported = localFallbackError(error) ?? error;
   const staleReason = staleFallbackReasonFromError(reported);
   if (active !== undefined && staleReason !== undefined) {
@@ -1237,6 +1262,7 @@ async function revalidateCachedTerminalLog(
       });
     }
   } catch (error) {
+    rethrowStringRewriteDenial(error);
     console.error("actions log existence probe failed", error);
   }
   return undefined;
@@ -1303,7 +1329,8 @@ async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> 
     ) {
       return { ...state.route, run_attempt_completed: true };
     }
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     // The proof only enables a longer TTL; failure keeps the conservative default.
   }
   return state.route;
@@ -1438,7 +1465,7 @@ async function staleCachedIdentityAvailable(
 }
 
 async function cachedResponseAvailable(
-  env: Env,
+  env: GitHubEgressEnv,
   pool: string,
   route: ReturnType<typeof classifyRoute>,
   cached: GitHubRelayResponse & {

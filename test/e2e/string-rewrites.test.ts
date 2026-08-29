@@ -20,6 +20,238 @@ const adminHeaders = {
   "content-type": "application/json",
 };
 
+describe("canonical relay egress protection", () => {
+  it("authenticates before revealing any policy-dependent denial", async () => {
+    await seedPool();
+    await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    for (const path of ["/repos/example/demo", "/repos/example/cobalt-mint"]) {
+      expect((await relay(path, "invalid-caller-token")).status).toBe(401);
+    }
+    expect(upstream).not.toHaveBeenCalled();
+  });
+  it.each(["\t", "\n", "\r", ""])("blocks path controls and direct matches %#", async (control) => {
+    await seedPool();
+    await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+    const upstream = vi.fn<typeof fetch>(async () => jsonResponse({}, 404));
+    vi.stubGlobal("fetch", upstream);
+    const response = await relay(`/repos/example/demo/commits/cobalt-${control}mint`);
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain("cobalt");
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["/repos/Cobalt-Mint/demo", { headers: { "if-none-match": '"audit"' } }],
+    ["/repos/example/Cobalt-Mint", { headers: { "if-none-match": '"audit"' } }],
+    ["/repos/Cobalt-Mint/demo/pulls/17/files", { route_hint: { pr_state: "closed" } }],
+  ] as const)("blocks derived proof paths %s", async (path, options) => {
+    await seedPool();
+    await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+    const upstream = vi.fn<typeof fetch>(async () => jsonResponse({}, 404));
+    vi.stubGlobal("fetch", upstream);
+    const response = await relay(path, CALLER_TOKEN, options);
+    expect(response.status).toBe(403);
+    expect(await response.text()).not.toContain("cobalt");
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it.each(["cobalt-%09mint", "safe"])(
+    "preserves literal encoded and safe paths %s",
+    async (ref) => {
+      await seedPool();
+      await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+      const upstream = vi.fn<typeof fetch>(async () =>
+        jsonResponse({ sha: "abc", private: false }),
+      );
+      vi.stubGlobal("fetch", upstream);
+      expect((await relay(`/repos/example/demo/commits/${ref}`)).status).toBe(200);
+      expect(upstream).toHaveBeenCalled();
+      expect(new Request(upstream.mock.calls[0]![0], upstream.mock.calls[0]![1]).url).toContain(
+        ref,
+      );
+    },
+  );
+
+  it.each([
+    [
+      "/repos/example/demo/pulls/17",
+      "^/repos/example/demo$",
+      { headers: { "if-none-match": '"audit"' } },
+    ],
+    [
+      "/repos/example/demo/pulls/17/files",
+      "^/repos/example/demo/pulls/17$",
+      { route_hint: { pr_state: "closed" } },
+    ],
+    ["/repos/example/demo/actions/jobs/19/logs", "^/repos/example/demo/actions/jobs/19$", {}],
+    [
+      "/repos/example/demo/pulls/17",
+      "^/example/demo/pull/17.diff$",
+      { headers: { accept: "application/vnd.github.v3.diff" } },
+    ],
+    [
+      "/repos/example/demo/contents/README.md",
+      "^/example/demo/main/README.md$",
+      { query: { ref: "main" } },
+    ],
+    ["/repos/example/demo/git/ref/heads/main", "^/example/demo.git/info/refs$", {}],
+  ] as const)("checks every derived transport before fetch %#", async (path, pattern, options) => {
+    await seedPool();
+    await put([{ pattern, replacement: "public" }]);
+    const upstream = vi.fn<typeof fetch>(async () => jsonResponse({}, 404));
+    vi.stubGlobal("fetch", upstream);
+    const response = await relay(path, CALLER_TOKEN, options);
+    expect(response.status).toBe(403);
+    expect(upstream).not.toHaveBeenCalled();
+    await expectNoPublication();
+  });
+
+  it("guards the membership refresh without changing credential ownership", async () => {
+    await seedPool();
+    await env.DB.prepare(
+      "UPDATE callers SET org_verified_at = '2000-01-01', github_login = 'cobalt-mint'",
+    ).run();
+    await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+    const upstream = vi.fn<typeof fetch>(async () => jsonResponse({}, 404));
+    vi.stubGlobal("fetch", upstream);
+    expect((await relay("/repos/example/demo")).status).toBe(403);
+    expect(upstream).not.toHaveBeenCalled();
+    await expectNoPublication();
+  });
+
+  it("propagates a denial from a nested Git repository page probe", async () => {
+    await seedPool();
+    await put([{ pattern: "^/example/demo/issues$", replacement: "public" }]);
+    const packet = (value: string) => (value.length + 4).toString(16).padStart(4, "0") + value;
+    const sha = "a".repeat(40);
+    const advertisement =
+      packet("# service=git-upload-pack\n") +
+      "0000" +
+      packet(`${sha} HEAD\0symref=HEAD:refs/heads/main\n`) +
+      packet(`${sha} refs/heads/main\n`) +
+      "0000";
+    const upstream = vi.fn<typeof fetch>(async () => new Response(advertisement));
+    vi.stubGlobal("fetch", upstream);
+    expect((await relay("/repos/example/demo/git/ref/heads/main")).status).toBe(403);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    await expectNoPublication();
+  });
+
+  it("guards pooled log redirects without forwarding authorization", async () => {
+    await seedPool();
+    await env.DB.prepare("UPDATE identity_scopes SET owner = 'example'").run();
+    await env.DB.prepare("UPDATE pools SET policy_json = ?")
+      .bind(
+        JSON.stringify({
+          allowed_owners: ["example"],
+          allow_public_repos: true,
+          allow_search: true,
+          allow_logs: true,
+        }),
+      )
+      .run();
+    await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (request.headers.get("authorization") === "Bearer test-org-token")
+        return jsonResponse({ private: false });
+      if (request.headers.get("authorization") === "Bearer test-primary-token") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://logs.actions.githubusercontent.com/cobalt-mint" },
+        });
+      }
+      if (url.pathname.endsWith("/actions/jobs/19"))
+        return jsonResponse({ id: 19, status: "in_progress" });
+      return jsonResponse({}, 404);
+    });
+    vi.stubGlobal("fetch", upstream);
+    const response = await relay("/repos/example/demo/actions/jobs/19/logs");
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(403);
+    const requests = upstream.mock.calls.map(([input, init]) => new Request(input, init));
+    expect(
+      requests.some(
+        (request) => request.headers.get("authorization") === "Bearer test-primary-token",
+      ),
+    ).toBe(true);
+    expect(requests.every((request) => new URL(request.url).hostname === "api.github.com")).toBe(
+      true,
+    );
+    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM audit_events").first()).toEqual({
+      count: 0,
+    });
+  });
+
+  it.each([
+    "https://github.com/example/cobalt-mint",
+    "https://raw.githubusercontent.com/example/demo/main/cobalt-mint",
+  ])("checks allowed-host redirects %s", async (location) => {
+    await seedPool();
+    await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+    const upstream = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 302, headers: { location } }),
+    );
+    vi.stubGlobal("fetch", upstream);
+    const response = await relay("/repos/example/demo/pulls/17", CALLER_TOKEN, {
+      headers: { accept: "application/vnd.github.v3.diff" },
+    });
+    expect(response.status).toBe(403);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    await expectNoPublication();
+  });
+
+  it("keeps concurrent policy snapshots isolated across a redirect", async () => {
+    await seedPool();
+    await put([{ pattern: "cobalt-mint", replacement: "public" }]);
+    let release!: () => void;
+    let started!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const reached = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new Request(input, init).url;
+      if (url.endsWith("/pull/17.diff")) {
+        started();
+        await waiting;
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://github.com/example/cobalt-mint" },
+        });
+      }
+      return jsonResponse({ private: false });
+    });
+    vi.stubGlobal("fetch", upstream);
+    const first = relay("/repos/example/demo/pulls/17", CALLER_TOKEN, {
+      headers: { accept: "application/vnd.github.v3.diff" },
+    });
+    await reached;
+    try {
+      expect((await put([{ pattern: "azure-sage", replacement: "public" }], 2)).status).toBe(200);
+      expect((await relay("/repos/example/cobalt-mint")).status).toBe(200);
+    } finally {
+      release();
+    }
+    expect((await first).status).toBe(403);
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves empty-policy casing but rejects literal parser controls", async () => {
+    await seedPool();
+    const upstream = vi.fn<typeof fetch>(async () => jsonResponse({ private: false }));
+    vi.stubGlobal("fetch", upstream);
+    expect((await relay("/repos/Cobalt-Mint/demo")).status).toBe(200);
+    upstream.mockClear();
+    expect((await relay("/repos/example/demo/commits/cobalt-\tmint")).status).toBe(403);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});
+
 async function put(rules: unknown, expectedRevision = 1): Promise<Response> {
   return callWorker(adminPath, {
     method: "PUT",

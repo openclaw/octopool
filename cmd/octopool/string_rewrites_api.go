@@ -232,6 +232,11 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 }
 
 func rewriteAPIRequest(opts rewriteAPIOptions) (ghAPIRequest, error) {
+	// Native gh expands placeholders anywhere in the original endpoint, including
+	// query keys/values and embedded legacy :branch forms, after this guard runs.
+	if rewriteEndpointPlaceholder.MatchString(opts.endpoint) {
+		return ghAPIRequest{}, errRewriteBlocked
+	}
 	endpoint := opts.endpoint
 	if !strings.HasPrefix(endpoint, "/") {
 		endpoint = "/" + endpoint
@@ -253,6 +258,8 @@ func rewriteAPIRequest(opts rewriteAPIOptions) (ghAPIRequest, error) {
 	}
 	return request, nil
 }
+
+var rewriteEndpointPlaceholder = regexp.MustCompile(`(:(owner|repo|branch)\b|\{[a-z]+\})`)
 
 var rewriteMutationPath = regexp.MustCompile(`^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(.+)$`)
 var rewriteIssueNumber = regexp.MustCompile(`^issues/[0-9]+$`)

@@ -144,6 +144,9 @@ func (policy stringRewritePolicy) rewrite(text string) (string, error) {
 	if len(text) > rewriteMaxContent || !utf8.ValidString(text) {
 		return "", errRewriteBlocked
 	}
+	if policy.containsRuleMaterial(text) {
+		return "", errRewriteBlocked
+	}
 	matches := 0
 	for _, rule := range policy.Rules {
 		// At most one match per input byte plus the terminal empty match. This keeps
@@ -190,6 +193,9 @@ func (policy stringRewritePolicy) rewrite(text string) (string, error) {
 		}
 		out.WriteString(text[previous:])
 		text = out.String()
+	}
+	if policy.containsRuleMaterial(text) {
+		return "", errRewriteBlocked
 	}
 	if err := policy.check(text); err != nil {
 		return "", err

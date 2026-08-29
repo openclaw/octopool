@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import { verifyPRStateHint } from "../src/pr-state";
 
@@ -138,11 +139,14 @@ type TestDB = {
   prepare: ReturnType<typeof vi.fn>;
 };
 
-function env(database: TestDB): Env {
-  return {
-    REQUEST_TIMEOUT_MS: "15000",
-    DB: database,
-  } as unknown as Env;
+function env(database: TestDB): GitHubEgressEnv {
+  return withGitHubEgress(
+    {
+      REQUEST_TIMEOUT_MS: "15000",
+      DB: database,
+    } as unknown as Env,
+    [],
+  );
 }
 
 function databaseWithFreshProof(row: { "1": number } | null): TestDB {

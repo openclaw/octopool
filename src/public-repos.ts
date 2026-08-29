@@ -1,4 +1,5 @@
 import { envSecret } from "./auth";
+import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import {
   acquireOwnedCacheFill,
   type CacheFillCoordinator,
@@ -27,7 +28,7 @@ type PublicRepoProofSource = "edge" | "shared";
 const EDGE_CACHE_NAMESPACE = "public-repo-v1";
 
 export async function ensurePublicGitHubRepo(
-  env: Env,
+  env: GitHubEgressEnv,
   route: RouteInfo,
   cacheCreatedAt?: string,
   coordinator?: CacheFillCoordinator,
@@ -117,7 +118,7 @@ export function anonymousGitHubResponseProvesPublicRepo(route: RouteInfo): boole
 }
 
 async function refreshPublicGitHubRepoProof(
-  env: Env,
+  env: GitHubEgressEnv,
   owner: string,
   repo: string,
   route: RouteInfo,
@@ -185,12 +186,12 @@ async function refreshPublicGitHubRepoProof(
 }
 
 function fetchPublicRepoProof(
-  env: Env,
+  env: GitHubEgressEnv,
   owner: string,
   repo: string,
   authenticated: boolean,
 ): Promise<Response> {
-  return fetch(
+  return env.githubEgress.fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
     {
       headers: publicRepoCheckHeaders(env, authenticated),
@@ -213,13 +214,13 @@ function publicRepoCheckHeaders(env: Env, authenticated: boolean): Record<string
 }
 
 async function fetchPublicRepoPageProof(
-  env: Env,
+  env: GitHubEgressEnv,
   owner: string,
   repo: string,
 ): Promise<boolean | undefined> {
   let response: Response;
   try {
-    response = await fetch(
+    response = await env.githubEgress.fetch(
       `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
       {
         headers: { accept: "text/html", "user-agent": "octopool" },
@@ -227,7 +228,8 @@ async function fetchPublicRepoPageProof(
         signal: AbortSignal.timeout(requestTimeoutMs(env)),
       },
     );
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     return undefined;
   }
   if (response.status === 404) {

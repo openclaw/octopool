@@ -1,4 +1,5 @@
 import { base64ToBytes } from "./encoding";
+import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { isRecord } from "./object";
@@ -26,7 +27,7 @@ export function terminalLogCacheKey(request: RelayRequest, runAttempt?: number):
 }
 
 export async function terminalLogCacheProof(
-  env: Env,
+  env: GitHubEgressEnv,
   _ctx: ExecutionContext,
   request: RelayRequest,
   route: RouteInfo,
@@ -57,13 +58,14 @@ export async function terminalLogCacheProof(
     const runAttempt = completedRunAttempt(run);
     return runAttempt === undefined ? undefined : { key: terminalLogCacheKey(request, runAttempt) };
   } catch (error) {
+    rethrowStringRewriteDenial(error);
     console.error("actions log completion preflight failed", error);
     return undefined;
   }
 }
 
 export async function terminalLogRunCompleted(
-  env: Env,
+  env: GitHubEgressEnv,
   ctx: ExecutionContext,
   request: RelayRequest,
   route: RouteInfo,
@@ -147,7 +149,7 @@ export async function writeTerminalLogCache(
 }
 
 async function fetchFreshMetadata(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   policy: PoolPolicy,
 ): Promise<GitHubRelayResponse | undefined> {

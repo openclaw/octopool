@@ -408,8 +408,24 @@ read into bounded snapshots, never modified, and never reopened by the child. Sa
 snapshots use a private 0700 directory and 0600 files, removed after execution, including
 nonzero exits. Active-policy child commands do not retain live stdin.
 
+Supported content paths also reject recognizable active rule material before rewriting
+and in the final text: complete JSON objects with exactly string `pattern` and
+`replacement` fields, whose decoded pattern equals an effective server or local pattern.
+The replacement need not be identical. This covers copied policy files, compact or pretty
+JSON, rule arrays, JSON Unicode escapes, and ordinary Markdown fenced snippets, including
+inline text, files, stdin, and decoded REST body fields. Detection is content-based, not
+filename-based, and stays within the existing 1 MiB limit. Ordinary prose containing a
+forbidden term still undergoes normal rewriting; merely mentioning regex source outside
+a recognizable JSON rule is not classified as policy material.
+
 Reads check decoded path segments, query keys/values, and safe forwarded headers, including
 bounded percent-decoding layers. Matches in structural values are blocked, never rewritten.
+Active policy also rejects unresolved native-gh placeholders anywhere in the original
+REST endpoint, including query keys/values and embedded `:owner`, `:repo`, or `:branch`
+forms, before initial dispatch and every final delegation. Supply literal structural IDs.
+The relay rejects literal TAB/LF/CR in paths before URL parsing and checks canonical final
+outbound URLs and noncredential headers, including derived probes and followed redirects.
+An encoded `%09` remains encoded on the wire; it is not treated as a stripped literal TAB.
 This includes direct `octopool request` with local rules and approved local read fallbacks.
 While rules are active, local read fallback is limited to explicit allowlisted raw REST GETs.
 Top-level reads still use the relay, but a requested native fallback is refused because
@@ -435,7 +451,9 @@ not patterns, replacements, matched content, or local paths.
 Protection covers supported traffic through this updated shim and relay, using the policy
 snapshot checked before dispatch. Direct real `gh`, browsers, Git pushes, older clients'
 local writes, existing published content, and arbitrary deliberate obfuscation are outside
-this boundary. GitHub writes continue to use the user's local credentials; the Worker
+this boundary. Policy-material detection does not interpret arbitrary Markdown, Unicode
+obfuscation, malformed rule JSON, or arbitrary encodings, and is not general data-loss
+prevention or a network-wide guarantee. GitHub writes continue to use the user's local credentials; the Worker
 remains GET-only.
 
 ## Cache freshness

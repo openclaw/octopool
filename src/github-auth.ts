@@ -1,11 +1,12 @@
 import { base64ToBytes, bytesToBase64URL } from "./encoding";
+import type { GitHubEgressEnv } from "./github-egress";
 import { requestTimeoutMs } from "./github-limits";
 import { HttpError } from "./http";
 import type { Identity } from "./types";
 
 const installationTokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-export async function githubToken(env: Env, identity: Identity): Promise<string> {
+export async function githubToken(env: GitHubEgressEnv, identity: Identity): Promise<string> {
   switch (identity.kind) {
     case "pat":
       return githubSecret(env, identity.secret_ref);
@@ -14,7 +15,10 @@ export async function githubToken(env: Env, identity: Identity): Promise<string>
   }
 }
 
-async function githubAppInstallationToken(env: Env, identity: Identity): Promise<string> {
+async function githubAppInstallationToken(
+  env: GitHubEgressEnv,
+  identity: Identity,
+): Promise<string> {
   if (identity.installation_id === null) {
     throw new HttpError(
       503,
@@ -29,7 +33,7 @@ async function githubAppInstallationToken(env: Env, identity: Identity): Promise
     return cached.token;
   }
   const jwt = await githubAppJWT(appId, githubSecret(env, identity.secret_ref));
-  const response = await fetch(
+  const response = await env.githubEgress.fetch(
     `https://api.github.com/app/installations/${identity.installation_id}/access_tokens`,
     {
       method: "POST",

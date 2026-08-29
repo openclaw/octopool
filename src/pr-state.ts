@@ -1,4 +1,5 @@
 import { isStateAwarePRRoute } from "./cache-policy";
+import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { queries } from "./generated/sql";
 import { requestTimeoutMs } from "./github-limits";
 import type { RelayRequest, RouteInfo } from "./types";
@@ -12,7 +13,7 @@ type PullResponse = {
 };
 
 export async function verifyPRStateHint(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): Promise<RouteInfo> {
@@ -20,7 +21,7 @@ export async function verifyPRStateHint(
 }
 
 export async function verifyPRStateHintLive(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): Promise<RouteInfo> {
@@ -33,7 +34,7 @@ function withoutStateHint(route: RouteInfo): RouteInfo {
 }
 
 async function verifyPRStateHintInternal(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
   allowCachedProof: boolean,
@@ -50,7 +51,7 @@ async function verifyPRStateHintInternal(
     if (allowCachedProof && (await freshPRStateProof(env, route, number, stateHint))) {
       return { ...route, state_hint: stateHint, state_hint_source: "cached" };
     }
-    const response = await fetch(
+    const response = await env.githubEgress.fetch(
       `https://api.github.com/repos/${encodeURIComponent(route.owner)}/${encodeURIComponent(route.repo)}/pulls/${number}`,
       {
         headers: {
@@ -70,7 +71,8 @@ async function verifyPRStateHintInternal(
       return { ...route, state_hint: stateHint, state_hint_source: "live" };
     }
     return route;
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     return route;
   }
 }

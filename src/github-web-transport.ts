@@ -1,8 +1,10 @@
 import { requestTimeoutMs } from "./github-limits";
+import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { HttpError } from "./http";
 import { readBodyCapped } from "./response-body";
 
 export async function fetchWebResponse(
+  env: GitHubEgressEnv,
   url: string,
   headers: Record<string, string>,
   timeoutMs: number,
@@ -10,13 +12,14 @@ export async function fetchWebResponse(
 ): Promise<{ response: Response; url: string } | undefined> {
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await env.githubEgress.fetch(url, {
       method: "GET",
       headers,
       redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
     });
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     return undefined;
   }
   const responseURL = response.url || url;
@@ -45,7 +48,7 @@ export async function fetchWebResponse(
   }
   try {
     await cancelResponseBody(response);
-    const redirected = await fetch(redirectedURL.toString(), {
+    const redirected = await env.githubEgress.fetch(redirectedURL.toString(), {
       method: "GET",
       headers,
       redirect: "manual",
@@ -58,7 +61,8 @@ export async function fetchWebResponse(
       response: redirected,
       url: redirected.url || redirectedURL.toString(),
     };
-  } catch {
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
     return undefined;
   }
 }
@@ -70,10 +74,11 @@ async function cancelResponseBody(response: Response): Promise<void> {
 export async function fetchPublicPage(
   url: string,
   capBytes: number,
-  env: Env,
+  env: GitHubEgressEnv,
   accept = "text/html",
 ): Promise<string | undefined> {
   const fetched = await fetchWebResponse(
+    env,
     url,
     { accept, "user-agent": "octopool" },
     requestTimeoutMs(env),

@@ -1,6 +1,191 @@
 {
   "cases": [
     {
+      "name": "reject nested rule array after a brace string",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[[\"{\",{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]]",
+      "error": true
+    },
+    {
+      "name": "reject rule array after escaped quote and brace",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[\"\\\\\\\"{\",{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]",
+      "error": true
+    },
+    {
+      "name": "reject rule array after escaped backslash and brace",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[\"\\\\{\",{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]",
+      "error": true
+    },
+    {
+      "name": "reject top-level rule array after a brace string",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[\"{\",{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]",
+      "error": true
+    },
+    {
+      "name": "reject nested rule arrays after quoted delimiters",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"],[\"}\",[[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"],{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]]]",
+      "error": true
+    },
+    {
+      "name": "reject rule array after objects and escaped strings",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[{\"note\":\"}\"},\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\",{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]",
+      "error": true
+    },
+    {
+      "name": "reject rule arrays nested in object properties",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "{\"notes\":[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"],\"nested\":[{\"note\":\"[\"},[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"],{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]}",
+      "error": true
+    },
+    {
+      "name": "reject adjacent array then rule object",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"]\n{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}",
+      "error": true
+    },
+    {
+      "name": "reject adjacent object then rule array",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "{\"notes\":[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"]}\n[\"{\",{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]",
+      "error": true
+    },
+    {
+      "name": "reject fenced nested arrays after escaped strings",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "Example:\n```json\n[\n  [\n    \"{\",\n    \"}\",\n    \"[\",\n    \"]\",\n    \"\\\"{\",\n    \"\\\\\\\"}\",\n    \"\\\\\",\n    \"\\\\\\\\\",\n    \"\\\\u007b\"\n  ],\n  [\n    \"{\",\n    \"}\",\n    \"[\",\n    \"]\",\n    \"\\\"{\",\n    \"\\\\\\\"}\",\n    \"\\\\\",\n    \"\\\\\\\\\",\n    \"\\\\u007b\",\n    {\n      \"pattern\": \"\\\\bcobalt-mint\\\\b\",\n      \"replacement\": \"public\"\n    }\n  ]\n]\n```\nEnd.",
+      "error": true
+    },
+    {
+      "name": "safe arrays preserve quoted delimiters and rewrite prose",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\",[\"Discuss cobalt-mint.\",{\"pattern\":\"other\",\"replacement\":\"safe\"}]]",
+      "output": "[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\",[\"Discuss public.\",{\"pattern\":\"other\",\"replacement\":\"safe\"}]]"
+    },
+    {
+      "name": "safe adjacent containers retain string boundaries",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "{\"notes\":[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"]}\n[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\",\"cobalt-mint\"]",
+      "output": "{\"notes\":[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\"]}\n[\"{\",\"}\",\"[\",\"]\",\"\\\"{\",\"\\\\\\\"}\",\"\\\\\",\"\\\\\\\\\",\"\\\\u007b\",\"public\"]"
+    },
+    {
+      "name": "ordinary bracket and quote prose still rewrites",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "Discuss [braces \"{\", quotes \"\\\\\"] and cobalt-mint.",
+      "output": "Discuss [braces \"{\", quotes \"\\\\\"] and public."
+    },
+    {
+      "name": "reject copied compact policy",
+      "rules": [{ "pattern": "\\bcobalt-mint\\b", "replacement": "public" }],
+      "input": "{\"schema_version\":1,\"rules\":[{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}]}",
+      "error": true
+    },
+    {
+      "name": "reject pretty fenced policy with unicode JSON escapes",
+      "rules": [{ "pattern": "\\bcobalt-mint\\b", "replacement": "public" }],
+      "input": "Example:\n```json\n{\n  \"schema_version\": 1,\n  \"rules\": [{\"patt\\u0065rn\": \"\\u005cbcobalt-mint\\u005cb\", \"replacement\": \"public\"}]\n}\n```\nEnd.",
+      "error": true
+    },
+    {
+      "name": "reject active rule with different replacement",
+      "rules": [{ "pattern": "\\bcobalt-mint\\b", "replacement": "public" }],
+      "input": "~~~json\n[{\"replacement\":\"other\",\"pattern\":\"\\\\bcobalt-mint\\\\b\"}]\n~~~",
+      "error": true
+    },
+    {
+      "name": "ordinary pattern prose still rewrites",
+      "rules": [{ "pattern": "cobalt-mint", "replacement": "public" }],
+      "input": "Discuss cobalt-mint; it is a pattern in this prose.",
+      "output": "Discuss public; it is a pattern in this prose."
+    },
+    {
+      "name": "pattern prose is not JSON material",
+      "rules": [{ "pattern": "\\bcobalt-mint\\b", "replacement": "public" }],
+      "input": "The expression \\bcobalt-mint\\b is documented here.",
+      "output": "The expression \\bcobalt-mint\\b is documented here."
+    },
+    {
+      "name": "unrelated rule stays ordinary content",
+      "rules": [{ "pattern": "\\bcobalt-mint\\b", "replacement": "public" }],
+      "input": "{\"pattern\":\"other\",\"replacement\":\"cobalt-mint\"}",
+      "output": "{\"pattern\":\"other\",\"replacement\":\"public\"}"
+    },
+    {
+      "name": "empty policy preserves rule material",
+      "rules": [],
+      "input": "{\"pattern\":\"cobalt-mint\",\"replacement\":\"public\"}",
+      "output": "{\"pattern\":\"cobalt-mint\",\"replacement\":\"public\"}"
+    },
+    {
       "name": "synthetic literal",
       "rules": [{ "pattern": "internal-model", "replacement": "gpt-5.6-sol" }],
       "input": "use internal-model",

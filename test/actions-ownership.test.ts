@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { withGitHubEgress } from "../src/github-egress";
 import {
   parseActionsRunHTML,
   parseActionsRunListHTML,
@@ -478,7 +479,11 @@ describe("Actions run ownership", () => {
       headers: { "x-octopool-public-shape": "actions-summary-v1" },
     });
     expect(
-      await callGitHubWeb({} as Env, request, classifyRoute(request, defaultPolicy("openclaw"))),
+      await callGitHubWeb(
+        withGitHubEgress({} as Env, []),
+        request,
+        classifyRoute(request, defaultPolicy("openclaw")),
+      ),
     ).toMatchObject({ backend: "github", body: exact });
   });
 
@@ -506,7 +511,11 @@ describe("Actions run ownership", () => {
         headers: { "x-octopool-public-shape": "actions-summary-v1" },
       });
       expect(
-        await callGitHubWeb({} as Env, request, classifyRoute(request, defaultPolicy("openclaw"))),
+        await callGitHubWeb(
+          withGitHubEgress({} as Env, []),
+          request,
+          classifyRoute(request, defaultPolicy("openclaw")),
+        ),
       ).toMatchObject({ backend: "github", body: exact });
     },
   );
@@ -545,5 +554,9 @@ async function readRun(id: number, attempt?: number) {
     path: `/repos/openclaw/Peekaboo/actions/runs/${id}${attempt === undefined ? "" : `/attempts/${attempt}`}`,
     headers: { "x-octopool-public-shape": "actions-summary-v1" },
   });
-  return callGitHubWeb({} as Env, request, classifyRoute(request, defaultPolicy("openclaw")));
+  return callGitHubWeb(
+    withGitHubEgress({} as Env, []),
+    request,
+    classifyRoute(request, defaultPolicy("openclaw")),
+  );
 }

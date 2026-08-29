@@ -19,13 +19,14 @@ import {
 } from "./github-html";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { fetchPublicPage } from "./github-web-transport";
+import type { GitHubEgressEnv } from "./github-egress";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
 const MAX_PUBLIC_JOB_PAGES = 25;
 
 export function actionsPageRequest(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -54,7 +55,7 @@ export function actionsPageRequest(
 }
 
 function actionsRunListRequest(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -107,7 +108,7 @@ function actionsRunListRequest(
 }
 
 function actionsRunRequest(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -146,7 +147,7 @@ function actionsRunRequest(
 }
 
 function actionsRunJobsRequest(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -226,7 +227,7 @@ function actionsJobsQuery(
 }
 
 async function enrichActionsRun(
-  env: Env,
+  env: GitHubEgressEnv,
   route: RouteInfo,
   run: Record<string, unknown>,
 ): Promise<Record<string, unknown> | undefined> {
@@ -261,7 +262,7 @@ async function enrichActionsRun(
 }
 
 async function completeActionsRunSHA(
-  env: Env,
+  env: GitHubEgressEnv,
   route: RouteInfo,
   run: Record<string, unknown>,
 ): Promise<Record<string, unknown> | undefined> {

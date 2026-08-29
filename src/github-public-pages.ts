@@ -21,13 +21,14 @@ import {
 } from "./github-html";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { fetchPublicPage } from "./github-web-transport";
+import type { GitHubEgressEnv } from "./github-egress";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
 const MAX_PUBLIC_WORKFLOW_PAGES = 10;
 
 export function summaryPageRequest(
-  env: Env,
+  env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -146,7 +147,7 @@ export function summaryPageRequest(
 }
 
 async function completeWorkflowList(
-  env: Env,
+  env: GitHubEgressEnv,
   route: RouteInfo,
   html: string,
 ): Promise<Record<string, unknown>[] | undefined> {

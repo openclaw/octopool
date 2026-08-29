@@ -228,3 +228,25 @@ Server rules precede local rules; identical entries deduplicate, conflicting rep
 for the same pattern fail, and merged limits may not silently discard rules. Local rules
 cannot weaken the downloaded policy. See [CLI](cli.md) for supported publication commands
 and [Operations](operations.md#activating-string-protection) for rollout and failure behavior.
+
+Supported CLI submissions reject recognizable active rule JSON even when a regex does
+not match its own escaped source. Detection recognizes complete objects with exactly string
+`pattern` and `replacement` fields and an effective active pattern, regardless of the
+replacement. Copies, JSON whitespace/Unicode escapes, rule arrays, and ordinary fenced
+Markdown snippets are covered in inline, file, stdin, and decoded REST content. Ordinary
+prose still rewrites normally. This bounded check is not arbitrary Markdown/Unicode
+deobfuscation, malformed-JSON recovery, encoded-file inspection, or semantic DLP; keep
+policy files private and use the dedicated authenticated admin import path.
+
+Each relay request owns a frozen transport context with its checked policy snapshot;
+there is no global mutable policy or stale policy fallback. Canonical outgoing URLs and
+noncredential headers are checked after URL parsing and header normalization, including
+repository visibility, PR-state, Actions metadata/page/patch probes, pagination, Git/raw/web
+transports, and followed redirects. Relay-triggered membership refreshes and App token
+exchanges use the same transport; credential ownership does not change. The coordinator
+only coordinates leases/cache fills and never fetches GitHub or receives the policy.
+Policy denials cannot become stale-cache successes or local fallbacks. Literal path
+TAB/LF/CR is rejected even with empty rules; safe empty-policy requests otherwise retain
+legacy behavior. Automatic API redirects are disabled; existing allowlisted web and log
+redirects are checked individually before following them. Login/admin authentication
+outside the relay remains a separate trust boundary.
