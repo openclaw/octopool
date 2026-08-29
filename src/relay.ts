@@ -490,6 +490,7 @@ async function attemptStaleRelayCacheRevalidation(
 async function staleRevalidationCandidates(state: ActiveRelay): Promise<RevalidationCandidate[]> {
   const candidates: RevalidationCandidate[] = [];
   for (const candidate of staleCacheCandidates(state)) {
+    // Age bounds restrict serving; old validators can still confirm the body live.
     const cached = await readStaleGitHubCache(state.env, candidate.cacheKey, state.route);
     if (cached === undefined) {
       continue;
@@ -997,7 +998,12 @@ async function serveStaleRelayCache(
     return undefined;
   }
   for (const candidate of staleCacheCandidates(state)) {
-    const cached = await readStaleGitHubCache(state.env, candidate.cacheKey, state.route);
+    const cached = await readStaleGitHubCache(
+      state.env,
+      candidate.cacheKey,
+      state.route,
+      state.maxAgeSeconds,
+    );
     if (
       cached === undefined ||
       !(await cachedResponseAvailable(

@@ -12,88 +12,110 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end cache revalidation", () => {
-  it("refreshes an anonymous API entry on 304 with stored body and state-derived TTL", async () => {
-    await seedPool();
-    let apiCalls = 0;
-    const upstream = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
-      expect(bearer(request)).toBeUndefined();
-      expect(request.url).toBe(`https://api.github.com${RUN_PATH}`);
-      apiCalls++;
-      if (request.headers.get("if-none-match") === '"run-v1"') {
-        return new Response(null, { status: 304, headers: apiHeaders('"run-v1"') });
-      }
-      return jsonResponse(
-        { id: 123, status: "in_progress", conclusion: null },
-        200,
-        apiHeaders('"run-v1"'),
-      );
-    });
-    vi.stubGlobal("fetch", upstream);
-
-    await relay(RUN_PATH);
-    await expireCacheEntry("run_view");
-    const response = await relay(RUN_PATH);
-
-    expect(await response.json<RelayEnvelope>()).toMatchObject({
-      body: { id: 123, status: "in_progress" },
-      relay: { cache: "hit", route_kind: "run_view" },
-    });
-    expect(apiCalls).toBe(2);
-    expect(
-      await env.DB.prepare(
-        `SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl
-         FROM github_cache_entries WHERE route_kind = 'run_view'`,
-      ).first(),
-    ).toEqual({ ttl: 60 });
-    expect(
-      await env.DB.prepare(
-        "SELECT cache_status, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
-      ).first(),
-    ).toEqual({ cache_status: "hit", fallback_reason: "cache_revalidated" });
-  });
-
-  it("stores a replacement response when conditional revalidation returns 200", async () => {
-    await seedPool();
-    let apiCalls = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) => {
+  it.each([undefined, 0, 20])(
+    "refreshes an anonymous API entry on 304 with max-age=%s",
+    async (maxAge) => {
+      await seedPool();
+      let apiCalls = 0;
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
+        expect(bearer(request)).toBeUndefined();
         expect(request.url).toBe(`https://api.github.com${RUN_PATH}`);
         apiCalls++;
         if (request.headers.get("if-none-match") === '"run-v1"') {
-          return jsonResponse(
-            { id: 123, status: "completed", conclusion: "success" },
-            200,
-            apiHeaders('"run-v2"'),
-          );
+          return new Response(null, { status: 304, headers: apiHeaders('"run-v1"') });
         }
         return jsonResponse(
           { id: 123, status: "in_progress", conclusion: null },
           200,
           apiHeaders('"run-v1"'),
         );
-      }),
-    );
+      });
+      vi.stubGlobal("fetch", upstream);
 
-    await relay(RUN_PATH);
-    await expireCacheEntry("run_view");
-    const response = await relay(RUN_PATH);
+      await relay(RUN_PATH);
+      await expireCacheEntry("run_view");
+      const response = await relay(RUN_PATH, undefined, {
+        headers: maxAge === undefined ? {} : { "cache-control": `max-age=${maxAge}` },
+      });
 
-    expect(await response.json<RelayEnvelope>()).toMatchObject({
-      body: { id: 123, status: "completed" },
-      relay: { cache: "miss", route_kind: "run_view" },
-    });
-    expect(apiCalls).toBe(2);
-    expect(
-      await env.DB.prepare(
-        `SELECT json_extract(body_json, '$.status') AS status,
+      expect(await response.json<RelayEnvelope>()).toMatchObject({
+        body: { id: 123, status: "in_progress" },
+        relay: { cache: "hit", route_kind: "run_view" },
+      });
+      expect(apiCalls).toBe(2);
+      expect(
+        await env.DB.prepare(
+          `SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl
+         FROM github_cache_entries WHERE route_kind = 'run_view'`,
+        ).first(),
+      ).toEqual({ ttl: 60 });
+      expect(
+        await env.DB.prepare(
+          "SELECT cache_status, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+        ).first(),
+      ).toEqual({ cache_status: "hit", fallback_reason: "cache_revalidated" });
+      const shared = await relay(RUN_PATH);
+      expect(await shared.json<RelayEnvelope>()).toMatchObject({
+        body: { id: 123, status: "in_progress" },
+        relay: { cache: "hit" },
+      });
+      expect(apiCalls).toBe(2);
+    },
+  );
+
+  it.each([undefined, 0, 20])(
+    "stores a conditional 200 replacement with max-age=%s",
+    async (maxAge) => {
+      await seedPool();
+      let apiCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          expect(request.url).toBe(`https://api.github.com${RUN_PATH}`);
+          apiCalls++;
+          if (request.headers.get("if-none-match") === '"run-v1"') {
+            return jsonResponse(
+              { id: 123, status: "completed", conclusion: "success" },
+              200,
+              apiHeaders('"run-v2"'),
+            );
+          }
+          return jsonResponse(
+            { id: 123, status: "in_progress", conclusion: null },
+            200,
+            apiHeaders('"run-v1"'),
+          );
+        }),
+      );
+
+      await relay(RUN_PATH);
+      await expireCacheEntry("run_view");
+      const response = await relay(RUN_PATH, undefined, {
+        headers: maxAge === undefined ? {} : { "cache-control": `max-age=${maxAge}` },
+      });
+
+      expect(await response.json<RelayEnvelope>()).toMatchObject({
+        body: { id: 123, status: "completed" },
+        relay: { cache: "miss", route_kind: "run_view" },
+      });
+      expect(apiCalls).toBe(2);
+      expect(
+        await env.DB.prepare(
+          `SELECT json_extract(body_json, '$.status') AS status,
                 unixepoch(expires_at) - unixepoch(created_at) AS ttl
          FROM github_cache_entries WHERE route_kind = 'run_view'`,
-      ).first(),
-    ).toEqual({ status: "completed", ttl: 60 });
-  });
+        ).first(),
+      ).toEqual({ status: "completed", ttl: 60 });
+      const shared = await relay(RUN_PATH);
+      expect(await shared.json<RelayEnvelope>()).toMatchObject({
+        body: { id: 123, status: "completed" },
+        relay: { cache: "hit" },
+      });
+      expect(apiCalls).toBe(2);
+    },
+  );
 
   it.each([202, 204])(
     "publishes a %i replacement response without a second fill",
@@ -433,7 +455,8 @@ async function expireCacheEntry(routeKind: string): Promise<void> {
   expect(row).not.toBeNull();
   await env.DB.prepare(
     `UPDATE github_cache_entries
-     SET expires_at = datetime('now', '-1 second'),
+     SET created_at = datetime('now', '-180 seconds'),
+         expires_at = datetime('now', '-1 second'),
          stale_expires_at = datetime('now', '+1 hour')
      WHERE cache_key = ?`,
   )

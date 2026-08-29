@@ -19,6 +19,7 @@ describe("github cache policy", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("keys equivalent query and header order identically", async () => {
@@ -267,6 +268,34 @@ describe("github cache policy", () => {
     });
     await expect(readGitHubCache(env, "cache-key", undefined, 15)).resolves.toBeUndefined();
   });
+
+  it.each([
+    { source: "edge", offsetMs: 0 },
+    { source: "shared", offsetMs: 0 },
+    { source: "edge", offsetMs: 1_000 },
+    { source: "shared", offsetMs: 1_000 },
+  ])(
+    "requires revalidation for max-age=0 at $source timestamp offset $offsetMs",
+    async ({ source, offsetMs }) => {
+      const now = Date.parse("2026-08-29T12:00:00Z");
+      vi.spyOn(Date, "now").mockReturnValue(now);
+      const created_at = sqliteUTC(now + offsetMs);
+      const expires_at = sqliteUTC(now + 60_000);
+      const body = { head: { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } };
+      vi.stubGlobal("caches", {
+        default: {
+          match: async () =>
+            source === "edge"
+              ? Response.json({ status: 200, headers: {}, body, created_at, expires_at })
+              : undefined,
+        },
+      });
+      const env = cacheRowEnv({ created_at, expires_at, body_json: JSON.stringify(body) });
+
+      await expect(readGitHubCache(env, "cache-key", undefined, 0)).resolves.toBeUndefined();
+      await expect(readGitHubCache(env, "cache-key")).resolves.toMatchObject({ body });
+    },
+  );
 
   it("falls through a too-old edge entry to a newer D1 fill without evicting it", async () => {
     const edgeEntry = {

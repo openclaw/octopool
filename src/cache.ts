@@ -154,6 +154,10 @@ function withinRequestedMaxAge(cached: CachedGitHubResponse, maxAgeSeconds?: num
   if (maxAgeSeconds === undefined) {
     return true;
   }
+  // A live read must revalidate even a same-time or future-dated cache entry.
+  if (maxAgeSeconds === 0) {
+    return false;
+  }
   const createdAt = parseSQLiteTimestamp(cached.created_at);
   return Number.isFinite(createdAt) && Date.now() - createdAt <= maxAgeSeconds * 1000;
 }
@@ -162,15 +166,14 @@ export async function readStaleGitHubCache(
   env: Env,
   cacheKey: string,
   route: RouteInfo,
+  maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
   const row = await env.DB.prepare(queries.readGitHubCacheAny).bind(cacheKey).first<CacheRow>();
-  if (row === null) {
+  if (row === null || !staleCacheAllowed(row, route)) {
     return undefined;
   }
-  if (!staleCacheAllowed(row, route)) {
-    return undefined;
-  }
-  return cacheRowResponse(row);
+  const cached = cacheRowResponse(row);
+  return cached !== undefined && withinRequestedMaxAge(cached, maxAgeSeconds) ? cached : undefined;
 }
 
 export function staleCacheSeconds(route: RouteInfo, freshTtlSeconds?: number): number {

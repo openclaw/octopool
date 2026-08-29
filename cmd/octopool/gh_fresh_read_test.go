@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -98,5 +101,67 @@ func TestVolatileRouteKindCoversDecisionRoutes(t *testing.T) {
 		if volatileRouteKind(kind) {
 			t.Fatalf("%s should not be treated as volatile", kind)
 		}
+	}
+}
+
+func TestCLIEndToEndCacheFreshnessNotices(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and executes the CLI binary")
+	}
+	bin := buildCLIBinary(t)
+	for _, test := range []struct {
+		name, cache, fresh, quiet string
+		wantNotice                bool
+	}{
+		{"ordinary stale", "stale", "", "", true},
+		{"fresh stale from older relay", "stale", "1", "", true},
+		{"quiet stale", "stale", "1", "1", false},
+		{"ordinary hit", "hit", "", "", true},
+		{"fresh revalidated hit", "hit", "1", "", false},
+		{"fresh miss", "miss", "1", "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {
+				request := decodeCLIRequest(t, w, r)
+				if request == nil {
+					return
+				}
+				headers, _ := request["headers"].(map[string]any)
+				if test.fresh == "1" && headers["cache-control"] != "max-age=0" {
+					t.Errorf("headers = %v, want max-age=0", headers)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(relayEnvelope{
+					Status: 200, Body: json.RawMessage(`{"head":{"sha":"` + head + `"}}`), BodyEncoding: "json",
+					Relay: relayMeta{Cache: test.cache, RouteKind: "pr_view"},
+				}); err != nil {
+					t.Error(err)
+				}
+			})
+			result := runCLI(t, bin, server.URL, map[string]string{
+				"OCTOPOOL_FRESH": test.fresh, "OCTOPOOL_QUIET_CACHE": test.quiet,
+				"OCTOPOOL_NO_FALLBACK": "1",
+			}, "gh", "api", "repos/openclaw/freshness-fixture/pulls/73")
+			if result.err != nil {
+				t.Fatalf("err=%v stderr=%q", result.err, result.stderr)
+			}
+			var body struct {
+				Head struct {
+					SHA string `json:"sha"`
+				} `json:"head"`
+			}
+			if err := json.Unmarshal([]byte(result.stdout), &body); err != nil || body.Head.SHA != head {
+				t.Fatalf("stdout=%q err=%v", result.stdout, err)
+			}
+			if test.wantNotice != strings.Contains(result.stderr, "pr_view served from shared cache") {
+				t.Errorf("notice=%q, want notice=%v", result.stderr, test.wantNotice)
+			}
+			if test.cache == "stale" && test.wantNotice {
+				if !strings.Contains(result.stderr, "not a live read") || strings.Contains(result.stderr, "set OCTOPOOL_FRESH=1") {
+					t.Errorf("stale notice must warn against live decisions without repeating FRESH advice: %q", result.stderr)
+				}
+			}
+		})
 	}
 }

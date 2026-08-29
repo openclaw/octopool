@@ -469,17 +469,22 @@ Three things keep that honest:
 - **Gate fields read live.** `gh pr view --json` reads that include `headRefOid`,
   `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`, or
   `closedAt` send `cache-control: max-age=0` automatically. These are the values callers
-  branch on, so they always come from GitHub. Descriptive fields (`title`, `body`, `labels`,
-  `author`) stay cached.
+  branch on, so they require an upstream fetch or successful conditional revalidation.
+  Descriptive fields (`title`, `body`, `labels`, `author`) stay cached.
 - **Cached decision reads announce themselves.** When a PR, issue, run, or checks route is
   served from the shared cache, the CLI prints one line to stderr naming the route, whether
   it was a hit or a stale serve, and when it refreshes. stdout stays untouched, so `--json`
-  and `--jq` consumers are unaffected. Silence it with `OCTOPOOL_QUIET_CACHE=1`.
+  and `--jq` consumers are unaffected. A stale response warns that it is unsafe for live
+  decisions even under `OCTOPOOL_FRESH=1`; older relays may ignore the requested bound.
+  A normal `hit` under FRESH remains quiet because it may have been live-revalidated.
+  Silence cache notices with `OCTOPOOL_QUIET_CACHE=1`.
 - **Anything can request a live read.** `OCTOPOOL_FRESH=1` applies `max-age=0` at shared
   relay request construction, including top-level `run view` and every jobs hydration
   request. An explicit `cache-control` header retains precedence, including headers
-  passed through `gh api -H`. Ordinary reads retain caching. The relay's existing bounded
-  stale fallback still applies when upstream backends are unavailable.
+  passed through `gh api -H`. Every explicit age bound also applies during outages:
+  `max-age=0` cannot return an unvalidated cached success. If upstream cannot satisfy the
+  bound, the existing typed failure/local-fallback flow applies. Reads without an age
+  bound retain the relay's route-limited stale outage fallback.
 
 Note that `git push` never passes through Octopool, so the relay cannot invalidate a PR
 entry when a branch moves. That is why the gate fields read live rather than relying on
@@ -508,7 +513,8 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_FRESH=1` — default every relayed read to `cache-control: max-age=0`, including
   run metadata and jobs; explicit cache-control headers take precedence. Use it right after
   a `git push` or a merge, when a cached answer could describe the previous state. It can
-  cost API quota; leave it off for ordinary reads. Bounded stale outage fallback is unchanged.
+  cost API quota; leave it off for ordinary reads. Outage fallback cannot exceed the
+  requested age bound.
 - `OCTOPOOL_QUIET_CACHE=1` — suppress the one-line stderr note printed when a
   decision-shaped route (PR/issue/run/checks) is served from the shared cache.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns

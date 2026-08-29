@@ -47,7 +47,7 @@ func volatileRouteKind(kind string) bool {
 // cached answer is indistinguishable from a live one, which is how a stale head
 // SHA or a "still open" merged PR reads as truth.
 func noteCachedRead(envelope relayEnvelope) {
-	if freshReadRequested() || quietCacheNotices() {
+	if quietCacheNotices() || (freshReadRequested() && envelope.Relay.Cache != "stale") {
 		return
 	}
 	if envelope.Relay.Cache != "hit" && envelope.Relay.Cache != "stale" {
@@ -56,12 +56,17 @@ func noteCachedRead(envelope relayEnvelope) {
 	if !volatileRouteKind(envelope.Relay.RouteKind) {
 		return
 	}
+	advice := "set OCTOPOOL_FRESH=1 for a live read"
+	if envelope.Relay.Cache == "stale" {
+		advice = "not a live read; do not use for live decisions"
+	}
 	fmt.Fprintf(
 		os.Stderr,
-		"octopool: %s served from shared cache (%s)%s; set OCTOPOOL_FRESH=1 for a live read\n",
+		"octopool: %s served from shared cache (%s)%s; %s\n",
 		envelope.Relay.RouteKind,
 		envelope.Relay.Cache,
 		cacheExpirySuffix(envelope.Relay.CacheExpiresAt),
+		advice,
 	)
 }
 

@@ -73,11 +73,15 @@ a follower in a cold colo reacquires coordinator ownership and performs one seri
 takeover fill. This can produce one fill per cold colo, but never overlapping ownerless
 upstream requests.
 
-Cacheable requests can instead bound acceptable staleness with a
-`cache-control: max-age=N` header. A fresh entry older than `N` seconds is treated as a
-miss and refetched, and the refill writes through to the shared cache, so concurrent
-bounded-freshness readers coalesce onto one upstream request rather than each bypassing
-the cache. The CLI's `gh pr checks` resolves the PR head SHA this way with `max-age=60`.
+Cacheable requests can bound cache age with a `cache-control: max-age=N` header.
+The bound applies to both fresh hits and outage stale fallback: an older entry cannot
+be served without successful upstream revalidation. `max-age=0` always requires an
+upstream fetch or conditional revalidation, including when a cached timestamp equals
+the current time. Old entries remain eligible for conditional requests; a successful
+`304` confirms and republishes the stored body. Successful refills write through to
+the shared cache. Positive bounds let concurrent readers share an acceptable refill;
+zero-bound readers each require upstream validation. The CLI's `gh pr checks` resolves
+the PR head SHA with `max-age=60`.
 
 ### Token-free GitHub reads
 
@@ -274,8 +278,10 @@ If the eligible token-free and pooled backends are unavailable, depleted, coolin
 or rate-limited, Octopool may serve an expired public cache entry for a short route-specific
 grace window. Mutable CI
 payloads get only minutes; terminal CI payloads get up to a day; PR/issue detail routes
-get up to an hour; immutable-ish commit views can get up to a day. Stale serves still run
-the public-repo guard and active-identity check before returning.
+get up to an hour; immutable-ish commit views can get up to a day. Requests without an
+age bound retain this outage fallback; an explicit bound must also be satisfied.
+Otherwise the existing typed failure/local-fallback flow applies. Stale serves still
+run the public-repo guard and active-identity check before returning.
 
 Cache publication is awaited before returning a miss response, closing the response/write
 race for immediate repeat reads. Concurrent identical misses acquire renewable,
