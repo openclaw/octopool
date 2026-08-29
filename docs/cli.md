@@ -173,6 +173,13 @@ regardless of the other requested fields or whether the relay uses a public page
 Draft status is separate: an open draft has `state: "OPEN"` and `isDraft: true` when
 requested. This conversion happens before field filtering and `--jq`; raw `gh api` REST
 states, PR search states, and human-format `DRAFT` display remain unchanged.
+`gh pr view --json mergeable` likewise returns a JSON enum string before filtering and
+`--jq`: REST `true` becomes `"MERGEABLE"`, `false` becomes `"CONFLICTING"`, and null or
+absent values become `"UNKNOWN"`. This uses only REST `mergeable`, not `mergeable_state`,
+draft/lifecycle status, checks, or merge policy. Raw `gh api` REST reads retain their
+boolean, null, or absent `mergeable` values. `mergeCommit` and `mergeStateStatus` remain
+unsupported and delegate to real `gh`, including when requested alongside `mergeable`;
+`gh pr list --json mergeable` also delegates.
 Run views also support the nested `jobs` field; Octopool composes its job/step metadata from
 the cache, exact API responses, or bounded public GitHub pages.
 `gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request

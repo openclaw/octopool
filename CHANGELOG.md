@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.10 - Unreleased
+
+### Fixes
+
+- Normalize `gh pr view --json mergeable` to `MERGEABLE`, `CONFLICTING`, or `UNKNOWN` before filtering and `--jq`, preserving raw `gh api` REST values and unsupported-field delegation.
+
 ## 0.5.9 - 2026-08-28
 
 ### Changes

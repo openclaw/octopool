@@ -141,6 +141,7 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 		return err
 	}
 	normalizePRViewState(pr)
+	normalizePRViewMergeable(pr)
 	filesHeadSHA := ""
 	for _, field := range opts.json {
 		switch field {
@@ -218,6 +219,20 @@ func normalizePRViewState(pr map[string]any) {
 		state = "OPEN"
 	}
 	pr["state"] = state
+}
+
+func normalizePRViewMergeable(pr map[string]any) {
+	if pr == nil {
+		return
+	}
+	switch pr["mergeable"] {
+	case true:
+		pr["mergeable"] = "MERGEABLE"
+	case false:
+		pr["mergeable"] = "CONFLICTING"
+	default:
+		pr["mergeable"] = "UNKNOWN"
+	}
 }
 
 func prViewHeaders(opts ghTopOptions) map[string]string {
