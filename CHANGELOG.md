@@ -2,6 +2,10 @@
 
 ## 0.5.11 - Unreleased
 
+### Fixes
+
+- Honor requested cache-age bounds during upstream outages so live PR reads cannot silently return stale heads, preserve conditional revalidation and ordinary stale availability, and warn about stale responses even under OCTOPOOL_FRESH=1.
+
 ## 0.5.10 - 2026-08-28
 
 ### Fixes
