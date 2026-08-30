@@ -197,6 +197,12 @@ regardless of the other requested fields or whether the relay uses a public page
 Draft status is separate: an open draft has `state: "OPEN"` and `isDraft: true` when
 requested. This conversion happens before field filtering and `--jq`; raw `gh api` REST
 states, PR search states, and human-format `DRAFT` display remain unchanged.
+`gh issue view --json state` and `gh issue list --json state` return native `OPEN` or
+`CLOSED` values across supported field subsets, including REST and public-page/cache
+payloads. This conversion happens before field filtering and `--jq`, without changing
+the cached representation. Raw `gh api` REST issue states remain lowercase; issue search
+states and human-format output remain unchanged. Unsupported issue fields such as
+`comments`, `closed`, and `stateReason` still delegate the entire request to real `gh`.
 `gh pr view --json mergeable` likewise returns a JSON enum string before filtering and
 `--jq`: REST `true` becomes `"MERGEABLE"`, `false` becomes `"CONFLICTING"`, and null or
 absent values become `"UNKNOWN"`. This uses only REST `mergeable`, not `mergeable_state`,

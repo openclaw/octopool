@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -40,11 +41,7 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 		if !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
-			method:  "GET",
-			path:    repoPath(repo, "issues", number),
-			headers: publicShapeHeaders(opts, supportedPublicIssueViewFields, publicShapeIssueSummary),
-		}, opts, fieldMapIssue))
+		return ghCompleted(relayIssueView(ctx, stdout, repo, number, opts))
 	case "list":
 		repo, ok := repoOnly(opts)
 		if !ok || limitOverOnePage(opts) || hasCurrentUserFilter(opts) {
@@ -74,6 +71,50 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 		}, opts))
 	default:
 		return ghDelegated()
+	}
+}
+
+func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
+	request := ghAPIRequest{
+		method:  "GET",
+		path:    repoPath(repo, "issues", number),
+		headers: publicShapeHeaders(opts, supportedPublicIssueViewFields, publicShapeIssueSummary),
+	}
+	if !safeRelayRequest(request) {
+		return errors.New("internal error: top-level gh command built an unsupported relay request")
+	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	envelope, err := client.do(ctx, request)
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	var issue map[string]any
+	if err := json.Unmarshal(body, &issue); err != nil {
+		return err
+	}
+	normalizeIssueJSONState(issue)
+	raw, err := json.Marshal(issue)
+	if err != nil {
+		return err
+	}
+	filtered, err := filterJSONFields(raw, opts.json, fieldMapIssue)
+	if err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, filtered, opts.jq)
+}
+
+func normalizeIssueJSONState(issue map[string]any) {
+	// Normalize only the decoded CLI copy; REST and public-page cache values stay intact.
+	if state, ok := issue["state"].(string); ok {
+		issue["state"] = strings.ToUpper(state)
 	}
 }
 
@@ -120,6 +161,9 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 	}
 	if len(opts.json) == 0 {
 		return renderHumanIssueList(stdout, filtered)
+	}
+	for _, issue := range filtered {
+		normalizeIssueJSONState(issue)
 	}
 	raw, err := json.Marshal(filtered)
 	if err != nil {
