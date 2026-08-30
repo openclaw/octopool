@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PUBLIC_SHAPES } from "../src/github-public-shapes";
-import { ROUTES } from "../src/route-manifest";
+import { isNativeReadRoute, ROUTES } from "../src/route-manifest";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,11 +29,22 @@ describe("token-free endpoint documentation", () => {
     );
     const implemented = new Set(
       ROUTES.filter(
-        (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
+        (route) => route.capabilities.publicApi || route.capabilities.fallback === "github_public",
       ).map((route) => normalizeRoute(route.template)),
     );
 
     expect([...documented].sort()).toEqual([...implemented].sort());
+  });
+
+  it("documents native-only paths separately from anonymous routes", () => {
+    const relay = readFileSync(path.join(root, "docs/relay.md"), "utf8");
+    const tokenFree = readFileSync(path.join(root, "docs/token-free.md"), "utf8");
+    const native = ROUTES.filter(isNativeReadRoute).map(
+      (route) => `GET ${normalizeRoute(route.template)}`,
+    );
+    expect(section(relay, "native-read-routes").match(/^GET (\/\S+)$/gm)).toEqual(native);
+    for (const path of native)
+      expect(section(tokenFree, "token-free-api-routes")).not.toContain(path);
   });
 
   it("documents every no-API-quota transport family", () => {

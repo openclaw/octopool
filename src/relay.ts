@@ -37,7 +37,7 @@ import {
   ensurePublicGitHubRepo,
   recordPublicGitHubRepo,
 } from "./public-repos";
-import { capabilitiesForRouteKind } from "./route-manifest";
+import { capabilitiesForRouteKind, isNativeReadRoute } from "./route-manifest";
 import {
   exactRunListRequest,
   filterRunListSuperset,
@@ -247,6 +247,12 @@ async function prepareRelay(
 }
 
 async function executeRelay(state: ActiveRelay): Promise<Response> {
+  // Caller-sensitive reads hand off before cache, public-repo probes, or any backend.
+  if (isNativeReadRoute({ capabilities: capabilitiesForRouteKind(state.route.kind) })) {
+    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+      reason: "local_credentials_required",
+    });
+  }
   if (state.route.logs && !hasConditionalRequestHeaders(state.request)) {
     const terminalProof = await terminalLogCacheProof(
       state.env,

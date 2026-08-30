@@ -99,6 +99,11 @@ The installer pins the real GitHub CLI path, creates an isolated shim symlink, u
 
 Full command surface, fallback rules, and discovery details: [docs.octopool.dev/cli](https://docs.octopool.dev/cli.html).
 
+Exact repository branch-protection, ruleset list/detail, and applicable branch-rules GETs
+are supported through guarded native-`gh` fallback. They retain the user's GitHub permissions
+and response fields, never pooled credentials or shared cache. See the
+[protection-read routes](docs/relay.md#native-protection-reads).
+
 ## Deploy it (Cloudflare)
 
 Octopool is built to be self-deployed per org. You'll need:

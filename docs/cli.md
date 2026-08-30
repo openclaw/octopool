@@ -127,6 +127,30 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 # 85341
 ```
 
+Repository protection reads use guarded native fallback, retaining your existing GitHub
+permissions and exact authenticated response shape. No protection response uses pooled
+credentials or shared cache, even for a public repository:
+
+```sh
+octopool gh api repos/openclaw/openclaw/rules/branches/main --jq type
+octopool gh api repos/openclaw/openclaw/rulesets --paginate
+octopool gh api 'repos/openclaw/openclaw/rulesets/42?includes_parents=true'
+octopool gh api repos/openclaw/openclaw/branches/feature%2Ftopic/protection
+```
+
+The [exact GET allowlist](relay.md#native-protection-reads) also covers documented
+protection subresources. Supply literal owner/repo/branch values; encode a slash within
+a branch as `%2F`. Decoded structural policy checks still apply. The Worker returns
+`fallback_local` / `local_credentials_required` after its policy checks, and the CLI
+fetches authoritative policy again before native dispatch. String-rewrite policy denial or
+unavailability never permits fallback; `OCTOPOOL_NO_FALLBACK=1` rejects the handoff. This is read capability,
+not a determination that a PR meets or fails a review requirement.
+
+With active rules, these exact reads and their supported output flags use strict API
+preparation, including GitHub.com host pinning. Safe unmodeled routes or flags retain the
+[best-effort native filtering](#outbound-string-rewrite-protection) described below; they do not
+become modeled protection reads merely because their path is similar.
+
 The exact `gh api user --jq .login` identity probe first validates the saved caller token
 against Octopool's pool-health endpoint, then prints the saved login without spending GitHub
 API or pooled-identity quota. Token/URL overrides, other projections, headers, queries, and

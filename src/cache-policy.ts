@@ -173,6 +173,11 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
     case "check_run_annotations":
     case "rate_limit":
       return staticCache(60);
+    case "branch_protection":
+    case "repo_ruleset_list":
+    case "repo_ruleset_view":
+    case "branch_rules":
+      return staticCache(0);
     default:
       return assertNever(kind);
   }
@@ -302,6 +307,11 @@ function staleCacheSeconds(kind: RouteKind): number {
     case "search_repositories":
     case "rate_limit":
       return 1_800;
+    case "branch_protection":
+    case "repo_ruleset_list":
+    case "repo_ruleset_view":
+    case "branch_rules":
+      return 0;
     default:
       return assertNever(kind);
   }

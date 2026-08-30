@@ -119,6 +119,20 @@ function localRoute<const Kind extends string>(
   return route(template, kind, resource, { ...options, fallback: "local" });
 }
 
+// These exact reads retain the caller's GitHub permissions and response shape.
+// Unlike localRoute, they must never try an anonymous backend or shared cache.
+function nativeReadRoute<const Kind extends string>(template: string, kind: Kind): RouteRule<Kind> {
+  return route(template, kind, "core", {
+    publicApi: false,
+    fallback: "local",
+    cacheable: false,
+  });
+}
+
+export function isNativeReadRoute(route: { capabilities: RouteCapabilities }): boolean {
+  return !route.capabilities.publicApi && route.capabilities.fallback === "local";
+}
+
 function normalizeRouteKeyTemplate(template: string): string {
   return template
     .replace(/^\/users\/\{login\}/, "/users/:login")
@@ -280,6 +294,46 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/milestones/{id}", "milestone_view"),
   route("/repos/{owner}/{repo}/branches", "branch_list"),
   route("/repos/{owner}/{repo}/branches/{branch}", "branch_view"),
+  nativeReadRoute("/repos/{owner}/{repo}/branches/{branch}/protection", "branch_protection"),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/required_signatures",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams",
+    "branch_protection",
+  ),
+  nativeReadRoute(
+    "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users",
+    "branch_protection",
+  ),
+  nativeReadRoute("/repos/{owner}/{repo}/rulesets", "repo_ruleset_list"),
+  nativeReadRoute("/repos/{owner}/{repo}/rulesets/{id}", "repo_ruleset_view"),
+  nativeReadRoute("/repos/{owner}/{repo}/rules/branches/{branch}", "branch_rules"),
   route("/repos/{owner}/{repo}/tags", "tag_list"),
   route("/repos/{owner}/{repo}/languages", "repo_languages"),
   route("/repos/{owner}/{repo}/contributors", "repo_contributors"),

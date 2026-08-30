@@ -4,6 +4,56 @@ import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/polic
 describe("route policy", () => {
   const policy = defaultPolicy("openclaw");
 
+  it("recognizes exact native protection reads without opening neighboring routes", () => {
+    for (const path of [
+      "/repos/openclaw/octopool/branches/feature%2Ftopic/protection",
+      "/repos/openclaw/octopool/rules/branches/feature%2Ftopic",
+    ]) {
+      expect(
+        classifyRoute(validateRelayRequest({ pool: "maintainers", method: "GET", path }), policy),
+      ).toMatchObject({ cacheable: false, owner: "openclaw", repo: "octopool" });
+    }
+    for (const path of [
+      "/repos/openclaw/octopool/rulesets/42/history",
+      "/repos/openclaw/octopool/rulesets/42x",
+      "/repos/openclaw/octopool/rulesets-extra",
+      "/repos/openclaw/octopool/rules/branches/main/extra",
+      "/repos/openclaw/octopool/branches/main/protection/unknown",
+      "/repos/openclaw/octopool/branches/main/protection/restrictions/users/42",
+      "/repos/openclaw/octopool/branches/main/protection/dismissal_restrictions",
+      "/orgs/openclaw/rulesets",
+      "/graphql",
+    ]) {
+      expect(() =>
+        classifyRoute(validateRelayRequest({ pool: "maintainers", method: "GET", path }), policy),
+      ).toThrow("Route is not enabled");
+    }
+  });
+
+  it("rejects unsafe native branch encodings even with no string rules", () => {
+    for (const branch of [
+      "feature%252Ftopic",
+      "feature%2F..%2Ftopic",
+      "feature%2F%2Ftopic",
+      "%2Ftopic",
+      "topic%2F",
+      "%7Bbranch%7D",
+      ":branch",
+      "topic%00",
+      "topic%0A",
+      "topic%09",
+      "topic%ZZ",
+      "*",
+    ]) {
+      const request = {
+        pool: "maintainers",
+        method: "GET",
+        path: `/repos/openclaw/octopool/rules/branches/${branch}`,
+      };
+      expect(() => classifyRoute(validateRelayRequest(request), policy)).toThrow();
+    }
+  });
+
   it("discards legacy advisory fields at the validation boundary", () => {
     expect(
       validateRelayRequest({

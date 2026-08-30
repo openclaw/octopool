@@ -43,12 +43,38 @@ func (policy stringRewritePolicy) guardRequest(request ghAPIRequest) error {
 	if err := policy.checkStructural(request.path); err != nil {
 		return err
 	}
+	branch := ""
+	if request.method == "GET" {
+		for _, pattern := range nativeReadBranchPathPatterns {
+			if match := pattern.FindStringSubmatch(request.path); match != nil {
+				branch = match[1]
+				break
+			}
+		}
+	}
 	for _, segment := range strings.Split(request.path, "/") {
 		if err := policy.checkStructural(segment); err != nil {
 			return err
 		}
 		decoded, err := url.PathUnescape(segment)
-		if err != nil || decoded == "." || decoded == ".." || strings.ContainsAny(decoded, "/?#%") {
+		if err != nil || decoded == "." || decoded == ".." || strings.ContainsAny(decoded, "?#%") {
+			return errRewriteBlocked
+		}
+		// A slash is data only in the generated native-read branch parameter.
+		// Inspect every decoded component as well as the whole path and parameter.
+		if branch != "" && segment == branch {
+			if strings.ContainsAny(decoded, "{}:*[]\t") {
+				return errRewriteBlocked
+			}
+			for _, part := range strings.Split(decoded, "/") {
+				if part == "" || part == "." || part == ".." {
+					return errRewriteBlocked
+				}
+				if err := policy.checkStructural(part); err != nil {
+					return err
+				}
+			}
+		} else if strings.Contains(decoded, "/") {
 			return errRewriteBlocked
 		}
 	}

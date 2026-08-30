@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { PUBLIC_SHAPES } from "../src/github-public-shapes.ts";
-import { ROUTES } from "../src/route-manifest.ts";
+import { isNativeReadRoute, ROUTES } from "../src/route-manifest.ts";
 
 const outputPath = new URL("../cmd/octopool/routes_generated.go", import.meta.url);
 const seenPatterns = new Set();
@@ -34,14 +34,35 @@ const lines = [
   ...patterns.map((pattern) => `\tregexp.MustCompile(\`${pattern}\`),`),
   "}",
   "",
+  "// Only these manifest-owned native reads allow an encoded slash inside a branch parameter.",
+  "var nativeReadBranchPathPatterns = []*regexp.Regexp{",
+  ...ROUTES.filter((route) => isNativeReadRoute(route) && route.template.includes("{branch}"))
+    .map((route) =>
+      route.pattern.source
+        .replaceAll("\\/", "/")
+        .replaceAll(/\(\?<([^>]+)>/g, (_token, name) => (name === "branch" ? "(" : "(?:")),
+    )
+    .map((pattern) => `\tregexp.MustCompile(\`${pattern}\`),`),
+  "}",
+  "",
 ];
 
+const [relayDocsPath, relayDocs] = await renderSection(
+  new URL("../docs/relay.md", import.meta.url),
+  "native-read-routes",
+  [
+    "```text",
+    ...ROUTES.filter(isNativeReadRoute).map((route) => `GET ${docsTemplate(route.template)}`),
+    "```",
+  ].join("\n"),
+);
 const outputs = [
   [outputPath, lines.join("\n")],
   await renderSection(
-    new URL("../docs/relay.md", import.meta.url),
+    relayDocsPath,
     "supported-route-kinds",
     [...new Set(ROUTES.map((route) => route.kind))].map((kind) => `- \`${kind}\``).join("\n"),
+    relayDocs,
   ),
   await renderSection(
     new URL("../docs/token-free.md", import.meta.url),
@@ -49,7 +70,7 @@ const outputs = [
     [
       "```text",
       ...ROUTES.filter(
-        (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
+        (route) => route.capabilities.publicApi || route.capabilities.fallback === "github_public",
       ).map((route) => `GET ${docsTemplate(route.template)}`),
       "```",
     ].join("\n"),
@@ -58,10 +79,10 @@ const outputs = [
 
 await Promise.all(outputs.map(([file, output]) => writeFile(file, output)));
 
-async function renderSection(file, name, content) {
+async function renderSection(file, name, content, source) {
   const start = `<!-- ${name}:start -->`;
   const end = `<!-- ${name}:end -->`;
-  const input = await readFile(file, "utf8");
+  const input = source ?? (await readFile(file, "utf8"));
   const startIndex = input.indexOf(start);
   const endIndex = input.indexOf(end);
   if (startIndex === -1 || endIndex <= startIndex) {

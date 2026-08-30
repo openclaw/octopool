@@ -201,6 +201,10 @@ following read-only shapes are enabled. A safe CLI-shaped request outside this s
 - `milestone_view`
 - `branch_list`
 - `branch_view`
+- `branch_protection`
+- `repo_ruleset_list`
+- `repo_ruleset_view`
+- `branch_rules`
 - `tag_list`
 - `repo_languages`
 - `repo_contributors`
@@ -246,6 +250,54 @@ for seven days only after the owning run completes, and is gated by the pool's `
 policy. Cached logs get at most a one-hour zero-contact window before an authenticated
 existence probe honors upstream deletion; active-run and failed-preflight logs retain the
 direct-fetch bypass.
+
+### Native protection reads
+
+The following exact GET routes are recognized by the canonical manifest but always return
+`424 fallback_local` with reason `local_credentials_required`. After caller authentication
+and fresh authoritative string-rewrite and pool-policy checks, the Worker hands them off
+before cache reads/writes, repository visibility probes, anonymous requests, or pooled
+credentials. The CLI checks current policy again before dispatching the user's native `gh`.
+`OCTOPOOL_NO_FALLBACK=1` therefore refuses these reads.
+
+<!-- native-read-routes:start -->
+
+```text
+GET /repos/{owner}/{repo}/branches/{branch}/protection
+GET /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins
+GET /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks
+GET /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks/contexts
+GET /repos/{owner}/{repo}/branches/{branch}/protection/required_pull_request_reviews
+GET /repos/{owner}/{repo}/branches/{branch}/protection/required_signatures
+GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions
+GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/apps
+GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/teams
+GET /repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users
+GET /repos/{owner}/{repo}/rulesets
+GET /repos/{owner}/{repo}/rulesets/{id}
+GET /repos/{owner}/{repo}/rules/branches/{branch}
+```
+
+<!-- native-read-routes:end -->
+
+GitHub's [branch-protection API](https://docs.github.com/en/rest/branches/branch-protection)
+requires Administration repository read permission, including these subresources.
+The [rules API](https://docs.github.com/en/rest/repos/rules) permits anonymous public reads
+and otherwise uses Metadata read permission, but ruleset details include `bypass_actors`
+only when the caller has write access to the ruleset. All these routes conservatively use
+the caller's native credentials, even for public repositories, preserving complete
+authenticated response semantics. This does not grant permissions or change GitHub's errors.
+Applicable branch rules include active rules from repository and higher levels; they exclude
+disabled/evaluate rulesets and do not require an existing branch. They are not a substitute
+for reading classic branch protection.
+
+Only the listed paths join the strict read allowlist: no org/admin routes, rule suites/history,
+arbitrary protection suffixes, or mutations. Branch names remain percent-encoded in the native
+request; strict preparation accepts encoded slashes only in these manifest-owned branch
+parameters after decoded structural checks. Traversal, unresolved placeholders, structural
+policy matches, and unsafe headers still fail closed on the modeled path. Safe unmodeled
+native routes or flags retain the CLI's [best-effort filtering](cli.md#outbound-string-rewrite-protection);
+the Worker remains GET-only and does not relay those neighboring routes.
 
 ## Policy gates
 

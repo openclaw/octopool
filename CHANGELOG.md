@@ -2,6 +2,10 @@
 
 ## 0.5.17 - Unreleased
 
+### Fixes
+
+- Allow exact repository branch-protection, ruleset, and applicable branch-rules GETs through freshly policy-checked native gh fallback, preserving caller permissions and encoded branch names without pooled credentials or shared caching.
+
 ## 0.5.16 - 2026-08-30
 
 ### Fixes

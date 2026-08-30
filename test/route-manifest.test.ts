@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { cachePolicyForRouteKind } from "../src/cache-policy";
-import { ROUTES } from "../src/route-manifest";
+import { isNativeReadRoute, ROUTES } from "../src/route-manifest";
 
 describe("route manifest", () => {
   it("has unique route identities and patterns", () => {
-    expect(ROUTES).toHaveLength(120);
-    expect(new Set(ROUTES.map((route) => route.kind)).size).toBe(116);
+    expect(ROUTES).toHaveLength(133);
+    expect(new Set(ROUTES.map((route) => route.kind)).size).toBe(120);
     expect(new Set(ROUTES.map((route) => route.id)).size).toBe(ROUTES.length);
     expect(new Set(ROUTES.map((route) => route.pattern.source)).size).toBe(ROUTES.length);
   });
@@ -22,13 +22,13 @@ describe("route manifest", () => {
 
   it("defines backend eligibility on every concrete route", () => {
     expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(116);
-    expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(27);
+    expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(40);
     expect(ROUTES.filter((route) => route.capabilities.fallback === "github_public")).toHaveLength(
       1,
     );
     expect(
       ROUTES.filter(
-        (route) => route.capabilities.publicApi || route.capabilities.fallback !== "pool",
+        (route) => route.capabilities.publicApi || route.capabilities.fallback === "github_public",
       ),
     ).toHaveLength(117);
   });
@@ -77,9 +77,26 @@ describe("route manifest", () => {
   it("defines cache policy on every route kind", () => {
     for (const route of ROUTES) {
       const policy = cachePolicyForRouteKind(route.kind);
-      expect(policy.staleSeconds).toBeGreaterThan(0);
+      if (isNativeReadRoute(route)) {
+        expect(route.cacheable).toBe(false);
+        expect(policy).toEqual({ fresh: { kind: "static", seconds: 0 }, staleSeconds: 0 });
+      } else {
+        expect(policy.staleSeconds).toBeGreaterThan(0);
+      }
       expect(policy.fresh).toBeDefined();
     }
     expect(ROUTES.find((route) => route.kind === "rate_limit")?.cacheable).toBe(false);
+  });
+
+  it("keeps protection reads out of every public or pooled backend", () => {
+    const native = ROUTES.filter(isNativeReadRoute);
+    expect(native).toHaveLength(13);
+    expect(new Set(native.map((route) => route.kind))).toEqual(
+      new Set(["branch_protection", "repo_ruleset_list", "repo_ruleset_view", "branch_rules"]),
+    );
+    for (const route of native) {
+      expect(route.capabilities).toMatchObject({ publicApi: false, fallback: "local" });
+      expect(route.cacheable).toBe(false);
+    }
   });
 });

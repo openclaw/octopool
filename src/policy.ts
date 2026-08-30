@@ -1,7 +1,12 @@
 import { HttpError } from "./http";
 import { isPublicIssueSearchQuery, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
-import { ROUTES, routeKeyForMatch, type RouteManifestEntry } from "./route-manifest";
+import {
+  isNativeReadRoute,
+  ROUTES,
+  routeKeyForMatch,
+  type RouteManifestEntry,
+} from "./route-manifest";
 import type { PoolPolicy, RelayRequest, RouteInfo } from "./types";
 
 type RouteRule = RouteManifestEntry;
@@ -87,6 +92,9 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     if (match === null) {
       continue;
     }
+    if (isNativeReadRoute(rule) && match.groups?.branch !== undefined) {
+      validateNativeReadBranch(match.groups.branch);
+    }
     if (rule.logs === true && !policy.allow_logs) {
       throw new HttpError(403, "logs_denied", "Log routes are disabled for this pool");
     }
@@ -154,6 +162,22 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     return info;
   }
   throw new HttpError(403, "route_denied", "Route is not enabled");
+}
+
+function validateNativeReadBranch(raw: string): void {
+  let branch: string;
+  try {
+    branch = decodeURIComponent(raw);
+  } catch {
+    throw new HttpError(400, "invalid_path", "Invalid branch parameter");
+  }
+  if (
+    branch.includes("\0") ||
+    /[\\\t\r\n?#%{}:*[\]]/.test(branch) ||
+    branch.split("/").some((part) => part === "" || part === "." || part === "..")
+  ) {
+    throw new HttpError(400, "invalid_path", "Invalid branch parameter");
+  }
 }
 
 function tokenFreeSearchRequest(
