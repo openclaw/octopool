@@ -2,6 +2,11 @@
 
 ## 0.5.16 - Unreleased
 
+### Fixes
+
+- Preserve native inline Markdown attachment references under strict protection by rewriting matched local destinations to private snapshots before upload while keeping code spans untouched and unsupported reference-style definitions blocked.
+- Keep protected `gh repo view owner/repo` targets positional and GitHub.com-validated instead of translating them into an unsupported native `--repo` flag.
+
 ## 0.5.15 - 2026-08-30
 
 ### Fixes

@@ -96,6 +96,23 @@ func captureRewriteAttachmentPath(value string) string {
 	return value
 }
 
+func capturedAttachmentSnapshot(args []string, extension string) string {
+	for _, arg := range args {
+		spec, ok := strings.CutPrefix(arg, "--attach=")
+		if !ok {
+			continue
+		}
+		marker := strings.ToLower(extension) + "#"
+		if index := strings.Index(strings.ToLower(spec), marker); index >= 0 {
+			return spec[:index+len(extension)]
+		}
+		if strings.HasSuffix(strings.ToLower(spec), strings.ToLower(extension)) {
+			return spec
+		}
+	}
+	return ""
+}
+
 func captureRewriteGH(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -390,6 +407,63 @@ func TestStringRewriteAttachments(t *testing.T) {
 		t.Fatalf("code attachment reference was not preserved: %+v", codeCapture)
 	}
 
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeImage, err := filepath.Rel(workingDirectory, image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reference := range []string{image, strings.ReplaceAll(image, "#", "%23"), relativeImage} {
+		capturePath := captureRewriteGH(t)
+		referenceBody := "![safe](" + reference + ")"
+		args := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", referenceBody, "--attach", image}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		snapshot := capturedAttachmentSnapshot(capture.Args, ".png")
+		if snapshot == "" {
+			t.Fatalf("attachment snapshot missing: %v", capture.Args)
+		}
+		rewritten := false
+		for path, content := range capture.Files {
+			if path != snapshot && strings.Contains(content, "![safe]") {
+				rewritten = strings.Contains(content, snapshot) && !strings.Contains(content, reference)
+			}
+		}
+		if !rewritten {
+			t.Fatalf("inline attachment reference was not rewritten: %+v", capture)
+		}
+	}
+
+	for _, complexBody := range []string{
+		"![<span title=\"](" + image + ")\">x</span>](" + image + ")",
+		"[![thumb](https://example.com/thumb.png \" ](" + image + ")\")](" + image + ")",
+	} {
+		capturePath := captureRewriteGH(t)
+		args := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", complexBody, "--attach", image}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		snapshot := capturedAttachmentSnapshot(capture.Args, ".png")
+		found := false
+		for path, content := range capture.Files {
+			if path == snapshot {
+				continue
+			}
+			_, states := rewriteAttachmentLinkStates([]byte(content))
+			for _, state := range states {
+				found = found || state.destination == snapshot
+			}
+		}
+		if !found {
+			t.Fatalf("complex inline destination was not structurally rewritten: %+v", capture)
+		}
+	}
+
 	literalBodyCapturePath := captureRewriteGH(t)
 	literalBody := "--attach=" + image
 	literalBodyArgs := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", literalBody}
@@ -401,6 +475,36 @@ func TestStringRewriteAttachments(t *testing.T) {
 		return strings.HasPrefix(arg, "--attach=")
 	}) {
 		t.Fatalf("flag value was reinterpreted as an attachment: %+v", literalBodyCapture)
+	}
+}
+
+func TestStringRewritePolicyCreatedAttachmentReference(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	directory := t.TempDir()
+	source := filepath.Join(directory, "public.png")
+	if err := os.WriteFile(source, []byte("safe"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	protectedReference := filepath.Join(directory, "internal-model.png")
+	capturePath := captureRewriteGH(t)
+	args := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe](" + protectedReference + ")", "--attach", source}
+	if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	capture := readRewriteCapture(t, capturePath)
+	snapshot := capturedAttachmentSnapshot(capture.Args, ".png")
+	found := false
+	for path, content := range capture.Files {
+		if path == snapshot {
+			continue
+		}
+		_, states := rewriteAttachmentLinkStates([]byte(content))
+		for _, state := range states {
+			found = found || state.destination == snapshot
+		}
+	}
+	if !found {
+		t.Fatalf("policy-created attachment reference was not rewritten: %+v", capture)
 	}
 }
 
@@ -448,9 +552,8 @@ func TestStringRewriteAttachmentBlocks(t *testing.T) {
 		}
 	}
 	safe := filepath.Join(directory, "safe.png")
-	hash := filepath.Join(directory, "hash#safe.png")
 	video := filepath.Join(directory, "safe.mp4")
-	for _, path := range []string{safe, hash, video} {
+	for _, path := range []string{safe, video} {
 		if err := os.WriteFile(path, []byte("safe"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -463,11 +566,10 @@ func TestStringRewriteAttachmentBlocks(t *testing.T) {
 		{"edit last without body", []string{"pr", "comment", "1", "--repo", "acme/repo", "--edit-last", "--attach", safe}},
 		{"delete last with attachment", []string{"pr", "comment", "1", "--repo", "acme/repo", "--delete-last", "--attach", safe}},
 		{"duplicate file", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "safe", "--attach", safe, "--attach", safe}},
-		{"inline reference", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe](" + safe + ")", "--attach", safe}},
-		{"hash reference", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe](" + hash + ")", "--attach", hash}},
-		{"encoded hash reference", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe](" + strings.ReplaceAll(hash, "#", "%23") + ")", "--attach", hash}},
+		{"malformed inline then shortcut reference", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![shot](" + safe + " garbage)\n\n[shot]: " + safe, "--attach", safe}},
 		{"reference definition", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe][shot]\n\n[shot]: <" + safe + ">", "--attach", safe}},
 		{"multiline reference definition", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe][shot]\n\n[shot]:\n  " + safe, "--attach", safe}},
+		{"too many inline references", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", strings.Repeat("![safe]("+safe+")\n", rewriteMaxAttachmentReferences+1), "--attach", safe}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			capturePath := captureRewriteGH(t)
@@ -583,6 +685,15 @@ func TestStringRewriteMaintainerCompatibility(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	repoViewCapturePath := captureRewriteGH(t)
+	if err := execRealGH(t.Context(), []string{"repo", "view", "https://github.com/acme/repo", "--json", "nameWithOwner"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	repoViewCapture := readRewriteCapture(t, repoViewCapturePath)
+	if !slices.Contains(repoViewCapture.Args, "acme/repo") || slices.ContainsFunc(repoViewCapture.Args, func(arg string) bool { return strings.HasPrefix(arg, "--repo") }) {
+		t.Fatalf("repo view target was not kept positional: %v", repoViewCapture.Args)
 	}
 
 	repo := t.TempDir()
@@ -1277,6 +1388,7 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		{"api", "repos/acme/%69nternal-model"},
 		{"api", "repos/acme/repo/issues?q=%2569nternal-model"},
 		{"pr", "view", "1", "--repo", "https://example.com/acme/repo", "--json", "number"},
+		{"repo", "view", "https://ghe.example/acme/repo", "--json", "nameWithOwner"},
 		{"pr", "view", "1", "--json", "number,internal-model", "-Racme/repo"},
 		{"pr", "list", "--head", "internal-model", "-Racme/repo"},
 		{"pr", "ready", "internal-model", "-Racme/repo"},

@@ -422,10 +422,13 @@ Protected PR create/comment commands accept up to 16 repeated `--attach FILE` or
 extensions are MOV, MP4, and WebM. Images are limited to 10 MiB each, videos to 100 MiB each,
 and all attachments together to 100 MiB. The source path is structurally checked, optional
 `#alt text` is rewritten, default image alt text remains based on the original filename, and
-native `gh` receives suffix-preserving private byte-for-byte snapshots. Empty files, directories,
-other extensions, video alt text, and body references to an attached local file are blocked;
-omit local references and let native `gh` append uploaded media. A new PR comment may consist
-only of attachments. An `--edit-last` attachment update still requires an explicit body because
+native `gh` receives suffix-preserving private byte-for-byte snapshots. Recognized inline
+Markdown links/images that point at an attached local file are rewritten to the matching snapshot,
+so native `gh` can preserve labels, alt text, titles, and normal upload-URL replacement. Up to 64
+matched inline references are rewritten with bounded parser verification. Code spans remain literal;
+matching reference-style definitions are blocked rather than published with broken paths. Empty
+files, directories, other extensions, and video alt text are blocked. A new PR comment
+may consist only of attachments. An `--edit-last` attachment update still requires an explicit body because
 native `gh` would otherwise fetch and republish the existing text after the guard runs. Other
 modeled body requirements stay unchanged. Attachment bytes are not text- or vision-inspected, so
 callers remain responsible for reviewing the media itself before publication.

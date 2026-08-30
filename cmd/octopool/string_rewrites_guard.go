@@ -225,8 +225,15 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	if err := policy.guardRequest(request); err != nil {
 		return err
 	}
-	prepared.args = append([]string{args[0], args[1]}, flags.positionals...)
-	prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
+	if command == "repo view" {
+		if err := policy.checkStructural("github.com/" + flags.values["--repo"]); err != nil {
+			return err
+		}
+		prepared.args = []string{"repo", "view", flags.values["--repo"]}
+	} else {
+		prepared.args = append([]string{args[0], args[1]}, flags.positionals...)
+		prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
+	}
 	for _, flag := range flags.ordered {
 		if flag.name != "--repo" {
 			if flag.boolean && flag.value == "true" {

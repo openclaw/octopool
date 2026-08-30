@@ -293,49 +293,8 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	}
 	prepared.args = append([]string{args[0], args[1]}, flags.positionals...)
 	prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
-	for _, flag := range flags.ordered {
-		if flag.name == "--repo" {
-			continue
-		}
-		switch flag.name {
-		case "--title", body, file:
-			text := flag.value
-			if flag.name == file {
-				data, err := readRewriteFile(flag.value, stdin, rewriteMaxContent-prepared.inputBytes)
-				if err != nil {
-					return err
-				}
-				text = string(data)
-			}
-			text, err = prepared.text(policy, text)
-			if err != nil {
-				return err
-			}
-			// Native gh matches body references against the supplied file paths.
-			// Private snapshots change those paths, so require append-only uploads.
-			if flag.name != "--title" && rewriteBodyReferencesAttachment(text, attachments) {
-				return errRewriteBlocked
-			}
-			// Empty create fields can re-enable gh's prompts/default generation.
-			if create && strings.TrimSpace(text) == "" {
-				return errRewriteBlocked
-			}
-			if flag.name == "--title" {
-				prepared.args = append(prepared.args, "--title="+text)
-			} else {
-				path, err := prepared.snapshot([]byte(text))
-				if err != nil {
-					return err
-				}
-				prepared.args = append(prepared.args, file+"="+path)
-			}
-		default:
-			if err := policy.checkStructural(flag.value); err != nil {
-				return err
-			}
-			prepared.args = append(prepared.args, flag.name+"="+flag.value)
-		}
-	}
+	attachmentArgs := make([]string, 0, len(attachments))
+	attachmentSnapshots := make([]rewriteAttachmentSnapshot, 0, len(attachments))
 	remainingAttachmentBytes := rewriteMaxAttachmentBytes
 	for _, attachment := range attachments {
 		if err := checkRewriteAttachmentPath(policy, attachment.source); err != nil {
@@ -364,12 +323,60 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 			}
 		}
 		path, size, err := prepared.snapshotAttachment(attachment, remainingAttachmentBytes)
-		if err != nil {
-			return err
+		if err != nil || policy.check(path) != nil {
+			return errRewriteBlocked
 		}
 		remainingAttachmentBytes -= size
-		prepared.args = append(prepared.args, "--attach="+rewriteAttachmentArgument(attachment, path, alt))
+		attachmentArgs = append(attachmentArgs, "--attach="+rewriteAttachmentArgument(attachment, path, alt))
+		attachmentSnapshots = append(attachmentSnapshots, rewriteAttachmentSnapshot{source: attachment.source, snapshot: path})
 	}
+	for _, flag := range flags.ordered {
+		if flag.name == "--repo" {
+			continue
+		}
+		switch flag.name {
+		case "--title", body, file:
+			text := flag.value
+			if flag.name == file {
+				data, err := readRewriteFile(flag.value, stdin, rewriteMaxContent-prepared.inputBytes)
+				if err != nil {
+					return err
+				}
+				text = string(data)
+			}
+			text, err = prepared.text(policy, text)
+			if err != nil {
+				return err
+			}
+			if flag.name != "--title" {
+				previousLength := len(text)
+				text, err = rewriteBodyAttachmentReferences(text, attachmentSnapshots)
+				prepared.outputBytes += len(text) - previousLength
+				if err != nil || prepared.outputBytes < 0 || prepared.outputBytes > rewriteMaxContent || policy.check(text) != nil || policy.containsRuleMaterial(text) {
+					return errRewriteBlocked
+				}
+			}
+			// Empty create fields can re-enable gh's prompts/default generation.
+			if create && strings.TrimSpace(text) == "" {
+				return errRewriteBlocked
+			}
+			if flag.name == "--title" {
+				prepared.args = append(prepared.args, "--title="+text)
+			} else {
+				path, err := prepared.snapshot([]byte(text))
+				if err != nil {
+					return err
+				}
+				prepared.args = append(prepared.args, file+"="+path)
+			}
+		default:
+			if err := policy.checkStructural(flag.value); err != nil {
+				return err
+			}
+			prepared.args = append(prepared.args, flag.name+"="+flag.value)
+		}
+	}
+	prepared.args = append(prepared.args, attachmentArgs...)
 	prepared.stdin = strings.NewReader("")
 	return nil
 }
