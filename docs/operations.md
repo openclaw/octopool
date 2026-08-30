@@ -131,14 +131,21 @@ octopool stats
 
 ## Cloudflare resources
 
-- Worker `octopool` — entry `src/index.ts`, `nodejs_compat`, observability on.
-- Public-host Worker `octopool` in the personal Cloudflare account (OpenClaw deployment
-  only) — entry `src/openclaw-proxy.ts`, custom-domain proxy for `octopool.dev`.
+The hosted OpenClaw deployment keeps both Workers in the OpenClaw Services account
+(`91b59577e757131d68d55a471fe32aca`):
+
+- Authoritative Worker `octopool` — config `wrangler.jsonc`, entry `src/index.ts`,
+  `nodejs_compat`, observability on, custom domain `octopool.openclaw.ai`.
+- Public-host Worker `octopool-public-proxy` — config `wrangler.public-proxy.jsonc`, entry
+  `src/openclaw-proxy.ts`, custom-domain proxy for `octopool.dev`.
 - Durable Object `PoolCoordinator` (binding `POOL_COORDINATOR`, SQLite-backed,
   migration tag `v1`).
-- D1 database `octopool` (binding `DB`).
-- Custom domain route — `octopool.dev` for OpenClaw; whatever you set in `routes[]` for
-  your own deployment.
+- D1 database `octopool-wnam` (binding `DB`).
+
+Both hosted Worker deploys use the Molty item `OpenClaw Services Cloudflare API Token`;
+the proxy does not use a personal-account Cloudflare credential. The shared
+`OCTOPOOL_PROXY_SECRET` still has to exist on both Workers. Self-hosted deployments use
+whatever account and routes they configure.
 
 ## Configuration
 
@@ -265,8 +272,10 @@ pnpm install
 pnpm check        # format:check + lint + vitest + build + go test + go vet
 pnpm test         # vitest only
 pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub
-pnpm run deploy   # authoritative Worker, then octopool.dev proxy Worker
-pnpm e2e          # smoke-test the live deployment
+pnpm run deploy                 # authoritative Worker, then public proxy
+pnpm run deploy:authoritative   # authoritative Worker only
+pnpm run deploy:public-proxy    # octopool.dev proxy Worker only
+pnpm e2e                        # smoke-test the live deployment
 ```
 
 `pnpm check` is the deterministic TypeScript + Go gate. The networked release gate
@@ -274,10 +283,13 @@ pnpm e2e          # smoke-test the live deployment
 D1, a real Durable Object, and public GitHub. The Go CLI also builds/tests with
 `go build ./cmd/octopool` and `go test ./...`.
 
-`pnpm run deploy` runs both `wrangler deploy` calls. Self-hosters who don't operate the
-public-host proxy can run `wrangler deploy` directly. Pushing to `main` does **not**
-auto-deploy the Worker — only the docs site has a GitHub Pages workflow. Run
-`wrangler deploy` (or `pnpm run deploy`) whenever Worker code or landing-page CSS needs to
+The hosted deployment runs both commands with `CLOUDFLARE_API_TOKEN` loaded from the
+Molty item `OpenClaw Services Cloudflare API Token`; both Worker configs are pinned to the
+same Services account. Use the config-qualified `deploy:public-proxy` command when proving
+proxy deploy access so Wrangler cannot target the authoritative Worker by accident.
+Self-hosters who don't operate the public-host proxy can run `deploy:authoritative` only.
+Pushing to `main` does **not** auto-deploy the Workers — only the docs site has a GitHub
+Pages workflow. Run `pnpm run deploy` whenever Worker code or landing-page CSS needs to
 ship to production.
 
 ## SQL catalog

@@ -26,9 +26,14 @@ durable release evidence; signing uses the OpenClaw Foundation Developer ID.
 5. Fleet rollout: `brew update && brew upgrade octopool` on every Mac;
    verify `octopool version` matches and the shim still relays
    (`OCTOPOOL_NO_FALLBACK=1 gh api repos/openclaw/octopool --jq .full_name`).
-6. Worker changes additionally need `pnpm run deploy` (both wrangler configs)
-   from the release commit; R2/D1 bindings must be provisioned first
-   (see docs/cache.md for the actions-logs bucket and its lifecycle rule).
+6. Worker changes additionally need `pnpm run deploy` from the release commit. Load
+   `CLOUDFLARE_API_TOKEN` through the approved 1Password workflow from the Molty item
+   `OpenClaw Services Cloudflare API Token`; both `wrangler.jsonc` (`octopool`) and
+   `wrangler.public-proxy.jsonc` (`octopool-public-proxy`) are pinned to the OpenClaw
+   Services account. Use `pnpm run deploy:public-proxy` for a proxy-only proof. Never
+   substitute a personal-account Cloudflare token. R2/D1 bindings must be provisioned
+   first (see docs/cache.md for the actions-logs bucket and its lifecycle rule), and
+   `OCTOPOOL_PROXY_SECRET` must already exist on both Workers.
 7. Record evidence in openclaw/releases: dispatch
    `openclaw-release-evidence.yml` with `release_id=octopool-X.Y.Z`,
    `package_spec=octopool@X.Y.Z`, and the release workflow run in `runs`.

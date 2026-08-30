@@ -232,8 +232,9 @@ pnpm install
 pnpm check        # format + lint + vitest + types + go test + go vet
 pnpm test         # vitest only
 pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub
-pnpm run deploy   # authoritative Worker, then octopool.dev proxy Worker
-pnpm e2e          # smoke-test the live deployment
+pnpm run deploy                 # both OpenClaw Services-account Workers
+pnpm run deploy:public-proxy    # octopool.dev proxy Worker only
+pnpm e2e                        # smoke-test the live deployment
 pnpm docs:site    # build the docs site into dist/docs-site
 pnpm sql:generate # regenerate Worker query constants
 pnpm sql:compile  # validate migrations and query types with sqlc

@@ -1,9 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "octopool",
-  "account_id": "de09342a728de2c25c85cc6b34d68739",
+  "name": "octopool-public-proxy",
+  "account_id": "91b59577e757131d68d55a471fe32aca",
   "main": "src/openclaw-proxy.ts",
   "compatibility_date": "2026-05-26",
+  "workers_dev": true,
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
@@ -11,6 +12,5 @@
   "vars": {
     "OCTOPOOL_ORIGIN": "https://octopool.openclaw.ai",
   },
-  "migrations": [{ "tag": "v2-public-proxy", "deleted_classes": ["PoolCoordinator"] }],
   "routes": [{ "pattern": "octopool.dev", "custom_domain": true }],
 }
