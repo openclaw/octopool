@@ -104,7 +104,7 @@ func validRewriteAssignees(value string) bool {
 		return false
 	}
 	for _, login := range values {
-		if !rewriteGitHubLogin.MatchString(login) {
+		if login != "@me" && login != "@copilot" && !rewriteGitHubLogin.MatchString(login) {
 			return false
 		}
 	}

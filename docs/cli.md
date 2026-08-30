@@ -391,8 +391,9 @@ With active rules, the initial local publication vocabulary is deliberately cons
   files, or stdin; numeric PR/issue selectors for existing items. PR creation requires
   explicit `--head` and `--base`; the head must already be pushed. `--head` prevents gh
   from implicitly pushing or forking. Reviews require one explicit review action. PR/issue creation
-  accepts one `--label`/`-l` value (use a comma-separated list), while PR/issue edits accept
-  metadata-only `--add-label`/`--remove-label`. PR create/comment also accept repeated `--attach`
+  accepts one `--label`/`-l` and one `--assignee`/`-a` value (use comma-separated lists),
+  while PR/issue edits accept metadata-only add/remove label and assignee flags. Assignees may
+  include native `@me` or `@copilot`. PR create/comment also accept repeated `--attach`
   image/video files as described below.
 - Release `create`/`edit`: explicit title/notes or notes files; one tag and no asset uploads.
   Creation requires `--verify-tag`, so gh cannot create a missing tag. Generated notes,
@@ -478,8 +479,8 @@ Allowlisted top-level reads may fall back to native gh after Octopool pins and c
 repository, numeric/ref selector, JSON field projection, filters, and composed request. This
 covers readiness/CI projections, issue comment projections, and PR head filters whose fixed
 GraphQL shapes are not representable by the relay. Numeric `pr ready` (or a checked
-current/explicit nonnumeric Git branch) and metadata-only
-`pr edit --add-assignee|--remove-assignee` are also allowed without free-form text. Exact-head
+current/explicit nonnumeric Git branch) and metadata-only PR/issue edits with add/remove label
+or assignee flags are also allowed without free-form text. Exact-head
 `pr merge --squash --match-head-commit` is converted to the immediate pull-request merge REST
 endpoint with only the checked SHA and squash method; it never enables auto-merge, so a branch
 that requires a merge queue fails closed. Subject/body merge flags, admin/auto merge variants,

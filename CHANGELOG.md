@@ -2,6 +2,10 @@
 
 ## 0.5.15 - Unreleased
 
+### Fixes
+
+- Allow structurally validated assignee metadata on strict protected PR/issue creation and metadata-only edits, including native `@me` and `@copilot` values.
+
 ## 0.5.14 - 2026-08-30
 
 ### Fixes

@@ -180,14 +180,14 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	booleanSpec := ""
 	switch command {
 	case "pr create":
-		valueSpec += " --title,-t --body,-b --body-file,-F --head,-H --base,-B --label,-l"
+		valueSpec += " --title,-t --body,-b --body-file,-F --head,-H --base,-B --label,-l --assignee,-a"
 		booleanSpec = "--draft,-d --no-maintainer-edit"
 	case "pr edit":
 		valueSpec += " --title,-t --body,-b --body-file,-F --add-assignee --remove-assignee --add-label --remove-label"
 	case "issue edit":
-		valueSpec += " --title,-t --body,-b --body-file,-F --add-label --remove-label"
+		valueSpec += " --title,-t --body,-b --body-file,-F --add-label --remove-label --add-assignee --remove-assignee"
 	case "issue create":
-		valueSpec += " --title,-t --body,-b --body-file,-F --label,-l"
+		valueSpec += " --title,-t --body,-b --body-file,-F --label,-l --assignee,-a"
 	case "pr comment", "issue comment":
 		valueSpec += " --body,-b --body-file,-F"
 		booleanSpec = "--edit-last --create-if-none"
@@ -253,11 +253,11 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	if create && (!flags.has("--title") || !hasBody) {
 		return errRewriteBlocked
 	}
-	metadataEdit := (command == "pr edit" && (flags.has("--add-assignee") || flags.has("--remove-assignee"))) || flags.has("--add-label") || flags.has("--remove-label")
+	metadataEdit := flags.has("--add-assignee") || flags.has("--remove-assignee") || flags.has("--add-label") || flags.has("--remove-label")
 	if args[1] == "edit" && !flags.has("--title") && !hasBody && !metadataEdit {
 		return errRewriteBlocked
 	}
-	for _, name := range []string{"--add-assignee", "--remove-assignee"} {
+	for _, name := range []string{"--assignee", "--add-assignee", "--remove-assignee"} {
 		if flags.has(name) && !validRewriteAssignees(flags.values[name]) {
 			return errRewriteBlocked
 		}

@@ -198,7 +198,7 @@ func TestStringRewriteProcessSnapshots(t *testing.T) {
 		want  string
 	}{
 		{"issue inline", []string{"issue", "create", "-tinternal-model", "-binternal-model", "-Racme/repo"}, "unused", false, "public"},
-		{"issue create label", []string{"issue", "create", "--title=safe", "--body-file=FILE", "--label=bug", "--repo=acme/repo"}, "unused", true, "public 🦞"},
+		{"issue create metadata", []string{"issue", "create", "--title=safe", "--body-file=FILE", "--label=bug", "--assignee=steipete", "--repo=acme/repo"}, "unused", true, "public 🦞"},
 		{"issue body file", []string{"issue", "edit", "1", "--body-file=FILE", "--repo=acme/repo"}, "unused", true, "public 🦞"},
 		{"pr body stdin", []string{"pr", "comment", "1", "-F-", "-Racme/repo"}, "internal-model 🦞", false, "public 🦞"},
 		{"review", []string{"pr", "review", "1", "--approve", "--body=internal-model", "-Racme/repo"}, "", false, "public"},
@@ -232,8 +232,8 @@ func TestStringRewriteProcessSnapshots(t *testing.T) {
 				t.Fatalf("streams: %q %q", out.String(), stderr.String())
 			}
 			capture := readRewriteCapture(t, capturePath)
-			if test.name == "issue create label" && !slices.Contains(capture.Args, "--label=bug") {
-				t.Fatalf("label metadata was not preserved: %v", capture.Args)
+			if test.name == "issue create metadata" && (!slices.Contains(capture.Args, "--label=bug") || !slices.Contains(capture.Args, "--assignee=steipete")) {
+				t.Fatalf("issue metadata was not preserved: %v", capture.Args)
 			}
 			if capture.Stdin != "" {
 				t.Fatal("child retained live stdin")
@@ -546,6 +546,7 @@ func TestStringRewriteMaintainerCompatibility(t *testing.T) {
 		{"convert draft", []string{"pr", "ready", "123", "--repo", "acme/repo", "--undo"}, false},
 		{"pinned squash", []string{"pr", "merge", "123", "--repo", "https://github.com/acme/repo", "--squash", "--match-head-commit", sha}, true},
 		{"claim assignee", []string{"pr", "edit", "123", "--repo", "acme/repo", "--add-assignee", "steipete"}, false},
+		{"self-assign issue", []string{"issue", "edit", "123", "--repo", "acme/repo", "--add-assignee", "@me"}, false},
 		{"add issue labels", []string{"issue", "edit", "123", "--repo", "acme/repo", "--add-label", "bug,help wanted"}, false},
 		{"remove pr label", []string{"pr", "edit", "123", "--repo", "acme/repo", "--remove-label", "blocked"}, false},
 	} {
@@ -1293,6 +1294,9 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--label", ",bug"},
 		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--label", "bug", "-l", "enhancement"},
 		{"issue", "edit", "1", "-Racme/repo", "--add-label", "internal-model"},
+		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--assignee", "internal-model"},
+		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--assignee", "@other"},
+		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--assignee", "steipete", "-a", "@me"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees[]=internal-model"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees=alice", "-f", "assignees[]=bob"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "labels[]=safe"},
