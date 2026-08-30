@@ -387,6 +387,7 @@ func rewriteReaderIsTerminal(reader io.Reader) bool {
 func pinBestEffortRepositories(policy stringRewritePolicy, args []string) ([]string, error) {
 	out := append([]string(nil), args...)
 	hasRepo := false
+	searchFilter := len(out) >= 2 && out[0] == "search"
 	for index := 0; index < len(out); index++ {
 		arg := out[index]
 		if arg == "--repo" || arg == "-R" {
@@ -399,7 +400,7 @@ func pinBestEffortRepositories(policy stringRewritePolicy, args []string) ([]str
 			if err != nil {
 				return nil, err
 			}
-			out[index] = repo
+			out[index] = bestEffortRepoFlagValue(repo, searchFilter)
 			continue
 		}
 		if value, ok := strings.CutPrefix(arg, "--repo="); ok {
@@ -408,7 +409,7 @@ func pinBestEffortRepositories(policy stringRewritePolicy, args []string) ([]str
 			if err != nil {
 				return nil, err
 			}
-			out[index] = "--repo=" + repo
+			out[index] = "--repo=" + bestEffortRepoFlagValue(repo, searchFilter)
 			continue
 		}
 		if value, ok := strings.CutPrefix(arg, "-R"); ok && value != "" {
@@ -417,7 +418,7 @@ func pinBestEffortRepositories(policy stringRewritePolicy, args []string) ([]str
 			if err != nil {
 				return nil, err
 			}
-			out[index] = "--repo=" + repo
+			out[index] = "--repo=" + bestEffortRepoFlagValue(repo, searchFilter)
 		}
 	}
 	if !hasRepo && bestEffortNeedsRepository(out) {
@@ -428,6 +429,13 @@ func pinBestEffortRepositories(policy stringRewritePolicy, args []string) ([]str
 		out = append(out, "--repo="+repo)
 	}
 	return out, nil
+}
+
+func bestEffortRepoFlagValue(pinned string, searchFilter bool) string {
+	if searchFilter {
+		return strings.TrimPrefix(pinned, "github.com/")
+	}
+	return pinned
 }
 
 func bestEffortNeedsRepository(args []string) bool {

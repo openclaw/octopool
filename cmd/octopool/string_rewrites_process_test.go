@@ -198,6 +198,7 @@ func TestStringRewriteProcessSnapshots(t *testing.T) {
 		want  string
 	}{
 		{"issue inline", []string{"issue", "create", "-tinternal-model", "-binternal-model", "-Racme/repo"}, "unused", false, "public"},
+		{"issue create label", []string{"issue", "create", "--title=safe", "--body-file=FILE", "--label=bug", "--repo=acme/repo"}, "unused", true, "public 🦞"},
 		{"issue body file", []string{"issue", "edit", "1", "--body-file=FILE", "--repo=acme/repo"}, "unused", true, "public 🦞"},
 		{"pr body stdin", []string{"pr", "comment", "1", "-F-", "-Racme/repo"}, "internal-model 🦞", false, "public 🦞"},
 		{"review", []string{"pr", "review", "1", "--approve", "--body=internal-model", "-Racme/repo"}, "", false, "public"},
@@ -231,6 +232,9 @@ func TestStringRewriteProcessSnapshots(t *testing.T) {
 				t.Fatalf("streams: %q %q", out.String(), stderr.String())
 			}
 			capture := readRewriteCapture(t, capturePath)
+			if test.name == "issue create label" && !slices.Contains(capture.Args, "--label=bug") {
+				t.Fatalf("label metadata was not preserved: %v", capture.Args)
+			}
 			if capture.Stdin != "" {
 				t.Fatal("child retained live stdin")
 			}
@@ -542,6 +546,8 @@ func TestStringRewriteMaintainerCompatibility(t *testing.T) {
 		{"convert draft", []string{"pr", "ready", "123", "--repo", "acme/repo", "--undo"}, false},
 		{"pinned squash", []string{"pr", "merge", "123", "--repo", "https://github.com/acme/repo", "--squash", "--match-head-commit", sha}, true},
 		{"claim assignee", []string{"pr", "edit", "123", "--repo", "acme/repo", "--add-assignee", "steipete"}, false},
+		{"add issue labels", []string{"issue", "edit", "123", "--repo", "acme/repo", "--add-label", "bug,help wanted"}, false},
+		{"remove pr label", []string{"pr", "edit", "123", "--repo", "acme/repo", "--remove-label", "blocked"}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			capturePath := captureRewriteGH(t)
@@ -709,6 +715,50 @@ func TestStringRewriteBestEffortFallback(t *testing.T) {
 			}
 		})
 	}
+
+	for _, test := range []struct {
+		name    string
+		args    []string
+		repoArg string
+	}{
+		{
+			"search issues repository filter",
+			[]string{"search", "issues", "internal-model", "--repo", "acme/repo", "--state", "open", "--match", "title,body", "--limit", "10", "--json", "number,title,url,updatedAt"},
+			"acme/repo",
+		},
+		{
+			"search prs repository filter",
+			[]string{"search", "prs", "internal-model", "--repo=https://github.com/acme/repo", "--state", "open", "--match", "title,body", "--limit", "10", "--json", "number,title,url,updatedAt"},
+			"--repo=acme/repo",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			if err := runGH(t.Context(), test.args, io.Discard, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			if !slices.Contains(capture.Args, test.repoArg) || capture.Env["GH_HOST"] != "github.com" {
+				t.Fatalf("search repository filter was not pinned: args=%v env=%v", capture.Args, capture.Env)
+			}
+			if slices.ContainsFunc(capture.Args, func(arg string) bool {
+				return strings.Contains(arg, "github.com/acme/repo") || strings.Contains(arg, "internal-model")
+			}) {
+				t.Fatalf("search repository or query was rewritten incorrectly: %v", capture.Args)
+			}
+		})
+	}
+
+	t.Run("search enterprise repository blocks", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"search", "issues", "safe", "--repo", "ghe.example/acme/repo", "--match", "title"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("enterprise search repository error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("enterprise search repository reached child")
+		}
+	})
 
 	for _, value := range []string{"https://ghe.example/acme/repo", "ghe.example/acme/repo", "ghe.example:acme/repo", "alice@ghe.example:acme/repo"} {
 		t.Run("positional enterprise repository blocks", func(t *testing.T) {
@@ -1239,6 +1289,10 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash", "-f", "commit_title=user text"},
 		{"api", "repos/acme/internal-model/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
 		{"pr", "edit", "1", "-Racme/repo", "--add-assignee", "internal-model"},
+		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--label", "internal-model"},
+		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--label", ",bug"},
+		{"issue", "create", "-Racme/repo", "--title", "safe", "--body", "safe", "--label", "bug", "-l", "enhancement"},
+		{"issue", "edit", "1", "-Racme/repo", "--add-label", "internal-model"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees[]=internal-model"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees=alice", "-f", "assignees[]=bob"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "labels[]=safe"},

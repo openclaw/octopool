@@ -390,8 +390,10 @@ With active rules, the initial local publication vocabulary is deliberately cons
 - PR/issue `create`, `edit`, `comment`, and PR `review`: explicit title/body flags, body
   files, or stdin; numeric PR/issue selectors for existing items. PR creation requires
   explicit `--head` and `--base`; the head must already be pushed. `--head` prevents gh
-  from implicitly pushing or forking. Reviews require one explicit review action. PR create/comment
-  also accept repeated `--attach` image/video files as described below.
+  from implicitly pushing or forking. Reviews require one explicit review action. PR/issue creation
+  accepts one `--label`/`-l` value (use a comma-separated list), while PR/issue edits accept
+  metadata-only `--add-label`/`--remove-label`. PR create/comment also accept repeated `--attach`
+  image/video files as described below.
 - Release `create`/`edit`: explicit title/notes or notes files; one tag and no asset uploads.
   Creation requires `--verify-tag`, so gh cannot create a missing tag. Generated notes,
   notes from tags, and other implicit content sources are blocked.
@@ -437,8 +439,10 @@ dispatches (`gh workflow run` field or `--json` forms), job-log reads, unmodeled
 introduced native flags working while active rules still remove visible matches. Native
 children force `GH_HOST=github.com` and remove inherited `GH_REPO`; best-effort
 `--repo`/`-R` values are structurally checked before rewriting and normalized to
-`github.com/owner/repo`. Repo-capable commands without an explicit selector pin the current
-GitHub.com remote. Alternate API/repository hosts, explicit credential headers,
+`github.com/owner/repo`. Native `gh search` repository filters retain `owner/repo`, because the
+CLI converts that value into a `repo:` search qualifier and rejects a host-qualified form.
+Repo-capable commands without an explicit selector pin the current GitHub.com remote.
+Alternate API/repository hosts, explicit credential headers,
 unresolved API placeholders, invalid UTF-8, policy
 material, residual matches, and bounded-read failures remain blocked.
 

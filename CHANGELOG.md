@@ -2,6 +2,11 @@
 
 ## 0.5.14 - Unreleased
 
+### Fixes
+
+- Keep best-effort `gh search --repo` filters in GitHub's required `owner/repo` form while retaining GitHub.com host validation and environment pinning.
+- Allow structurally validated labels on strict protected PR/issue creation and metadata-only label edits without weakening title/body snapshots.
+
 ## 0.5.13 - 2026-08-30
 
 ### Fixes

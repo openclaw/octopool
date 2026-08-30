@@ -110,3 +110,12 @@ func validRewriteAssignees(value string) bool {
 	}
 	return true
 }
+
+func validRewriteLabels(value string) bool {
+	for _, label := range strings.Split(value, ",") {
+		if strings.TrimSpace(label) == "" {
+			return false
+		}
+	}
+	return value != ""
+}
