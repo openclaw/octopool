@@ -2,6 +2,10 @@
 
 ## 0.5.17 - Unreleased
 
+### Changes
+
+- Move the `octopool.dev` proxy Worker into the OpenClaw Services Cloudflare account under its own service so one non-interactive deployment credential covers both hosted Workers.
+
 ### Fixes
 
 - Return native uppercase `OPEN`/`CLOSED` states in issue-view/list JSON before `--jq`, preserving lowercase raw `gh api` REST states.
@@ -41,10 +45,6 @@
 ### Fixes
 
 - Keep active string-rewrite protection best-effort for evolving native `gh` commands by filtering visible arguments, declared piped JSON/text, and `--input` snapshots instead of blocking workflow dispatches, job logs, uploads, or newly added flags solely because their command shape is not structurally modeled.
-
-### Changes
-
-- Move the `octopool.dev` proxy Worker into the OpenClaw Services Cloudflare account under its own service so one non-interactive deployment credential covers both hosted Workers.
 
 ## 0.5.11 - 2026-08-29
 
