@@ -478,6 +478,259 @@ func TestStringRewriteAttachments(t *testing.T) {
 	}
 }
 
+func TestStringRewriteIssueCreateAttachments(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	for _, test := range []struct {
+		name     string
+		text     string
+		multiple bool
+		exitCode int
+	}{
+		{"reported shape", "safe", false, 0},
+		{"rewritten repeated attachments", "internal-model", true, 0},
+		{"child nonzero exit", "internal-model", true, 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			t.Setenv("OCTOPOOL_TEST_REWRITE_EXIT", strconv.Itoa(test.exitCode))
+			directory := t.TempDir()
+			body := filepath.Join(directory, "body.md")
+			image := filepath.Join(directory, "image.png")
+			video := filepath.Join(directory, "clip.mp4")
+			content := test.text + " literal \\u0000\n![" + test.text + "](" + image + " \"" + test.text + "\")"
+			if test.multiple {
+				content += "\n[" + test.text + "](" + video + ")"
+			}
+			originals := map[string][]byte{
+				body:  []byte(content),
+				image: {0x89, 'P', 'N', 'G', 0x00, 0xff},
+				video: {0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p', 0xff},
+			}
+			for path, data := range originals {
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			alt := "alt"
+			if test.multiple {
+				alt = test.text + " screenshot"
+			}
+			args := []string{"issue", "create", "--repo", "acme/repo", "--title", test.text, "--body-file", body, "--label", "bug", "--assignee", "steipete", "--attach", image + "#" + alt}
+			if test.multiple {
+				args = append(args, "--attach="+video)
+			}
+			var stdout, stderr bytes.Buffer
+			err := runGH(t.Context(), args, &stdout, &stderr)
+			if test.exitCode == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				var exitErr exitCodeError
+				if !errors.As(err, &exitErr) || exitErr.Code != test.exitCode {
+					t.Fatalf("child exit: got %v, want %d", err, test.exitCode)
+				}
+			}
+			if stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+				t.Fatalf("child streams: %q %q", stdout.String(), stderr.String())
+			}
+			capture := readRewriteCapture(t, capturePath)
+			imageSnapshot := capturedAttachmentSnapshot(capture.Args, ".png")
+			bodySnapshot := ""
+			for _, arg := range capture.Args {
+				if path, ok := strings.CutPrefix(arg, "--body-file="); ok {
+					bodySnapshot = path
+				}
+			}
+			wantArgs := []string{"issue", "create", "--repo=acme/repo", "--title=" + strings.ReplaceAll(test.text, "internal-model", "public"), "--body-file=" + bodySnapshot, "--label=bug", "--assignee=steipete", "--attach=" + imageSnapshot + "#" + strings.ReplaceAll(alt, "internal-model", "public")}
+			wantBody := strings.ReplaceAll(strings.ReplaceAll(content, "internal-model", "public"), image, imageSnapshot)
+			wantFiles := map[string][]byte{imageSnapshot: originals[image]}
+			if test.multiple {
+				videoSnapshot := capturedAttachmentSnapshot(capture.Args, ".mp4")
+				wantArgs = append(wantArgs, "--attach="+videoSnapshot)
+				wantBody = strings.ReplaceAll(wantBody, video, videoSnapshot)
+				wantFiles[videoSnapshot] = originals[video]
+			}
+			wantFiles[bodySnapshot] = []byte(wantBody)
+			if !slices.Equal(capture.Args, wantArgs) || capture.Stdin != "" || len(capture.FileData) != len(wantFiles) {
+				t.Fatalf("issue create capture=%+v, want argv=%v", capture, wantArgs)
+			}
+			for path, want := range wantFiles {
+				if path == "" || originals[path] != nil || !bytes.Equal(capture.FileData[path], want) {
+					t.Fatalf("snapshot %q: got %q, want %q", path, capture.FileData[path], want)
+				}
+				if runtime.GOOS != "windows" && (capture.Modes[path] != 0600 || capture.DirectoryModes[path] != 0700) {
+					t.Fatal("snapshot permissions are not private")
+				}
+				for _, removed := range []string{path, filepath.Dir(path)} {
+					if _, err := os.Stat(removed); !os.IsNotExist(err) {
+						t.Fatalf("snapshot cleanup failed for %s: %v", removed, err)
+					}
+				}
+			}
+			for path, want := range originals {
+				if data, err := os.ReadFile(path); err != nil || !bytes.Equal(data, want) {
+					t.Fatalf("original file changed: %s", path)
+				}
+			}
+		})
+	}
+}
+
+func TestStringRewriteIssueCreateAttachmentBlocks(t *testing.T) {
+	policy, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	directory := t.TempDir()
+	image := filepath.Join(directory, "image.png")
+	protected := filepath.Join(directory, "internal-model.png")
+	unsupported := filepath.Join(directory, "artifact.txt")
+	for _, path := range []string{image, protected, unsupported} {
+		if err := os.WriteFile(path, []byte("synthetic attachment"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	material := `{"pattern":"internal-model","replacement":"synthetic"}`
+	emptyPolicy := strings.Replace(rewriteActiveTestPolicy, `"public"`, `""`, 1)
+	residualPolicy := strings.Replace(rewriteActiveTestPolicy, `"public"`, `"internal-model"`, 1)
+	for _, test := range []struct {
+		name   string
+		flag   string
+		value  string
+		policy string
+	}{
+		{"protected path", "--attach", protected + "#alt", ""},
+		{"unsupported type", "--attach", unsupported, ""},
+		{"protected repo", "--repo", "acme/internal-model", ""},
+		{"alternate host", "--repo", "https://example.com/acme/repo", ""},
+		{"protected label", "--label", "internal-model", ""},
+		{"malformed label", "--label", ",bug", ""},
+		{"protected assignee", "--assignee", "internal-model", ""},
+		{"malformed assignee", "--assignee", "@other", ""},
+		{"missing title", "--title", "", ""},
+		{"missing body", "--body", "", ""},
+		{"empty title", "--title", " ", ""},
+		{"empty body", "--body", " ", ""},
+		{"sanitized empty title", "--title", "internal-model", emptyPolicy},
+		{"sanitized empty body", "--body", "internal-model", emptyPolicy},
+		{"reference definition", "--body", "![safe][shot]\n\n[shot]: <" + image + ">", ""},
+		{"title rule material", "--title", material, ""},
+		{"body rule material", "--body", material, ""},
+		{"alt rule material", "--attach", image + "#" + material, ""},
+		{"residual title", "--title", "internal-model", residualPolicy},
+		{"residual body", "--body", "internal-model", residualPolicy},
+		{"residual alt", "--attach", image + "#internal-model", residualPolicy},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			policyBody := test.policy
+			if policyBody == "" {
+				policyBody = rewriteActiveTestPolicy
+			}
+			policy.Store(policyBody)
+			capturePath := captureRewriteGH(t)
+			args := []string{"issue", "create", "--repo", "acme/repo", "--title", "safe", "--body", "safe", "--label", "bug", "--assignee", "steipete", "--attach", image + "#alt"}
+			index := slices.Index(args, test.flag)
+			if test.value == "" {
+				args = slices.Delete(args, index, index+2)
+			} else {
+				args[index+1] = test.value
+			}
+			if err := runGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+				t.Fatalf("expected strict block, got %v", err)
+			}
+			if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+				t.Fatal("blocked issue create reached child")
+			}
+		})
+	}
+}
+
+func TestStringRewritePREditAttachments(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	directory := t.TempDir()
+	body := filepath.Join(directory, "body.md")
+	emptyBody := filepath.Join(directory, "empty.md")
+	image := filepath.Join(directory, "synthetic.png")
+	video := filepath.Join(directory, "synthetic.mp4")
+	content := "internal-model\n![internal-model](" + image + ")\n[internal-model](" + video + ")"
+	for path, data := range map[string][]byte{body: []byte(content), emptyBody: {}, image: {0x89, 'P', 'N', 'G', 0x00, 0xff}, video: {0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p'}} {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+		body string
+	}{
+		{"explicit body file", []string{"--body-file", body}, content},
+		{"explicit empty body", []string{"--body", ""}, ""},
+		{"explicit empty body file", []string{"--body-file", emptyBody}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			args := append([]string{"pr", "edit", "133369", "--repo", "acme/repo"}, test.args...)
+			args = append(args, "--add-label", "bug", "--add-assignee", "steipete", "--attach", image+"#internal-model screenshot", "--attach="+video)
+			if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			imageSnapshot := capturedAttachmentSnapshot(capture.Args, ".png")
+			videoSnapshot := capturedAttachmentSnapshot(capture.Args, ".mp4")
+			bodySnapshot := ""
+			for _, arg := range capture.Args {
+				if path, ok := strings.CutPrefix(arg, "--body-file="); ok {
+					bodySnapshot = path
+				}
+			}
+			wantArgs := []string{"pr", "edit", "133369", "--repo=acme/repo", "--body-file=" + bodySnapshot, "--add-label=bug", "--add-assignee=steipete", "--attach=" + imageSnapshot + "#public screenshot", "--attach=" + videoSnapshot}
+			wantBody := strings.NewReplacer("internal-model", "public", image, imageSnapshot, video, videoSnapshot).Replace(test.body)
+			gotBody, hasBody := capture.Files[bodySnapshot]
+			if !slices.Equal(capture.Args, wantArgs) || capture.Stdin != "" || len(capture.Files) != 3 || imageSnapshot == "" || videoSnapshot == "" || bodySnapshot == body || bodySnapshot == emptyBody || !hasBody || gotBody != wantBody {
+				t.Fatalf("PR edit capture=%+v, want argv=%v body=%q", capture, wantArgs, wantBody)
+			}
+		})
+	}
+}
+
+func TestStringRewritePREditAttachmentsRequireBody(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	image := filepath.Join(t.TempDir(), "synthetic.png")
+	if err := os.WriteFile(image, []byte("synthetic attachment"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{"no edit fields", nil},
+		{"title only", []string{"--title", "safe"}},
+		{"metadata only", []string{"--add-label", "bug", "--add-assignee", "steipete"}},
+	} {
+		for _, attach := range []bool{false, true} {
+			t.Run(test.name+"/attach="+strconv.FormatBool(attach), func(t *testing.T) {
+				capturePath := captureRewriteGH(t)
+				args := append([]string{"pr", "edit", "133369", "--repo", "acme/repo"}, test.args...)
+				if attach {
+					args = append(args, "--attach", image+"#alt")
+				}
+				err := runGH(t.Context(), args, io.Discard, io.Discard)
+				if attach || len(test.args) == 0 {
+					if err != errRewriteBlocked {
+						t.Fatalf("expected strict block without body, got %v", err)
+					}
+					if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+						t.Fatal("blocked PR edit reached child")
+					}
+				} else {
+					if err != nil {
+						t.Fatal(err)
+					}
+					readRewriteCapture(t, capturePath)
+				}
+			})
+		}
+	}
+}
+
 func TestStringRewritePolicyCreatedAttachmentReference(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	directory := t.TempDir()

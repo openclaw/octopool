@@ -417,8 +417,8 @@ With active rules, the initial local publication vocabulary is deliberately cons
   from implicitly pushing or forking. Reviews require one explicit review action. PR/issue creation
   accepts one `--label`/`-l` and one `--assignee`/`-a` value (use comma-separated lists),
   while PR/issue edits accept metadata-only add/remove label and assignee flags. Assignees may
-  include native `@me` or `@copilot`. PR create/comment also accept repeated `--attach`
-  image/video files as described below.
+  include native `@me` or `@copilot`. PR create/edit/comment and issue create also accept repeated
+  `--attach` image/video files as described below.
 - Release `create`/`edit`: explicit title/notes or notes files; one tag and no asset uploads.
   Creation requires `--verify-tag`, so gh cannot create a missing tag. Generated notes,
   notes from tags, and other implicit content sources are blocked.
@@ -441,8 +441,8 @@ are blocked. Input files are read into bounded snapshots, never modified, and ne
 by the child. Sanitized snapshots use a private 0700 directory and 0600 files, removed
 after execution, including nonzero exits. These modeled commands do not retain live stdin.
 
-Protected PR create/comment commands accept up to 16 repeated `--attach FILE` or
-`--attach=FILE` values. Raster image extensions are GIF, JPEG/JPG, PNG, and WebP; video
+Protected PR create/edit/comment and issue create commands accept up to 16 repeated `--attach FILE`
+or `--attach=FILE` values. Raster image extensions are GIF, JPEG/JPG, PNG, and WebP; video
 extensions are MOV, MP4, and WebM. Images are limited to 10 MiB each, videos to 100 MiB each,
 and all attachments together to 100 MiB. The source path is structurally checked, optional
 `#alt text` is rewritten, default image alt text remains based on the original filename, and
@@ -452,10 +452,13 @@ so native `gh` can preserve labels, alt text, titles, and normal upload-URL repl
 matched inline references are rewritten with bounded parser verification. Code spans remain literal;
 matching reference-style definitions are blocked rather than published with broken paths. Empty
 files, directories, other extensions, and video alt text are blocked. A new PR comment
-may consist only of attachments. An `--edit-last` attachment update still requires an explicit body because
-native `gh` would otherwise fetch and republish the existing text after the guard runs. Other
-modeled body requirements stay unchanged. Attachment bytes are not text- or vision-inspected, so
-callers remain responsible for reviewing the media itself before publication.
+may consist only of attachments. PR edits with attachments and PR comment `--edit-last` attachment
+updates require explicit `--body` or `--body-file`, because native `gh` would otherwise fetch and
+republish existing text after the guard runs. Title or metadata flags do not satisfy this requirement
+for PR edits. PR edits allow an explicitly supplied empty body after inspection. Other
+modeled body requirements stay unchanged; issue creation still requires an explicit title and body.
+Attachment bytes are not text- or vision-inspected, so callers remain responsible for reviewing
+the media itself before publication.
 
 Commands and flags outside the modeled vocabulary use a bounded best-effort pass-through
 instead of being denied solely for being new or unfamiliar. Octopool rewrites every visible

@@ -207,7 +207,7 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	valueFlags := rewriteFlagNames(valueSpec)
 	var attachments []rewriteAttachment
 	var err error
-	if command == "pr create" || command == "pr comment" {
+	if command == "pr create" || command == "pr edit" || command == "pr comment" || command == "issue create" {
 		commandArgs, attachments, err = extractRewriteAttachments(commandArgs, valueFlags)
 		if err != nil {
 			return err
@@ -250,6 +250,10 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 		return errRewriteBlocked
 	}
 	hasBody := flags.has(body) || flags.has(file)
+	if command == "pr edit" && len(attachments) > 0 && !hasBody {
+		// Without an explicit body, native gh republishes uninspected remote text.
+		return errRewriteBlocked
+	}
 	if create && (!flags.has("--title") || !hasBody) {
 		return errRewriteBlocked
 	}
