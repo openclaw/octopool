@@ -11,6 +11,7 @@ import {
   staleCacheSeconds,
   writeGitHubCache,
 } from "../src/cache";
+import { parseIssueHTML } from "../src/github-html-embedded";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import type { GitHubRelayResponse } from "../src/types";
 
@@ -18,6 +19,7 @@ describe("github cache policy", () => {
   const policy = defaultPolicy("openclaw");
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -105,6 +107,7 @@ describe("github cache policy", () => {
   it.each([
     ["/repos/openclaw/openclaw/actions/runs", "actions-summary-v1"],
     ["/repos/openclaw/openclaw/pulls/85341", "pr-summary-v1"],
+    ["/repos/openclaw/openclaw/issues/5", "issue-summary-v1"],
   ])("keeps %s public summaries separate from exact REST cache entries", async (path, shape) => {
     const summary = validateRelayRequest({
       pool: "maintainers",
@@ -409,6 +412,62 @@ describe("github cache policy", () => {
         headers: { etag: '"web"', "last-modified": "Fri, 18 Jul 2026 06:00:00 GMT" },
       }),
     ).toBeUndefined();
+  });
+
+  it.each([
+    ["CLOSED", 3_600],
+    ["OPEN", 300],
+  ] as const)("classifies parsed %s issue pages without changing the body", (state, ttl) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/issues/5",
+      headers: { "x-octopool-public-shape": "issue-summary-v1" },
+    });
+    const route = classifyRoute(request, policy);
+    const body = parseIssueHTML(issuePage(state), "openclaw", "octopool", 5);
+
+    expect(route.kind).toBe("issue_view");
+    expect(body).toBeDefined();
+    expect(body?.state).toBe(state);
+    const original = structuredClone(body);
+    const relayResponse = response(body);
+    expect(cacheTTLSeconds(route, relayResponse)).toBe(ttl);
+    expect(relayResponse.body).toEqual(original);
+  });
+
+  it.each([
+    ["REST closed", { state: "closed", title: "Synthetic issue" }, 3_600],
+    ["REST open", { state: "open", title: "Synthetic issue" }, 300],
+    ["missing state", {}, 300],
+    ["null state", { state: null }, 300],
+    ["numeric state", { state: 1 }, 300],
+    ["boolean state", { state: true }, 300],
+    ["object state", { state: { value: "closed" } }, 300],
+    ["array state", { state: ["closed"] }, 300],
+    ["unknown state", { state: "MERGED" }, 300],
+    ["mixed-case state", { state: "Closed" }, 300],
+    ["padded state", { state: " CLOSED " }, 300],
+    ["empty state", { state: "" }, 300],
+    ["missing body", undefined, 300],
+    ["null body", null, 300],
+    ["array body", [{ state: "closed" }], 300],
+    ["string body", "closed", 300],
+    ["numeric body", 1, 300],
+  ])("classifies %s issue bodies conservatively without mutation", (_name, body, ttl) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/issues/5",
+    });
+    const route = classifyRoute(request, policy);
+    const relayResponse = response(body);
+    const original = structuredClone(body);
+
+    expect(route.kind).toBe("issue_view");
+    expect(cacheTTLSeconds(route)).toBe(300);
+    expect(cacheTTLSeconds(route, relayResponse)).toBe(ttl);
+    expect(relayResponse.body).toEqual(original);
   });
 
   it("keeps mutable CI TTLs short and caches terminal CI for an hour", () => {
@@ -762,6 +821,52 @@ describe("github cache policy", () => {
     });
   });
 
+  it("persists parsed CLOSED issue bodies unchanged with one-hour D1 and edge TTLs", async () => {
+    const now = Date.parse("2026-08-30T12:00:00Z");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    const put = vi.fn(async () => undefined);
+    vi.stubGlobal("caches", { default: { put } });
+    const run = vi.fn(async () => ({}));
+    const bind = vi.fn((..._args: unknown[]) => ({ run }));
+    const env = { DB: { prepare: () => ({ bind }) } } as unknown as Env;
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/issues/5",
+      headers: { "x-octopool-public-shape": "issue-summary-v1" },
+    });
+    const body = parseIssueHTML(issuePage("CLOSED"), "openclaw", "octopool", 5);
+    expect(body?.state).toBe("CLOSED");
+    const original = structuredClone(body);
+    const relayResponse = response(body);
+
+    await expect(
+      writeGitHubCache(
+        env,
+        "issue-cache-key",
+        request,
+        classifyRoute(request, policy),
+        relayResponse,
+      ),
+    ).resolves.toBe("shared");
+
+    expect(run).toHaveBeenCalledOnce();
+    expect(bind).toHaveBeenCalledOnce();
+    const args = bind.mock.calls[0] as unknown[];
+    const expiresAt = sqliteUTC(now + 3_600_000);
+    expect(args[10]).toBe(JSON.stringify(original));
+    expect(args[14]).toBe(expiresAt);
+    expect(put).toHaveBeenCalledOnce();
+    const [, edgeResponse] = put.mock.calls[0] as unknown as [Request, Response];
+    expect(edgeResponse.headers.get("cache-control")).toBe("public, max-age=3600");
+    const cached = await edgeResponse.json();
+    expect(cached).toHaveProperty("body", original);
+    expect(cached).toHaveProperty("created_at", sqliteUTC(now));
+    expect(cached).toHaveProperty("expires_at", expiresAt);
+    expect(relayResponse.body).toEqual(original);
+  });
+
   it("keeps oversized bodies out of D1 while still writing the edge cache", async () => {
     const put = vi.fn(async () => undefined);
     vi.stubGlobal("caches", {
@@ -1030,6 +1135,30 @@ describe("github cache policy", () => {
     expect(boundLimit).toBe(100);
   });
 });
+
+function issuePage(state: "CLOSED" | "OPEN"): string {
+  const issue = {
+    __typename: "Issue",
+    number: 5,
+    title: "Synthetic issue",
+    body: "Synthetic body",
+    state,
+    url: "https://github.com/openclaw/octopool/issues/5",
+    createdAt: "2026-08-01T00:00:00Z",
+    updatedAt: "2026-08-02T00:00:00Z",
+    author: { id: "synthetic-user", login: "fixture-user", name: "Fixture User" },
+    labels: { edges: [], pageInfo: { hasNextPage: false } },
+    assignedActors: { edges: [], pageInfo: { hasNextPage: false } },
+    milestone: null,
+  };
+  return `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+    payload: {
+      preloadedQueries: [
+        { queryName: "IssueViewerViewQuery", result: { data: { repository: { issue } } } },
+      ],
+    },
+  })}</script>`;
+}
 
 function response(body: unknown): GitHubRelayResponse {
   return {

@@ -422,7 +422,10 @@ function closedPR(response?: GitHubRelayResponse): boolean {
 }
 
 function closedIssue(response?: GitHubRelayResponse): boolean {
-  return isRecord(response?.body) && response.body.state === "closed";
+  return (
+    isRecord(response?.body) &&
+    (response.body.state === "closed" || response.body.state === "CLOSED")
+  );
 }
 
 function completedRun(response?: GitHubRelayResponse): boolean {

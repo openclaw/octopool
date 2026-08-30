@@ -175,6 +175,9 @@ Per route kind and response state (`cacheTTLSeconds`):
 - repo metadata → 10m; workflow metadata → 1h
 - active/unknown-run logs, `rate_limit`, and conditional requests still bypass
 
+REST issue state `closed` and page-derived `CLOSED` both receive the one-hour TTL;
+classification preserves cached bodies and raw response states.
+
 ## Completed Actions log cache
 
 `job_logs` requests fetch the job endpoint without using edge or D1 metadata cache and
