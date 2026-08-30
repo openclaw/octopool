@@ -135,7 +135,7 @@ func TestHumanPRChecksExactOutputAndSanitizesName(t *testing.T) {
 			return map[string]any{"head": map[string]any{"sha": "abc123"}}
 		case "/repos/openclaw/octopool/commits/abc123/check-runs":
 			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{
-				"name": "Check\x1b[31m", "status": "completed", "conclusion": "success",
+				"id": 1, "name": "Check\x1b[31m", "status": "completed", "conclusion": "success",
 				"started_at": "2026-07-17T21:00:00Z", "completed_at": "2026-07-17T21:03:12Z",
 				"details_url": "https://github.com/openclaw/octopool/actions/runs/29614118703/job/87995297404",
 			}}}
@@ -356,7 +356,7 @@ func TestHumanPRChecksPendingExitsEight(t *testing.T) {
 			return map[string]any{"head": map[string]any{"sha": "abc123"}}
 		case "/repos/openclaw/octopool/commits/abc123/check-runs":
 			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{
-				"name": "Check", "status": "in_progress", "started_at": "2026-07-17T21:00:00Z",
+				"id": 1, "name": "Check", "status": "in_progress", "started_at": "2026-07-17T21:00:00Z",
 			}}}
 		case "/repos/openclaw/octopool/commits/abc123/status":
 			return map[string]any{"total_count": 0, "statuses": []map[string]any{}}

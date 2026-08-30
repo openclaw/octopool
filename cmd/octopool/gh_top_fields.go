@@ -81,7 +81,7 @@ var supportedPRFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
 	"additions", "deletions", "changedFiles", "mergeable", "merged", "files", "commits", "comments",
-	"reviews",
+	"reviews", "headRepository", "headRepositoryOwner", "assignees", "statusCheckRollup",
 )
 
 var supportedPRListFields = supportedFields(

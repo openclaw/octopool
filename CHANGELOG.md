@@ -5,6 +5,8 @@
 ### Fixes
 
 - Return native uppercase `OPEN`/`CLOSED` states in issue-view/list JSON before `--jq`, preserving lowercase raw `gh api` REST states.
+- Relay PR fork metadata, assignees, and native check-rollup JSON through shared transports to reduce local GitHub quota usage; hydrate repeated fields once and reject inconsistent check/status pagination before output while retaining guarded native fallback.
+- Match native PR-view author and label JSON shapes and file change-type enums, sharing author profile hydration and removing REST-only file fields.
 - Allow typed attachments on protected `gh issue create` and `gh pr edit` through strict snapshots and inline-reference rewriting, requiring an explicit body for PR attachment edits.
 - Allow exact repository branch-protection, ruleset, and applicable branch-rules GETs through freshly policy-checked native gh fallback, preserving caller permissions and encoded branch names without pooled credentials or shared caching.
 

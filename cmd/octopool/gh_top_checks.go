@@ -106,73 +106,32 @@ func prCheckItemsForSHAWithHeaders(
 	sha string,
 	headers map[string]string,
 ) ([]any, error) {
-	checkRuns := []any{}
-	totalCheckRuns := 0
-	for page := 1; page <= maxRelayPages; page++ {
-		request := ghAPIRequest{
-			method:  "GET",
-			path:    repoPath(repo, "commits", sha, "check-runs"),
-			query:   map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
-			headers: headers,
-		}
-		checkRunsEnvelope, err := client.do(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		items, total, err := checkRunItems(checkRunsEnvelope)
-		if err != nil {
-			return nil, err
-		}
-		if page == 1 {
-			totalCheckRuns = total
-		}
-		checkRuns = append(checkRuns, items...)
-		if len(checkRuns) >= totalCheckRuns || len(items) < relayPageSize {
-			break
-		}
-	}
-	if len(checkRuns) < totalCheckRuns {
-		return nil, localFallbackError{Reason: "pagination_exhausted"}
-	}
-	statuses := []any{}
-	totalStatuses := 0
-	for page := 1; page <= maxRelayPages; page++ {
-		statusEnvelope, err := client.do(ctx, ghAPIRequest{
-			method:  "GET",
-			path:    repoPath(repo, "commits", sha, "status"),
-			query:   map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
-			headers: headers,
-		})
-		if err != nil {
-			return nil, err
-		}
-		items, total, err := statusItems(statusEnvelope)
-		if err != nil {
-			return nil, err
-		}
-		if page == 1 {
-			totalStatuses = total
-		}
-		statuses = append(statuses, items...)
-		if len(statuses) >= totalStatuses || len(items) < relayPageSize {
-			break
-		}
-	}
-	if len(statuses) < totalStatuses {
-		return nil, localFallbackError{Reason: "pagination_exhausted"}
-	}
-	return ghCheckItems(append(checkRuns, statuses...)), nil
-}
-
-func checkRunItems(envelope relayEnvelope) ([]any, int, error) {
-	return envelopeCollectionPage(envelope, "check_runs")
-}
-
-func statusItems(envelope relayEnvelope) ([]any, int, error) {
-	rawItems, total, err := envelopeCollectionPage(envelope, "statuses")
+	items, err := prCheckContextsForSHA(ctx, client, repo, sha, headers)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
+	return ghCheckItems(items), nil
+}
+
+// Preserve the context discriminator and source fields until each gh export
+// projects them; pr checks and pr view expose different public JSON contracts.
+func prCheckContextsForSHA(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string) ([]any, error) {
+	checkRuns, err := relayCompleteCollection(ctx, client, ghAPIRequest{
+		method: "GET", path: repoPath(repo, "commits", sha, "check-runs"), headers: headers,
+	}, "check_runs")
+	if err != nil {
+		return nil, err
+	}
+	statuses, err := relayCompleteCollection(ctx, client, ghAPIRequest{
+		method: "GET", path: repoPath(repo, "commits", sha, "status"), headers: headers,
+	}, "statuses")
+	if err != nil {
+		return nil, err
+	}
+	return append(checkRuns, statusItems(statuses)...), nil
+}
+
+func statusItems(rawItems []any) []any {
 	items := make([]any, 0, len(rawItems))
 	for _, raw := range rawItems {
 		status, ok := raw.(map[string]any)
@@ -195,7 +154,7 @@ func statusItems(envelope relayEnvelope) ([]any, int, error) {
 		}
 		items = append(items, item)
 	}
-	return items, total, nil
+	return items
 }
 
 func ghCheckItems(items []any) []any {

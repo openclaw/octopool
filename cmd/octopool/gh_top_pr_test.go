@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestRunGHPRViewHydratesDetails(t *testing.T) {
 			if hint["pr_head_sha"] != "0123456789abcdef0123456789abcdef01234567" {
 				t.Fatalf("route hint = %#v", hint)
 			}
-			return []map[string]any{{"filename": "cmd/octopool/gh.go"}}
+			return []map[string]any{{"filename": "cmd/octopool/gh.go", "status": "modified", "additions": 2, "deletions": 1}}
 		case "/repos/openclaw/octopool/pulls/7/commits":
 			return []map[string]any{{"sha": "abc1234"}}
 		case "/repos/openclaw/octopool/issues/7/comments":
@@ -76,7 +77,7 @@ func TestRunGHPRViewFilesFallsBackWhenHeadMoves(t *testing.T) {
 			}
 			return map[string]any{"number": 7, "head": map[string]any{"sha": sha}}
 		case "/repos/openclaw/octopool/pulls/7/files":
-			return []map[string]any{{"filename": "moving.ts"}}
+			return []map[string]any{{"filename": "moving.ts", "status": "modified", "additions": 2, "deletions": 1}}
 		default:
 			t.Fatalf("path = %v", body["path"])
 			return nil
@@ -87,19 +88,6 @@ func TestRunGHPRViewFilesFallsBackWhenHeadMoves(t *testing.T) {
 		"view", "7", "-R", "openclaw/octopool", "--json", "number,files",
 	}, &bytes.Buffer{})
 	if result.action != ghFail || !isLocalFallback(result.err) {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
-}
-
-func TestRunGHPRViewFallsBackForStatusCheckRollup(t *testing.T) {
-	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"view",
-		"7",
-		"-R", "openclaw/octopool",
-		"--json", "number,statusCheckRollup",
-	}, &out)
-	if result.err != nil || result.action != ghDelegate {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }
@@ -127,9 +115,9 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 		case "/repos/openclaw/octopool/pulls/7":
 			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
-			return map[string]any{"statuses": []map[string]any{}}
+			return map[string]any{"total_count": 0, "statuses": []map[string]any{}}
 		default:
 			t.Fatalf("path = %v", body["path"])
 			return nil
@@ -151,17 +139,13 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 }
 
 func TestStatusItemsMapLegacyContexts(t *testing.T) {
-	envelope := relayEnvelope{
-		Status:       200,
-		BodyEncoding: "json",
-		Body:         []byte(`{"statuses":[{"context":"ci/external","state":"success","target_url":"https://example.test","created_at":"2026-05-27T00:00:00Z","updated_at":"2026-05-27T00:01:00Z"}]}`),
-	}
-	items, total, err := statusItems(envelope)
-	if err != nil {
+	var rawItems []any
+	if err := json.Unmarshal([]byte(`[{"id":1,"context":"ci/external","state":"success","target_url":"https://example.test","created_at":"2026-05-27T00:00:00Z","updated_at":"2026-05-27T00:01:00Z"}]`), &rawItems); err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || total != 1 {
-		t.Fatalf("items = %#v total=%d", items, total)
+	items := statusItems(rawItems)
+	if len(items) != 1 {
+		t.Fatalf("items = %#v", items)
 	}
 	item := items[0].(map[string]any)
 	if item["name"] != "ci/external" || item["conclusion"] != "success" || item["details_url"] != "https://example.test" {

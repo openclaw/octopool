@@ -133,11 +133,11 @@ func TestCLIEndToEndCheckExitCodes(t *testing.T) {
 				case "/repos/openclaw/octopool/pulls/7":
 					writeCLIEnvelope(t, w, map[string]any{"head": map[string]any{"sha": "abc123"}})
 				case "/repos/openclaw/octopool/commits/abc123/check-runs":
-					writeCLIEnvelope(t, w, map[string]any{"check_runs": []map[string]any{{
-						"name": "CI", "status": test.status, "conclusion": test.conclusion,
+					writeCLIEnvelope(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]any{{
+						"id": 1, "name": "CI", "status": test.status, "conclusion": test.conclusion,
 					}}})
 				case "/repos/openclaw/octopool/commits/abc123/status":
-					writeCLIEnvelope(t, w, map[string]any{"statuses": []any{}})
+					writeCLIEnvelope(t, w, map[string]any{"total_count": 0, "statuses": []any{}})
 				default:
 					http.Error(w, "unexpected checks path", http.StatusBadRequest)
 				}

@@ -210,6 +210,32 @@ draft/lifecycle status, checks, or merge policy. Raw `gh api` REST reads retain 
 boolean, null, or absent `mergeable` values. `mergeCommit` and `mergeStateStatus` remain
 unsupported and delegate to real `gh`, including when requested alongside `mergeable`;
 `gh pr list --json mergeable` also delegates.
+PR views also relay `headRepository`, `headRepositoryOwner`, `assignees`, and
+`statusCheckRollup` to reduce local GitHub quota usage through shared transports and
+eligible caching, including under active string rewrite protection. Fork metadata
+uses GitHub node IDs; a deleted head repository is `null`. Requested author, owner, and assignee
+names use a shared per-command profile lookup. The rollup preserves native `gh`
+`CheckRun` and `StatusContext` fields and resolves workflow names by check-suite ID
+from head-filtered Actions runs, without guessing from job names or URLs. Check/status
+pages and workflow lookups read live; after all hydration, a final live PR head check
+rejects a moving head before any JSON is printed. A matching SHA is not an atomic
+snapshot: checks can change on the same commit. Both `pr checks` and the rollup require
+consistent page totals, unique upstream IDs, and complete pages, bounded to 1,000 items
+per collection. The workflow lookup uses the same completeness checks. Inconsistent
+or incomplete collections emit no partial JSON and follow the existing typed native
+fallback, including fresh policy checks and host pinning under active rewrite rules.
+`OCTOPOOL_NO_FALLBACK=1` keeps these cases as failures. Repeated JSON fields are accepted
+and hydrated once.
+PR-view `author`, `labels`, and `files` use native JSON projections regardless of the
+other requested fields. User authors export `id` (node ID), `is_bot`, `login`, and
+`name`; bot authors use native `is_bot` and `app/…` login keys. Labels export node IDs,
+names, descriptions (null becomes an empty string), and colors in upstream order.
+Files export only `path`, `additions`, `deletions`, and `changeType`, including renames.
+File change types use native enums; REST `removed` becomes `DELETED`. Unsupported or
+missing statuses, including REST `unchanged` with no native enum, follow guarded
+fallback before any JSON is printed.
+Upgrade note: PR-view scripts using numeric author/label IDs, REST-only nested keys,
+lowercase file statuses, or `originalPath` must use these native projections instead.
 Upgrade note: scripts relying on earlier Octopool boolean/null output must use explicit
 enum comparisons. Replace `.mergeable == true` with `.mergeable == "MERGEABLE"` and
 `.mergeable == false` with `.mergeable == "CONFLICTING"`; handle `"UNKNOWN"` separately.
@@ -558,8 +584,8 @@ how a stale answer gets read as current fact.
 Three things keep that honest:
 
 - **Gate fields read live.** `gh pr view --json` reads that include `headRefOid`,
-  `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`, or
-  `closedAt` send `cache-control: max-age=0` automatically. These are the values callers
+  `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`,
+  `closedAt`, or `statusCheckRollup` send `cache-control: max-age=0` automatically. These are the values callers
   branch on, so they require an upstream fetch or successful conditional revalidation.
   Descriptive fields (`title`, `body`, `labels`, `author`) stay cached.
 - **Cached decision reads announce themselves.** When a PR, issue, run, or checks route is

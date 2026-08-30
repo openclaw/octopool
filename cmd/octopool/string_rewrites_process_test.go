@@ -1881,7 +1881,7 @@ func TestStringRewriteActivePRHydrationAndPaginationFallback(t *testing.T) {
 			case "/repos/acme/repo/pulls/1":
 				writeCLIEnvelope(t, w, map[string]any{"number": 1, "head": map[string]any{"sha": "0123456789abcdef0123456789abcdef01234567"}})
 			case "/repos/acme/repo/pulls/1/files":
-				writeCLIEnvelope(t, w, []map[string]any{{"filename": "safe.go"}})
+				writeCLIEnvelope(t, w, []map[string]any{{"filename": "safe.go", "status": "added", "additions": 1, "deletions": 0}})
 			default:
 				t.Error("unexpected hydration path")
 				w.WriteHeader(400)

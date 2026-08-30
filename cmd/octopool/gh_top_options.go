@@ -193,8 +193,10 @@ func splitFields(raw string) []string {
 		return r == ',' || r == ' '
 	})
 	out := make([]string, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
 	for _, part := range parts {
-		if part != "" {
+		if part != "" && !seen[part] {
+			seen[part] = true
 			out = append(out, part)
 		}
 	}

@@ -171,7 +171,7 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 					}
 					writeCLIEnvelope(t, w, map[string]any{"head": map[string]any{"sha": "abc1234"}})
 				case strings.HasSuffix(path, "/check-runs"):
-					writeCLIEnvelope(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}})
+					writeCLIEnvelope(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}})
 				case strings.HasSuffix(path, "/status"):
 					writeCLIEnvelope(t, w, map[string]any{"total_count": 0, "statuses": []any{}})
 				default:

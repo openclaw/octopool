@@ -150,12 +150,12 @@ func TestGHPRChecksWatchPendingToDone(t *testing.T) {
 			return map[string]any{
 				"total_count": 2,
 				"check_runs": []map[string]any{
-					{"name": "CI", "status": status, "conclusion": conclusion, "details_url": "https://example.test/ci"},
-					{"name": "Lint", "status": "completed", "conclusion": "success", "details_url": "https://example.test/lint"},
+					{"id": 1, "name": "CI", "status": status, "conclusion": conclusion, "details_url": "https://example.test/ci"},
+					{"id": 2, "name": "Lint", "status": "completed", "conclusion": "success", "details_url": "https://example.test/lint"},
 				},
 			}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
-			return map[string]any{"statuses": []any{}}
+			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
 			t.Fatalf("unexpected path = %v", body["path"])
 			return nil
@@ -190,11 +190,11 @@ func TestGHPRChecksWatchFailFast(t *testing.T) {
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
 			checkCalls++
 			return map[string]any{"total_count": 2, "check_runs": []map[string]any{
-				{"name": "CI", "status": "completed", "conclusion": "failure"},
-				{"name": "Integration", "status": "queued"},
+				{"id": 1, "name": "CI", "status": "completed", "conclusion": "failure"},
+				{"id": 2, "name": "Integration", "status": "queued"},
 			}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
-			return map[string]any{"statuses": []any{}}
+			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
 			t.Fatalf("unexpected path = %v", body["path"])
 			return nil
@@ -227,11 +227,11 @@ func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
 				pendingStatus, pendingConclusion = "completed", "success"
 			}
 			return map[string]any{"total_count": 2, "check_runs": []map[string]any{
-				{"name": "CI", "status": "completed", "conclusion": "cancelled"},
-				{"name": "Integration", "status": pendingStatus, "conclusion": pendingConclusion},
+				{"id": 1, "name": "CI", "status": "completed", "conclusion": "cancelled"},
+				{"id": 2, "name": "Integration", "status": pendingStatus, "conclusion": pendingConclusion},
 			}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
-			return map[string]any{"statuses": []any{}}
+			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
 			t.Fatalf("unexpected path = %v", body["path"])
 			return nil
@@ -284,7 +284,7 @@ func TestGHPRChecksWatchCachedEmptyRevalidatesFresh(t *testing.T) {
 				// Stale shared-cache entry from before checks registered.
 				return map[string]any{"total_count": 0, "check_runs": []any{}}
 			}
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -314,7 +314,7 @@ func TestGHPRChecksWatchFreshEmptyTerminalIsNotGreen(t *testing.T) {
 				// Terminal confirmation sees the checks vanish (rerun lag).
 				return map[string]any{"total_count": 0, "check_runs": []any{}}
 			}
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -363,9 +363,9 @@ func TestGHPRChecksWatchEqualsTrueSpelling(t *testing.T) {
 		case "/repos/openclaw/octopool/pulls/7":
 			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
-			return map[string]any{"statuses": []any{}}
+			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
 			t.Fatalf("unexpected path = %v", body["path"])
 			return nil
@@ -425,9 +425,9 @@ func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
 		case strings.HasSuffix(path, "/check-runs"):
 			sha := strings.Split(path, "/")[5]
 			checkFetches = append(checkFetches, sha)
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
-			return map[string]any{"statuses": []any{}}
+			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
 			t.Fatalf("unexpected path = %v", path)
 			return nil
@@ -499,12 +499,12 @@ func TestGHPRChecksWatchConfirmsRerunSameHead(t *testing.T) {
 				freshCheckReads++
 				if freshCheckReads == 1 {
 					// Rerun in flight: same head SHA, cached payload obsolete.
-					return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "in_progress"}}}
+					return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "in_progress"}}}
 				}
 			}
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
-			return map[string]any{"statuses": []any{}}
+			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
 			t.Fatalf("unexpected path = %v", path)
 			return nil
@@ -777,7 +777,7 @@ func TestGHPRChecksWatchAuthFailureDoesNotHandoff(t *testing.T) {
 			}
 			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
 		case strings.HasSuffix(path, "/check-runs"):
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
