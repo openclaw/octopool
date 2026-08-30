@@ -100,6 +100,15 @@ func normalizeRepo(raw string) string {
 		return ""
 	}
 	raw = strings.TrimSuffix(raw, ".git")
+	if parsed, err := url.Parse(raw); err == nil && parsed.Scheme == "ssh" && parsed.Hostname() == "github.com" && parsed.RawQuery == "" && parsed.Fragment == "" {
+		hasPassword := false
+		if parsed.User != nil {
+			_, hasPassword = parsed.User.Password()
+		}
+		if parsed.User == nil || (parsed.User.Username() == "git" && !hasPassword) {
+			raw = parsed.Path
+		}
+	}
 	raw = strings.TrimPrefix(raw, "git@github.com:")
 	raw = strings.TrimPrefix(raw, "https://github.com/")
 	parts := strings.Split(strings.Trim(raw, "/"), "/")

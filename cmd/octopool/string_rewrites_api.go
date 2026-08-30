@@ -48,7 +48,7 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 		}
 		parsed, err := parseRewriteFlags(args[i:i+count], values, booleans)
 		if err != nil || len(parsed.ordered) != 1 {
-			return result, errRewriteBlocked
+			return result, errRewriteUnsupported
 		}
 		flag := parsed.ordered[0]
 		i += count - 1
@@ -115,23 +115,26 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 	if err := policy.guardRequest(request); err != nil {
 		return err
 	}
+	if err := policy.checkStructural("github.com"); err != nil {
+		return err
+	}
 	if opts.method == "GET" {
 		if opts.inputSet || len(opts.fields) > 0 || !rewriteReadPath(request.path) {
-			return errRewriteBlocked
+			return errRewriteUnsupported
 		}
-		prepared.args = append([]string{"api", opts.endpoint, "--method=GET"}, opts.output...)
+		prepared.args = append([]string{"api", opts.endpoint, "--method=GET", "--hostname=github.com"}, opts.output...)
 		prepared.stdin = strings.NewReader("")
 		return nil
 	}
 	if opts.method != "POST" && opts.method != "PATCH" && opts.method != "PUT" {
-		return errRewriteBlocked
+		return errRewriteUnsupported
 	}
 	if len(request.query) > 0 {
-		return errRewriteBlocked
+		return errRewriteUnsupported
 	}
 	for _, flag := range opts.output {
 		if strings.HasPrefix(flag, "--paginate") || strings.HasPrefix(flag, "--slurp") {
-			return errRewriteBlocked
+			return errRewriteUnsupported
 		}
 	}
 	schema, err := rewriteMutationSchema(request.path, opts.method)
@@ -233,7 +236,7 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 	if err != nil {
 		return err
 	}
-	prepared.args = append([]string{"api", opts.endpoint, "--method=" + opts.method, "--input=" + path}, opts.output...)
+	prepared.args = append([]string{"api", opts.endpoint, "--method=" + opts.method, "--hostname=github.com", "--input=" + path}, opts.output...)
 	prepared.stdin = strings.NewReader("")
 	if schema == "release-create" {
 		tag := payload["tag_name"].(string)
@@ -286,7 +289,7 @@ var rewriteAssignees = regexp.MustCompile(`^issues/[0-9]+/assignees$`)
 func rewriteMutationSchema(path, method string) (string, error) {
 	match := rewriteMutationPath.FindStringSubmatch(path)
 	if match == nil {
-		return "", errRewriteBlocked
+		return "", errRewriteUnsupported
 	}
 	tail := match[1]
 	switch {
@@ -315,7 +318,7 @@ func rewriteMutationSchema(path, method string) (string, error) {
 	case method == "POST" && rewriteAssignees.MatchString(tail):
 		return "assignees", nil
 	}
-	return "", errRewriteBlocked
+	return "", errRewriteUnsupported
 }
 
 func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation, payload map[string]any, schema string) error {

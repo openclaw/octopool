@@ -147,11 +147,11 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	case "search issues", "search prs":
 		values += " --limit,-L --state --author --assignee --label"
 	default:
-		return errRewriteBlocked
+		return errRewriteUnsupported
 	}
 	flags, err := parseRewriteFlags(args[2:], rewriteFlagNames(values), rewriteFlagNames(booleans))
 	if err != nil {
-		return err
+		return errRewriteUnsupported
 	}
 	if flags.has("--color") {
 		return errRewriteBlocked
@@ -301,6 +301,7 @@ func rewriteBootstrapInvocation(args []string) bool {
 func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*rewritePreparation, error) {
 	prepared := &rewritePreparation{args: args, stdin: stdin}
 	if rewriteBootstrapInvocation(args) {
+		prepared.forceGitHubHost = true
 		return prepared, nil
 	}
 	policy, err := currentStringRewritePolicy(ctx)
@@ -310,6 +311,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	if len(policy.Rules) == 0 {
 		return prepared, nil
 	}
+	prepared.forceGitHubHost = true
 	total := 0
 	for _, arg := range args {
 		total += len(arg)
@@ -322,12 +324,18 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 		err = prepareRewriteContent(policy, args, stdin, prepared)
 	case len(args) > 0 && args[0] == "api":
 		err = prepareRewriteAPI(policy, args, stdin, prepared)
+		if err == errRewriteUnsupported {
+			err = prepareRewriteBestEffort(policy, args, stdin, prepared)
+		}
 	case len(args) >= 2 && args[0] == "pr" && (args[1] == "ready" || args[1] == "merge"):
 		err = prepareRewritePRLifecycle(policy, args, prepared)
 	default:
-		// Approved top-level reads pin repository context and selectors before
-		// native gh can construct its fixed REST/GraphQL request shapes.
+		// Modeled reads retain structural pinning. Unknown commands and flag
+		// shapes still receive bounded argv/stdin filtering before native gh.
 		err = prepareRewriteRead(policy, args, prepared)
+		if err == errRewriteUnsupported {
+			err = prepareRewriteBestEffort(policy, args, stdin, prepared)
+		}
 	}
 	if err != nil {
 		prepared.cleanup()

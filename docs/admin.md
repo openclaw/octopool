@@ -239,6 +239,11 @@ prose still rewrites normally. This bounded check is not arbitrary Markdown/Unic
 deobfuscation, malformed-JSON recovery, encoded-file inspection, or semantic DLP; keep
 policy files private and use the dedicated authenticated admin import path.
 
+Modeled CLI submissions retain strict structural snapshots. Unmodeled native `gh` commands
+use bounded best-effort rewriting of visible arguments, declared piped JSON/text, and `--input`
+snapshots so an evolving CLI surface does not halt normal operations. Interactive or deferred
+native content remains outside that guarantee. Server-mediated relay requests remain strict.
+
 Each relay request owns a frozen transport context with its checked policy snapshot;
 there is no global mutable policy or stale policy fallback. Canonical outgoing URLs and
 noncredential headers are checked after URL parsing and header normalization, including

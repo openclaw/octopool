@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -129,8 +130,11 @@ func TestStringRewriteMissingLoginAndLocalFile(t *testing.T) {
 	if err := os.WriteFile(local, []byte(`{"schema_version":1,"rules":[{"pattern":"internal-model","replacement":"public"}]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := execRealGH(t.Context(), []string{"alias", "list"}, io.Discard, io.Discard); err != errRewriteBlocked {
-		t.Fatalf("default local policy not enforced: %v", err)
+	if err := execRealGH(t.Context(), []string{"alias", "list"}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("default local best-effort policy failed: %v", err)
+	}
+	if got := readRewriteCapture(t, capture); !slices.Equal(got.Args, []string{"alias", "list"}) {
+		t.Fatalf("default local best-effort args=%v", got.Args)
 	}
 }
 func TestStringRewriteSavedURLBinding(t *testing.T) {

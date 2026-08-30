@@ -2,6 +2,10 @@
 
 ## 0.5.12 - Unreleased
 
+### Fixes
+
+- Keep active string-rewrite protection best-effort for evolving native `gh` commands by filtering visible arguments, declared piped JSON/text, and `--input` snapshots instead of blocking workflow dispatches, job logs, uploads, or newly added flags solely because their command shape is not structurally modeled.
+
 ## 0.5.11 - 2026-08-29
 
 ### Fixes

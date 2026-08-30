@@ -19,8 +19,9 @@ const (
 )
 
 var (
-	errRewritePolicy  = errors.New("string rewrite policy unavailable or invalid")
-	errRewriteBlocked = errors.New("string rewrite protection blocked unsupported or unsafe input; use a documented typed gh command or REST shape")
+	errRewritePolicy      = errors.New("string rewrite policy unavailable or invalid")
+	errRewriteBlocked     = errors.New("string rewrite protection blocked unsafe input")
+	errRewriteUnsupported = errors.New("string rewrite command shape is not structurally modeled")
 )
 
 type stringRewriteRule struct {

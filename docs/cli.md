@@ -261,9 +261,11 @@ Pagination is fail-closed: if bounded relay pagination cannot prove a complete P
 check set, or filtered issue list, the CLI delegates to real `gh` instead of returning a
 partial result. Non-integer `--limit`/`-L` values are rejected explicitly.
 
-With active string rewrite rules, supported explicit content commands are sanitized before
-local execution; unsupported commands and flags are blocked. With an empty effective policy,
-mutating and unsupported subcommands retain their usual delegation. Child exit codes and
+With active string rewrite rules, modeled content, API, and lifecycle commands use strict
+structural validation and immutable sanitized snapshots. An unmodeled native command or flag
+no longer fails merely because Octopool does not recognize its shape: visible arguments,
+explicitly declared JSON/text stdin, and `--input` files are filtered on a bounded best-effort basis before normal
+real-`gh` delegation. Policy load/rewrite failures still block. Child exit codes and
 stdout/stderr are preserved.
 `gh auth status` normally delegates too. For `gh auth status --active --hostname <host>`,
 if GitHub's REST scope probe reports the active token as invalid while the same token still
@@ -408,11 +410,33 @@ Creation also rejects sanitized empty titles/bodies/notes to avoid implicit defa
 Repository context is normalized and pinned into an explicit `owner/repo` after validation;
 explicit `https://github.com/owner/repo` and GitHub SSH forms are accepted, while other hosts
 are blocked. Input files are read into bounded snapshots, never modified, and never reopened
-by the child. Sanitized
-snapshots use a private 0700 directory and 0600 files, removed after execution, including
-nonzero exits. Active-policy child commands do not retain live stdin.
+by the child. Sanitized snapshots use a private 0700 directory and 0600 files, removed
+after execution, including nonzero exits. These modeled commands do not retain live stdin.
 
-Supported content paths also reject recognizable active rule material before rewriting
+Commands and flags outside the modeled vocabulary use a bounded best-effort pass-through
+instead of being denied solely for being new or unfamiliar. Octopool rewrites every visible
+argument, snapshots and filters `--input` files or `--input=-`, snapshots typed
+`-F`/`--field key=@source` text without changing its formatting, and filters stdin when the
+command explicitly declares it (currently `workflow run --json`). Valid JSON request stdin/files are decoded recursively so string keys and values are rewritten
+without corrupting JSON; other valid UTF-8 is rewritten as text. This keeps workflow
+dispatches (`gh workflow run` field or `--json` forms), job-log reads, uploads, and newly
+introduced native flags working while active rules still remove visible matches. Native
+children force `GH_HOST=github.com` and remove inherited `GH_REPO`; best-effort
+`--repo`/`-R` values are structurally checked before rewriting and normalized to
+`github.com/owner/repo`. Repo-capable commands without an explicit selector pin the current
+GitHub.com remote. Alternate API/repository hosts, explicit credential headers,
+unresolved API placeholders, invalid UTF-8, policy
+material, residual matches, and bounded-read failures remain blocked.
+
+Best effort is intentionally not the same guarantee as a modeled snapshot. Live terminal
+input is passed through so native prompts still work, and deferred content sources other than
+`--input` and typed field `@source` files—for example an editor, generated notes,
+extension-owned files, or content native
+`gh` derives after the guard—cannot be inspected. Direct real `gh`, browsers, Git pushes,
+and deliberate encoding/obfuscation remain outside the boundary. Use a modeled command when
+publication content needs the strict guarantee.
+
+Modeled content paths also reject recognizable active rule material before rewriting
 and in the final text: complete JSON objects with exactly string `pattern` and
 `replacement` fields, whose decoded pattern equals an effective server or local pattern.
 The replacement need not be identical. This covers copied policy files, compact or pretty
@@ -441,10 +465,11 @@ current/explicit nonnumeric Git branch) and metadata-only
 `pr merge --squash --match-head-commit` is converted to the immediate pull-request merge REST
 endpoint with only the checked SHA and squash method; it never enables auto-merge, so a branch
 that requires a merge queue fails closed. Subject/body merge flags, admin/auto merge variants,
-URL selectors, numeric inferred branches, unpinned merges, editor/web/template/fill modes,
-uploads, aliases/extensions, unknown commands/flags, raw GraphQL apart from the fixed auth
-viewer probe, and ambiguous encodings remain blocked while rules are active. The denial names
-the documented typed command or REST-shape alternative without echoing the rejected input.
+URL selectors, numeric inferred branches, and unpinned merges remain blocked on that strict
+lifecycle path. Other editor/web/template/fill modes, uploads, aliases/extensions, raw
+GraphQL, and newly introduced native commands/flags use best-effort filtering and retain
+native behavior. A denial reports only the generic unsafe-input boundary and never echoes the
+rejected text.
 
 Admin imports always fetch the current revision before the conditional update:
 
@@ -458,10 +483,11 @@ cat rules.json | octopool admin string-rewrites set --file - --if-revision 7
 overwrites a newer policy. Status and successful imports print only revision and rule count,
 not patterns, replacements, matched content, or local paths.
 
-Protection covers supported traffic through this updated shim and relay, using the policy
-snapshot checked before dispatch. Direct real `gh`, browsers, Git pushes, older clients'
-local writes, existing published content, and arbitrary deliberate obfuscation are outside
-this boundary. Policy-material detection does not interpret arbitrary Markdown, Unicode
+Strict protection covers modeled traffic through this updated shim and relay, using the
+policy snapshot checked before dispatch; unmodeled native commands receive the best-effort
+filtering described above. Direct real `gh`, interactive/deferred native content, browsers,
+Git pushes, older clients' local writes, existing published content, and arbitrary deliberate
+obfuscation are outside this boundary. Policy-material detection does not interpret arbitrary Markdown, Unicode
 obfuscation, malformed rule JSON, or arbitrary encodings, and is not general data-loss
 prevention or a network-wide guarantee. GitHub writes continue to use the user's local credentials; the Worker
 remains GET-only.

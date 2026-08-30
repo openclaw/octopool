@@ -29,6 +29,9 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 				}
 				opts, err := parseRewriteAPI(args[1:])
 				if err != nil {
+					if errors.Is(err, errRewriteUnsupported) {
+						return execRealGH(ctx, args, stdout, stderr)
+					}
 					return err
 				}
 				if opts.method != "GET" {
@@ -42,11 +45,14 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 					return err
 				}
 				if opts.inputSet || len(opts.fields) != 0 || !rewriteReadPath(request.path) {
-					return errRewriteBlocked
+					return execRealGH(ctx, args, stdout, stderr)
 				}
 			} else {
 				prepared := &rewritePreparation{}
 				if err := prepareRewriteRead(policy, args, prepared); err != nil {
+					if errors.Is(err, errRewriteUnsupported) {
+						return execRealGH(ctx, args, stdout, stderr)
+					}
 					return err
 				}
 				args = prepared.args

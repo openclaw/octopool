@@ -128,6 +128,9 @@ func execRealGHWithStdinAndEnv(
 	cmd.Stdin = prepared.stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	if prepared.forceGitHubHost {
+		env = envWithGitHubHost(env)
+	}
 	cmd.Env = env
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
@@ -137,6 +140,18 @@ func execRealGHWithStdinAndEnv(
 		return err
 	}
 	return nil
+}
+
+func envWithGitHubHost(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.EqualFold(name, "GH_HOST") || strings.EqualFold(name, "GH_REPO") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, "GH_HOST=github.com")
 }
 
 func envWithoutGitHubTokens() []string {

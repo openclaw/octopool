@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type rewriteCapture struct {
@@ -25,6 +26,7 @@ type rewriteCapture struct {
 	Files          map[string]string
 	Modes          map[string]uint32
 	DirectoryModes map[string]uint32
+	Env            map[string]string
 }
 
 func TestRewriteCaptureProcess(t *testing.T) {
@@ -39,22 +41,32 @@ func TestRewriteCaptureProcess(t *testing.T) {
 			break
 		}
 	}
-	capture := rewriteCapture{Args: args, Files: map[string]string{}, Modes: map[string]uint32{}, DirectoryModes: map[string]uint32{}}
+	capture := rewriteCapture{Args: args, Files: map[string]string{}, Modes: map[string]uint32{}, DirectoryModes: map[string]uint32{}, Env: map[string]string{"GH_HOST": os.Getenv("GH_HOST"), "GH_REPO": os.Getenv("GH_REPO")}}
 	input, _ := io.ReadAll(os.Stdin)
 	capture.Stdin = string(input)
 	for _, arg := range args {
+		paths := []string{}
 		for _, prefix := range []string{"--body-file=", "--notes-file=", "--input="} {
 			if path, ok := strings.CutPrefix(arg, prefix); ok {
-				data, err := os.ReadFile(path)
-				if err != nil {
-					os.Exit(80)
-				}
-				capture.Files[path] = string(data)
-				info, _ := os.Stat(path)
-				capture.Modes[path] = uint32(info.Mode().Perm())
-				dir, _ := os.Stat(filepath.Dir(path))
-				capture.DirectoryModes[path] = uint32(dir.Mode().Perm())
+				paths = append(paths, path)
 			}
+		}
+		if field, ok := strings.CutPrefix(arg, "--field="); ok {
+			_, value, exists := strings.Cut(field, "=")
+			if exists && strings.HasPrefix(value, "@") && value != "@-" {
+				paths = append(paths, strings.TrimPrefix(value, "@"))
+			}
+		}
+		for _, path := range paths {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				os.Exit(80)
+			}
+			capture.Files[path] = string(data)
+			info, _ := os.Stat(path)
+			capture.Modes[path] = uint32(info.Mode().Perm())
+			dir, _ := os.Stat(filepath.Dir(path))
+			capture.DirectoryModes[path] = uint32(dir.Mode().Perm())
 		}
 	}
 	data, _ := json.Marshal(capture)
@@ -365,29 +377,556 @@ func TestStringRewriteReadFallbackCompatibility(t *testing.T) {
 	}
 }
 
+func TestStringRewriteBestEffortFallback(t *testing.T) {
+	policyStore, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"workflow fields", []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "--ref", "main", "-f", "message=internal-model"}, "message=public"},
+		{"run job logs", []string{"run", "view", "123", "--repo", "acme/repo", "--job", "456", "--log"}, "--job"},
+		{"config read", []string{"config", "get", "internal-model"}, "public"},
+		{"graphql read", []string{"api", "graphql", "-f", "query=query { internal-model }"}, "query=query { public }"},
+		{"graphql explicit host", []string{"api", "graphql", "--hostname", "github.com", "-f", "query=query { internal-model }"}, "query=query { public }"},
+		{"raw workflow dispatch", []string{"api", "repos/acme/repo/actions/workflows/deploy.yml/dispatches", "--method", "POST", "-f", "ref=main", "-f", "inputs[message]=internal-model"}, "inputs[message]=public"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			if err := runGH(t.Context(), test.args, io.Discard, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			if !slices.Contains(capture.Args, test.want) {
+				t.Fatalf("best-effort argv missing %q: %v", test.want, capture.Args)
+			}
+			for _, arg := range capture.Args {
+				if strings.Contains(arg, "internal-model") {
+					t.Fatalf("unfiltered argv: %v", capture.Args)
+				}
+			}
+			if test.name == "workflow fields" && (!slices.Contains(capture.Args, "github.com/acme/repo") || capture.Env["GH_HOST"] != "github.com") {
+				t.Fatalf("workflow repository was not pinned: args=%v env=%v", capture.Args, capture.Env)
+			}
+		})
+	}
+
+	for _, value := range []string{"https://ghe.example/acme/repo", "ghe.example/acme/repo", "ghe.example:acme/repo", "alice@ghe.example:acme/repo"} {
+		t.Run("positional enterprise repository blocks", func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			args := []string{"repo", "clone", value}
+			if err := runGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+				t.Fatalf("positional enterprise repository error=%v", err)
+			}
+			if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+				t.Fatal("positional enterprise repository reached child")
+			}
+		})
+	}
+
+	t.Run("positional github repository is pinned", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"repo", "clone", "https://github.com/acme/repo"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.Contains(capture.Args, "https://github.com/acme/repo") || capture.Env["GH_HOST"] != "github.com" {
+			t.Fatalf("positional GitHub repository was not pinned: args=%v env=%v", capture.Args, capture.Env)
+		}
+	})
+
+	t.Run("positional ssh repository preserves protocol", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"repo", "clone", "ssh://git@github.com/acme/repo.git"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.Contains(capture.Args, "ssh://git@github.com/acme/repo.git") {
+			t.Fatalf("positional SSH protocol changed: %v", capture.Args)
+		}
+	})
+
+	t.Run("positional scp repository preserves protocol", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"repo", "clone", "git@github.com:acme/repo.git"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.Contains(capture.Args, "git@github.com:acme/repo.git") {
+			t.Fatalf("positional SCP protocol changed: %v", capture.Args)
+		}
+	})
+
+	t.Run("implicit repository ignores enterprise environment", func(t *testing.T) {
+		t.Setenv("GH_HOST", "ghe.example")
+		t.Setenv("GH_REPO", "ghe.example/other/repo")
+		repo := t.TempDir()
+		if output, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v: %s", err, output)
+		}
+		if output, err := exec.Command("git", "-C", repo, "remote", "add", "origin", "https://github.com/acme/repo").CombinedOutput(); err != nil {
+			t.Fatalf("git remote: %v: %s", err, output)
+		}
+		previous, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(repo); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(previous) }()
+		capturePath := captureRewriteGH(t)
+		args := []string{"workflow", "run", "deploy.yml", "-f", "message=safe"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != "" || !slices.Contains(capture.Args, "--repo=github.com/acme/repo") {
+			t.Fatalf("implicit repository was not pinned: args=%v env=%v", capture.Args, capture.Env)
+		}
+	})
+
+	t.Run("implicit ssh URL repository is pinned", func(t *testing.T) {
+		repo := t.TempDir()
+		if output, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+			t.Fatalf("git init: %v: %s", err, output)
+		}
+		if output, err := exec.Command("git", "-C", repo, "remote", "add", "origin", "ssh://git@github.com/acme/repo.git").CombinedOutput(); err != nil {
+			t.Fatalf("git remote: %v: %s", err, output)
+		}
+		previous, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chdir(repo); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chdir(previous) }()
+		capturePath := captureRewriteGH(t)
+		args := []string{"workflow", "run", "deploy.yml", "-f", "message=safe"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.Contains(capture.Args, "--repo=github.com/acme/repo") {
+			t.Fatalf("ssh URL repository was not pinned: %v", capture.Args)
+		}
+	})
+
+	t.Run("bootstrap auth pins github host", func(t *testing.T) {
+		t.Setenv("GH_HOST", "ghe.example")
+		t.Setenv("GH_REPO", "ghe.example/other/repo")
+		capturePath := captureRewriteGH(t)
+		args := []string{"auth", "status", "--active", "--hostname", "github.com"}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != "" {
+			t.Fatalf("bootstrap host was not pinned: %v", capture.Env)
+		}
+	})
+
+	t.Run("top-level alternate repository host blocks", func(t *testing.T) {
+		t.Setenv("GH_HOST", "ghe.example")
+		capturePath := captureRewriteGH(t)
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "ghe.example/acme/repo", "-f", "message=safe"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("alternate repository host error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("alternate repository host reached child")
+		}
+	})
+
+	t.Run("protected repository does not redirect", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "internal-model/repo", "-f", "message=safe"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("protected repository error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("protected repository reached child")
+		}
+	})
+
+	t.Run("positional pull URL is pinned", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"pr", "view", "https://github.com/acme/repo/pull/7", "--comments", "--repo", "acme/repo"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.Contains(capture.Args, "https://github.com/acme/repo/pull/7") || !slices.Contains(capture.Args, "github.com/acme/repo") || capture.Env["GH_HOST"] != "github.com" {
+			t.Fatalf("pull URL was not validated and host-pinned: args=%v env=%v", capture.Args, capture.Env)
+		}
+	})
+
+	t.Run("positional enterprise pull URL blocks", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"pr", "view", "https://ghe.example/acme/repo/pull/7", "--comments", "--repo", "acme/repo"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("enterprise pull URL error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("enterprise pull URL reached child")
+		}
+	})
+
+	t.Run("enterprise pull URL cannot hide behind flag URLs", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{
+			"pr", "view", "--json", "number",
+			"--template", "https://github.com/acme/repo/pull/1",
+			"--template", "https://github.com/acme/repo/pull/2",
+			"https://ghe.example/acme/repo/pull/7", "--repo", "acme/repo",
+		}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("hidden enterprise pull URL error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("hidden enterprise pull URL reached child")
+		}
+	})
+
+	t.Run("repo list slash-containing jq passes", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"repo", "list", "--json", "nameWithOwner", "--jq", `.[].nameWithOwner | split("/")[0]`}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.Contains(capture.Args, `.[].nameWithOwner | split("/")[0]`) {
+			t.Fatalf("repo list jq changed: %v", capture.Args)
+		}
+	})
+
+	t.Run("api pins github host over environment", func(t *testing.T) {
+		t.Setenv("GH_HOST", "ghe.example")
+		capturePath := captureRewriteGH(t)
+		args := []string{"api", "graphql", "-f", "query=query { viewer { login } }"}
+		if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if capture.Env["GH_HOST"] != "github.com" || !slices.Contains(capture.Args, "--hostname=github.com") {
+			t.Fatalf("API host was not pinned: args=%v env=%v", capture.Args, capture.Env)
+		}
+	})
+
+	t.Run("field dispatch does not read idle pipe", func(t *testing.T) {
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer reader.Close()
+		defer writer.Close()
+		policy, err := parseStringRewritePolicy([]byte(rewriteActiveTestPolicy), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			prepared := &rewritePreparation{}
+			done <- prepareRewriteBestEffort(policy, []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "-f", "message=safe"}, reader, prepared)
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("field dispatch attempted to read idle stdin")
+		}
+	})
+
+	t.Run("workflow json stdin", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		input := `{"message":"internal-model","nested":{"value":"internal-model"}}`
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "--ref", "main", "--json"}
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(input), io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(capture.Stdin), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["message"] != "public" || payload["nested"].(map[string]any)["value"] != "public" {
+			t.Fatalf("workflow stdin not rewritten: %s", capture.Stdin)
+		}
+	})
+
+	t.Run("typed field stdin is snapshotted", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		args := []string{"api", "repos/acme/repo/issues/1/comments", "-Fbody=@-", "--verbose"}
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader("internal-model"), io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if capture.Stdin != "" || len(capture.Files) != 1 {
+			t.Fatalf("typed field retained stdin: %+v", capture)
+		}
+		if !slices.ContainsFunc(capture.Args, func(arg string) bool { return strings.HasPrefix(arg, "--field=body=@") }) {
+			t.Fatalf("typed field was not rebound to snapshot: %v", capture.Args)
+		}
+		for _, content := range capture.Files {
+			if content != "public" {
+				t.Fatalf("typed field snapshot=%q", content)
+			}
+		}
+	})
+
+	t.Run("typed field key is rewritten", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		input := filepath.Join(t.TempDir(), "safe.txt")
+		if err := os.WriteFile(input, []byte("safe"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "-F", "internal-model=@" + input}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.ContainsFunc(capture.Args, func(arg string) bool { return strings.HasPrefix(arg, "--field=public=@") }) {
+			t.Fatalf("typed field key was not rewritten: %v", capture.Args)
+		}
+	})
+
+	t.Run("policy material still blocks", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		input := `{"message":"{\"pattern\":\"internal-model\",\"replacement\":\"public\"}"}`
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "--ref", "main", "--json"}
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(input), io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("policy material error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("policy material reached child")
+		}
+	})
+
+	t.Run("direct policy object still blocks", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		input := `{"pattern":"internal-model","replacement":"public"}`
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "--ref", "main", "--json"}
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(input), io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("direct policy material error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("direct policy object reached child")
+		}
+	})
+
+	t.Run("api input snapshot", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		input := filepath.Join(t.TempDir(), "dispatch.json")
+		original := []byte(`{"ref":"main","inputs":{"message":"internal-model"}}`)
+		if err := os.WriteFile(input, original, 0600); err != nil {
+			t.Fatal(err)
+		}
+		args := []string{"api", "repos/acme/repo/actions/workflows/deploy.yml/dispatches", "--method", "POST", "--input", input}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if len(capture.Files) != 1 {
+			t.Fatalf("snapshot files=%v", capture.Files)
+		}
+		for _, content := range capture.Files {
+			if strings.Contains(content, "internal-model") || !strings.Contains(content, "public") {
+				t.Fatalf("input snapshot not rewritten: %s", content)
+			}
+		}
+		unchanged, err := os.ReadFile(input)
+		if err != nil || !bytes.Equal(unchanged, original) {
+			t.Fatal("original dispatch input changed")
+		}
+	})
+
+	t.Run("typed field preserves exact text", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		input := filepath.Join(t.TempDir(), "payload.txt")
+		original := []byte("{\n  \"z\": 1,\n  \"a\": 2\n}\n")
+		if err := os.WriteFile(input, original, 0600); err != nil {
+			t.Fatal(err)
+		}
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "-F", "payload=@" + input}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if len(capture.Files) != 1 {
+			t.Fatalf("typed field files=%v", capture.Files)
+		}
+		for _, content := range capture.Files {
+			if content != string(original) {
+				t.Fatalf("typed field bytes changed: %q", content)
+			}
+		}
+	})
+
+	t.Run("source path is frozen before rewriting", func(t *testing.T) {
+		dir := t.TempDir()
+		intended := filepath.Join(dir, "internal-model.json")
+		wrong := filepath.Join(dir, "public.json")
+		if err := os.WriteFile(intended, []byte(`{"value":"intended-safe-content"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(wrong, []byte(`{"value":"wrong-file-content"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		capturePath := captureRewriteGH(t)
+		args := []string{"api", "repos/acme/repo/actions/workflows/deploy.yml/dispatches", "--verbose", "--input", intended}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if len(capture.Files) != 1 {
+			t.Fatalf("source snapshot files=%v", capture.Files)
+		}
+		for _, content := range capture.Files {
+			if !strings.Contains(content, "intended-safe-content") || strings.Contains(content, "wrong-file-content") {
+				t.Fatalf("wrong source file snapshotted: %q", content)
+			}
+		}
+	})
+
+	t.Run("repeated inputs retain aggregate bound", func(t *testing.T) {
+		capturePath := captureRewriteGH(t)
+		input := filepath.Join(t.TempDir(), "large.json")
+		data := []byte(`"` + strings.Repeat("a", 600_000) + `"`)
+		if err := os.WriteFile(input, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		args := []string{"api", "repos/acme/repo/actions/workflows/deploy.yml/dispatches", "--verbose", "--input", input, "--input", input}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("repeated input error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("oversized aggregate input reached child")
+		}
+	})
+
+	t.Run("rewritten json flag filters stdin", func(t *testing.T) {
+		policyJSON, err := json.Marshal(map[string]any{
+			"schema_version": 1,
+			"revision":       2,
+			"updated_at":     "2026-08-29T00:00:00Z",
+			"rules": []map[string]string{
+				{"pattern": "MAGIC", "replacement": "--json"},
+				{"pattern": "internal-model", "replacement": "public"},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		policyStore.Store(string(policyJSON))
+		capturePath := captureRewriteGH(t)
+		input := `{"message":"internal-model"}`
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "MAGIC"}
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(input), io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.Contains(capture.Args, "--json") || strings.Contains(capture.Stdin, "internal-model") || !strings.Contains(capture.Stdin, "public") {
+			t.Fatalf("rewritten json flag did not filter stdin: %+v", capture)
+		}
+	})
+
+	t.Run("rewritten JSON cannot create policy material", func(t *testing.T) {
+		policyJSON, err := json.Marshal(map[string]any{
+			"schema_version": 1,
+			"revision":       2,
+			"updated_at":     "2026-08-29T00:00:00Z",
+			"rules": []map[string]string{
+				{"pattern": "^p$", "replacement": "pattern"},
+				{"pattern": `\binternal-model\b`, "replacement": "public"},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		policyStore.Store(string(policyJSON))
+		capturePath := captureRewriteGH(t)
+		input := `{"p":"\\binternal-model\\b","replacement":"public"}`
+		args := []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "--ref", "main", "--json"}
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(input), io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("created policy material error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("rewritten policy material reached child")
+		}
+	})
+
+	t.Run("rewritten source flag is snapshotted", func(t *testing.T) {
+		source := filepath.Join(t.TempDir(), "private.txt")
+		if err := os.WriteFile(source, []byte("internal-model"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		policyJSON, err := json.Marshal(map[string]any{
+			"schema_version": 1,
+			"revision":       2,
+			"updated_at":     "2026-08-29T00:00:00Z",
+			"rules": []map[string]string{
+				{"pattern": "MAGIC", "replacement": "--field=body=@" + source},
+				{"pattern": "internal-model", "replacement": "public"},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		policyStore.Store(string(policyJSON))
+		capturePath := captureRewriteGH(t)
+		args := []string{"api", "graphql", "--verbose", "-f", "query=query { viewer { login } }", "MAGIC"}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if len(capture.Files) != 1 || slices.ContainsFunc(capture.Args, func(arg string) bool { return strings.Contains(arg, source) }) {
+			t.Fatalf("rewritten source was not isolated: %+v", capture)
+		}
+		for _, content := range capture.Files {
+			if content != "public" {
+				t.Fatalf("rewritten source snapshot=%q", content)
+			}
+		}
+	})
+
+	t.Run("rewritten API host is revalidated", func(t *testing.T) {
+		policyStore.Store(`{"schema_version":1,"revision":2,"updated_at":"2026-08-29T00:00:00Z","rules":[{"pattern":"github\\.com","replacement":"ghe.example"}]}`)
+		capturePath := captureRewriteGH(t)
+		args := []string{"api", "graphql", "--hostname", "github.com", "-f", "query=query { viewer { login } }"}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("rewritten API host error=%v", err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("rewritten API host reached child")
+		}
+	})
+}
+
 func TestStringRewriteProcessBlocks(t *testing.T) {
-	if message := errRewriteBlocked.Error(); !strings.Contains(message, "documented typed gh command or REST shape") || strings.Contains(message, "internal-model") {
-		t.Fatalf("denial is not actionable and generic: %q", message)
+	if message := errRewriteBlocked.Error(); message != "string rewrite protection blocked unsafe input" || strings.Contains(message, "internal-model") {
+		t.Fatalf("denial is not generic: %q", message)
 	}
 	policy, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	for _, args := range [][]string{
-		{"alias", "list"}, {"extension", "exec", "x"}, {"auth", "refresh"}, {"auth", "login", "--unknown"},
-		{"api", "graphql", "-fquery=mutation { unsafe }"},
-		{"api", "repos/acme/repo/releases/1/assets", "-XPOST", "--input=-"},
 		{"api", "repos/acme/repo/issues/1/comments", "-fbody=a", "-Fbody=b"},
 		{"api", "repos/acme/repo/issues/1/comments", "-Fbody=false"},
 		{"api", "repos/acme/repo/issues/1/comments", "-Fbody=null"},
 		{"api", "repos/acme/repo/issues/1/comments", "-fbody=a", "--input=-"},
 		{"api", "repos/acme/repo/issues/1/comments", "-fbody=a", "--hostname=other.example"},
+		{"api", "https://example.com/repos/acme/repo", "--hostname", "github.com"},
 		{"api", "repos/acme/repo/issues/1/comments", "-fbody=a", "--header=Authorization: unsafe"},
-		{"api", "repos/acme/repo/issues/1/comments", "-fbody=a", "--paginate"},
 		{"api", "repos/acme/repo/issues/1/comments", "-Fbody={branch}"},
 		{"api", "repos/acme/repo/pulls/1/reviews", "-Fcomments[0][body]=safe"},
-		{"api", "repos/acme/repo/issues/1/comments?unsafe=value", "-fbody=a"},
 		{"api", "repos/acme/repo/issues/1/comments", "-fbody=a", "-funknown=value"},
 		{"api", "repos/acme/%69nternal-model"},
 		{"api", "repos/acme/repo/issues?q=%2569nternal-model"},
-		{"pr", "view", "1", "--web", "-Racme/repo"},
 		{"pr", "view", "1", "--repo", "https://example.com/acme/repo", "--json", "number"},
 		{"pr", "view", "1", "--json", "number,internal-model", "-Racme/repo"},
 		{"pr", "list", "--head", "internal-model", "-Racme/repo"},
@@ -401,14 +940,10 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=merge"},
 		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash", "-f", "commit_title=user text"},
 		{"api", "repos/acme/internal-model/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
-		{"api", "repos/acme/repo/pulls/1/merge?unsafe=value", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
-		{"api", "repos/acme/repo/pulls/1/merge", "--method", "POST", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
 		{"pr", "edit", "1", "-Racme/repo", "--add-assignee", "internal-model"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees[]=internal-model"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees=alice", "-f", "assignees[]=bob"},
-		{"api", "repos/acme/repo/issues/1/assignees", "--method", "DELETE", "-f", "assignees[]=alice"},
 		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "labels[]=safe"},
-		{"release", "upload", "v1", "x", "-Racme/repo"},
 	} {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
 			capture := captureRewriteGH(t)
@@ -588,7 +1123,7 @@ func TestStringRewriteRelayReadAndAuthFailure(t *testing.T) {
 	}
 }
 
-func TestStringRewriteTopLevelWatchFallbackIsRefused(t *testing.T) {
+func TestStringRewriteTopLevelWatchFallbackIsBestEffort(t *testing.T) {
 	recordWatchSleeps(t)
 	rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
 		var request map[string]any
@@ -601,12 +1136,13 @@ func TestStringRewriteTopLevelWatchFallbackIsRefused(t *testing.T) {
 		writeCLIFallback(t, w, "route_denied")
 	})
 	capture := captureRewriteGH(t)
-	err := runGH(t.Context(), []string{"run", "watch", "42", "-Racme/repo", "-i5", "--exit-status"}, io.Discard, io.Discard)
-	if err != errRewriteBlocked {
-		t.Fatalf("native watch fallback was accepted: %v", err)
+	args := []string{"run", "watch", "42", "-Racme/repo", "-i5", "--exit-status"}
+	if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+		t.Fatalf("native watch best-effort fallback failed: %v", err)
 	}
-	if _, err := os.Stat(capture); !os.IsNotExist(err) {
-		t.Fatal("native watch fallback ran a child")
+	want := []string{"run", "watch", "42", "--repo=github.com/acme/repo", "-i5", "--exit-status"}
+	if got := readRewriteCapture(t, capture); !slices.Equal(got.Args, want) || got.Env["GH_HOST"] != "github.com" {
+		t.Fatalf("native watch args=%v env=%v", got.Args, got.Env)
 	}
 }
 

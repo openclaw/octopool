@@ -78,12 +78,15 @@ func rewriteFlagNames(spec string) map[string]string {
 func (flags rewriteFlags) has(name string) bool { _, ok := flags.values[name]; return ok }
 
 type rewritePreparation struct {
-	preflight   []string
-	args        []string
-	stdin       io.Reader
-	directory   string
-	inputBytes  int
-	outputBytes int
+	preflight         []string
+	args              []string
+	stdin             io.Reader
+	directory         string
+	inputBytes        int
+	outputBytes       int
+	bestEffortSources int
+	forceGitHubHost   bool
+	snapshots         map[string]bool
 }
 
 func (prepared *rewritePreparation) cleanup() {
@@ -127,7 +130,12 @@ func (prepared *rewritePreparation) snapshot(data []byte) (string, error) {
 	if writeErr != nil || closeErr != nil {
 		return "", errRewriteBlocked
 	}
-	return filepath.Clean(path), nil
+	path = filepath.Clean(path)
+	if prepared.snapshots == nil {
+		prepared.snapshots = map[string]bool{}
+	}
+	prepared.snapshots[path] = true
+	return path, nil
 }
 
 var rewriteRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
