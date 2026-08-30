@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -214,7 +216,159 @@ func TestStringRewriteProcessSnapshots(t *testing.T) {
 		})
 	}
 }
+func TestStringRewriteMaintainerCompatibility(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	sha := strings.Repeat("a", 40)
+	for _, test := range []struct {
+		name      string
+		args      []string
+		mergeBody bool
+	}{
+		{"read readiness fields", []string{"pr", "view", "123", "--repo", "acme/repo", "--json", "number,isDraft,mergeable,mergeStateStatus,reviewDecision,reviewRequests", "--jq", ".number"}, false},
+		{"read status rollup", []string{"pr", "view", "123", "--repo", "acme/repo", "--json", "number,headRefOid,statusCheckRollup"}, false},
+		{"read issue comments", []string{"issue", "view", "123", "--repo", "https://github.com/acme/repo", "--json", "number,comments"}, false},
+		{"filter pull head", []string{"pr", "list", "--repo", "https://github.com/acme/repo", "--head", "safe-branch", "--json", "number,headRefName"}, false},
+		{"mark ready", []string{"pr", "ready", "123", "--repo", "https://github.com/acme/repo"}, false},
+		{"convert draft", []string{"pr", "ready", "123", "--repo", "acme/repo", "--undo"}, false},
+		{"pinned squash", []string{"pr", "merge", "123", "--repo", "https://github.com/acme/repo", "--squash", "--match-head-commit", sha}, true},
+		{"claim assignee", []string{"pr", "edit", "123", "--repo", "acme/repo", "--add-assignee", "steipete"}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			if err := execRealGH(t.Context(), test.args, io.Discard, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			if capture.Stdin != "" {
+				t.Fatal("metadata command retained live stdin")
+			}
+			if test.mergeBody {
+				if len(capture.Files) != 1 || !slices.Contains(capture.Args, "api") || !slices.Contains(capture.Args, "repos/acme/repo/pulls/123/merge") || !slices.Contains(capture.Args, "--method=PUT") || !slices.Contains(capture.Args, "--silent=true") {
+					t.Fatalf("merge was not converted to a fixed REST mutation: %+v", capture)
+				}
+				for _, content := range capture.Files {
+					var payload map[string]string
+					if err := json.Unmarshal([]byte(content), &payload); err != nil || payload["sha"] != sha || payload["merge_method"] != "squash" || len(payload) != 2 {
+						t.Fatalf("merge snapshot=%q", content)
+					}
+				}
+			} else {
+				if len(capture.Files) != 0 {
+					t.Fatal("metadata command retained content input")
+				}
+				if !slices.Contains(capture.Args, "--repo=acme/repo") {
+					t.Fatalf("repository was not normalized and pinned: %v", capture.Args)
+				}
+			}
+			for _, arg := range capture.Args {
+				if strings.Contains(arg, "internal-model") || strings.Contains(arg, "match-head-commit") || strings.Contains(arg, "https://github.com") {
+					t.Fatal("metadata command leaked protected or native merge input")
+				}
+			}
+		})
+	}
+
+	repo := t.TempDir()
+	if output, err := exec.Command("git", "init", "--quiet", "--initial-branch=safe-ready-branch", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+	branchCapture := captureRewriteGH(t)
+	if err := execRealGH(t.Context(), []string{"pr", "ready", "--repo", "acme/repo"}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if captured := readRewriteCapture(t, branchCapture); !slices.Contains(captured.Args, "safe-ready-branch") {
+		t.Fatalf("current branch not pinned: %v", captured.Args)
+	}
+	if output, err := exec.Command("git", "checkout", "--quiet", "-b", "123").CombinedOutput(); err != nil {
+		t.Fatalf("numeric branch: %v: %s", err, output)
+	}
+	numericCapture := captureRewriteGH(t)
+	if err := execRealGH(t.Context(), []string{"pr", "ready", "--repo", "acme/repo"}, io.Discard, io.Discard); err != errRewriteBlocked {
+		t.Fatalf("numeric current branch error=%v", err)
+	}
+	if _, err := os.Stat(numericCapture); !os.IsNotExist(err) {
+		t.Fatal("numeric current branch reached child")
+	}
+
+	capturePath := captureRewriteGH(t)
+	args := []string{"api", "repos/acme/repo/issues/123/assignees", "--method", "POST", "-f", "assignees[]=steipete"}
+	if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	capture := readRewriteCapture(t, capturePath)
+	if len(capture.Files) != 1 {
+		t.Fatalf("files=%v", capture.Files)
+	}
+	for _, content := range capture.Files {
+		if content != `{"assignees":["steipete"]}` {
+			t.Fatalf("assignee snapshot=%q", content)
+		}
+	}
+
+	capturePath = captureRewriteGH(t)
+	args = []string{"api", "repos/acme/repo/pulls/123/merge", "--method", "PUT", "-f", "sha=" + sha, "-f", "merge_method=squash", "--silent"}
+	if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	capture = readRewriteCapture(t, capturePath)
+	if len(capture.Files) != 1 || !slices.Contains(capture.Args, "--method=PUT") || !slices.Contains(capture.Args, "--silent=true") {
+		t.Fatalf("raw merge was not snapshotted: %+v", capture)
+	}
+	for _, content := range capture.Files {
+		var payload map[string]string
+		if err := json.Unmarshal([]byte(content), &payload); err != nil || payload["sha"] != sha || payload["merge_method"] != "squash" || len(payload) != 2 {
+			t.Fatalf("raw merge snapshot=%q", content)
+		}
+	}
+}
+
+func TestStringRewriteReadFallbackCompatibility(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+		writeCLIFallback(t, w, "route_denied")
+	})
+	sha := strings.Repeat("a", 40)
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"read readiness", []string{"pr", "view", "123", "--repo", "acme/repo", "--json", "number,headRefOid,statusCheckRollup"}, "123"},
+		{"read issue comments", []string{"issue", "view", "123", "--repo", "https://github.com/acme/repo", "--json", "number,comments"}, "comments"},
+		{"filter pull head", []string{"pr", "list", "--repo", "https://github.com/acme/repo", "--head", "safe-branch", "--json", "number"}, "--head=safe-branch"},
+		{"mark ready", []string{"pr", "ready", "123", "--repo", "https://github.com/acme/repo"}, "ready"},
+		{"pinned merge", []string{"pr", "merge", "123", "--repo", "https://github.com/acme/repo", "--squash", "--match-head-commit", sha}, "repos/acme/repo/pulls/123/merge"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			if err := runGH(t.Context(), test.args, io.Discard, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			if !slices.Contains(capture.Args, "--repo=acme/repo") && !slices.Contains(capture.Args, "repos/acme/repo/pulls/123/merge") {
+				t.Fatalf("repository was not structurally pinned: %v", capture.Args)
+			}
+			if !slices.Contains(capture.Args, test.want) && !slices.ContainsFunc(capture.Args, func(arg string) bool { return strings.Contains(arg, test.want) }) {
+				t.Fatalf("guarded command shape missing %q: %v", test.want, capture.Args)
+			}
+			if slices.ContainsFunc(capture.Args, func(arg string) bool { return strings.Contains(arg, "https://github.com") }) {
+				t.Fatalf("original repository URL reached child: %v", capture.Args)
+			}
+		})
+	}
+}
+
 func TestStringRewriteProcessBlocks(t *testing.T) {
+	if message := errRewriteBlocked.Error(); !strings.Contains(message, "documented typed gh command or REST shape") || strings.Contains(message, "internal-model") {
+		t.Fatalf("denial is not actionable and generic: %q", message)
+	}
 	policy, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	for _, args := range [][]string{
 		{"alias", "list"}, {"extension", "exec", "x"}, {"auth", "refresh"}, {"auth", "login", "--unknown"},
@@ -234,6 +388,26 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		{"api", "repos/acme/%69nternal-model"},
 		{"api", "repos/acme/repo/issues?q=%2569nternal-model"},
 		{"pr", "view", "1", "--web", "-Racme/repo"},
+		{"pr", "view", "1", "--repo", "https://example.com/acme/repo", "--json", "number"},
+		{"pr", "view", "1", "--json", "number,internal-model", "-Racme/repo"},
+		{"pr", "list", "--head", "internal-model", "-Racme/repo"},
+		{"pr", "ready", "internal-model", "-Racme/repo"},
+		{"pr", "ready", "https://github.com/other/repo/pull/1", "-Racme/repo"},
+		{"pr", "ready", "github.com/other/repo/pull/1", "-Racme/repo"},
+		{"pr", "merge", "1", "-Racme/repo", "--squash", "--subject", "unsafe", "--match-head-commit", strings.Repeat("a", 40)},
+		{"pr", "merge", "1", "-Racme/repo", "--auto", "--squash", "--match-head-commit", strings.Repeat("a", 40)},
+		{"pr", "merge", "1", "-Racme/repo", "--squash", "--match-head-commit", "short"},
+		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=short", "-f", "merge_method=squash"},
+		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=merge"},
+		{"api", "repos/acme/repo/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash", "-f", "commit_title=user text"},
+		{"api", "repos/acme/internal-model/pulls/1/merge", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
+		{"api", "repos/acme/repo/pulls/1/merge?unsafe=value", "--method", "PUT", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
+		{"api", "repos/acme/repo/pulls/1/merge", "--method", "POST", "-f", "sha=" + strings.Repeat("a", 40), "-f", "merge_method=squash"},
+		{"pr", "edit", "1", "-Racme/repo", "--add-assignee", "internal-model"},
+		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees[]=internal-model"},
+		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "assignees=alice", "-f", "assignees[]=bob"},
+		{"api", "repos/acme/repo/issues/1/assignees", "--method", "DELETE", "-f", "assignees[]=alice"},
+		{"api", "repos/acme/repo/issues/1/assignees", "--method", "POST", "-f", "labels[]=safe"},
 		{"release", "upload", "v1", "x", "-Racme/repo"},
 	} {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {

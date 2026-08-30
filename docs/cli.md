@@ -395,16 +395,20 @@ With active rules, the initial local publication vocabulary is deliberately cons
 - Raw REST API equivalents: allowlisted issue/PR/review/comment/release endpoints with
   `-f`/`--raw-field`, `-F`/`--field`, or `--input` JSON. Literal and typed fields retain
   their distinction; only typed `@file`/`@-` values read files/stdin. Nested review comments
-  use `--input` JSON. Bracket-style field accumulation, duplicate keys, mixed input/field
-  sources, unknown properties, and custom authentication headers are rejected. Raw release
-  creation first verifies the existing remote tag with a local authenticated GET.
+  use `--input` JSON. Exact issue-assignee POSTs accept repeated raw `assignees[]` values;
+  exact pull-request merge PUTs require only a full 40-hex `sha` and `merge_method: squash`.
+  Other bracket accumulation, duplicate keys, mixed input/field sources, unknown properties,
+  and custom authentication headers are rejected. Raw release creation first verifies the
+  existing remote tag with a local authenticated GET.
 
 Long flags accept separate or equal values; supported short value flags also accept
 attached values. Repeated flags/aliases and boolean clusters are rejected. Metadata flags
 not listed by the guard are unsupported; use an allowlisted raw REST shape where applicable.
 Creation also rejects sanitized empty titles/bodies/notes to avoid implicit defaults.
-Repository context is pinned into an explicit `--repo` after validation. Input files are
-read into bounded snapshots, never modified, and never reopened by the child. Sanitized
+Repository context is normalized and pinned into an explicit `owner/repo` after validation;
+explicit `https://github.com/owner/repo` and GitHub SSH forms are accepted, while other hosts
+are blocked. Input files are read into bounded snapshots, never modified, and never reopened
+by the child. Sanitized
 snapshots use a private 0700 directory and 0600 files, removed after execution, including
 nonzero exits. Active-policy child commands do not retain live stdin.
 
@@ -413,10 +417,11 @@ and in the final text: complete JSON objects with exactly string `pattern` and
 `replacement` fields, whose decoded pattern equals an effective server or local pattern.
 The replacement need not be identical. This covers copied policy files, compact or pretty
 JSON, rule arrays, JSON Unicode escapes, and ordinary Markdown fenced snippets, including
-inline text, files, stdin, and decoded REST body fields. Detection is content-based, not
-filename-based, and stays within the existing 1 MiB limit. Ordinary prose containing a
-forbidden term still undergoes normal rewriting; merely mentioning regex source outside
-a recognizable JSON rule is not classified as policy material.
+inline text, files, stdin, and every decoded REST payload string. Fenced regions are scanned
+with independent parser state so unrelated quoted prose cannot hide a complete rule object.
+Detection is content-based, not filename-based, and stays within the existing 1 MiB limit.
+Ordinary prose containing a forbidden term still undergoes normal rewriting; merely mentioning
+regex source outside a recognizable JSON rule is not classified as policy material.
 
 Reads check decoded path segments, query keys/values, and safe forwarded headers, including
 bounded percent-decoding layers. Matches in structural values are blocked, never rewritten.
@@ -426,15 +431,20 @@ forms, before initial dispatch and every final delegation. Supply literal struct
 The relay rejects literal TAB/LF/CR in paths before URL parsing and checks canonical final
 outbound URLs and noncredential headers, including derived probes and followed redirects.
 An encoded `%09` remains encoded on the wire; it is not treated as a stripped literal TAB.
-This includes direct `octopool request` with local rules and approved local read fallbacks.
-While rules are active, local read fallback is limited to explicit allowlisted raw REST GETs.
-Top-level reads still use the relay, but a requested native fallback is refused because
-native gh can construct additional search/GraphQL requests. Use an explicit raw REST GET
-for local fallback; an empty effective policy preserves the previous fallback behavior.
-Opaque paths, raw GraphQL (apart from the fixed auth viewer probe), aliases/extensions,
-editor/web/template/fill modes, uploads, unknown commands/flags, and ambiguous encodings
-are blocked while rules are active. Some native gh shapes, including URL selectors and
-bracket-style REST fields, are intentionally unsupported.
+This includes direct `octopool request` with local rules and approved local fallbacks.
+Allowlisted top-level reads may fall back to native gh after Octopool pins and checks the
+repository, numeric/ref selector, JSON field projection, filters, and composed request. This
+covers readiness/CI projections, issue comment projections, and PR head filters whose fixed
+GraphQL shapes are not representable by the relay. Numeric `pr ready` (or a checked
+current/explicit nonnumeric Git branch) and metadata-only
+`pr edit --add-assignee|--remove-assignee` are also allowed without free-form text. Exact-head
+`pr merge --squash --match-head-commit` is converted to the immediate pull-request merge REST
+endpoint with only the checked SHA and squash method; it never enables auto-merge, so a branch
+that requires a merge queue fails closed. Subject/body merge flags, admin/auto merge variants,
+URL selectors, numeric inferred branches, unpinned merges, editor/web/template/fill modes,
+uploads, aliases/extensions, unknown commands/flags, raw GraphQL apart from the fixed auth
+viewer probe, and ambiguous encodings remain blocked while rules are active. The denial names
+the documented typed command or REST-shape alternative without echoing the rejected input.
 
 Admin imports always fetch the current revision before the conditional update:
 

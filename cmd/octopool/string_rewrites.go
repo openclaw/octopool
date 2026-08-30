@@ -20,7 +20,7 @@ const (
 
 var (
 	errRewritePolicy  = errors.New("string rewrite policy unavailable or invalid")
-	errRewriteBlocked = errors.New("string rewrite protection blocked unsupported or unsafe input")
+	errRewriteBlocked = errors.New("string rewrite protection blocked unsupported or unsafe input; use a documented typed gh command or REST shape")
 )
 
 type stringRewriteRule struct {

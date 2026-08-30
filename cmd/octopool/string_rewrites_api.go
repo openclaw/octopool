@@ -134,6 +134,10 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 			return errRewriteBlocked
 		}
 	}
+	schema, err := rewriteMutationSchema(request.path, opts.method)
+	if err != nil {
+		return err
+	}
 	payload := map[string]any{}
 	if len(opts.fields) > rewriteMaxRules {
 		return errRewriteBlocked
@@ -159,10 +163,21 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 			if !ok || key == "" {
 				return errRewriteBlocked
 			}
-			// Structured fields use --input JSON; gh's bracket accumulation grammar
-			// has ambiguous duplicate/array merging, so do not reconstruct it here.
+			// Only the exact assignees[] shape has unambiguous array semantics.
 			if strings.ContainsAny(key, "[]") {
-				return errRewriteBlocked
+				if schema != "assignees" || key != "assignees[]" || field.name != "--raw-field" || text == "" {
+					return errRewriteBlocked
+				}
+				values, ok := payload["assignees"].([]any)
+				if _, exists := payload["assignees"]; exists && !ok {
+					return errRewriteBlocked
+				}
+				payload["assignees"] = append(values, text)
+				snapshotBytes += len(key) + len(text)
+				if snapshotBytes > rewriteMaxContent {
+					return errRewriteBlocked
+				}
+				continue
 			}
 			if _, exists := payload[key]; exists {
 				return errRewriteBlocked
@@ -201,10 +216,6 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 				}
 			}
 		}
-	}
-	schema, err := rewriteMutationSchema(request.path, opts.method)
-	if err != nil {
-		return err
 	}
 	if err := rewriteAPIPayload(policy, prepared, payload, schema); err != nil {
 		return err
@@ -266,9 +277,11 @@ var rewriteIssueNumber = regexp.MustCompile(`^issues/[0-9]+$`)
 var rewriteCommentCreate = regexp.MustCompile(`^issues/[0-9]+/comments$`)
 var rewriteCommentEdit = regexp.MustCompile(`^(issues|pulls)/comments/[0-9]+$`)
 var rewritePullNumber = regexp.MustCompile(`^pulls/[0-9]+$`)
+var rewritePullMerge = regexp.MustCompile(`^pulls/[0-9]+/merge$`)
 var rewriteReviewCreate = regexp.MustCompile(`^pulls/[0-9]+/reviews$`)
 var rewriteReviewEdit = regexp.MustCompile(`^pulls/[0-9]+/reviews/[0-9]+$`)
 var rewriteReleaseNumber = regexp.MustCompile(`^releases/[0-9]+$`)
+var rewriteAssignees = regexp.MustCompile(`^issues/[0-9]+/assignees$`)
 
 func rewriteMutationSchema(path, method string) (string, error) {
 	match := rewriteMutationPath.FindStringSubmatch(path)
@@ -287,6 +300,8 @@ func rewriteMutationSchema(path, method string) (string, error) {
 		return "issue-edit", nil
 	case method == "PATCH" && rewritePullNumber.MatchString(tail):
 		return "pull-edit", nil
+	case method == "PUT" && rewritePullMerge.MatchString(tail):
+		return "pull-merge", nil
 	case method == "POST" && rewriteCommentCreate.MatchString(tail):
 		return "comment", nil
 	case method == "PATCH" && rewriteCommentEdit.MatchString(tail):
@@ -297,6 +312,8 @@ func rewriteMutationSchema(path, method string) (string, error) {
 		return "comment", nil
 	case method == "PATCH" && rewriteReleaseNumber.MatchString(tail):
 		return "release-edit", nil
+	case method == "POST" && rewriteAssignees.MatchString(tail):
+		return "assignees", nil
 	}
 	return "", errRewriteBlocked
 }
@@ -317,6 +334,9 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 	case "pull-edit":
 		spec = "title:text body:text"
 		required = ""
+	case "pull-merge":
+		spec = "sha:string merge_method:squash"
+		required = "sha merge_method"
 	case "release-create":
 		spec = "name:text body:text tag_name:string draft:bool prerelease:bool make_latest:string"
 		required = "name body tag_name"
@@ -329,6 +349,9 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 	case "review-comment":
 		spec = "body:text path:string line:integer side:string start_line:integer start_side:string position:integer"
 		required = "body path"
+	case "assignees":
+		spec = "assignees:strings"
+		required = "assignees"
 	}
 	allowed := map[string]string{}
 	for _, entry := range strings.Fields(spec) {
@@ -369,11 +392,16 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 			payload[key] = rewritten
 		case "string":
 			text, ok := value.(string)
-			if !ok || text == "" {
+			if !ok || text == "" || (schema == "pull-merge" && key == "sha" && !rewriteCommitSHA.MatchString(text)) {
 				return errRewriteBlocked
 			}
 			if err := policy.checkStructural(text); err != nil {
 				return err
+			}
+		case "squash":
+			text, ok := value.(string)
+			if !ok || text != "squash" {
+				return errRewriteBlocked
 			}
 		case "strings":
 			values, ok := value.([]any)
@@ -382,7 +410,7 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 			}
 			for _, value := range values {
 				text, ok := value.(string)
-				if !ok {
+				if !ok || (schema == "assignees" && !rewriteGitHubLogin.MatchString(text)) {
 					return errRewriteBlocked
 				}
 				if err := policy.checkStructural(text); err != nil {
@@ -420,9 +448,15 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 func checkRewriteJSONStrings(policy stringRewritePolicy, value any) error {
 	switch value := value.(type) {
 	case string:
+		if policy.containsRuleMaterial(value) {
+			return errRewriteBlocked
+		}
 		return policy.check(value)
 	case map[string]any:
 		for key, item := range value {
+			if policy.containsRuleMaterial(key) {
+				return errRewriteBlocked
+			}
 			if err := policy.check(key); err != nil {
 				return err
 			}

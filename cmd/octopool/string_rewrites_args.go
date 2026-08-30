@@ -135,9 +135,11 @@ var rewriteRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./:-]*$`)
 
 func rewriteRepo(flags *rewriteFlags, policy stringRewritePolicy) error {
 	repo := flags.values["--repo"]
-	// Pin inferred repository context too: the child must not resolve another
-	// repository from its environment after the structural check.
-	if repo == "" {
+	// Pin explicit GitHub URLs and inferred repository context to owner/repo so
+	// the child cannot reinterpret another host or repository after validation.
+	if repo != "" {
+		repo = normalizeRepo(repo)
+	} else {
 		var ok bool
 		repo, ok = repoFromOptionOrCurrent("")
 		if !ok {
@@ -172,7 +174,9 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	case "pr create":
 		valueSpec += " --title,-t --body,-b --body-file,-F --head,-H --base,-B"
 		booleanSpec = "--draft,-d --no-maintainer-edit"
-	case "pr edit", "issue edit":
+	case "pr edit":
+		valueSpec += " --title,-t --body,-b --body-file,-F --add-assignee --remove-assignee"
+	case "issue edit":
 		valueSpec += " --title,-t --body,-b --body-file,-F"
 	case "issue create":
 		valueSpec += " --title,-t --body,-b --body-file,-F"
@@ -231,8 +235,16 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	if create && (!flags.has("--title") || !hasBody) {
 		return errRewriteBlocked
 	}
-	if args[1] == "edit" && !flags.has("--title") && !hasBody {
+	metadataEdit := command == "pr edit" && (flags.has("--add-assignee") || flags.has("--remove-assignee"))
+	if args[1] == "edit" && !flags.has("--title") && !hasBody && !metadataEdit {
 		return errRewriteBlocked
+	}
+	if metadataEdit {
+		for _, name := range []string{"--add-assignee", "--remove-assignee"} {
+			if flags.has(name) && !validRewriteAssignees(flags.values[name]) {
+				return errRewriteBlocked
+			}
+		}
 	}
 	if (args[1] == "comment" || args[1] == "review") && !hasBody {
 		return errRewriteBlocked

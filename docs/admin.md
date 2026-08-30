@@ -233,7 +233,8 @@ Supported CLI submissions reject recognizable active rule JSON even when a regex
 not match its own escaped source. Detection recognizes complete objects with exactly string
 `pattern` and `replacement` fields and an effective active pattern, regardless of the
 replacement. Copies, JSON whitespace/Unicode escapes, rule arrays, and ordinary fenced
-Markdown snippets are covered in inline, file, stdin, and decoded REST content. Ordinary
+Markdown snippets are covered in inline, file, stdin, and every decoded REST payload string;
+fence parsing uses independent state so preceding prose cannot mask a complete rule. Ordinary
 prose still rewrites normally. This bounded check is not arbitrary Markdown/Unicode
 deobfuscation, malformed-JSON recovery, encoded-file inspection, or semantic DLP; keep
 policy files private and use the dedicated authenticated admin import path.

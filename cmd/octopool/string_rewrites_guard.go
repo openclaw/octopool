@@ -128,19 +128,17 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	case "pr view", "issue view":
 	case "pr diff":
 		booleans = "--patch"
-	case "pr list", "issue list":
+	case "pr list":
+		values += " --limit,-L --state --author --assignee --label --head,-H"
+	case "issue list":
 		values += " --limit,-L --state --author --assignee --label"
 	case "run view":
 		values += " --attempt"
 		booleans = "--log --log-failed --exit-status"
 	case "run list":
 		values += " --limit,-L --branch --workflow --status"
-	case "run watch":
-		values += " --interval,-i"
-		booleans = "--exit-status"
 	case "pr checks":
-		values += " --interval,-i"
-		booleans = "--watch --fail-fast --required"
+		booleans = "--fail-fast --required"
 	case "repo view":
 	case "release view":
 	case "release list", "workflow list", "label list":
@@ -197,9 +195,9 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 		}
 	}
 	for key, value := range flags.values {
-		if key == "--jq" || key == "--json" {
-			continue
-		} // Local output projections do not go to GitHub.
+		if key == "--jq" {
+			continue // jq evaluates locally after GitHub returns the selected fields.
+		}
 		if err := policy.checkStructural(value); err != nil {
 			return err
 		}
@@ -324,10 +322,12 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 		err = prepareRewriteContent(policy, args, stdin, prepared)
 	case len(args) > 0 && args[0] == "api":
 		err = prepareRewriteAPI(policy, args, stdin, prepared)
+	case len(args) >= 2 && args[0] == "pr" && (args[1] == "ready" || args[1] == "merge"):
+		err = prepareRewritePRLifecycle(policy, args, prepared)
 	default:
-		// Native top-level reads may construct additional search/GraphQL
-		// requests. Only decoded raw REST GETs have an approved local shape.
-		err = errRewriteBlocked
+		// Approved top-level reads pin repository context and selectors before
+		// native gh can construct its fixed REST/GraphQL request shapes.
+		err = prepareRewriteRead(policy, args, prepared)
 	}
 	if err != nil {
 		prepared.cleanup()

@@ -80,7 +80,18 @@ func TestRewritePolicyMaterialNoChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	contents := []string{raw, pretty.String(), strings.ReplaceAll(raw, "cobalt", `\u0063obalt`), "Policy:\n```json\n" + pretty.String() + "\n```\nEnd.", `{"pattern":"\\bcobalt-mint\\b","replacement":"other"}`}
+	contents = append(contents,
+		"The array opener is \"[\".\n\n```json\n"+`{"pattern":"\\bcobalt-mint\\b","replacement":"public"}`+"\n```\n",
+		"The object opener is \"{\".\n\n~~~json\n"+`{"pattern":"\\bcobalt-mint\\b","replacement":"public"}`+"\n~~~\n",
+	)
 	rule := json.RawMessage(`{"pattern":"\\bcobalt-mint\\b","replacement":"public"}`)
+	contents = append(contents,
+		"The array opener is \"[\".\r\n\r\n```json\r\n"+string(rule)+"\r\n```\r\n",
+		"The array opener is \"[\".\n````json\n```\n"+string(rule)+"\n````\n",
+		"```text\nThe array opener is \"[\".\n"+string(rule)+"\n```\n",
+		"The array opener is \"[\". Text ```json "+string(rule)+"```",
+		"The array opener is \"[\".\n"+string(rule),
+	)
 	preceding := []any{"{", "}", "[", "]", `"{`, `\"}`, `\`, `\\`, `\u007b`}
 	encode := func(value any) string {
 		encoded, err := json.Marshal(value)
@@ -160,6 +171,20 @@ func TestRewritePolicyMaterialNoChild(t *testing.T) {
 				t.Fatal("ordinary content no longer rewritten")
 			}
 		}
+	}
+}
+
+func TestRewritePolicyMaterialStructuralNoChild(t *testing.T) {
+	const active = `{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"s[3]cr3t","replacement":""}]}`
+	rewriteTestServer(t, active, nil)
+	capture := captureRewriteGH(t)
+	input := `{"title":"Example","body":"Example","labels":["{\"pattern\":\"s[3]cr3t\",\"replacement\":\"\"}"]}`
+	err := execRealGHWithStdin(t.Context(), []string{"api", "repos/acme/demo/issues", "--method=POST", "--input=-"}, strings.NewReader(input), io.Discard, io.Discard)
+	if err != errRewriteBlocked {
+		t.Fatalf("expected generic denial, got %v", err)
+	}
+	if _, err := os.Stat(capture); !os.IsNotExist(err) {
+		t.Fatal("structural policy material reached child")
 	}
 }
 

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Preserve active string-rewrite protection across maintainer reads and landing workflows by pinning readiness/issue/PR projections, ready/assignee actions, and immediate exact-head squash merges that cannot become auto-merge; reject recognizable policy JSON in every payload string and isolate rule-object parsing from unrelated prose state.
 - Honor requested cache-age bounds during upstream outages so live PR reads cannot silently return stale heads, preserve conditional revalidation and ordinary stale availability, and warn about stale responses even under OCTOPOOL_FRESH=1.
 
 ## 0.5.10 - 2026-08-28

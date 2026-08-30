@@ -1,6 +1,83 @@
 {
   "cases": [
     {
+      "name": "reject fenced rule after quoted array opener prose",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "The array opener is \"[\".\n\n```json\n{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}\n```\n",
+      "error": true
+    },
+    {
+      "name": "reject tilde fenced rule after quoted object opener prose",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "The object opener is \"{\".\n\n~~~json\n{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}\n~~~\n",
+      "error": true
+    },
+    {
+      "name": "reject CRLF fenced rule after poisoned prose",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "The array opener is \"[\".\r\n\r\n```json\r\n{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}\r\n```\r\n",
+      "error": true
+    },
+    {
+      "name": "reject rule after shorter fence run inside a longer fence",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "The array opener is \"[\".\n````json\n```\n{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}\n````\n",
+      "error": true
+    },
+    {
+      "name": "reject rule after poisoned prose inside one fence",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "```text\nThe array opener is \"[\".\n{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}\n```\n",
+      "error": true
+    },
+    {
+      "name": "reject inline fenced rule after poisoned prose",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "The array opener is \"[\". Text ```json {\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}```",
+      "error": true
+    },
+    {
+      "name": "reject bare rule after poisoned prose",
+      "rules": [
+        {
+          "pattern": "\\bcobalt-mint\\b",
+          "replacement": "public"
+        }
+      ],
+      "input": "The array opener is \"[\".\n{\"pattern\":\"\\\\bcobalt-mint\\\\b\",\"replacement\":\"public\"}",
+      "error": true
+    },
+    {
       "name": "reject nested rule array after a brace string",
       "rules": [
         {

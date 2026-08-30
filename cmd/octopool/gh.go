@@ -20,9 +20,10 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 			return err
 		}
 		if len(policy.Rules) != 0 {
-			if rewriteContentCommand(args) || args[0] == "api" {
-				// Content snapshots are prepared exactly once, at the final child
-				// boundary. Read API dispatch still uses the relay after validation.
+			lifecycle := len(args) >= 2 && args[0] == "pr" && (args[1] == "ready" || args[1] == "merge")
+			if rewriteContentCommand(args) || lifecycle || args[0] == "api" {
+				// Mutations and content snapshots are prepared exactly once, at the
+				// final child boundary. Read API dispatch still uses the relay.
 				if args[0] != "api" {
 					return execRealGH(ctx, args, stdout, stderr)
 				}
