@@ -192,11 +192,17 @@ human-format reads. Supported `--json` fields are intentionally conservative. Co
 `gh` field names are mapped where the REST API uses different
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
-`gh pr view --json state` returns the GraphQL lifecycle `OPEN`, `CLOSED`, or `MERGED`
-regardless of the other requested fields or whether the relay uses a public page or REST.
+`gh pr view --json state` and `gh pr list --json state` return the GraphQL lifecycle
+`OPEN`, `CLOSED`, or `MERGED` regardless of the other requested fields or whether the relay
+uses a public page or REST.
 Draft status is separate: an open draft has `state: "OPEN"` and `isDraft: true` when
-requested. This conversion happens before field filtering and `--jq`; raw `gh api` REST
-states, PR search states, and human-format `DRAFT` display remain unchanged.
+requested. This conversion happens before field filtering and `--jq`, without changing
+cached payloads, raw `gh api` REST states, or human-format `DRAFT` display.
+`gh search prs --json state` and `gh search issues --json state` retain native lowercase
+`open`/`closed` states and return `merged` when the result has a nonzero nested
+`pull_request.merged_at` timestamp. Top-level `merged_at` and draft status do not change
+search state. Search conversion also precedes field filtering and `--jq` and leaves raw
+`gh api /search/issues` responses and cached payloads unchanged.
 `gh issue view --json state` and `gh issue list --json state` return native `OPEN` or
 `CLOSED` values across supported field subsets, including REST and public-page/cache
 payloads. This conversion happens before field filtering and `--jq`, without changing

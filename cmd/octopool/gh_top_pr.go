@@ -76,12 +76,12 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		if !machineReadable(opts) || !supportedJSONFields(opts, supportedPRListFields) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
+		return ghCompleted(relayPRList(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "pulls"),
 			query:   query,
 			headers: publicShapeHeaders(opts, supportedPublicPRListFields, publicShapePullRequestList),
-		}, opts, fieldMapPR))
+		}, opts))
 	case "diff":
 		repo, number, ok := repoNumber(opts)
 		if !ok || hasTopModifiersExceptPatch(opts) || machineReadable(opts) || opts.jq != "" {
@@ -109,6 +109,40 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	default:
 		return ghDelegated()
 	}
+}
+
+func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, opts ghTopOptions) error {
+	if !safeRelayRequest(request) {
+		return errors.New("internal error: top-level gh command built an unsupported relay request")
+	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	envelope, err := client.do(ctx, request)
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(body, &items); err != nil {
+		return err
+	}
+	for _, pr := range items {
+		normalizePRViewState(pr)
+	}
+	raw, err := json.Marshal(items)
+	if err != nil {
+		return err
+	}
+	filtered, err := filterJSONFields(raw, opts.json, fieldMapPR)
+	if err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, filtered, opts.jq)
 }
 
 func relayPRView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {

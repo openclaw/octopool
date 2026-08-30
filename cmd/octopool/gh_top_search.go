@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
@@ -167,6 +168,17 @@ func relayGitHubSearch(
 		return err
 	}
 	items, _ := response["items"].([]any)
+	for _, item := range items {
+		issue, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Native search derives lowercase merged only from nested PR metadata.
+		mergedAt, err := time.Parse(time.RFC3339, nestedStringValue(issue, "pull_request", "merged_at"))
+		if err == nil && !mergedAt.IsZero() {
+			issue["state"] = "merged"
+		}
+	}
 	raw, err := json.Marshal(items)
 	if err != nil {
 		return err

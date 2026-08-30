@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.18 - Unreleased
+
+### Fixes
+
+- Return native uppercase PR-list lifecycle states and lowercase merged PR-search states from nested merge metadata before `--jq`, preserving raw API and cache payloads.
+
 ## 0.5.17 - 2026-08-30
 
 ### Fixes
