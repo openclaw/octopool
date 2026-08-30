@@ -2,6 +2,10 @@
 
 ## 0.5.13 - Unreleased
 
+### Fixes
+
+- Allow protected `gh pr create` and `gh pr comment` media attachments by validating paths, rewriting image alt text, and passing immutable private snapshots to native `gh` without weakening strict body filtering.
+
 ## 0.5.12 - 2026-08-29
 
 ### Fixes

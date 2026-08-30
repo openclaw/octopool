@@ -209,9 +209,10 @@ failures occur before audit context exists. Bodies, credentials, and raw tokens 
 - `octopool gh ...` and a binary named `gh` translate supported safe reads.
 - Mutations, bodies, unsafe headers/queries, unsupported flags, and unknown commands delegate
   locally without contacting Octopool.
-- With active rewrite rules, modeled local commands use strict structural snapshots; unmodeled
-  delegated commands receive bounded best-effort filtering of visible argv, explicitly declared stdin, and
-  `--input` snapshots rather than failing solely because their shape is unknown.
+- With active rewrite rules, modeled local commands use strict structural snapshots, including
+  validated PR media attachments; unmodeled delegated commands receive bounded best-effort filtering
+  of visible argv, explicitly declared stdin, and `--input` snapshots rather than failing solely because
+  their shape is unknown.
 - Safe requests contact Octopool first and delegate only on explicit `fallback_local` or
   stale/invalid Octopool auth. `OCTOPOOL_NO_FALLBACK` disables delegation.
 - The canonical relay client loop retries selected transient pool fallbacks and

@@ -203,7 +203,17 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	default:
 		return errRewriteBlocked
 	}
-	flags, err := parseRewriteFlags(args[2:], rewriteFlagNames(valueSpec), rewriteFlagNames(booleanSpec))
+	commandArgs := args[2:]
+	valueFlags := rewriteFlagNames(valueSpec)
+	var attachments []rewriteAttachment
+	var err error
+	if command == "pr create" || command == "pr comment" {
+		commandArgs, attachments, err = extractRewriteAttachments(commandArgs, valueFlags)
+		if err != nil {
+			return err
+		}
+	}
+	flags, err := parseRewriteFlags(commandArgs, valueFlags, rewriteFlagNames(booleanSpec))
 	if err != nil {
 		return err
 	}
@@ -254,7 +264,8 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 			}
 		}
 	}
-	if (args[1] == "comment" || args[1] == "review") && !hasBody {
+	attachmentOnlyComment := command == "pr comment" && len(attachments) > 0 && flags.values["--edit-last"] != "true"
+	if (args[1] == "comment" || args[1] == "review") && !hasBody && !attachmentOnlyComment {
 		return errRewriteBlocked
 	}
 	if command == "pr create" {
@@ -297,6 +308,11 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 			if err != nil {
 				return err
 			}
+			// Native gh matches body references against the supplied file paths.
+			// Private snapshots change those paths, so require append-only uploads.
+			if flag.name != "--title" && rewriteBodyReferencesAttachment(text, attachments) {
+				return errRewriteBlocked
+			}
 			// Empty create fields can re-enable gh's prompts/default generation.
 			if create && strings.TrimSpace(text) == "" {
 				return errRewriteBlocked
@@ -316,6 +332,40 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 			}
 			prepared.args = append(prepared.args, flag.name+"="+flag.value)
 		}
+	}
+	remainingAttachmentBytes := rewriteMaxAttachmentBytes
+	for _, attachment := range attachments {
+		if err := checkRewriteAttachmentPath(policy, attachment.source); err != nil {
+			return err
+		}
+		alt := attachment.alt
+		if attachment.kind == rewriteAttachmentKindImage {
+			if !attachment.hasAlt {
+				alt = rewriteAttachmentDefaultAlt(attachment)
+			}
+			alt, err = prepared.text(policy, alt)
+			if err != nil {
+				return err
+			}
+			if alt == "" && attachment.hasAlt {
+				alt, err = prepared.text(policy, rewriteAttachmentDefaultAlt(attachment))
+				if err != nil {
+					return err
+				}
+			}
+			if alt == "" {
+				alt, err = prepared.text(policy, "attachment")
+				if err != nil || alt == "" {
+					return errRewriteBlocked
+				}
+			}
+		}
+		path, size, err := prepared.snapshotAttachment(attachment, remainingAttachmentBytes)
+		if err != nil {
+			return err
+		}
+		remainingAttachmentBytes -= size
+		prepared.args = append(prepared.args, "--attach="+rewriteAttachmentArgument(attachment, path, alt))
 	}
 	prepared.stdin = strings.NewReader("")
 	return nil

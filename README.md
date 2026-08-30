@@ -89,7 +89,7 @@ octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 octopool stats
 ```
 
-Install it as a `gh` shim — safe reads try Octopool first, while supported writes and explicit server fallback signals use your local `gh` after outbound-policy checks. Active rewrite rules block commands whose final content cannot be inspected:
+Install it as a `gh` shim — safe reads try Octopool first, while supported writes and explicit server fallback signals use your local `gh` after outbound-policy checks. Active rewrite rules strictly snapshot modeled publication bodies and media attachments; evolving native command shapes receive bounded best-effort filtering:
 
 ```sh
 octopool install-shim

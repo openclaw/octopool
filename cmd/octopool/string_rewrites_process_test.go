@@ -24,6 +24,7 @@ type rewriteCapture struct {
 	Args           []string
 	Stdin          string
 	Files          map[string]string
+	FileData       map[string][]byte
 	Modes          map[string]uint32
 	DirectoryModes map[string]uint32
 	Env            map[string]string
@@ -41,13 +42,16 @@ func TestRewriteCaptureProcess(t *testing.T) {
 			break
 		}
 	}
-	capture := rewriteCapture{Args: args, Files: map[string]string{}, Modes: map[string]uint32{}, DirectoryModes: map[string]uint32{}, Env: map[string]string{"GH_HOST": os.Getenv("GH_HOST"), "GH_REPO": os.Getenv("GH_REPO")}}
+	capture := rewriteCapture{Args: args, Files: map[string]string{}, FileData: map[string][]byte{}, Modes: map[string]uint32{}, DirectoryModes: map[string]uint32{}, Env: map[string]string{"GH_HOST": os.Getenv("GH_HOST"), "GH_REPO": os.Getenv("GH_REPO")}}
 	input, _ := io.ReadAll(os.Stdin)
 	capture.Stdin = string(input)
 	for _, arg := range args {
 		paths := []string{}
-		for _, prefix := range []string{"--body-file=", "--notes-file=", "--input="} {
+		for _, prefix := range []string{"--body-file=", "--notes-file=", "--input=", "--attach="} {
 			if path, ok := strings.CutPrefix(arg, prefix); ok {
+				if prefix == "--attach=" {
+					path = captureRewriteAttachmentPath(path)
+				}
 				paths = append(paths, path)
 			}
 		}
@@ -63,6 +67,7 @@ func TestRewriteCaptureProcess(t *testing.T) {
 				os.Exit(80)
 			}
 			capture.Files[path] = string(data)
+			capture.FileData[path] = data
 			info, _ := os.Stat(path)
 			capture.Modes[path] = uint32(info.Mode().Perm())
 			dir, _ := os.Stat(filepath.Dir(path))
@@ -78,6 +83,19 @@ func TestRewriteCaptureProcess(t *testing.T) {
 	exit, _ := strconv.Atoi(os.Getenv("OCTOPOOL_TEST_REWRITE_EXIT"))
 	os.Exit(exit)
 }
+
+func captureRewriteAttachmentPath(value string) string {
+	if _, err := os.Stat(value); err == nil {
+		return value
+	}
+	for index := strings.LastIndex(value, "#"); index > 0; index = strings.LastIndex(value[:index], "#") {
+		if _, err := os.Stat(value[:index]); err == nil {
+			return value[:index]
+		}
+	}
+	return value
+}
+
 func captureRewriteGH(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -109,6 +127,25 @@ func readRewriteCapture(t *testing.T, path string) rewriteCapture {
 	}
 	return capture
 }
+
+func rewriteCaptureHasContent(capture rewriteCapture, want string) bool {
+	for _, content := range capture.Files {
+		if content == want {
+			return true
+		}
+	}
+	return false
+}
+
+func rewriteCaptureHasData(capture rewriteCapture, want []byte) bool {
+	for _, data := range capture.FileData {
+		if bytes.Equal(data, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func rewriteTestServer(t *testing.T, policyBody string, relay http.HandlerFunc) (*atomic.Value, *atomic.Int64) {
 	t.Helper()
 	body := &atomic.Value{}
@@ -228,6 +265,267 @@ func TestStringRewriteProcessSnapshots(t *testing.T) {
 		})
 	}
 }
+
+func TestStringRewriteAttachments(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	directory := t.TempDir()
+	body := filepath.Join(directory, "body.md")
+	image := filepath.Join(directory, "image#one.png")
+	video := filepath.Join(directory, "clip.mp4")
+	imageData := []byte{0x89, 'P', 'N', 'G', 0x00, 0xff}
+	videoData := []byte{0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p', 0xff}
+	for path, data := range map[string][]byte{body: []byte("internal-model"), image: imageData, video: videoData} {
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	capturePath := captureRewriteGH(t)
+	args := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body-file", body, "--attach", image + "#internal-model screenshot", "--attach=" + video}
+	if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	capture := readRewriteCapture(t, capturePath)
+	if capture.Stdin != "" || len(capture.FileData) != 3 {
+		t.Fatalf("attachment capture=%+v", capture)
+	}
+	seenBody, seenImage, seenVideo := false, false, false
+	for path, data := range capture.FileData {
+		switch {
+		case string(data) == "public":
+			seenBody = true
+		case bytes.Equal(data, imageData):
+			seenImage = strings.HasSuffix(path, ".png")
+		case bytes.Equal(data, videoData):
+			seenVideo = strings.HasSuffix(path, ".mp4")
+		default:
+			t.Fatalf("unexpected snapshot bytes %x", data)
+		}
+		if runtime.GOOS != "windows" && (capture.Modes[path] != 0600 || capture.DirectoryModes[path] != 0700) {
+			t.Fatal("attachment snapshot permissions are not private")
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatal("attachment snapshot leaked")
+		}
+	}
+	if !seenBody || !seenImage || !seenVideo {
+		t.Fatalf("missing snapshots body=%v image=%v video=%v", seenBody, seenImage, seenVideo)
+	}
+	if slices.ContainsFunc(capture.Args, func(arg string) bool {
+		return arg == body || strings.Contains(arg, image) || strings.Contains(arg, video) || strings.Contains(arg, "internal-model")
+	}) {
+		t.Fatalf("original path/text reached child: %v", capture.Args)
+	}
+	if !slices.ContainsFunc(capture.Args, func(arg string) bool {
+		return strings.HasPrefix(arg, "--attach=") && strings.HasSuffix(arg, ".png#public screenshot")
+	}) {
+		t.Fatalf("rewritten attachment alt missing: %v", capture.Args)
+	}
+	for path, expected := range map[string][]byte{body: []byte("internal-model"), image: imageData, video: videoData} {
+		data, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(data, expected) {
+			t.Fatalf("original attachment changed: %s", path)
+		}
+	}
+
+	alias := filepath.Join(directory, "alias.png")
+	if err := os.Symlink(image, alias); err != nil {
+		t.Fatal(err)
+	}
+	aliasCapturePath := captureRewriteGH(t)
+	aliasArgs := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "safe", "--attach", alias}
+	if err := execRealGH(t.Context(), aliasArgs, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	aliasCapture := readRewriteCapture(t, aliasCapturePath)
+	if !rewriteCaptureHasData(aliasCapture, imageData) || slices.ContainsFunc(aliasCapture.Args, func(arg string) bool { return strings.Contains(arg, alias) }) {
+		t.Fatalf("symlink attachment was not privately snapshotted: %+v", aliasCapture)
+	}
+
+	createCapturePath := captureRewriteGH(t)
+	createArgs := []string{"pr", "create", "--repo", "acme/repo", "--title", "safe", "--body", "safe", "--head", "feature", "--base", "main", "--attach", image}
+	if err := execRealGH(t.Context(), createArgs, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	createCapture := readRewriteCapture(t, createCapturePath)
+	if !slices.ContainsFunc(createCapture.Args, func(arg string) bool {
+		return strings.HasPrefix(arg, "--attach=") && strings.HasSuffix(arg, ".png#image#one")
+	}) {
+		t.Fatalf("default attachment alt missing: %v", createCapture.Args)
+	}
+
+	attachmentOnlyCapturePath := captureRewriteGH(t)
+	attachmentOnlyArgs := []string{"pr", "comment", "1", "--repo", "acme/repo", "--attach", image}
+	if err := execRealGH(t.Context(), attachmentOnlyArgs, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	attachmentOnlyCapture := readRewriteCapture(t, attachmentOnlyCapturePath)
+	if len(attachmentOnlyCapture.FileData) != 1 || !slices.ContainsFunc(attachmentOnlyCapture.Args, func(arg string) bool {
+		return strings.HasPrefix(arg, "--attach=")
+	}) {
+		t.Fatalf("attachment-only comment changed shape: %+v", attachmentOnlyCapture)
+	}
+
+	editCapturePath := captureRewriteGH(t)
+	editArgs := []string{"pr", "comment", "1", "--repo", "acme/repo", "--edit-last", "--body", "safe", "--attach", image}
+	if err := execRealGH(t.Context(), editArgs, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	editCapture := readRewriteCapture(t, editCapturePath)
+	if len(editCapture.FileData) != 2 || !rewriteCaptureHasContent(editCapture, "safe") {
+		t.Fatalf("explicit edit-last body changed shape: %+v", editCapture)
+	}
+
+	codeCapturePath := captureRewriteGH(t)
+	codeBody := "`![example](" + image + ")`"
+	codeArgs := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", codeBody, "--attach", image}
+	if err := execRealGH(t.Context(), codeArgs, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	codeCapture := readRewriteCapture(t, codeCapturePath)
+	if len(codeCapture.FileData) != 2 || !rewriteCaptureHasContent(codeCapture, codeBody) {
+		t.Fatalf("code attachment reference was not preserved: %+v", codeCapture)
+	}
+
+	literalBodyCapturePath := captureRewriteGH(t)
+	literalBody := "--attach=" + image
+	literalBodyArgs := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", literalBody}
+	if err := execRealGH(t.Context(), literalBodyArgs, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	literalBodyCapture := readRewriteCapture(t, literalBodyCapturePath)
+	if len(literalBodyCapture.FileData) != 1 || !rewriteCaptureHasContent(literalBodyCapture, literalBody) || slices.ContainsFunc(literalBodyCapture.Args, func(arg string) bool {
+		return strings.HasPrefix(arg, "--attach=")
+	}) {
+		t.Fatalf("flag value was reinterpreted as an attachment: %+v", literalBodyCapture)
+	}
+}
+
+func TestStringRewriteAttachmentBlocks(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	directory := t.TempDir()
+	unsupported := filepath.Join(directory, "artifact.txt")
+	protected := filepath.Join(directory, "internal-model.png")
+	empty := filepath.Join(directory, "empty.png")
+	oversizedImage := filepath.Join(directory, "large.png")
+	oversizedVideo := filepath.Join(directory, "large.mp4")
+	for _, path := range []string{unsupported, protected} {
+		if err := os.WriteFile(path, []byte("safe"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, size := range map[string]int64{empty: 0, oversizedImage: rewriteMaxImageAttachment + 1, oversizedVideo: rewriteMaxAttachmentBytes + 1} {
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Truncate(path, size); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		attachment string
+		body       string
+	}{
+		{unsupported, "safe"},
+		{protected, "safe"},
+		{directory, "safe"},
+		{empty, "safe"},
+		{oversizedImage, "safe"},
+		{oversizedVideo, "safe"},
+		{protected + "#safe", "safe"},
+		{filepath.Join(directory, "missing.png"), "safe"},
+	} {
+		capturePath := captureRewriteGH(t)
+		args := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", test.body, "--attach", test.attachment}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+			t.Fatalf("attachment %q error=%v", test.attachment, err)
+		}
+		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+			t.Fatal("blocked attachment reached child")
+		}
+	}
+	safe := filepath.Join(directory, "safe.png")
+	hash := filepath.Join(directory, "hash#safe.png")
+	video := filepath.Join(directory, "safe.mp4")
+	for _, path := range []string{safe, hash, video} {
+		if err := os.WriteFile(path, []byte("safe"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{"video alt", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "safe", "--attach", video + "#caption"}},
+		{"edit last without body", []string{"pr", "comment", "1", "--repo", "acme/repo", "--edit-last", "--attach", safe}},
+		{"delete last with attachment", []string{"pr", "comment", "1", "--repo", "acme/repo", "--delete-last", "--attach", safe}},
+		{"duplicate file", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "safe", "--attach", safe, "--attach", safe}},
+		{"inline reference", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe](" + safe + ")", "--attach", safe}},
+		{"hash reference", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe](" + hash + ")", "--attach", hash}},
+		{"encoded hash reference", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe](" + strings.ReplaceAll(hash, "#", "%23") + ")", "--attach", hash}},
+		{"reference definition", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe][shot]\n\n[shot]: <" + safe + ">", "--attach", safe}},
+		{"multiline reference definition", []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "![safe][shot]\n\n[shot]:\n  " + safe, "--attach", safe}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			if err := execRealGH(t.Context(), test.args, io.Discard, io.Discard); err != errRewriteBlocked {
+				t.Fatalf("error=%v", err)
+			}
+			if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+				t.Fatal("blocked attachment reached child")
+			}
+		})
+	}
+	args := []string{"pr", "comment", "1", "--repo", "acme/repo", "--body", "safe"}
+	for range rewriteMaxAttachments + 1 {
+		args = append(args, "--attach", safe)
+	}
+	capturePath := captureRewriteGH(t)
+	if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != errRewriteBlocked {
+		t.Fatalf("attachment count error=%v", err)
+	}
+	if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+		t.Fatal("excess attachments reached child")
+	}
+}
+
+func TestStringRewriteAttachmentAltFallback(t *testing.T) {
+	policy := `{"schema_version":1,"revision":1,"updated_at":"2026-08-29T00:00:00Z","rules":[{"pattern":"secret-alt","replacement":""}]}`
+	rewriteTestServer(t, policy, nil)
+	image := filepath.Join(t.TempDir(), "friendly.png")
+	if err := os.WriteFile(image, []byte("safe"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"#secret-alt", "#"} {
+		capturePath := captureRewriteGH(t)
+		args := []string{"pr", "comment", "1", "--repo", "acme/repo", "--attach", image + suffix}
+		if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		capture := readRewriteCapture(t, capturePath)
+		if !slices.ContainsFunc(capture.Args, func(arg string) bool {
+			return strings.HasPrefix(arg, "--attach=") && strings.HasSuffix(arg, ".png#friendly")
+		}) {
+			t.Fatalf("original filename alt fallback missing: %v", capture.Args)
+		}
+	}
+}
+
+func TestRewriteAttachmentPathSemantics(t *testing.T) {
+	policy, err := compileStringRewriteRules([]stringRewriteRule{{Pattern: "internal-model", Replacement: "public"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkRewriteAttachmentPath(policy, `.\\shot.png`); err != nil {
+		t.Fatal("Windows path separators were rejected")
+	}
+	if rewriteAttachmentDestinationRemote(`C:/work/shot.png`) {
+		t.Fatal("Windows volume path was classified as remote")
+	}
+	if !rewriteAttachmentDestinationRemote(`https://example.com/shot.png`) {
+		t.Fatal("HTTPS destination was classified as local")
+	}
+}
+
 func TestStringRewriteMaintainerCompatibility(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	sha := strings.Repeat("a", 40)

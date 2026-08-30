@@ -390,7 +390,8 @@ With active rules, the initial local publication vocabulary is deliberately cons
 - PR/issue `create`, `edit`, `comment`, and PR `review`: explicit title/body flags, body
   files, or stdin; numeric PR/issue selectors for existing items. PR creation requires
   explicit `--head` and `--base`; the head must already be pushed. `--head` prevents gh
-  from implicitly pushing or forking. Reviews require one explicit review action.
+  from implicitly pushing or forking. Reviews require one explicit review action. PR create/comment
+  also accept repeated `--attach` image/video files as described below.
 - Release `create`/`edit`: explicit title/notes or notes files; one tag and no asset uploads.
   Creation requires `--verify-tag`, so gh cannot create a missing tag. Generated notes,
   notes from tags, and other implicit content sources are blocked.
@@ -413,13 +414,26 @@ are blocked. Input files are read into bounded snapshots, never modified, and ne
 by the child. Sanitized snapshots use a private 0700 directory and 0600 files, removed
 after execution, including nonzero exits. These modeled commands do not retain live stdin.
 
+Protected PR create/comment commands accept up to 16 repeated `--attach FILE` or
+`--attach=FILE` values. Raster image extensions are GIF, JPEG/JPG, PNG, and WebP; video
+extensions are MOV, MP4, and WebM. Images are limited to 10 MiB each, videos to 100 MiB each,
+and all attachments together to 100 MiB. The source path is structurally checked, optional
+`#alt text` is rewritten, default image alt text remains based on the original filename, and
+native `gh` receives suffix-preserving private byte-for-byte snapshots. Empty files, directories,
+other extensions, video alt text, and body references to an attached local file are blocked;
+omit local references and let native `gh` append uploaded media. A new PR comment may consist
+only of attachments. An `--edit-last` attachment update still requires an explicit body because
+native `gh` would otherwise fetch and republish the existing text after the guard runs. Other
+modeled body requirements stay unchanged. Attachment bytes are not text- or vision-inspected, so
+callers remain responsible for reviewing the media itself before publication.
+
 Commands and flags outside the modeled vocabulary use a bounded best-effort pass-through
 instead of being denied solely for being new or unfamiliar. Octopool rewrites every visible
 argument, snapshots and filters `--input` files or `--input=-`, snapshots typed
 `-F`/`--field key=@source` text without changing its formatting, and filters stdin when the
 command explicitly declares it (currently `workflow run --json`). Valid JSON request stdin/files are decoded recursively so string keys and values are rewritten
 without corrupting JSON; other valid UTF-8 is rewritten as text. This keeps workflow
-dispatches (`gh workflow run` field or `--json` forms), job-log reads, uploads, and newly
+dispatches (`gh workflow run` field or `--json` forms), job-log reads, unmodeled uploads, and newly
 introduced native flags working while active rules still remove visible matches. Native
 children force `GH_HOST=github.com` and remove inherited `GH_REPO`; best-effort
 `--repo`/`-R` values are structurally checked before rewriting and normalized to
@@ -466,7 +480,7 @@ current/explicit nonnumeric Git branch) and metadata-only
 endpoint with only the checked SHA and squash method; it never enables auto-merge, so a branch
 that requires a merge queue fails closed. Subject/body merge flags, admin/auto merge variants,
 URL selectors, numeric inferred branches, and unpinned merges remain blocked on that strict
-lifecycle path. Other editor/web/template/fill modes, uploads, aliases/extensions, raw
+lifecycle path. Other editor/web/template/fill modes, unmodeled uploads, aliases/extensions, raw
 GraphQL, and newly introduced native commands/flags use best-effort filtering and retain
 native behavior. A denial reports only the generic unsafe-input boundary and never echoes the
 rejected text.
