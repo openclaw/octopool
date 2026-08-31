@@ -1,5 +1,57 @@
 import { describe, expect, it } from "vitest";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import {
+  deniedRepoSearchQueries,
+  repoSearchPaths,
+  validRepoSearchQueries,
+} from "./fixtures/restricted-search";
+
+describe.each(repoSearchPaths)("restricted search grammar for %s", (path) => {
+  const policy = { ...defaultPolicy("openclaw"), allow_search: true };
+  const requestFor = (q: string | string[] | undefined) =>
+    validateRelayRequest({ pool: "maintainers", method: "GET", path, query: { q } });
+
+  it.each(deniedRepoSearchQueries)("denies unsupported q=%j", (q) => {
+    expect(() => classifyRoute(requestFor(q), policy)).toThrow(
+      expect.objectContaining({ status: 403, code: "search_denied" }),
+    );
+  });
+
+  it("requires a single string q", () => {
+    for (const query of [undefined, {}, { q: ["repo:openclaw/octopool", "needle"] }]) {
+      const request = validateRelayRequest({ pool: "maintainers", method: "GET", path, query });
+      expect(() => classifyRoute(request, policy)).toThrow(
+        expect.objectContaining({ status: 403, code: "search_denied" }),
+      );
+    }
+  });
+
+  it.each(validRepoSearchQueries)("preserves valid q=%j", (q) => {
+    const request = requestFor(q);
+    expect(classifyRoute(request, policy)).toMatchObject({
+      owner: "openclaw",
+      repo: q.includes("OctoPool") ? "OctoPool" : "octopool",
+      publicOnly: false,
+      resource: "search",
+    });
+    expect(request.query?.q).toBe(q);
+    expect(() => classifyRoute(request, { ...policy, allow_search: false })).toThrow(
+      expect.objectContaining({ status: 403, code: "search_denied" }),
+    );
+  });
+
+  it("retains owner and public-only policy routing", () => {
+    const request = requestFor("repo:Other/Project needle");
+    expect(classifyRoute(request, policy)).toMatchObject({
+      owner: "other",
+      repo: "Project",
+      publicOnly: true,
+    });
+    expect(() => classifyRoute(request, { ...policy, allow_public_repos: false })).toThrow(
+      expect.objectContaining({ status: 403, code: "owner_denied" }),
+    );
+  });
+});
 
 describe("route policy", () => {
   const policy = defaultPolicy("openclaw");

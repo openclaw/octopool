@@ -1,0 +1,41 @@
+export const repoSearchPaths = ["/search/issues", "/search/code", "/search/commits"];
+
+export const deniedRepoSearchQueries = [
+  "repo:openclaw/octopool repo:other/project needle",
+  "repo:openclaw/octopool repo:openclaw/octopool needle",
+  'repo:openclaw/octopool repo:"other/private" needle',
+  'repo:"other/private" repo:openclaw/octopool needle',
+  "repo:openclaw/octopool repo:other needle",
+  "repo:openclaw/octopool repo: needle",
+  "repo:openclaw/octopool repo:other/ needle",
+  "repo:openclaw/octopool repo:/private needle",
+  "repo:openclaw/octopool repo:other/private/extra needle",
+  "repo:openclaw/octopool repo:other/private,third/project needle",
+  "repo:openclaw/octopool,other/private needle",
+  'repo:"openclaw/octopool" needle',
+  "needle",
+  "",
+  "repo:openclaw/octopool needle OR other",
+  "repo:openclaw/octopool needle or other",
+  "repo:openclaw/octopool OR repo:other/project needle",
+  "NOT repo:openclaw/octopool needle",
+  "needle NOT repo:openclaw/octopool",
+  "not repo:openclaw/octopool needle",
+  "repo:openclaw/octopool NOT needle",
+  "-repo:openclaw/octopool needle",
+  "repo:openclaw/octopool -repo:other/private needle",
+  "repo:openclaw/octopool -needle",
+  "(repo:openclaw/octopool) needle",
+  "repo:openclaw/octopool org:other needle",
+  "REPO:openclaw/octopool needle",
+  "repo:openclaw/octopool TYPE:issue needle",
+  "repo:openclaw/octopool state:OPEN needle",
+];
+
+export const validRepoSearchQueries = [
+  "repo:openclaw/octopool",
+  "repo:openclaw/octopool needle cache-hit v1.2 under_score",
+  "needle repo:openclaw/octopool type:issue state:open",
+  "type:pr state:closed repo:openclaw/octopool needle",
+  " \tneedle\nrepo:OpenClaw/OctoPool  type:issue\tstate:open \r\n",
+];

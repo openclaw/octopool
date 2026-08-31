@@ -202,24 +202,37 @@ function repoFromSearchQuery(query: Record<string, string | string[]> | undefine
     throw new HttpError(403, "search_denied", "Search routes require a repo-scoped q query");
   }
   const tokens = q.trim().split(/\s+/).filter(Boolean);
-  const matches = tokens
-    .map((token) => /^repo:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(token))
-    .filter((match): match is RegExpExecArray => match !== null);
-  if (matches.length !== 1 || matches[0]?.[1] === undefined || matches[0]?.[2] === undefined) {
-    throw new HttpError(403, "search_denied", "Search routes require exactly one repo qualifier");
-  }
+  let scope: { owner: string; repo: string } | undefined;
   for (const token of tokens) {
-    if (token.startsWith("repo:")) {
+    const match = /^repo:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(token);
+    if (match !== null) {
+      if (scope !== undefined || match[1] === undefined || match[2] === undefined) {
+        throw new HttpError(
+          403,
+          "search_denied",
+          "Search routes require exactly one repo qualifier",
+        );
+      }
+      scope = { owner: match[1], repo: match[2] };
       continue;
     }
     if (/^type:(issue|pr)$/.test(token) || /^state:(open|closed)$/.test(token)) {
       continue;
     }
-    if (!/^[A-Za-z0-9_.-]+$/.test(token) || token.toUpperCase() === "OR") {
+    const upper = token.toUpperCase();
+    if (
+      token.startsWith("-") ||
+      !/^[A-Za-z0-9_.-]+$/.test(token) ||
+      upper === "OR" ||
+      upper === "NOT"
+    ) {
       throw new HttpError(403, "search_denied", "Search routes only allow plain repo-scoped terms");
     }
   }
-  return { owner: matches[0][1], repo: matches[0][2] };
+  if (scope === undefined) {
+    throw new HttpError(403, "search_denied", "Search routes require exactly one repo qualifier");
+  }
+  return scope;
 }
 
 function searchRepoForRule(

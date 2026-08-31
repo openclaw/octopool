@@ -320,8 +320,14 @@ the Worker remains GET-only and does not relay those neighboring routes.
   reason `logs_denied`.
 - `allow_search` — search routes require it (default `false`). Issue, code, and commit searches
   require exactly one `repo:owner/name` qualifier plus plain terms and optional
-  `type:issue|pr` / `state:open|closed`; repository search accepts plain terms only. Invalid
-  queries return `424 fallback_local` with reason `search_denied`.
+  `type:issue|pr` / `state:open|closed`. Every token must match this grammar: additional,
+  quoted, bare, or malformed repo qualifiers, `OR`/`NOT`, and negated terms are rejected
+  before upstream dispatch or cache reuse. Qualifier names and filter values are lowercase;
+  owner/repository casing and whitespace between tokens are accepted without rewriting the
+  query sent upstream. Repository search keeps its separate plain-term grammar. Invalid
+  queries return `424 fallback_local` with reason `search_denied`. The supported token-free
+  issue-search shape can run with `allow_search: false`, subject to the same grammar and
+  owner/public-repository gates, and never falls through to pooled credentials.
 
 When a Cloudflare backend (D1 or the pool Durable Object) rejects work because its
 request queue backed up, the relay returns `424 fallback_local` with reason
