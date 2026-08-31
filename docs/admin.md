@@ -10,8 +10,9 @@ Source: `src/provisioning.ts`, `src/router.ts`, `cmd/octopool/main.go`.
 ## Provision a caller
 
 Registers a GitHub org member as a relay caller and grants them a pool. The Worker
-verifies org membership and resolves the immutable GitHub user id, then returns a
-one-time caller token.
+resolves the immutable GitHub user id and verifies that same account's org membership, then returns a
+one-time caller token. Enrollment stores the identity-bound verification time in
+`org_identity_verified_at`, so the issued token uses the normal membership TTL immediately.
 
 API: `POST /v1/admin/callers`
 

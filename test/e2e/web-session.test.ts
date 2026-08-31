@@ -13,6 +13,57 @@ import {
 const APP = "https://octopool.openclaw.ai";
 
 describe("Worker end-to-end web sessions", () => {
+  it("rejects OAuth membership for a substituted account without creating a session", async () => {
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const path = new URL(request.url).pathname;
+      if (path === "/login/oauth/access_token")
+        return jsonResponse({ access_token: "oauth-user-token" });
+      if (path === "/user") return jsonResponse({ id: 101, login: "old-name" });
+      if (path === "/graphql") return orgMembershipResponse(true, 202);
+      return jsonResponse({}, 500);
+    });
+    vi.stubGlobal("fetch", upstream);
+    const start = await callWorker(`${APP}/login/github`);
+    const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+    const callback = await callWorker(
+      `${APP}/login/github/callback?code=oauth-code&state=${encodeURIComponent(state)}`,
+      { headers: { cookie: `octopool_oauth_state=${encodeURIComponent(state)}` } },
+    );
+    expect(callback.status).toBe(403);
+    expect(await callback.text()).toContain("github_identity_mismatch");
+    expect(cookieValue(callback, "octopool_session")).toBeUndefined();
+    expect(await env.DB.prepare("SELECT count(*) AS count FROM callers").first()).toEqual({
+      count: 0,
+    });
+    expect(await env.DB.prepare("SELECT count(*) AS count FROM web_sessions").first()).toEqual({
+      count: 0,
+    });
+    expect(upstream).toHaveBeenCalledTimes(3);
+  });
+
+  it("binds stale browser sessions to the stored immutable account", async () => {
+    await seedPool();
+    const session = await seedWebSession();
+    await env.DB.prepare(
+      "UPDATE callers SET github_user_id = 101, github_login = 'old-name', org_identity_verified_at = '2020-01-01' WHERE id = 'caller'",
+    ).run();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => orgMembershipResponse(true, 202)),
+    );
+    const response = await callWorker(`${APP}/v1/me`, {
+      headers: { cookie: `octopool_session=${session}` },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "github_identity_mismatch" } });
+    expect(
+      await env.DB.prepare(
+        "SELECT org_identity_verified_at FROM callers WHERE id = 'caller'",
+      ).first(),
+    ).toEqual({ org_identity_verified_at: "2020-01-01" });
+  });
+
   it("returns a typed browser error when the GitHub OAuth exchange fails", async () => {
     let exchangeHadSignal = false;
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
@@ -54,7 +105,7 @@ describe("Worker end-to-end web sessions", () => {
         return jsonResponse({ id: 501, login: "web-user", name: "Web User" });
       }
       if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
-        return orgMembershipResponse(true);
+        return orgMembershipResponse(true, 501);
       }
       return jsonResponse({ message: "unexpected OAuth request" }, 500);
     });
@@ -113,6 +164,12 @@ describe("Worker end-to-end web sessions", () => {
     const dashboard = await callWorker(`${APP}/dashboard`, { headers: { cookie } });
     expect(dashboard.status).toBe(200);
     expect(dashboard.headers.get("content-type")).toContain("text/html");
+    expect(upstream).toHaveBeenCalledTimes(3);
+    expect(
+      await env.DB.prepare(
+        "SELECT org_verified_at, org_identity_verified_at FROM callers WHERE github_user_id = 501",
+      ).first(),
+    ).toEqual({ org_verified_at: null, org_identity_verified_at: expect.any(String) });
 
     const logout = await callWorker(`${APP}/logout`, { headers: { cookie } });
     expect(logout.status).toBe(302);
@@ -147,7 +204,7 @@ describe("Worker end-to-end web sessions", () => {
         return jsonResponse({ id: 502, login: "web-user-2" });
       }
       if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
-        return orgMembershipResponse(true);
+        return orgMembershipResponse(true, 502);
       }
       return jsonResponse({ message: "unexpected OAuth request" }, 500);
     });
@@ -170,14 +227,14 @@ describe("Worker end-to-end web sessions", () => {
     await seedPool();
     const session = await seedWebSession();
     await env.DB.prepare(
-      "UPDATE callers SET org_verified_at = datetime('now', '-2 days') WHERE id = 'caller'",
+      "UPDATE callers SET org_identity_verified_at = datetime('now', '-2 days') WHERE id = 'caller'",
     ).run();
     let isMember = true;
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
       if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
-        return orgMembershipResponse(isMember);
+        return orgMembershipResponse(isMember, 42);
       }
       return jsonResponse({ message: "unexpected membership request" }, 500);
     });
@@ -188,12 +245,12 @@ describe("Worker end-to-end web sessions", () => {
     expect(refreshed.status).toBe(200);
     expect(upstream).toHaveBeenCalledTimes(1);
     const verified = await env.DB.prepare(
-      "SELECT org_verified_at FROM callers WHERE id = 'caller'",
-    ).first<{ org_verified_at: string }>();
-    expect(Date.now() - Date.parse(verified!.org_verified_at)).toBeLessThan(60_000);
+      "SELECT org_identity_verified_at FROM callers WHERE id = 'caller'",
+    ).first<{ org_identity_verified_at: string }>();
+    expect(Date.now() - Date.parse(verified!.org_identity_verified_at)).toBeLessThan(60_000);
 
     await env.DB.prepare(
-      "UPDATE callers SET org_verified_at = datetime('now', '-2 days') WHERE id = 'caller'",
+      "UPDATE callers SET org_identity_verified_at = datetime('now', '-2 days') WHERE id = 'caller'",
     ).run();
     isMember = false;
     const revoked = await callWorker(`${APP}/v1/me`, { headers: { cookie } });

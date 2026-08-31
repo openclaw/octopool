@@ -19,7 +19,7 @@ export async function loginGitHubCLI(request: Request, env: Env): Promise<Respon
   const clientName = body.client_name === undefined ? "legacy" : parseClientName(body.client_name);
   const pool = requestedLoginPool(env, body.pool);
   const user = await githubUserFromToken(env, githubToken);
-  const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login);
+  const verifiedAt = await verifyGitHubOrgMemberWithToken(env, githubToken, user.login, user.id);
   const token = newToken("op");
   const caller = await ensureCliCaller(env, pool, user, verifiedAt, token, clientName);
   // Admin/login mutations invalidate this isolate's config cache immediately;
@@ -41,8 +41,8 @@ export async function createCaller(request: Request, env: Env): Promise<Response
   const name =
     typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : githubLogin;
   await ensurePool(env, pool);
-  const verifiedAt = await verifyGitHubOrgMember(env, githubLogin);
   const githubUser = await githubUserByLogin(env, githubLogin);
+  const verifiedAt = await verifyGitHubOrgMember(env, githubUser.login, githubUser.id);
   const token = newToken("op");
   const caller = await ensureCliCaller(
     env,

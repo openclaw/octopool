@@ -204,6 +204,8 @@ D1 schema lives in `migrations/`:
 - `0015_drop_oauth_states.sql` — remove obsolete database-backed OAuth state.
 - `0016_string_rewrites.sql` — authoritative deployment-wide singleton string policy;
   seeds explicit empty rules at revision 1.
+- `0017_org_identity_verification.sql` — add a separate nullable identity-bound proof timestamp without backfill or changes to old data;
+  apply before the [rolling Worker upgrade](auth.md#immutable-membership-upgrade). Old timestamp writes cannot authorize new Workers.
 
 Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
 

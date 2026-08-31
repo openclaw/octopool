@@ -1,5 +1,6 @@
 -- name: AuthenticateCaller :one
-SELECT callers.id, callers.name, callers.github_login, callers.org_login, callers.org_verified_at,
+SELECT callers.id, callers.name, callers.github_login, callers.github_user_id, callers.org_login,
+       callers.org_identity_verified_at AS org_verified_at,
        caller_tokens.id AS caller_token_id, caller_tokens.client_name
 FROM caller_tokens
 JOIN callers ON callers.id = caller_tokens.caller_id
@@ -9,9 +10,9 @@ WHERE caller_tokens.token_hash = ?1
   AND caller_pools.pool_id = ?2
 LIMIT 1;
 
--- name: UpdateCallerOrgVerifiedAt :exec
+-- name: UpdateCallerOrgIdentityVerifiedAt :exec
 UPDATE callers
-SET org_verified_at = ?1,
+SET org_identity_verified_at = ?1,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?2;
 
@@ -317,7 +318,7 @@ WHERE github_user_id = ?1
 LIMIT 1;
 
 -- name: InsertCaller :exec
-INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)
+INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_identity_verified_at, status)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active');
 
 -- name: UpsertCallerToken :exec
@@ -372,7 +373,7 @@ UPDATE callers
 SET name = ?1,
     github_login = ?2,
     github_user_id = ?3,
-    org_verified_at = ?4,
+    org_identity_verified_at = ?4,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = ?5;
 
@@ -389,8 +390,9 @@ SELECT
   callers.id,
   callers.name,
   callers.github_login,
+  callers.github_user_id,
   callers.org_login,
-  callers.org_verified_at,
+  callers.org_identity_verified_at AS org_verified_at,
   callers.dashboard_role,
   web_sessions.expires_at
 FROM web_sessions

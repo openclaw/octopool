@@ -95,6 +95,7 @@ describe("client-filtered stats", () => {
     id: "caller-id",
     name: "Caller",
     github_login: "caller",
+    github_user_id: 42,
     org_login: "openclaw",
     org_verified_at: null,
     caller_token_id: "caller-token-id",

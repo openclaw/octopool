@@ -25,7 +25,9 @@ export type Caller = {
   id: string;
   name: string;
   github_login: string;
+  github_user_id: number | null;
   org_login: string;
+  // Public field name; SQL aliases only org_identity_verified_at, never the legacy proof.
   org_verified_at: string | null;
   caller_token_id: string;
   client_name: string;

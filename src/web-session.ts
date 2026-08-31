@@ -74,7 +74,7 @@ export async function finishGitHubWebLogin(
 
   const githubToken = await exchangeGitHubCode(request, env, code);
   const user = await githubUserFromToken(env, githubToken);
-  const verifiedAt = await verifyGitHubOrgMember(env, user.login);
+  const verifiedAt = await verifyGitHubOrgMember(env, user.login, user.id);
   const pool = defaultLoginPool(env);
   const caller = await ensureWebCaller(env, pool, user, verifiedAt);
 

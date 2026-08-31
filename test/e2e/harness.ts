@@ -89,7 +89,7 @@ export async function seedPool(options: { secondary?: boolean } = {}): Promise<v
     ),
     env.DB.prepare(
       `INSERT INTO callers (
-        id, name, token_hash, github_login, org_login, org_verified_at, status, github_user_id,
+        id, name, token_hash, github_login, org_login, org_identity_verified_at, status, github_user_id,
         dashboard_role
       ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'active', ?, 'admin')`,
     ).bind("caller", "Caller", await hashToken(CALLER_TOKEN), "caller", "openclaw", 42),
@@ -112,7 +112,7 @@ export async function seedCaller(id: string, token: string, login: string): Prom
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO callers (
-        id, name, token_hash, github_login, org_login, org_verified_at, status, github_user_id
+        id, name, token_hash, github_login, org_login, org_identity_verified_at, status, github_user_id
       ) VALUES (?, ?, ?, ?, 'openclaw', CURRENT_TIMESTAMP, 'active', ?)`,
     ).bind(id, login, await hashToken(token), login, id === "other" ? 43 : 44),
     env.DB.prepare("INSERT INTO caller_pools (caller_id, pool_id) VALUES (?, ?)").bind(id, POOL),
@@ -204,10 +204,11 @@ export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit)
   });
 }
 
-export function orgMembershipResponse(member: boolean): Response {
+export function orgMembershipResponse(member: boolean, userId: number): Response {
   return jsonResponse({
     data: {
       user: {
+        databaseId: userId,
         organizations: {
           nodes: member ? [{ login: "openclaw" }] : [],
           pageInfo: { endCursor: null, hasNextPage: false },

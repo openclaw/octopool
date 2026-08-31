@@ -36,9 +36,9 @@ export const queries = {
   completeCacheFill:
     "DELETE FROM cache_fills\nWHERE cache_key = ?1\n  AND owner_token = ?2\n  AND expires_at > ?3",
   authenticateCaller:
-    "SELECT callers.id, callers.name, callers.github_login, callers.org_login, callers.org_verified_at,\n       caller_tokens.id AS caller_token_id, caller_tokens.client_name\nFROM caller_tokens\nJOIN callers ON callers.id = caller_tokens.caller_id\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE caller_tokens.token_hash = ?1\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?2\nLIMIT 1",
-  updateCallerOrgVerifiedAt:
-    "UPDATE callers\nSET org_verified_at = ?1,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id = ?2",
+    "SELECT callers.id, callers.name, callers.github_login, callers.github_user_id, callers.org_login,\n       callers.org_identity_verified_at AS org_verified_at,\n       caller_tokens.id AS caller_token_id, caller_tokens.client_name\nFROM caller_tokens\nJOIN callers ON callers.id = caller_tokens.caller_id\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE caller_tokens.token_hash = ?1\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?2\nLIMIT 1",
+  updateCallerOrgIdentityVerifiedAt:
+    "UPDATE callers\nSET org_identity_verified_at = ?1,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id = ?2",
   ensurePool:
     "INSERT INTO pools (id, name, policy_json)\nVALUES (?1, ?1, ?2)\nON CONFLICT(id) DO NOTHING",
   getPoolPolicy: "SELECT policy_json\nFROM pools\nWHERE id = ?1",
@@ -95,7 +95,7 @@ export const queries = {
   findActiveCallerByGitHubUser:
     "SELECT id\nFROM callers\nWHERE github_user_id = ?1\n  AND org_login = ?2\n  AND status = 'active'\nLIMIT 1",
   insertCaller:
-    "INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_verified_at, status)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
+    "INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_identity_verified_at, status)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
   upsertCallerToken:
     "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at)\nVALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%d %H:%M:%f', 'now'))\nON CONFLICT(caller_id, client_name) DO UPDATE SET\n  token_hash = excluded.token_hash,\n  updated_at = excluded.updated_at",
   pruneCallerTokens:
@@ -108,12 +108,12 @@ export const queries = {
   insertIdentityScope:
     "INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)\nVALUES (?1, ?2, ?3, 'read', ?4)",
   updateCallerWebLogin:
-    "UPDATE callers\nSET name = ?1,\n    github_login = ?2,\n    github_user_id = ?3,\n    org_verified_at = ?4,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id = ?5",
+    "UPDATE callers\nSET name = ?1,\n    github_login = ?2,\n    github_user_id = ?3,\n    org_identity_verified_at = ?4,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id = ?5",
   insertWebSession:
     "INSERT INTO web_sessions (session_hash, caller_id, expires_at)\nVALUES (?1, ?2, ?3)",
   deleteWebSession: "DELETE FROM web_sessions\nWHERE session_hash = ?1",
   getWebSession:
-    "SELECT\n  callers.id,\n  callers.name,\n  callers.github_login,\n  callers.org_login,\n  callers.org_verified_at,\n  callers.dashboard_role,\n  web_sessions.expires_at\nFROM web_sessions\nJOIN callers ON callers.id = web_sessions.caller_id\nWHERE web_sessions.session_hash = ?1\n  AND web_sessions.expires_at > CURRENT_TIMESTAMP\n  AND callers.status = 'active'\n  AND callers.org_login = ?2",
+    "SELECT\n  callers.id,\n  callers.name,\n  callers.github_login,\n  callers.github_user_id,\n  callers.org_login,\n  callers.org_identity_verified_at AS org_verified_at,\n  callers.dashboard_role,\n  web_sessions.expires_at\nFROM web_sessions\nJOIN callers ON callers.id = web_sessions.caller_id\nWHERE web_sessions.session_hash = ?1\n  AND web_sessions.expires_at > CURRENT_TIMESTAMP\n  AND callers.status = 'active'\n  AND callers.org_login = ?2",
   getCallerPoolGrant:
     "SELECT 1\nFROM caller_pools\nWHERE caller_id = ?1\n  AND pool_id = ?2\nLIMIT 1",
   touchWebSession:

@@ -5,6 +5,7 @@ import { poolHealth } from "../../src/health";
 import {
   bearer,
   callWorker,
+  callWarmWorker,
   CALLER_TOKEN,
   jsonResponse,
   orgMembershipResponse,
@@ -16,6 +17,43 @@ import {
 } from "./harness";
 
 describe("Worker end-to-end control plane", () => {
+  it("rejects membership from a replacement account without refreshing the enrolled caller", async () => {
+    await seedPool();
+    const stale = "2020-01-01T00:00:00.000Z";
+    await env.DB.prepare(
+      "UPDATE callers SET github_user_id = 101, github_login = 'old-name', org_identity_verified_at = ? WHERE id = 'caller'",
+    )
+      .bind(stale)
+      .run();
+    const upstream = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        data: {
+          user: {
+            databaseId: 202,
+            organizations: {
+              nodes: [{ login: "openclaw" }],
+              pageInfo: { endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await authenticatedGet(`/v1/pools/${POOL}/health`);
+    const stored = await env.DB.prepare(
+      "SELECT github_user_id, github_login, org_identity_verified_at AS org_verified_at FROM callers WHERE id = 'caller'",
+    ).first();
+    expect.soft(response.status).toBe(403);
+    expect
+      .soft(await response.json())
+      .toMatchObject({ error: { code: "github_identity_mismatch" } });
+    expect
+      .soft(stored)
+      .toEqual({ github_user_id: 101, github_login: "old-name", org_verified_at: stale });
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it("attributes legacy macOS .local client aliases to the canonical host", async () => {
     await seedPool();
     await env.DB.prepare(
@@ -28,6 +66,307 @@ describe("Worker end-to-end control plane", () => {
       operator: { client_name: "clawstudio" },
     });
   });
+
+  it("refreshes the same account across pages and preserves fresh and warm-cache membership", async () => {
+    await seedPool();
+    await setEnrollment(101, "old-name", STALE);
+    const upstream = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(membershipPage(101, ["other"], "next"))
+      .mockResolvedValueOnce(membershipPage(101, ["OpenClaw"]));
+    vi.stubGlobal("fetch", upstream);
+
+    expect((await authenticatedGet(`/v1/pools/${POOL}/health`)).status).toBe(200);
+    const stored = await enrollment();
+    expect(stored).toMatchObject({ github_user_id: 101, github_login: "old-name" });
+    expect(Date.now() - Date.parse(stored!.org_verified_at!)).toBeLessThan(60_000);
+    expect(upstream).toHaveBeenCalledTimes(2);
+    const requests = upstream.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(requests[0].query).toContain("databaseId");
+    expect(requests.map((request) => request.variables)).toEqual([
+      { login: "old-name", after: null },
+      { login: "old-name", after: "next" },
+    ]);
+    expect(
+      (
+        await callWarmWorker(`/v1/pools/${POOL}/health`, {
+          headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await authenticatedGet(`/v1/pools/${POOL}/health`)).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(await enrollment()).toEqual(stored);
+  });
+
+  it("rejects account substitution on a later organization page", async () => {
+    await seedPool();
+    await setEnrollment(101, "old-name", STALE);
+    const upstream = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(membershipPage(101, ["other"], "next"))
+      .mockResolvedValueOnce(membershipPage(202, ["openclaw"]));
+    vi.stubGlobal("fetch", upstream);
+    const response = await authenticatedGet(`/v1/pools/${POOL}/health`);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "github_identity_mismatch" } });
+    expect((await enrollment())!.org_verified_at).toBe(STALE);
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["completed nonmembership", () => membershipPage(101, ["other"]), 403, "org_member_denied"],
+    [
+      "missing account",
+      () => jsonResponse({ data: { user: null } }),
+      403,
+      "github_identity_mismatch",
+    ],
+    [
+      "missing database ID",
+      () =>
+        jsonResponse({
+          data: {
+            user: {
+              organizations: {
+                nodes: [{ login: "openclaw" }],
+                pageInfo: { endCursor: null, hasNextPage: false },
+              },
+            },
+          },
+        }),
+      502,
+      "org_verification_failed",
+    ],
+    [
+      "malformed node",
+      () =>
+        jsonResponse({
+          data: {
+            user: {
+              databaseId: 101,
+              organizations: {
+                nodes: [null],
+                pageInfo: { endCursor: null, hasNextPage: false },
+              },
+            },
+          },
+        }),
+      502,
+      "org_verification_failed",
+    ],
+    [
+      "malformed node alongside membership",
+      () =>
+        jsonResponse({
+          data: {
+            user: {
+              databaseId: 101,
+              organizations: {
+                nodes: [{ login: "openclaw" }, { login: 123 }],
+                pageInfo: { endCursor: null, hasNextPage: false },
+              },
+            },
+          },
+        }),
+      502,
+      "org_verification_failed",
+    ],
+    [
+      "missing pagination",
+      () =>
+        jsonResponse({
+          data: {
+            user: {
+              databaseId: 101,
+              organizations: {
+                nodes: [{ login: "openclaw" }],
+              },
+            },
+          },
+        }),
+      502,
+      "org_verification_failed",
+    ],
+    [
+      "invalid JSON",
+      () => new Response("synthetic-private-upstream"),
+      502,
+      "org_verification_failed",
+    ],
+    [
+      "query failure",
+      () => jsonResponse({ errors: [{ message: "synthetic-private-upstream" }] }),
+      502,
+      "org_verification_failed",
+    ],
+    [
+      "HTTP failure",
+      () => jsonResponse({ message: "synthetic-private-upstream" }, 401),
+      502,
+      "org_verification_failed",
+    ],
+    [
+      "transport failure",
+      () => {
+        throw new Error("synthetic-private-upstream");
+      },
+      502,
+      "org_verification_failed",
+    ],
+  ] as const)(
+    "keeps the timestamp unchanged for %s",
+    async (_name, responseForFetch, statusCode, code) => {
+      await seedPool();
+      await setEnrollment(101, "old-name", STALE);
+      const upstream = vi.fn<typeof fetch>(async () => responseForFetch());
+      vi.stubGlobal("fetch", upstream);
+      const response = await authenticatedGet(`/v1/pools/${POOL}/health`);
+      expect(response.status).toBe(statusCode);
+      const body = await response.text();
+      expect(JSON.parse(body)).toMatchObject({ error: { code } });
+      expect(body).not.toContain("synthetic-private-upstream");
+      expect(body).not.toContain("test-org-token");
+      expect((await enrollment())!.org_verified_at).toBe(STALE);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["stale", "fresh"])(
+    "fails closed for a legacy null ID with a %s timestamp on bearer and web auth",
+    async (freshness) => {
+      await seedPool();
+      const timestamp = freshness === "fresh" ? new Date().toISOString() : STALE;
+      await setEnrollment(null, "old-name", timestamp);
+      const session = await seedWebSession();
+      const upstream = vi.fn<typeof fetch>(async () => membershipPage(202, ["openclaw"]));
+      vi.stubGlobal("fetch", upstream);
+      for (const response of [
+        await authenticatedGet(`/v1/pools/${POOL}/health`),
+        await callWorker("https://octopool.openclaw.ai/v1/me", {
+          headers: { cookie: `octopool_session=${session}` },
+        }),
+      ]) {
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({
+          error: {
+            code: "github_identity_required",
+            message: expect.stringContaining("sign in again"),
+          },
+        });
+      }
+      expect(await enrollment()).toEqual({
+        github_user_id: null,
+        github_login: "old-name",
+        org_verified_at: timestamp,
+      });
+      expect(upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it("recovers a renamed account only through a fresh verified login by the same ID", async () => {
+    await seedPool();
+    await setEnrollment(101, "old-name", STALE);
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname === "/user")
+        return jsonResponse({ id: 101, login: "new-name" });
+      const { variables } = await request.json<{ variables: { login: string } }>();
+      return membershipPage(variables.login === "new-name" ? 101 : 202, ["openclaw"]);
+    });
+    vi.stubGlobal("fetch", upstream);
+    expect((await authenticatedGet(`/v1/pools/${POOL}/health`)).status).toBe(403);
+    const login = await postJSON("/v1/login/github-cli", {
+      github_token: "renamed-user-token",
+      client_name: "new-client",
+    });
+    expect(login.status).toBe(201);
+    expect(await login.json()).toMatchObject({
+      caller: { id: "caller", github_login: "new-name" },
+    });
+    expect(await enrollment()).toMatchObject({ github_user_id: 101, github_login: "new-name" });
+    expect((await enrollment())!.org_verified_at).not.toBe(STALE);
+    expect((await authenticatedGet(`/v1/pools/${POOL}/health`)).status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(3);
+  });
+
+  it("enrolls a legacy user's fresh login separately without reviving old credentials or grants", async () => {
+    await seedPool();
+    await setEnrollment(null, "old-name", STALE);
+    const session = await seedWebSession();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      return new URL(request.url).pathname === "/user"
+        ? jsonResponse({ id: 202, login: "old-name" })
+        : membershipPage(202, ["openclaw"]);
+    });
+    vi.stubGlobal("fetch", upstream);
+    const login = await postJSON("/v1/login/github-cli", { github_token: "fresh-user-token" });
+    expect(login.status).toBe(201);
+    const body = await login.json<{ caller: { id: string }; token: string }>();
+    expect(body.caller.id).not.toBe("caller");
+    expect(
+      (
+        await callWorker(`/v1/pools/${POOL}/health`, {
+          headers: { authorization: `Bearer ${body.token}` },
+        })
+      ).status,
+    ).toBe(200);
+    expect((await authenticatedGet(`/v1/pools/${POOL}/health`)).status).toBe(403);
+    expect(
+      (
+        await callWorker("https://octopool.openclaw.ai/v1/me", {
+          headers: { cookie: `octopool_session=${session}` },
+        })
+      ).status,
+    ).toBe(403);
+    expect(await enrollment()).toEqual({
+      github_user_id: null,
+      github_login: "old-name",
+      org_verified_at: STALE,
+    });
+    expect(
+      await env.DB.prepare("SELECT dashboard_role FROM callers WHERE id = ?")
+        .bind(body.caller.id)
+        .first(),
+    ).toEqual({ dashboard_role: "none" });
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["CLI", "admin"])(
+    "binds %s enrollment to the account resolved before membership",
+    async (surface) => {
+      await seedPool();
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const path = new URL(request.url).pathname;
+        return path === "/graphql"
+          ? membershipPage(202, ["openclaw"])
+          : jsonResponse({ id: 101, login: "old-name" });
+      });
+      vi.stubGlobal("fetch", upstream);
+      const response =
+        surface === "CLI"
+          ? await postJSON("/v1/login/github-cli", { github_token: "fresh-user-token" })
+          : await postJSON(
+              "/v1/admin/callers",
+              { pool: POOL, github_login: "old-name" },
+              "test-admin-token",
+            );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: "github_identity_mismatch" } });
+      expect(upstream.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+        surface === "CLI" ? "/user" : "/users/old-name",
+        "/graphql",
+      ]);
+      expect(await env.DB.prepare("SELECT count(*) AS count FROM callers").first()).toEqual({
+        count: 1,
+      });
+      expect(await env.DB.prepare("SELECT count(*) AS count FROM caller_tokens").first()).toEqual({
+        count: 1,
+      });
+    },
+  );
 
   it("reports active, disabled, empty, and missing pool health correctly", async () => {
     await seedPool({ secondary: true });
@@ -105,7 +444,7 @@ describe("Worker end-to-end control plane", () => {
       const request = new Request(input, init);
       const url = new URL(request.url);
       if (url.pathname === "/graphql" && bearer(request) === "test-org-token") {
-        return orgMembershipResponse(true);
+        return orgMembershipResponse(true, 99);
       }
       if (url.pathname === "/users/new-user") {
         return jsonResponse({ id: 99, login: "new-user" });
@@ -136,6 +475,12 @@ describe("Worker end-to-end control plane", () => {
       headers: { authorization: `Bearer ${body.token}` },
     });
     expect(health.status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(
+      await env.DB.prepare(
+        "SELECT org_verified_at, org_identity_verified_at FROM callers WHERE github_user_id = 99",
+      ).first(),
+    ).toEqual({ org_verified_at: null, org_identity_verified_at: expect.any(String) });
   });
 
   it("keeps different CLI clients active while rotating only a re-logged client", async () => {
@@ -146,7 +491,7 @@ describe("Worker end-to-end control plane", () => {
         return jsonResponse({ id: 101, login: "cli-user", name: "CLI User" });
       }
       if (url.pathname === "/graphql" && bearer(request) === "github-user-token") {
-        return orgMembershipResponse(true);
+        return orgMembershipResponse(true, 101);
       }
       return jsonResponse({ message: "unexpected request" }, 500);
     });
@@ -187,6 +532,12 @@ describe("Worker end-to-end control plane", () => {
       headers: { authorization: `Bearer ${body.token}` },
     });
     expect(firstHealth.status).toBe(200);
+    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(
+      await env.DB.prepare(
+        "SELECT org_verified_at, org_identity_verified_at FROM callers WHERE github_user_id = 101",
+      ).first(),
+    ).toEqual({ org_verified_at: null, org_identity_verified_at: expect.any(String) });
 
     const studioResponse = await postJSON("/v1/login/github-cli", {
       github_token: "github-user-token",
@@ -325,6 +676,44 @@ describe("Worker end-to-end control plane", () => {
     expect(cache.results).toEqual([{ cache_key: "fresh-cache" }]);
   });
 });
+
+const STALE = "2020-01-01T00:00:00.000Z";
+
+function membershipPage(userId: number, logins: string[], cursor: string | null = null): Response {
+  return jsonResponse({
+    data: {
+      user: {
+        databaseId: userId,
+        organizations: {
+          nodes: logins.map((login) => ({ login })),
+          pageInfo: { endCursor: cursor, hasNextPage: cursor !== null },
+        },
+      },
+    },
+  });
+}
+
+async function setEnrollment(
+  userId: number | null,
+  login: string,
+  timestamp: string,
+): Promise<void> {
+  await env.DB.prepare(
+    "UPDATE callers SET github_user_id = ?, github_login = ?, org_identity_verified_at = ? WHERE id = 'caller'",
+  )
+    .bind(userId, login, timestamp)
+    .run();
+}
+
+function enrollment() {
+  return env.DB.prepare(
+    "SELECT github_user_id, github_login, org_identity_verified_at AS org_verified_at FROM callers WHERE id = 'caller'",
+  ).first<{
+    github_user_id: number | null;
+    github_login: string;
+    org_verified_at: string | null;
+  }>();
+}
 
 function authenticatedGet(path: string): Promise<Response> {
   return callWorker(path, { headers: { authorization: `Bearer ${CALLER_TOKEN}` } });

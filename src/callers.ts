@@ -21,34 +21,34 @@ export async function ensureCliCaller(
   env: Env,
   pool: string,
   user: GitHubLoginUser,
-  verifiedAt: string,
+  identityVerifiedAt: string,
   token: string,
   clientName: string,
 ): Promise<LoginCaller> {
-  return ensureCaller(env, pool, user, verifiedAt, { token, clientName });
+  return ensureCaller(env, pool, user, identityVerifiedAt, { token, clientName });
 }
 
 export async function ensureWebCaller(
   env: Env,
   pool: string,
   user: GitHubLoginUser,
-  verifiedAt: string,
+  identityVerifiedAt: string,
 ): Promise<LoginCaller> {
-  return ensureCaller(env, pool, user, verifiedAt);
+  return ensureCaller(env, pool, user, identityVerifiedAt);
 }
 
 async function ensureCaller(
   env: Env,
   pool: string,
   user: GitHubLoginUser,
-  verifiedAt: string,
+  identityVerifiedAt: string,
   client?: { token: string; clientName: string },
 ): Promise<LoginCaller> {
   await ensurePool(env, pool);
   const name = user.name ?? user.login;
   const existing = await findLoginCaller(env, pool, user.id);
   if (existing === null) {
-    return insertCaller(env, pool, user, name, verifiedAt, client);
+    return insertCaller(env, pool, user, name, identityVerifiedAt, client);
   }
 
   const statements = [
@@ -56,7 +56,7 @@ async function ensureCaller(
       name,
       user.login,
       user.id,
-      verifiedAt,
+      identityVerifiedAt,
       existing.id,
     ),
     env.DB.prepare(queries.insertCallerPool).bind(existing.id, pool),
@@ -109,7 +109,7 @@ async function insertCaller(
   pool: string,
   user: GitHubLoginUser,
   name: string,
-  verifiedAt: string,
+  identityVerifiedAt: string,
   client?: { token: string; clientName: string },
 ): Promise<LoginCaller> {
   const callerId = `caller_${crypto.randomUUID()}`;
@@ -122,7 +122,7 @@ async function insertCaller(
       user.login,
       user.id,
       env.ALLOWED_GITHUB_ORG,
-      verifiedAt,
+      identityVerifiedAt,
     ),
     env.DB.prepare(queries.insertCallerPool).bind(callerId, pool),
     ...(client === undefined

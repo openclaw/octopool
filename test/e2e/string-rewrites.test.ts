@@ -111,7 +111,7 @@ describe("canonical relay egress protection", () => {
   it("guards the membership refresh without changing credential ownership", async () => {
     await seedPool();
     await env.DB.prepare(
-      "UPDATE callers SET org_verified_at = '2000-01-01', github_login = 'cobalt-mint'",
+      "UPDATE callers SET org_identity_verified_at = '2000-01-01', github_login = 'cobalt-mint'",
     ).run();
     await put([{ pattern: "cobalt-mint", replacement: "public" }]);
     const upstream = vi.fn<typeof fetch>(async () => jsonResponse({}, 404));

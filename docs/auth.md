@@ -18,8 +18,9 @@ Relay and health requests send `Authorization: Bearer <octopool_caller_token>`.
 - The caller must be `active` and granted the requested pool (`caller_pools`).
 - The caller's `org_login` must equal `ALLOWED_GITHUB_ORG`, else `403 org_denied`.
 - Org membership is re-verified on use once it goes stale (`ORG_VERIFY_TTL_SECONDS`,
-  default 24h), using the org verifier token. A member who leaves the org loses access at
-  the next check.
+  default 24h), using the org verifier token. Every verification page must resolve the
+  enrolled immutable `github_user_id`; a matching organization on a replacement account
+  cannot refresh the caller. A member who leaves the org loses access at the next check.
 
 A missing/invalid token returns `401`; a valid token without the pool grant returns
 `401 invalid_auth`.
@@ -100,9 +101,50 @@ Two helpers query the user's visible organizations through GitHub GraphQL:
 - During login, with the user's own token.
 - During background freshness checks, with the configured `OCTOPOOL_GITHUB_ORG_TOKEN`.
 
-The query paginates organization memberships and confirms the configured org by login. A
-completed query without the org denies (`403 org_member_denied`); transport, credential,
-rate-limit, or malformed-response failures surface as `502 org_verification_failed`. Using
-the GraphQL budget keeps org verification independent from REST core quota consumed by
-release and repository workflows. If the verifier token is unset, verification returns
-`503 org_verification_unavailable`.
+The query requests GitHub's [User.databaseId](https://docs.github.com/en/graphql/reference/users#user)
+and organization memberships together. Every fetched page must contain a positive integer
+database ID equal to the enrolled account (refresh) or the account just resolved by `/user`
+or `/users/{login}` (login/provisioning), before any membership is accepted. Admin provisioning
+resolves the account before checking membership. No opaque node IDs are synthesized.
+
+A completed query for the expected account without the org denies (`403 org_member_denied`).
+A different account or an absent user returns `403 github_identity_mismatch`; missing or
+malformed upstream IDs, organization nodes, or pagination, invalid JSON, transport, credential,
+and rate-limit failures return `502 org_verification_failed`. Failed verification never refreshes
+the timestamp. Responses omit upstream bodies and exception text. Requests retain timeouts,
+response-size caps, and relay egress protection; protection denials remain `403 string_rewrite_denied`.
+Membership checks use GraphQL, without adding a REST core-quota dependency. An unset verifier
+token still returns `503 org_verification_unavailable` when a refresh is required.
+
+### Immutable membership upgrade
+
+The 0.5.18 migration `0017_org_identity_verification.sql` adds nullable
+`callers.org_identity_verified_at` without backfilling it. Only successful identity-bound
+verification writes this column, including CLI/OAuth login, admin provisioning, and caller/session
+refresh. New auth TTL decisions use only this proof. A verified login stores it immediately, so the
+next authenticated request does not need a redundant membership check.
+
+Apply the additive schema migration before rolling out the new Worker. The old `org_verified_at`
+database column and its existing values remain intact for mixed-version deployment compatibility.
+Old Workers can continue writing their column, but those writes cannot create or extend a proof
+trusted by new Workers, even if an old timestamp is fresh or future-dated. No authentication shutdown
+or access-policy change is required. Complete the normal rollout and drain old requests before
+claiming the fix is fully deployed; requests still served by old code retain its old behavior.
+
+The public `Caller.org_verified_at` field keeps its name and nullable timestamp shape through explicit
+SQL aliases of `org_identity_verified_at` in bearer and web-session reads. This is the public API
+compatibility contract, not a fallback to the legacy database column. New code neither reads nor
+dual-writes the old proof. Existing accounts without a new proof require an identity-bound GraphQL
+check on their first request to new code; normal membership TTL and the 30-second caller config
+cache apply after success. This causes a one-time increase in verification requests during rollout.
+
+Legacy rows with null/missing or invalid `github_user_id` fail closed as
+`403 github_identity_required`, even with a fresh timestamp. Run `octopool login` again, sign in
+again on the website, or ask an admin to reprovision. A fresh proven login creates a separate
+enrollment when no matching immutable ID exists; it never binds the legacy row by username or
+revives its old caller tokens or web sessions. Old pool grants and dashboard roles do not transfer;
+an admin must explicitly regrant any additional access to the new enrollment.
+
+For an enrolled account that has renamed, sign in again with that GitHub account. Verified login
+updates the username on the same immutable-ID enrollment. Merely owning the old username is
+insufficient: GitHub permits [another account to claim it](https://docs.github.com/en/account-and-profile/concepts/username-changes).

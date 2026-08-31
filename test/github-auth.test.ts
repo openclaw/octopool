@@ -78,6 +78,7 @@ describe("GitHub identity credentials", () => {
       verifyGitHubOrgMember(
         { ...env, OCTOPOOL_GITHUB_ORG_TOKEN: "org-token" } as unknown as Env,
         "octo",
+        42,
       ),
     ).resolves.toEqual(expect.any(String));
 
@@ -96,7 +97,7 @@ describe("GitHub identity credentials", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo")).resolves.toEqual(
+    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42)).resolves.toEqual(
       expect.any(String),
     );
     expect(fetchMock).toHaveBeenCalledWith("https://api.github.com/graphql", expect.any(Object));
@@ -113,7 +114,7 @@ describe("GitHub identity credentials", () => {
       .mockResolvedValueOnce(orgMembershipResponse(["openclaw"]));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo")).resolves.toEqual(
+    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42)).resolves.toEqual(
       expect.any(String),
     );
     const secondRequest = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
@@ -128,7 +129,9 @@ describe("GitHub identity credentials", () => {
       vi.fn(async () => orgMembershipResponse(["other"])),
     );
 
-    await expect(verifyGitHubOrgMemberWithToken(env(), "org-token", "octo")).rejects.toMatchObject({
+    await expect(
+      verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42),
+    ).rejects.toMatchObject({
       status: 403,
       code: "org_member_denied",
     });
@@ -141,14 +144,185 @@ describe("GitHub identity credentials", () => {
     );
 
     await expect(
-      verifyGitHubOrgMemberWithToken(env(), "invalid-token", "octo"),
+      verifyGitHubOrgMemberWithToken(env(), "invalid-token", "octo", 42),
     ).rejects.toMatchObject({ status: 502, code: "org_verification_failed" });
+  });
+
+  it("requires an enrolled ID even when a runtime caller omits it", async () => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    await expect(
+      verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", undefined as unknown as number),
+    ).rejects.toMatchObject({ status: 403, code: "github_identity_required" });
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("preserves missing-verifier and egress-policy errors", async () => {
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    await expect(verifyGitHubOrgMember(env(), "octo", 42)).rejects.toMatchObject({
+      status: 503,
+      code: "org_verification_unavailable",
+    });
+    const guarded = withGitHubEgress(env(), [{ pattern: "octo", replacement: "public" }]);
+    await expect(
+      verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42, guarded.githubEgress),
+    ).rejects.toMatchObject({ status: 403, code: "string_rewrite_denied" });
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, "42", 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects a malformed GraphQL account ID %s",
+    async (databaseId) => {
+      const body = await orgMembershipResponse(["openclaw"]).json<MembershipPayload>();
+      body.data.user.databaseId = databaseId;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body)),
+      );
+      await expect(
+        verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42),
+      ).rejects.toMatchObject({ status: 502, code: "org_verification_failed" });
+    },
+  );
+
+  it.each([null, [], "org", {}, { login: null }, { login: 1 }, { login: "" }, { login: " " }])(
+    "rejects malformed organization nodes %j even alongside a valid member",
+    async (node) => {
+      const body = await orgMembershipResponse(["openclaw"]).json<MembershipPayload>();
+      body.data.user.organizations.nodes.push(node);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body)),
+      );
+      await expect(
+        verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42),
+      ).rejects.toMatchObject({ status: 502, code: "org_verification_failed" });
+    },
+  );
+
+  it.each([null, [], "bad", {}, { data: null }, { data: { user: [] } }, { errors: "bad" }])(
+    "rejects malformed GraphQL envelopes %j",
+    async (body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(body)),
+      );
+      await expect(
+        verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42),
+      ).rejects.toMatchObject({ status: 502, code: "org_verification_failed" });
+    },
+  );
+
+  it("rejects cursor cycles and malformed pagination before accepting membership", async () => {
+    const upstream = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(orgMembershipResponse(["other"], true, "first"))
+      .mockResolvedValueOnce(orgMembershipResponse(["other"], true, "second"))
+      .mockResolvedValueOnce(orgMembershipResponse(["openclaw"], true, "first"));
+    vi.stubGlobal("fetch", upstream);
+    await expect(
+      verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42),
+    ).rejects.toMatchObject({ status: 502, code: "org_verification_failed" });
+    expect(upstream).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["missing continuation", true, null],
+    ["blank continuation", true, ""],
+    ["invalid hasNextPage", "yes", "next"],
+  ])("rejects %s pagination", async (_label, hasNextPage, endCursor) => {
+    const body = await orgMembershipResponse(["openclaw"]).json<MembershipPayload>();
+    body.data.user.organizations.pageInfo = { hasNextPage, endCursor };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(body)),
+    );
+    await expect(
+      verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42),
+    ).rejects.toMatchObject({ status: 502, code: "org_verification_failed" });
+  });
+
+  it("caps membership bodies and maps failed body reads to the upstream error contract", async () => {
+    let cancelled = false;
+    const oversized = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(33));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+    );
+    const failed = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(new Error("synthetic-private-upstream"));
+        },
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValueOnce(oversized).mockResolvedValueOnce(failed),
+    );
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(
+        verifyGitHubOrgMemberWithToken(
+          { ...env(), MAX_RESPONSE_BYTES: "32" } as unknown as Env,
+          "org-token",
+          "octo",
+          42,
+        ),
+      ).rejects.toMatchObject({
+        status: 502,
+        code: "org_verification_failed",
+        message: "GitHub membership response was invalid",
+      });
+    }
+    expect(cancelled).toBe(true);
+  });
+
+  it("returns rate-limit metadata with an upstream failure and blocks credential redirects", async () => {
+    const upstream = vi.fn<typeof fetch>(
+      async () =>
+        new Response(null, {
+          status: 429,
+          headers: {
+            "x-ratelimit-resource": "graphql",
+            "x-ratelimit-remaining": "0",
+            "retry-after": "60",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", upstream);
+    await expect(
+      verifyGitHubOrgMemberWithToken(env(), "org-token", "octo", 42),
+    ).rejects.toMatchObject({
+      status: 502,
+      code: "org_verification_failed",
+      details: {
+        github_rate_limit_resource: "graphql",
+        github_rate_limit_remaining: "0",
+        github_retry_after: "60",
+      },
+    });
+    expect(upstream.mock.calls[0]?.[1]?.redirect).toBe("manual");
   });
 });
 
 function env(): Env {
   return { ALLOWED_GITHUB_ORG: "openclaw", REQUEST_TIMEOUT_MS: "1234" } as unknown as Env;
 }
+
+type MembershipPayload = {
+  data: {
+    user: {
+      databaseId: unknown;
+      organizations: { nodes: unknown[]; pageInfo: unknown };
+    };
+  };
+};
 
 function orgMembershipResponse(
   organizations: string[],
@@ -158,6 +332,7 @@ function orgMembershipResponse(
   return Response.json({
     data: {
       user: {
+        databaseId: 42,
         organizations: {
           nodes: organizations.map((login) => ({ login })),
           pageInfo: { endCursor, hasNextPage },
