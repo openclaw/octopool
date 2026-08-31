@@ -49,7 +49,8 @@ Identity selection runs in a Durable Object partitioned per pool (`pool:<pool_id
 keeps four SQLite tables in DO storage:
 
 - `leases` — sticky route→identity binding, 10s TTL.
-- `rate_states` — last seen `remaining`/`reset_at` per identity and resource bucket.
+- `rate_states` — newest reset window and lowest observed remaining budget within that
+  window, per identity and resource bucket.
 - `cooldowns` — per identity, scoped to `*`, `resource:<r>`, or a route key.
 - `cache_fills` — renewable, token-fenced ownership for concurrent identical cache misses;
   completion wakes followers with the confirmed publication outcome.
@@ -61,23 +62,60 @@ keeps four SQLite tables in DO storage:
 2. Otherwise score each non-cooling candidate by `remaining + weight` (unknown rate
    assumes a fresh 5000 budget; an exhausted-but-unreset identity is skipped) and take
    the best (`reason: highest_remaining`).
-3. If every candidate is cooling down, the Worker returns `503 identities_cooling_down`.
+3. If every candidate is cooling down or quota-exhausted, selection reports
+   `identities_cooling_down`; the relay uses its existing stale-cache or typed
+   `424 fallback_local` response.
 
 The winning route gets a fresh 10s lease so concurrent callers stick to the same identity
 briefly instead of stampeding.
 
 ## Health feedback (cooldowns)
 
-After each GitHub call, `recordResult` updates `rate_states` from the response's
-`x-ratelimit-*` headers and, on a `401`/`403`/`429`, writes a cooldown:
+After an identity-backed GitHub resource call, `recordResult` merges complete, valid
+`x-ratelimit-remaining`/`x-ratelimit-reset` observations into `rate_states`. A greater
+reset timestamp starts a new window; an equal reset keeps the minimum remaining count;
+an older reset cannot change the row. Same-window limit metadata remains the first
+accepted value, so differing limits are not order-independent. A newer window updates
+the limit, using the existing 5000 default when it is absent.
 
-- `401` → global `*` cooldown (Retry-After, else 120s).
-- a `Retry-After` on any error → global `*` cooldown for that duration.
-- `403` with budget remaining (secondary/abuse limit) → global `*` cooldown, 120s.
-- `429` → `resource:<resource>` cooldown, 120s.
-- otherwise → route-key cooldown, 120s.
+Numeric headers must be whole-decimal nonnegative safe integers. Reset must be positive
+and remain safe when converted from seconds to milliseconds. Invalid supplied quota
+fields or an incomplete remaining/reset pair leave known rate state untouched, including
+exhaustion. RPC inputs are also validated. A newer complete positive observation or
+wall-clock time equal to the reset restores quota eligibility; a sticky lease cannot
+bypass live exhaustion. This is conservative feedback, not quota reservation: requests
+already in flight can still consume the same last unit, and same-window quota increases
+remain suppressed until reset.
 
-Cooling-down identities are skipped by selection until their cooldown expires.
+Only `401`/`403`/`429` write cooldowns, independently of quota validation:
+
+- `401` → global `*` cooldown (usable Retry-After, otherwise 120s).
+- `403` or `429` with usable Retry-After → global `*` cooldown for that duration.
+- `403` without usable Retry-After → route-key cooldown, 120s, including permission/SSO
+  failures. A complete zero-budget observation also excludes that resource until reset.
+- `429` without usable Retry-After → `resource:<resource>` cooldown, 120s.
+
+Retry-After supports integer seconds only, with a one-second minimum. HTTP dates,
+malformed numbers, and durations whose absolute deadline is unsafe use the defaults
+above; there is no additional duration cap. Other statuses, including `404`/`422` and
+`5xx`, can update valid quota observations but do not create cooldowns. A `403` with zero
+remaining and no usable reset creates only the route cooldown: it does not establish
+resource-wide exhaustion or invent a reset.
+
+Each cooldown key retains its greatest expiry and the status/reason attached to that
+deadline. Equal or shorter updates do nothing. Route, resource and global keys remain
+independent; a success or newer rate window does not clear a live cooldown. Selection
+and snapshots ignore expired rows at exact deadline equality, without deleting them.
+Rate and cooldown writes for one result use a synchronous storage transaction, so a
+failed second write cannot leave a partially accepted observation.
+
+The trusted route determines the identity's `core`/`search` bucket; the response resource
+header cannot override it. Anonymous API snapshots and App token-exchange responses do
+not update identity budgets. State survives Durable Object eviction. Replaying the same
+absolute SQL observation is idempotent; replaying the relative-duration `recordResult`
+RPC can extend a cooldown. Feedback errors do not initiate retries or compensating state
+deletion. No schema migration or state reset is required; previously overwritten
+observations cannot be reconstructed by this repair.
 
 ## Registration
 

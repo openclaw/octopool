@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { CacheFillAcquisition, CacheFillOutcome } from "./cache-fill";
 import { queries } from "./generated/sql";
+import { isRateInteger, isRateSeconds } from "./github-rate";
 import type { CoordinatorSnapshot, RecordResult, SelectionRequest, SelectionResult } from "./types";
 
 type LeaseRow = {
@@ -162,27 +163,37 @@ export class PoolCoordinator extends DurableObject<Env> {
   }
 
   recordResult(result: RecordResult): void {
-    if (result.rate?.remaining !== undefined && result.rate.resetAt !== undefined) {
-      this.ctx.storage.sql.exec(
-        queries.upsertRateState,
-        result.identityId,
-        result.resource,
-        result.rate.limit ?? 5000,
-        result.rate.remaining,
-        result.rate.resetAt * 1000,
-      );
-    }
-    if (result.status === 401 || result.status === 403 || result.status === 429) {
-      const cooldown = classifyCooldown(result);
-      this.ctx.storage.sql.exec(
-        queries.upsertCooldown,
-        result.identityId,
-        cooldown.key,
-        result.status,
-        "github_error",
-        Date.now() + cooldown.ttlMs,
-      );
-    }
+    // A failed cooldown statement must not leave half of this observation committed.
+    this.ctx.storage.transactionSync(() => {
+      const rate = result.rate;
+      if (
+        isRateInteger(rate?.remaining) &&
+        isRateSeconds(rate?.resetAt) &&
+        rate.resetAt > 0 &&
+        (rate.limit === undefined || isRateInteger(rate.limit))
+      ) {
+        this.ctx.storage.sql.exec(
+          queries.upsertRateState,
+          result.identityId,
+          result.resource,
+          rate.limit ?? 5000,
+          rate.remaining,
+          rate.resetAt * 1000,
+        );
+      }
+      if (result.status === 401 || result.status === 403 || result.status === 429) {
+        const now = Date.now();
+        const cooldown = classifyCooldown(result, now);
+        this.ctx.storage.sql.exec(
+          queries.upsertCooldown,
+          result.identityId,
+          cooldown.key,
+          result.status,
+          "github_error",
+          now + cooldown.ttlMs,
+        );
+      }
+    });
   }
 
   snapshot(): CoordinatorSnapshot {
@@ -292,17 +303,16 @@ export class PoolCoordinator extends DurableObject<Env> {
   }
 }
 
-function classifyCooldown(result: RecordResult): { key: string; ttlMs: number } {
+function classifyCooldown(result: RecordResult, now: number): { key: string; ttlMs: number } {
+  const retryAfter = result.rate?.retryAfter;
+  const duration = isRateSeconds(retryAfter) ? Math.max(retryAfter, 1) * 1000 : undefined;
   const retryAfterMs =
-    result.rate?.retryAfter !== undefined ? Math.max(result.rate.retryAfter, 1) * 1000 : undefined;
+    duration !== undefined && Number.isSafeInteger(now + duration) ? duration : undefined;
   if (result.status === 401) {
     return { key: "*", ttlMs: retryAfterMs ?? 120_000 };
   }
   if (retryAfterMs !== undefined) {
     return { key: "*", ttlMs: retryAfterMs };
-  }
-  if (result.status === 403 && result.rate?.remaining !== undefined && result.rate.remaining > 0) {
-    return { key: result.routeKey, ttlMs: 120_000 };
   }
   if (result.status === 429) {
     return { key: `resource:${result.resource}`, ttlMs: 120_000 };

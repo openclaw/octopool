@@ -17,9 +17,9 @@ export const queries = {
   upsertLease:
     "INSERT INTO leases (route_key, identity_id, expires_at)\nVALUES (?1, ?2, ?3)\nON CONFLICT(route_key) DO UPDATE SET\n  identity_id = excluded.identity_id,\n  expires_at = excluded.expires_at",
   upsertRateState:
-    "INSERT INTO rate_states (identity_id, resource, limit_count, remaining, reset_at)\nVALUES (?1, ?2, ?3, ?4, ?5)\nON CONFLICT(identity_id, resource) DO UPDATE SET\n  limit_count = excluded.limit_count,\n  remaining = excluded.remaining,\n  reset_at = excluded.reset_at",
+    "INSERT INTO rate_states (identity_id, resource, limit_count, remaining, reset_at)\nVALUES (?1, ?2, ?3, ?4, ?5)\nON CONFLICT(identity_id, resource) DO UPDATE SET\n  limit_count = CASE\n    WHEN excluded.reset_at > rate_states.reset_at THEN excluded.limit_count\n    ELSE rate_states.limit_count\n  END,\n  remaining = CASE\n    WHEN excluded.reset_at > rate_states.reset_at THEN excluded.remaining\n    ELSE MIN(rate_states.remaining, excluded.remaining)\n  END,\n  reset_at = excluded.reset_at\nWHERE excluded.reset_at >= rate_states.reset_at",
   upsertCooldown:
-    "INSERT INTO cooldowns (identity_id, route_key, status, reason, expires_at)\nVALUES (?1, ?2, ?3, ?4, ?5)\nON CONFLICT(identity_id, route_key) DO UPDATE SET\n  status = excluded.status,\n  reason = excluded.reason,\n  expires_at = excluded.expires_at",
+    "INSERT INTO cooldowns (identity_id, route_key, status, reason, expires_at)\nVALUES (?1, ?2, ?3, ?4, ?5)\nON CONFLICT(identity_id, route_key) DO UPDATE SET\n  status = excluded.status,\n  reason = excluded.reason,\n  expires_at = excluded.expires_at\nWHERE excluded.expires_at > cooldowns.expires_at",
   coordinatorRates:
     "SELECT identity_id, resource, limit_count, remaining, reset_at\nFROM rate_states\nWHERE reset_at > ?\nORDER BY identity_id, resource",
   coordinatorCooldowns:

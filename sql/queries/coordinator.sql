@@ -57,9 +57,16 @@ ON CONFLICT(route_key) DO UPDATE SET
 INSERT INTO rate_states (identity_id, resource, limit_count, remaining, reset_at)
 VALUES (?1, ?2, ?3, ?4, ?5)
 ON CONFLICT(identity_id, resource) DO UPDATE SET
-  limit_count = excluded.limit_count,
-  remaining = excluded.remaining,
-  reset_at = excluded.reset_at;
+  limit_count = CASE
+    WHEN excluded.reset_at > rate_states.reset_at THEN excluded.limit_count
+    ELSE rate_states.limit_count
+  END,
+  remaining = CASE
+    WHEN excluded.reset_at > rate_states.reset_at THEN excluded.remaining
+    ELSE MIN(rate_states.remaining, excluded.remaining)
+  END,
+  reset_at = excluded.reset_at
+WHERE excluded.reset_at >= rate_states.reset_at;
 
 -- name: UpsertCooldown :exec
 INSERT INTO cooldowns (identity_id, route_key, status, reason, expires_at)
@@ -67,7 +74,8 @@ VALUES (?1, ?2, ?3, ?4, ?5)
 ON CONFLICT(identity_id, route_key) DO UPDATE SET
   status = excluded.status,
   reason = excluded.reason,
-  expires_at = excluded.expires_at;
+  expires_at = excluded.expires_at
+WHERE excluded.expires_at > cooldowns.expires_at;
 
 -- name: CoordinatorRates :many
 SELECT identity_id, resource, limit_count, remaining, reset_at

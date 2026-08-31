@@ -342,6 +342,12 @@ that excludes failed misses and deliberate local fallback responses.
 Successful `304` refreshes use the existing `hit` status so current stats and CLI parsers count
 the saved request, with `fallback_reason = cache_revalidated` as the distinct audit marker.
 
+Identity availability feedback is separate from cache-source eligibility. Overlapping
+identity responses merge quota and cooldown observations conservatively in the pool
+coordinator, including conditional requests that bypass cache storage. A delayed success
+cannot reopen a known exhausted window or shorten a live cooldown. Fresh cache reuse
+still checks active route eligibility and public proof; see [identity feedback](identities.md#health-feedback-cooldowns).
+
 ## Public-repo guard
 
 The shared cache and pooled identities are **public-repository only**. Before any repo

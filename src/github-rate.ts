@@ -17,19 +17,33 @@ export function rateFromHeaders(headers: Record<string, string>): GitHubRate {
   if (remaining !== undefined) {
     out.remaining = remaining;
   }
-  if (resetAt !== undefined) {
+  // An invalid supplied limit must not become an apparently complete observation
+  // with default metadata at the coordinator. Keep valid remaining for fallback.
+  if (
+    isRateSeconds(resetAt) &&
+    resetAt > 0 &&
+    (headers["x-ratelimit-limit"] === undefined || limit !== undefined)
+  ) {
     out.resetAt = resetAt;
   }
-  if (retryAfter !== undefined) {
+  if (isRateSeconds(retryAfter)) {
     out.retryAfter = retryAfter;
   }
   return out;
 }
 
 function parseHeaderInt(value: string | undefined): number | undefined {
-  if (value === undefined) {
+  if (value === undefined || value === "" || /[^0-9]/.test(value)) {
     return undefined;
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  const parsed = Number(value);
+  return isRateInteger(parsed) ? parsed : undefined;
+}
+
+export function isRateInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isRateSeconds(value: unknown): value is number {
+  return isRateInteger(value) && Number.isSafeInteger(value * 1000);
 }
