@@ -215,6 +215,9 @@ func TestLoginCompoundClientWhoamiAndStats(t *testing.T) {
 	for _, input := range []string{"Host.local.local", "Host.LoCaL.local.LOCAL"} {
 		t.Run(input, func(t *testing.T) {
 			isolateTestConfig(t)
+			for _, name := range []string{"OCTOPOOL_TOKEN", "OCTOPOOL_URL", "OCTOPOOL_POOL"} {
+				t.Setenv(name, "")
+			}
 			t.Setenv("GH_TOKEN", "synthetic-github")
 			var server *httptest.Server
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

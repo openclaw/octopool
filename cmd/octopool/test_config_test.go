@@ -42,6 +42,7 @@ func TestAuthTestsPreserveInheritedConfig(t *testing.T) {
 		"TestWriteLocalUserLogin",
 		"TestWriteLocalUserLoginRejectsOverridesAndBroaderShapes",
 		"TestLoginAcceptsPositionalServerAndStoresDiscoveredAuth",
+		"TestLoginCompoundClientWhoamiAndStats",
 		"TestLoginRedirects",
 		"TestCallerRequestFlagsAuthSnapshot",
 		"TestStringRewriteSavedURLBinding",
@@ -51,6 +52,13 @@ func TestAuthTestsPreserveInheritedConfig(t *testing.T) {
 			before := configSnapshot(t, inherited)
 			cmd := exec.CommandContext(t.Context(), executable, "-test.run=^"+name+"$", "-test.v", "-test.count=1")
 			cmd.Env = os.Environ()
+			if name == "TestLoginCompoundClientWhoamiAndStats" {
+				cmd.Env = append(cmd.Env,
+					"OCTOPOOL_TOKEN=synthetic-inherited-caller",
+					"OCTOPOOL_URL=http://127.0.0.1:1",
+					"OCTOPOOL_POOL=synthetic-inherited-pool",
+				)
+			}
 			out, err := cmd.CombinedOutput()
 			// Check preservation even if the child fails before completing a write.
 			if after := configSnapshot(t, inherited); !reflect.DeepEqual(after, before) {
