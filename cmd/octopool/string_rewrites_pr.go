@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -9,7 +10,7 @@ import (
 var rewriteCommitSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 var rewriteGitHubLogin = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
 
-func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, prepared *rewritePreparation) error {
+func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin io.Reader, prepared *rewritePreparation) error {
 	if len(args) < 2 || args[0] != "pr" {
 		return errRewriteBlocked
 	}
@@ -20,7 +21,7 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, prepar
 	case "pr ready":
 		booleans = rewriteFlagNames("--undo")
 	case "pr merge":
-		values = rewriteFlagNames("--repo,-R --match-head-commit")
+		values = rewriteFlagNames("--repo,-R --match-head-commit --body-file,-F")
 		booleans = rewriteFlagNames("--squash")
 	default:
 		return errRewriteBlocked
@@ -66,10 +67,15 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, prepar
 		// Use GitHub's immediate merge endpoint so the checked head SHA remains the
 		// commit being merged; queue-required branches fail instead of weakening it.
 		endpoint := "repos/" + flags.values["--repo"] + "/pulls/" + selector + "/merge"
-		return prepareRewriteAPI(policy, []string{
+		apiArgs := []string{
 			"api", endpoint, "--method=PUT", "--raw-field=sha=" + sha,
 			"--raw-field=merge_method=squash", "--silent",
-		}, strings.NewReader(""), prepared)
+		}
+		if flags.has("--body-file") {
+			// The API owner reads, rewrites, and snapshots the body before dispatch.
+			apiArgs = append(apiArgs, "--field=commit_message=@"+flags.values["--body-file"])
+		}
+		return prepareRewriteAPI(policy, apiArgs, stdin, prepared)
 	}
 	prepared.args = []string{"pr", args[1], flags.positionals[0], "--repo=" + flags.values["--repo"]}
 	for _, flag := range flags.ordered {

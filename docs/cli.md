@@ -471,7 +471,8 @@ With active rules, the initial local publication vocabulary is deliberately cons
   `-f`/`--raw-field`, `-F`/`--field`, or `--input` JSON. Literal and typed fields retain
   their distinction; only typed `@file`/`@-` values read files/stdin. Nested review comments
   use `--input` JSON. Exact issue-assignee POSTs accept repeated raw `assignees[]` values;
-  exact pull-request merge PUTs require only a full 40-hex `sha` and `merge_method: squash`.
+  exact pull-request merge PUTs require a full 40-hex `sha` and `merge_method: squash`,
+  with an optional rewritten `commit_message` string.
   Other bracket accumulation, duplicate keys, mixed input/field sources, unknown properties,
   and custom authentication headers are rejected. Raw release creation first verifies the
   existing remote tag with a local authenticated GET.
@@ -612,8 +613,11 @@ GraphQL shapes are not representable by the relay. Numeric `pr ready` (or a chec
 current/explicit nonnumeric Git branch) and metadata-only PR/issue edits with add/remove label
 or assignee flags are also allowed without free-form text. Exact-head
 `pr merge --squash --match-head-commit` is converted to the immediate pull-request merge REST
-endpoint with only the checked SHA and squash method; it never enables auto-merge, so a branch
-that requires a merge queue fails closed. Subject/body merge flags, admin/auto merge variants,
+endpoint with the checked SHA and squash method; it never enables auto-merge, so a branch
+that requires a merge queue fails closed. An explicit `--body-file`/`-F` (including `-` for
+stdin) supplies an optional commit message through the same bounded text rewriting and private
+JSON snapshot as REST content. The child receives neither the original body path nor live stdin.
+Subject/inline-body merge flags, admin/auto merge variants,
 URL selectors, numeric inferred branches, and unpinned merges remain blocked on that strict
 lifecycle path. Other editor/web/template/fill modes, unmodeled uploads, aliases/extensions, raw
 GraphQL, and newly introduced native commands/flags use best-effort filtering and retain

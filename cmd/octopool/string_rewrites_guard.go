@@ -361,7 +361,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 			err = prepareRewriteBestEffort(policy, args, stdin, prepared)
 		}
 	case len(args) >= 2 && args[0] == "pr" && (args[1] == "ready" || args[1] == "merge"):
-		err = prepareRewritePRLifecycle(policy, args, prepared)
+		err = prepareRewritePRLifecycle(policy, args, stdin, prepared)
 	default:
 		// Modeled reads retain structural pinning. Unknown commands and flag
 		// shapes still receive bounded argv/stdin filtering before native gh.
