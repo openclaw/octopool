@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Reject malformed stored pool policies before cache reuse or pooled GitHub access with a typed configuration-unavailable error, preserving valid partial-policy defaults.
 - Reject extra or malformed repository qualifiers and negated scope in issue, code, and commit searches before relay dispatch or cache reuse, preserving typed local fallback for unsupported queries.
 - Make active caller enrollment and named-client token rotation atomic across CLI, admin, and browser login, preserving existing access and history while refusing ambiguous upgrades.
 - Bind org membership checks to the enrolled GitHub account on every page, isolate verification timestamps across rolling upgrades, and preserve safe legacy re-login and typed upstream errors.

@@ -1,10 +1,61 @@
 import { describe, expect, it } from "vitest";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { HttpError } from "../src/http";
+import { classifyRoute, defaultPolicy, parsePolicy, validateRelayRequest } from "../src/policy";
+import { malformedStoredPolicies, restrictivePolicy } from "./fixtures/stored-policy";
 import {
   deniedRepoSearchQueries,
   repoSearchPaths,
   validRepoSearchQueries,
 } from "./fixtures/restricted-search";
+
+describe("stored pool policy", () => {
+  it.each(malformedStoredPolicies)("rejects $name with a safe configuration error", ({ raw }) => {
+    expect(() => parsePolicy(raw, "openclaw")).toThrow(
+      new HttpError(503, "pool_policy_unavailable", "Pool policy is unavailable"),
+    );
+    expect(() => parsePolicy(raw, "openclaw")).toThrow(
+      expect.objectContaining({ status: 503, code: "pool_policy_unavailable" }),
+    );
+  });
+
+  it("preserves creation defaults and explicit empty-object storage", () => {
+    const expected = {
+      allowed_owners: ["openclaw", "other"],
+      allow_public_repos: true,
+      allow_search: false,
+      allow_logs: true,
+    };
+    expect(defaultPolicy(" OpenClaw, ,OTHER ")).toEqual(expected);
+    expect(parsePolicy("{}", " OpenClaw, ,OTHER ")).toEqual(expected);
+  });
+
+  it("preserves complete restrictions, missing fields, and historical owner normalization", () => {
+    expect(parsePolicy(JSON.stringify(restrictivePolicy), "other")).toEqual(restrictivePolicy);
+    expect(parsePolicy('{"allow_logs":false}', "openclaw")).toEqual({
+      ...defaultPolicy("openclaw"),
+      allow_logs: false,
+    });
+    expect(
+      parsePolicy('{"allowed_owners":["OpenClaw"," OTHER ","","OpenClaw"]}', "fallback"),
+    ).toEqual({
+      ...defaultPolicy("fallback"),
+      allowed_owners: ["openclaw", " other ", "", "openclaw"],
+    });
+    expect(parsePolicy('{"allowed_owners":[]}', "fallback").allowed_owners).toEqual([]);
+    expect(parsePolicy('{"future_field":{"enabled":true}}', "openclaw")).toEqual(
+      defaultPolicy("openclaw"),
+    );
+  });
+
+  it.each([true, false])("preserves explicit %s for each boolean independently", (flag) => {
+    for (const field of ["allow_public_repos", "allow_search", "allow_logs"]) {
+      expect(parsePolicy(JSON.stringify({ [field]: flag }), "openclaw")).toEqual({
+        ...defaultPolicy("openclaw"),
+        [field]: flag,
+      });
+    }
+  });
+});
 
 describe.each(repoSearchPaths)("restricted search grammar for %s", (path) => {
   const policy = { ...defaultPolicy("openclaw"), allow_search: true };

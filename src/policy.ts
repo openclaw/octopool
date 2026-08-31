@@ -26,29 +26,41 @@ export function defaultPolicy(owners: string): PoolPolicy {
 }
 
 export function parsePolicy(raw: string, fallbackOwners: string): PoolPolicy {
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(raw);
-    if (!isRecord(value)) {
-      return defaultPolicy(fallbackOwners);
-    }
-    const fallback = defaultPolicy(fallbackOwners);
-    return {
-      allowed_owners: Array.isArray(value.allowed_owners)
-        ? value.allowed_owners
-            .filter((item): item is string => typeof item === "string")
-            .map((item) => item.toLowerCase())
-        : fallback.allowed_owners,
-      allow_public_repos:
-        typeof value.allow_public_repos === "boolean"
-          ? value.allow_public_repos
-          : fallback.allow_public_repos,
-      allow_search:
-        typeof value.allow_search === "boolean" ? value.allow_search : fallback.allow_search,
-      allow_logs: typeof value.allow_logs === "boolean" ? value.allow_logs : fallback.allow_logs,
-    };
+    value = JSON.parse(raw);
   } catch {
-    return defaultPolicy(fallbackOwners);
+    throw poolPolicyUnavailable();
   }
+  if (!isRecord(value)) {
+    throw poolPolicyUnavailable();
+  }
+  // Missing fields (including an explicit {}) retain the stored-policy contract.
+  // Present but invalid restrictions must never become new-pool defaults.
+  const policy = defaultPolicy(fallbackOwners);
+  if (Object.hasOwn(value, "allowed_owners")) {
+    if (
+      !Array.isArray(value.allowed_owners) ||
+      !value.allowed_owners.every((item): item is string => typeof item === "string")
+    ) {
+      throw poolPolicyUnavailable();
+    }
+    policy.allowed_owners = value.allowed_owners.map((item) => item.toLowerCase());
+  }
+  for (const field of ["allow_public_repos", "allow_search", "allow_logs"] as const) {
+    if (Object.hasOwn(value, field)) {
+      const flag = value[field];
+      if (typeof flag !== "boolean") {
+        throw poolPolicyUnavailable();
+      }
+      policy[field] = flag;
+    }
+  }
+  return policy;
+}
+
+function poolPolicyUnavailable(): HttpError {
+  return new HttpError(503, "pool_policy_unavailable", "Pool policy is unavailable");
 }
 
 export function validateRelayRequest(value: unknown): RelayRequest {

@@ -329,6 +329,19 @@ the Worker remains GET-only and does not relay those neighboring routes.
   issue-search shape can run with `allow_search: false`, subject to the same grammar and
   owner/public-repository gates, and never falls through to pooled credentials.
 
+Stored policy must be a JSON object. Missing fields, including an explicit `{}`, retain
+the defaults above; present boolean fields must be booleans and `allowed_owners` must
+contain only strings. Invalid JSON, roots, or known fields return
+`503 pool_policy_unavailable` with a generic message, before cache access or pooled
+identity selection. Authentication and deployment-wide string protection still run first.
+This configuration error does not authorize native fallback; valid policy denials and
+caller-owned native reads retain their existing `424 fallback_local` behavior.
+
+Valid policies may remain cached in an isolate for 30 seconds after a database edit.
+Cold and expired lookups reject corrupt storage, and failed parses are never cached as
+successful configuration; a corrected value can be read on the next lookup. There is no
+persistent last-known-good policy fallback.
+
 When a Cloudflare backend (D1 or the pool Durable Object) rejects work because its
 request queue backed up, the relay returns `424 fallback_local` with reason
 `relay_overloaded` (other surfaces report `503 relay_overloaded`) instead of an untyped

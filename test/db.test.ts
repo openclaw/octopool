@@ -1,5 +1,68 @@
-import { describe, expect, it, vi } from "vitest";
-import { loadIdentities, pruneOldAuditEvents } from "../src/db";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearConfigCache } from "../src/config-cache";
+import { loadIdentities, loadPoolPolicy, pruneOldAuditEvents } from "../src/db";
+import { restrictivePolicy } from "./fixtures/stored-policy";
+
+describe("stored pool policy loading", () => {
+  beforeEach(clearConfigCache);
+  afterEach(() => {
+    clearConfigCache();
+    vi.restoreAllMocks();
+  });
+
+  function fixture(initial: string | null) {
+    let raw = initial;
+    const first = vi.fn(async () => (raw === null ? null : { policy_json: raw }));
+    const bind = vi.fn(() => ({ first }));
+    const prepare = vi.fn(() => ({ bind }));
+    return {
+      env: { ...env(prepare), DEFAULT_ALLOWED_OWNERS: "openclaw" } satisfies Env,
+      first,
+      set: (next: string) => {
+        raw = next;
+      },
+    };
+  }
+
+  it("keeps a missing pool distinct from an invalid stored policy", async () => {
+    const db = fixture(null);
+    await expect(loadPoolPolicy(db.env, "missing")).resolves.toBeNull();
+  });
+
+  it("does not cache failed parses and reads a repair on the next lookup", async () => {
+    const db = fixture("null");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(loadPoolPolicy(db.env, "maintainers")).rejects.toMatchObject({
+        status: 503,
+        code: "pool_policy_unavailable",
+      });
+    }
+    db.set(JSON.stringify(restrictivePolicy));
+    await expect(loadPoolPolicy(db.env, "maintainers")).resolves.toEqual(restrictivePolicy);
+    await expect(loadPoolPolicy(db.env, "maintainers")).resolves.toEqual(restrictivePolicy);
+    expect(db.first).toHaveBeenCalledTimes(3);
+  });
+
+  it("expires a valid policy at 30 seconds without reviving it after a parse failure", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const db = fixture(JSON.stringify(restrictivePolicy));
+    await expect(loadPoolPolicy(db.env, "maintainers")).resolves.toEqual(restrictivePolicy);
+    db.set("[]");
+    clock.mockReturnValue(30_999);
+    await expect(loadPoolPolicy(db.env, "maintainers")).resolves.toEqual(restrictivePolicy);
+    expect(db.first).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(31_000);
+    await expect(loadPoolPolicy(db.env, "maintainers")).rejects.toMatchObject({
+      code: "pool_policy_unavailable",
+    });
+    db.set("{}");
+    await expect(loadPoolPolicy(db.env, "maintainers")).resolves.toMatchObject({
+      allow_public_repos: true,
+      allow_logs: true,
+    });
+    expect(db.first).toHaveBeenCalledTimes(3);
+  });
+});
 
 describe("identity loading", () => {
   it("uses explicitly broad public PAT identities for public-only routes", async () => {

@@ -118,6 +118,15 @@ owners = `DEFAULT_ALLOWED_OWNERS` (`openclaw`), `allow_public_repos: true`,
 `allow_search: false`, `allow_logs: true`.
 There is no pool-creation endpoint; edit `pools.policy_json` in D1 to change a policy.
 
+Stored policies must be JSON objects. `{}` and partial objects retain defaults for missing
+fields. Present `allow_public_repos`, `allow_search`, and `allow_logs` values must be
+booleans; `allowed_owners` must be an array of strings (an empty array is valid). Stored
+owner strings are lowercased. Invalid JSON, roots, or known field types block relay
+serving with `503 pool_policy_unavailable`, without exposing the stored value. Repair the
+row to recover; referencing an existing pool does not replace its policy with defaults.
+An isolate may use a previously valid cached policy for up to 30 seconds after an edit;
+cold/expired lookups reject corruption, and failed parses are not cached.
+
 ## Deployment-wide string protection
 
 String rewrite rules are a **single deployment-wide policy**, independent of pool policy.
