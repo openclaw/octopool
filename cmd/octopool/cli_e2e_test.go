@@ -321,8 +321,12 @@ func writeCLIFallback(t *testing.T, w http.ResponseWriter, reason string) {
 
 func fakeGH(t *testing.T) string {
 	t.Helper()
+	return writeFakeGH(t, "#!/bin/sh\nprintf 'real-gh:%s\\n' \"$*\"\n")
+}
+
+func writeFakeGH(t *testing.T, content string) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), executableName("fake-gh"))
-	content := "#!/bin/sh\nprintf 'real-gh:%s\\n' \"$*\"\n"
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is Unix-only")
 	}

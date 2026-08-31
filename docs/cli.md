@@ -59,9 +59,12 @@ zsh -c 'command -v gh'
 
 ### `octopool login [server]`
 
-Reads a local GitHub token (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth token`), exchanges it
-with `POST /v1/login/github-cli`, and saves the returned caller token. The server can be
-passed as a positional argument, `--server`, or the older `--url` flag:
+Reads a local GitHub.com token (`GH_TOKEN`, then `GITHUB_TOKEN`, then
+`gh auth token --hostname github.com`), exchanges it with `POST /v1/login/github-cli`,
+and saves the returned caller token. Native lookup always targets GitHub.com regardless
+of `GH_HOST`; a missing or empty GitHub.com token fails login without falling back to
+Enterprise credentials. The server can be passed as a positional argument, `--server`,
+or the older `--url` flag:
 
 ```sh
 octopool login

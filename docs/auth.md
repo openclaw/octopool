@@ -59,8 +59,10 @@ Flow:
 
 1. The CLI discovers the server with `GET /.well-known/octopool`, then chooses the
    discovered `api_base` and `default_pool` unless flags override them.
-2. Body carries `github_token` (the user's `gh auth token`), a hostname-derived
-   `client_name`, and an optional `pool`.
+2. Body carries `github_token` (the user's GitHub.com token from `GH_TOKEN`,
+   `GITHUB_TOKEN`, or `gh auth token --hostname github.com`, in that order), a
+   hostname-derived `client_name`, and an optional `pool`. Enterprise credentials
+   are never a fallback for this GitHub.com-only exchange.
 3. The Worker resolves the GitHub user (`GET /user`) and verifies that user is a member
    of `ALLOWED_GITHUB_ORG` using the supplied token.
 4. The caller row and requested default-pool grant are created or refreshed by immutable

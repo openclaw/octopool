@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Pin CLI login credential lookup to GitHub.com so Enterprise host settings cannot select an Enterprise token.
 - Block cross-origin redirects and HTTPS downgrades for CLI login and authenticated JSON requests to prevent credential replay.
 - Preserve exact raw Markdown in release-view JSON via the anonymous API and retire cached HTML-derived release summaries for existing clients.
 - Return native uppercase PR-list lifecycle states and lowercase merged PR-search states from nested merge metadata before `--jq`, preserving raw API and cache payloads.

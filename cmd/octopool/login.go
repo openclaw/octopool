@@ -289,7 +289,7 @@ func localGitHubToken(ctx context.Context, ghPath string) (string, error) {
 	}
 	child, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(child, path, "auth", "token")
+	cmd := exec.CommandContext(child, path, "auth", "token", "--hostname", "github.com")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", localGitHubAuthError(path, err)
