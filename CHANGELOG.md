@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Preserve contributor credit in protected exact-head squash merges by accepting merge body files through the existing text rewriting and private snapshot checks.
 - Keep CLI caller tokens bound to the loaded server URL when another login replaces saved auth during request setup.
 - Pin CLI login credential lookup to GitHub.com so Enterprise host settings cannot select an Enterprise token.
 - Block cross-origin redirects and HTTPS downgrades for CLI login and authenticated JSON requests to prevent credential replay.
