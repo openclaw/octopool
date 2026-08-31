@@ -5,6 +5,7 @@ import worker from "../../src/index";
 import { hashToken } from "../../src/auth";
 import { clearConfigCache } from "../../src/config-cache";
 import type { RelayRequest } from "../../src/types";
+import { ownedWork } from "./owned-work";
 
 export const CALLER_TOKEN = "caller-token";
 export const POOL = "maintainers";
@@ -24,22 +25,53 @@ export async function relay(
   });
 }
 
-export async function callWorker(path: string, init?: RequestInit): Promise<Response> {
+export function callWorker(path: string, init?: RequestInit): Promise<Response> {
   // Every simulated request starts cold: e2e tests mutate callers/identities
   // between requests via direct SQL and assert immediate effect, which the
   // isolate-local config cache would otherwise mask for its TTL.
   clearConfigCache();
-  const ctx = createExecutionContext();
-  const url = path.startsWith("https://") ? path : `https://octopool.dev${path}`;
-  const response = await worker.fetch(new Request(url, init), env, ctx);
-  await waitOnExecutionContext(ctx);
-  return response;
+  return callWarmWorker(path, init);
 }
 
-export async function runScheduled(): Promise<void> {
+// Explicitly preserve isolate-local config caches for warm-isolate assertions.
+export function callWarmWorker(path: string, init?: RequestInit): Promise<Response> {
+  const url = path.startsWith("https://") ? path : `https://octopool.dev${path}`;
+  return runWithContext((ctx) => worker.fetch(new Request(url, init), env, ctx));
+}
+
+export function runScheduled(): Promise<void> {
+  return runWithContext((ctx) => worker.scheduled({} as ScheduledController, env, ctx));
+}
+
+export function runWithContext<T>(handler: (ctx: ExecutionContext) => T | Promise<T>): Promise<T> {
   const ctx = createExecutionContext();
-  await worker.scheduled({} as ScheduledController, env, ctx);
-  await waitOnExecutionContext(ctx);
+  const waitUntil = ctx.waitUntil.bind(ctx);
+  ctx.waitUntil = (promise) => {
+    // The SDK drain has its own abandonment watchdog. Ownership must outlive
+    // that watchdog so unfinished work never permits mock restoration.
+    ownedWork.track(promise);
+    waitUntil(promise);
+  };
+  return ownedWork.track(
+    (async () => {
+      let result!: T;
+      const errors: unknown[] = [];
+      try {
+        result = await handler(ctx);
+      } catch (error) {
+        errors.push(error);
+      } finally {
+        try {
+          await waitOnExecutionContext(ctx);
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length) throw new AggregateError(errors, "Handler and execution context failed");
+      return result;
+    })(),
+  );
 }
 
 export async function seedPool(options: { secondary?: boolean } = {}): Promise<void> {

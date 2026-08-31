@@ -292,6 +292,64 @@ Pushing to `main` does **not** auto-deploy the Workers — only the docs site ha
 Pages workflow. Run `pnpm run deploy` whenever Worker code or landing-page CSS needs to
 ship to production.
 
+### Worker integration test isolation
+
+`pnpm test:e2e` runs real Workerd storage with a test-owned lifecycle in
+`test/e2e/setup.ts`. Each isolated file applies the actual migrations once in
+`beforeAll`, verifies that D1 was pristine, and captures an immutable migrated
+baseline. The original 10-second hook deadline, 15-second test deadline and default
+file parallelism remain in effect; migration initialization still has to finish
+within its hook deadline.
+
+Before each test, D1 restoration discovers the **current** application schema and
+foreign-key dependencies, removes views/triggers and child tables before parent
+tables, then replays the baseline in one atomic batch. This covers renamed or
+dropped tables and unexpected schema objects as well as rows. The ordinary path
+uses three D1 requests: schema discovery, batched foreign-key discovery, and the
+atomic teardown/replay. SQLite/Cloudflare internals are preserved; the export
+restores application AUTOINCREMENT sequences, migration records and the original
+string-policy seed timestamp. Unsupported foreign-key cycles (including self
+references), virtual tables and SQLite statistics tables fail explicitly before
+destructive restoration.
+
+`test/e2e/d1-baseline.ts` isolates a version-specific local runtime contract:
+Miniflare `5.20260804.0-alpha` implements
+`PRAGMA miniflare_d1_export(?,?,?);`, also used by Wrangler `4.120.1`. The D1 binding
+accepts numeric flags `bind(0, 0)` for schema plus data with no table filter. Its
+single result row is an array of **complete SQL statements**, which the adapter
+validates and submits individually through `D1.batch`. It must never be joined
+and fed to newline-splitting `D1.exec`, replaced by `D1.dump`, or used as a
+production API. Dependency updates must revalidate this export/replay contract.
+
+Storage cleanup owns the configured `POOL_COORDINATOR`, `ACTIONS_LOGS` and native
+Cache API writes. It enumerates persisted coordinator IDs, including dormant
+objects, deletes their alarms and storage inside each real object, then evicts
+each instance so the constructor recreates SQL and discards memory/timers/waiters.
+R2 cleanup lists every page and deletes at most 1,000 keys per call. The Cache API
+ledger forwards default/named cache operations to the native implementations,
+waits for owned puts, and deletes their recorded keys. It only owns writes made
+through that ledger; it cannot purge arbitrary untracked cache entries. Tests
+that explicitly provide mock caches retain their own cache semantics.
+
+The harness tracks requests and scheduled calls, draining their execution
+contexts even when handlers throw. `callWorker` retains its cold-config-cache
+behavior; `callWarmWorker` explicitly preserves a warm isolate. Concurrency tests
+register gate releases with `ownedWork` and also release/drain in `finally`.
+After each test, gates are released and requests, contexts and cache writes drain
+**before** mocks/globals are restored. A failed cleanup or timed-out hook/body
+poisons the file lifecycle: subsequent test bodies fail rather than racing the
+old promise. The deadline watchdog does not cancel Workerd operations or extend
+Vitest's timeouts. Test code must register owned async work and release gates;
+arbitrary untracked timers/writes are outside this lifecycle's ownership.
+
+The lifecycle never calls the native global storage `reset()`. The regression uses
+the official global `abortAllDurableObjects()` to reproduce a dormant internal D1
+actor; natural 11-second idle independently reproduces the same retained-storage
+failure in the pinned runtime. `evictAllDurableObjects()` only reaches the current
+Worker's explicit Durable Object bindings and does **not** establish D1 dormancy
+through its service binding. Per-stub eviction remains appropriate for testing
+the coordinator's constructor and storage cleanup.
+
 ## SQL catalog
 
 Runtime SQL lives in `sql/queries/*.sql` with sqlc annotations. `sqlc.yaml` points sqlc at

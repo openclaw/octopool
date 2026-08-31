@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 import { withGitHubEgress } from "../../src/github-egress";
-import { createExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache, writeGitHubCache } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
@@ -11,7 +10,7 @@ import {
   terminalLogRunCompleted,
 } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
-import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } from "./harness";
 
 type RelayEnvelope = {
   status: number;
@@ -140,12 +139,14 @@ describe("terminal Actions log cache", () => {
     );
 
     await expect(
-      terminalLogRunCompleted(
-        withGitHubEgress(env, []),
-        createExecutionContext(),
-        request,
-        classifyRoute(request, policy),
-        policy,
+      runWithContext((ctx) =>
+        terminalLogRunCompleted(
+          withGitHubEgress(env, []),
+          ctx,
+          request,
+          classifyRoute(request, policy),
+          policy,
+        ),
       ),
     ).resolves.toBe(false);
     expect(
@@ -201,12 +202,8 @@ describe("terminal Actions log cache", () => {
         policy,
       );
 
-      const proof = await terminalLogCacheProof(
-        withGitHubEgress(env, []),
-        createExecutionContext(),
-        logRequest,
-        logRoute,
-        policy,
+      const proof = await runWithContext((ctx) =>
+        terminalLogCacheProof(withGitHubEgress(env, []), ctx, logRequest, logRoute, policy),
       );
       expect(proof).toEqual(
         cacheable ? { key: terminalLogCacheKey(logRequest, runAttempt) } : undefined,

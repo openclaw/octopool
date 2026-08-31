@@ -1,16 +1,16 @@
 import { env } from "cloudflare:workers";
-import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import worker from "../../src/index";
 import {
   CALLER_TOKEN,
   callWorker,
+  callWarmWorker,
   githubUpstream,
   jsonResponse,
   POOL,
   relay,
   seedPool,
 } from "./harness";
+import { ownedWork } from "./owned-work";
 
 const adminPath = "/v1/admin/string-rewrites";
 const callerPath = `/v1/pools/${POOL}/string-rewrites`;
@@ -206,11 +206,8 @@ describe("canonical relay egress protection", () => {
   it("keeps concurrent policy snapshots isolated across a redirect", async () => {
     await seedPool();
     await put([{ pattern: "cobalt-mint", replacement: "public" }]);
-    let release!: () => void;
     let started!: () => void;
-    const waiting = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const { promise: waiting, release } = ownedWork.gate();
     const reached = new Promise<void>((resolve) => {
       started = resolve;
     });
@@ -230,12 +227,13 @@ describe("canonical relay egress protection", () => {
     const first = relay("/repos/example/demo/pulls/17", CALLER_TOKEN, {
       headers: { accept: "application/vnd.github.v3.diff" },
     });
-    await reached;
     try {
+      await reached;
       expect((await put([{ pattern: "azure-sage", replacement: "public" }], 2)).status).toBe(200);
       expect((await relay("/repos/example/cobalt-mint")).status).toBe(200);
     } finally {
       release();
+      await Promise.allSettled([first]);
     }
     expect((await first).status).toBe(403);
     expect(upstream).toHaveBeenCalledTimes(2);
@@ -493,16 +491,7 @@ describe("server read enforcement", () => {
     await seedPool();
     const upstream = githubUpstream({ primary: jsonResponse({ number: 17 }) });
     vi.stubGlobal("fetch", upstream);
-    const warm = async (path: string, init?: RequestInit): Promise<Response> => {
-      const ctx = createExecutionContext();
-      const response = await worker.fetch(
-        new Request(`https://octopool.dev${path}`, init),
-        env,
-        ctx,
-      );
-      await waitOnExecutionContext(ctx);
-      return response;
-    };
+    const warm = callWarmWorker;
     const request = {
       method: "POST",
       headers: { authorization: `Bearer ${CALLER_TOKEN}`, "content-type": "application/json" },

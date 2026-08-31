@@ -19,6 +19,7 @@ import {
   seedPool,
   seedWebSession,
 } from "./harness";
+import { ownedWork } from "./owned-work";
 
 type RelayEnvelope = {
   status: number;
@@ -357,11 +358,8 @@ describe("Worker end-to-end relay", () => {
 
   it("coalesces concurrent cache misses into one authenticated GitHub request", async () => {
     await seedPool();
-    let releasePrimary!: () => void;
     let primaryStarted!: () => void;
-    const primaryGate = new Promise<void>((resolve) => {
-      releasePrimary = resolve;
-    });
+    const { promise: primaryGate, release: releasePrimary } = ownedWork.gate();
     const started = new Promise<void>((resolve) => {
       primaryStarted = resolve;
     });
@@ -380,33 +378,40 @@ describe("Worker end-to-end relay", () => {
     vi.stubGlobal("fetch", upstream);
 
     const firstPromise = relay("/repos/openclaw/octopool");
-    await started;
-    const secondPromise = relay("/repos/openclaw/octopool");
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    releasePrimary();
-    const envelopes = await Promise.all(
-      [firstPromise, secondPromise].map(async (responsePromise) => {
-        const response = await responsePromise;
-        expect(response.status).toBe(200);
-        return response.json<RelayEnvelope>();
-      }),
-    );
+    const requests = [firstPromise];
+    try {
+      await started;
+      const secondPromise = relay("/repos/openclaw/octopool");
+      requests.push(secondPromise);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      releasePrimary();
+      const envelopes = await Promise.all(
+        [firstPromise, secondPromise].map(async (responsePromise) => {
+          const response = await responsePromise;
+          expect(response.status).toBe(200);
+          return response.json<RelayEnvelope>();
+        }),
+      );
 
-    expect(envelopes.map(({ relay: result }) => result.cache).sort()).toEqual(["hit", "miss"]);
-    // Miniflare may not schedule the follower until the leader has published the cache entry.
-    const coalesced = envelopes.some(({ relay: result }) => result.coalesced === true);
-    expect(
-      upstream.mock.calls.filter(
-        ([request, init]) => bearer(request, init) === "test-primary-token",
-      ),
-    ).toHaveLength(1);
-    const audits = await env.DB.prepare(
-      "SELECT cache_status, coalesced FROM audit_events ORDER BY cache_status",
-    ).all<{ cache_status: string; coalesced: number }>();
-    expect(audits.results).toEqual([
-      { cache_status: "hit", coalesced: coalesced ? 1 : 0 },
-      { cache_status: "miss", coalesced: 0 },
-    ]);
+      expect(envelopes.map(({ relay: result }) => result.cache).sort()).toEqual(["hit", "miss"]);
+      // Miniflare may not schedule the follower until the leader has published the cache entry.
+      const coalesced = envelopes.some(({ relay: result }) => result.coalesced === true);
+      expect(
+        upstream.mock.calls.filter(
+          ([request, init]) => bearer(request, init) === "test-primary-token",
+        ),
+      ).toHaveLength(1);
+      const audits = await env.DB.prepare(
+        "SELECT cache_status, coalesced FROM audit_events ORDER BY cache_status",
+      ).all<{ cache_status: string; coalesced: number }>();
+      expect(audits.results).toEqual([
+        { cache_status: "hit", coalesced: coalesced ? 1 : 0 },
+        { cache_status: "miss", coalesced: 0 },
+      ]);
+    } finally {
+      releasePrimary();
+      await Promise.allSettled(requests);
+    }
   });
 
   it("serves a stale cache entry when the only identity becomes rate limited", async () => {

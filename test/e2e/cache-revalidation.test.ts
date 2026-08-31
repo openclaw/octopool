@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { ownedWork } from "./owned-work";
 
 const RUN_PATH = "/repos/openclaw/octopool/actions/runs/123";
 
@@ -370,11 +371,8 @@ describe("Worker end-to-end cache revalidation", () => {
 
   it("publishes a 304 refresh to coalesced waiters", async () => {
     await seedPool();
-    let releaseRevalidation!: () => void;
     let revalidationStarted!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      releaseRevalidation = resolve;
-    });
+    const { promise: gate, release: releaseRevalidation } = ownedWork.gate();
     const started = new Promise<void>((resolve) => {
       revalidationStarted = resolve;
     });
@@ -412,37 +410,44 @@ describe("Worker end-to-end cache revalidation", () => {
     ).run();
     await deleteEdgeJSON("public-repo-v1", "openclaw/octopool");
     const leader = relay(RUN_PATH);
-    await started;
-    const follower = relay(RUN_PATH);
-    // Outlast the first 4s coalescing wait while the leader still owns its 8s fill lease.
-    // A follower must wait/claim again instead of starting another conditional request.
-    await new Promise((resolve) => setTimeout(resolve, 4_250));
-    const conditionalCallsBeforePublish = conditionalCalls;
-    releaseRevalidation();
-    const envelopes = await Promise.all(
-      [leader, follower].map(async (responsePromise) =>
-        (await responsePromise).json<RelayEnvelope>(),
-      ),
-    );
+    const requests = [leader];
+    try {
+      await started;
+      const follower = relay(RUN_PATH);
+      requests.push(follower);
+      // Outlast the first 4s coalescing wait while the leader still owns its 8s fill lease.
+      // A follower must wait/claim again instead of starting another conditional request.
+      await new Promise((resolve) => setTimeout(resolve, 4_250));
+      const conditionalCallsBeforePublish = conditionalCalls;
+      releaseRevalidation();
+      const envelopes = await Promise.all(
+        [leader, follower].map(async (responsePromise) =>
+          (await responsePromise).json<RelayEnvelope>(),
+        ),
+      );
 
-    expect(envelopes).toEqual([
-      expect.objectContaining({
-        body: expect.objectContaining({ id: 123, status: "in_progress" }),
-        relay: expect.objectContaining({ cache: "hit" }),
-      }),
-      expect.objectContaining({
-        body: expect.objectContaining({ id: 123, status: "in_progress" }),
-        relay: expect.objectContaining({ cache: "hit", coalesced: true }),
-      }),
-    ]);
-    expect(conditionalCallsBeforePublish).toBe(1);
-    expect(conditionalCalls).toBe(1);
-    expect(publicRepoChecks).toBe(1);
-    expect(
-      await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM audit_events WHERE fallback_reason = 'cache_revalidated'",
-      ).first(),
-    ).toEqual({ count: 1 });
+      expect(envelopes).toEqual([
+        expect.objectContaining({
+          body: expect.objectContaining({ id: 123, status: "in_progress" }),
+          relay: expect.objectContaining({ cache: "hit" }),
+        }),
+        expect.objectContaining({
+          body: expect.objectContaining({ id: 123, status: "in_progress" }),
+          relay: expect.objectContaining({ cache: "hit", coalesced: true }),
+        }),
+      ]);
+      expect(conditionalCallsBeforePublish).toBe(1);
+      expect(conditionalCalls).toBe(1);
+      expect(publicRepoChecks).toBe(1);
+      expect(
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM audit_events WHERE fallback_reason = 'cache_revalidated'",
+        ).first(),
+      ).toEqual({ count: 1 });
+    } finally {
+      releaseRevalidation();
+      await Promise.allSettled(requests);
+    }
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { ownedWork } from "./owned-work";
 
 const PATH = "/repos/openclaw/octopool/pulls/42";
 const OPTIONS = { headers: { accept: "application/vnd.github.diff" } };
@@ -39,21 +40,30 @@ describe("Worker end-to-end cache-fill outcomes", () => {
     vi.stubGlobal("fetch", upstream.fetch);
 
     const leader = relay(PATH, undefined, OPTIONS);
-    await upstream.started;
-    const follower = relay(PATH, undefined, OPTIONS);
-    await cache.waitForGitHubMatches(3);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    upstream.release();
-    const followerResponse = await Promise.race([
-      follower,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("follower stayed blocked")), 2_000),
-      ),
-    ]);
-    await leader.catch(() => undefined);
+    const requests = [leader];
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await upstream.started;
+      const follower = relay(PATH, undefined, OPTIONS);
+      requests.push(follower);
+      await cache.waitForGitHubMatches(3);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      upstream.release();
+      const followerResponse = await Promise.race([
+        follower,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("follower stayed blocked")), 2_000);
+        }),
+      ]);
+      await leader.catch(() => undefined);
 
-    expect(followerResponse.status).toBe(200);
-    expect(upstream.calls()).toBe(2);
+      expect(followerResponse.status).toBe(200);
+      expect(upstream.calls()).toBe(2);
+    } finally {
+      clearTimeout(timeout);
+      upstream.release();
+      await Promise.allSettled(requests);
+    }
   });
 
   it("keeps upstream work beyond the old eight-second lease exclusively owned", async () => {
@@ -64,17 +74,24 @@ describe("Worker end-to-end cache-fill outcomes", () => {
     vi.stubGlobal("fetch", upstream.fetch);
 
     const leader = relay(PATH, undefined, OPTIONS);
-    await upstream.started;
-    const follower = relay(PATH, undefined, OPTIONS);
-    await cache.waitForGitHubMatches(3);
-    await new Promise((resolve) => setTimeout(resolve, 8_500));
+    const requests = [leader];
+    try {
+      await upstream.started;
+      const follower = relay(PATH, undefined, OPTIONS);
+      requests.push(follower);
+      await cache.waitForGitHubMatches(3);
+      await new Promise((resolve) => setTimeout(resolve, 8_500));
 
-    expect(upstream.calls()).toBe(1);
-    expect(upstream.maxConcurrent()).toBe(1);
-    upstream.release();
-    const responses = await Promise.all([leader, follower]);
-    expect(responses.map(({ status }) => status)).toEqual([200, 200]);
-    expect(upstream.calls()).toBe(1);
+      expect(upstream.calls()).toBe(1);
+      expect(upstream.maxConcurrent()).toBe(1);
+      upstream.release();
+      const responses = await Promise.all([leader, follower]);
+      expect(responses.map(({ status }) => status)).toEqual([200, 200]);
+      expect(upstream.calls()).toBe(1);
+    } finally {
+      upstream.release();
+      await Promise.allSettled(requests);
+    }
   }, 15_000);
 });
 
@@ -86,23 +103,27 @@ async function concurrentFill(body: string, githubEntriesVisible: boolean) {
   vi.stubGlobal("fetch", upstream.fetch);
 
   const leader = relay(PATH, undefined, OPTIONS);
-  await upstream.started;
-  const follower = relay(PATH, undefined, OPTIONS);
-  await cache.waitForGitHubMatches(3);
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  upstream.release();
-  return { responses: await Promise.all([leader, follower]), upstream };
+  const requests = [leader];
+  try {
+    await upstream.started;
+    const follower = relay(PATH, undefined, OPTIONS);
+    requests.push(follower);
+    await cache.waitForGitHubMatches(3);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    upstream.release();
+    return { responses: await Promise.all(requests), upstream };
+  } finally {
+    upstream.release();
+    await Promise.allSettled(requests);
+  }
 }
 
 function gatedDiffUpstream(body: string, options: { failFirst?: boolean } = {}) {
   let active = 0;
   let maximum = 0;
   let count = 0;
-  let release!: () => void;
   let markStarted!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  const { promise: gate, release } = ownedWork.gate();
   const started = new Promise<void>((resolve) => {
     markStarted = resolve;
   });
@@ -163,10 +184,20 @@ function edgeCache(githubEntriesVisible: boolean) {
     default: defaultCache,
     async waitForGitHubMatches(count: number): Promise<void> {
       while (githubMatches < count) {
-        await new Promise<void>((resolve) => {
-          matchWaiters.add(resolve);
-        });
-        matchWaiters.clear();
+        let wake!: () => void;
+        let unregister!: () => void;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            wake = resolve;
+            matchWaiters.add(wake);
+            unregister = ownedWork.registerRelease(() =>
+              reject(new Error("Cache match wait interrupted by teardown")),
+            );
+          });
+        } finally {
+          unregister();
+          matchWaiters.delete(wake);
+        }
       }
     },
   };

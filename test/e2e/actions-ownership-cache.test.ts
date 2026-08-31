@@ -8,6 +8,7 @@ import { runListSupersetView } from "../../src/run-list-superset";
 import { legacyActionsKey } from "../fixtures/actions-legacy-cache";
 import { exactRun, historicalHead, runIDs, wrongPatchHead } from "../fixtures/actions-ownership";
 import { jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { ownedWork } from "./owned-work";
 
 const headers = { "x-octopool-public-shape": "actions-summary-v1" };
 const path = `/repos/openclaw/Peekaboo/actions/runs/${runIDs[0]}`;
@@ -56,11 +57,8 @@ describe("Actions ownership cache migration", () => {
   it("coalesces a clean fill, revalidates only its new key, and serves only clean stale data", async () => {
     const { request, oldKey, body, route } = await seedLegacy(path);
     await expire(oldKey);
-    let release!: () => void;
     let started!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const { promise: gate, release } = ownedWork.gate();
     const entered = new Promise<void>((resolve) => {
       started = resolve;
     });
@@ -89,17 +87,24 @@ describe("Actions ownership cache migration", () => {
       }),
     );
     const leader = relay(path, undefined, request);
-    await entered;
-    const follower = relay(path, undefined, request);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    release();
-    const filled = await Promise.all(
-      [leader, follower].map(async (response) => (await response).json<Envelope>()),
-    );
-    expect(filled.map((item) => item.body)).toEqual([body, body]);
-    expect(filled[1]?.relay.coalesced).toBe(true);
-    expect(apiCalls).toBe(1);
-    expect(conditionals).toEqual([null]);
+    const requests = [leader];
+    try {
+      await entered;
+      const follower = relay(path, undefined, request);
+      requests.push(follower);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      release();
+      const filled = await Promise.all(
+        [leader, follower].map(async (response) => (await response).json<Envelope>()),
+      );
+      expect(filled.map((item) => item.body)).toEqual([body, body]);
+      expect(filled[1]?.relay.coalesced).toBe(true);
+      expect(apiCalls).toBe(1);
+      expect(conditionals).toEqual([null]);
+    } finally {
+      release();
+      await Promise.allSettled(requests);
+    }
 
     const newKey = await githubCacheKey(request.pool, request, route);
     expect(newKey).not.toBe(oldKey);
