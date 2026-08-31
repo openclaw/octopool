@@ -80,6 +80,8 @@ octopool login --client build-mac
 - If discovery points `api_base` at a different host, login fails unless
   `--trust-discovery-redirect` is passed. This keeps a mistyped or compromised discovery
   host from silently receiving your local GitHub token.
+- After discovery, the login exchange follows only same-origin HTTP redirects. Trusting
+  a discovered `api_base` does not authorize later redirects to other origins.
 - The token is stored 0600 at `<user-config-dir>/octopool/auth.json` (URL, pool, token,
   login, client, timestamp).
 - The default client name is the local hostname. `--client` overrides it; re-login rotates
@@ -619,6 +621,14 @@ invalidation.
   `OCTOPOOL_URL`) to a different host requires an explicit `OCTOPOOL_TOKEN`, or a fresh
   `octopool login` for that URL. This prevents leaking the token to an attacker-supplied
   endpoint.
+- Login, caller, and admin JSON requests follow redirects only to the same scheme,
+  hostname, and effective port as the original request (omitted ports mean 80 for HTTP
+  and 443 for HTTPS). Cross-origin redirects and HTTPS downgrades fail before the target
+  receives a request. Neither `--trust-discovery-redirect` nor
+  `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` bypasses this restriction. Configure the intended API
+  base directly when moving a server to another origin. Credential-free discovery
+  keeps its existing redirect behavior; string-rewrite policy requests still reject
+  all redirects.
 - Once a request reaches Octopool, relay policy denials fail closed; they are not
   silently retried against the real `gh` unless Octopool returns the explicit
   `fallback_local` signal for a safe read.

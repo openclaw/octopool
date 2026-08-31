@@ -3,14 +3,103 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+var errInvalidRedirectLocation = errors.New("invalid redirect Location header")
+
+type jsonRedirectTransport struct {
+	base http.RoundTripper
+}
+
+func (transport jsonRedirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := transport.base.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		if location := resp.Header.Get("Location"); location != "" {
+			// net/http parses Location before CheckRedirect and quotes it on failure.
+			if _, err := req.URL.Parse(location); err != nil {
+				resp.Body.Close()
+				return nil, errInvalidRedirectLocation
+			}
+		}
+	}
+	return resp, nil
+}
+
+func doJSONRequest(req *http.Request) (*http.Response, error) {
+	// Login carries its credential in the body, so protect every JSON request.
+	// Keep credential-free discovery's redirect behavior on the shared client.
+	client := *httpClient
+	transport := client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	client.Transport = jsonRedirectTransport{base: transport}
+	var redirectErr error
+	var followedRedirect bool
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if !sameURLOrigin(req.URL, next.URL) {
+			redirectErr = errors.New("refusing cross-origin redirect for credential-bearing request")
+		} else if len(via) >= 10 {
+			redirectErr = errors.New("stopped after 10 redirects")
+		}
+		if redirectErr == nil {
+			followedRedirect = true
+		}
+		return redirectErr
+	}
+	resp, err := client.Do(req)
+	if redirectErr != nil {
+		// net/http wraps redirect errors with the untrusted Location URL.
+		return nil, redirectErr
+	}
+	if errors.Is(err, errInvalidRedirectLocation) {
+		// A previous same-origin redirect may also have reflected secrets in its URL.
+		return nil, errInvalidRedirectLocation
+	}
+	if followedRedirect && err != nil {
+		var requestErr *url.Error
+		if errors.As(err, &requestErr) {
+			// Keep the transport cause without printing reflected redirect query values.
+			safeErr := *requestErr
+			safeErr.URL = req.URL.Redacted()
+			return resp, &safeErr
+		}
+	}
+	return resp, err
+}
+
+func sameURLOrigin(left, right *url.URL) bool {
+	return strings.EqualFold(left.Scheme, right.Scheme) &&
+		strings.EqualFold(left.Hostname(), right.Hostname()) &&
+		effectiveURLPort(left) == effectiveURLPort(right)
+}
+
+func effectiveURLPort(value *url.URL) string {
+	if port := value.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(value.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
 
 func getJSON(ctx context.Context, stdout io.Writer, url string, token string) error {
 	resp, err := getJSONRaw(ctx, url, token)
@@ -26,7 +115,7 @@ func getJSONRaw(ctx context.Context, url string, token string) (*http.Response, 
 		return nil, err
 	}
 	req.Header.Set("authorization", "Bearer "+token)
-	return httpClient.Do(req)
+	return doJSONRequest(req)
 }
 
 func postJSON(ctx context.Context, stdout io.Writer, url string, token string, body map[string]any) error {
@@ -55,7 +144,7 @@ func postJSONRaw(
 		req.Header.Set("authorization", "Bearer "+token)
 	}
 	req.Header.Set("content-type", "application/json")
-	return httpClient.Do(req)
+	return doJSONRequest(req)
 }
 
 func writeJSONResponse(stdout io.Writer, resp *http.Response) error {

@@ -133,8 +133,7 @@ func TestFormatLoginFailureQuotesProvisioningCommandArguments(t *testing.T) {
 
 func TestLoginAcceptsPositionalServerAndStoresDiscoveredAuth(t *testing.T) {
 	t.Setenv("GH_TOKEN", "gh_test")
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	isolateHTTPTestConfig(t)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

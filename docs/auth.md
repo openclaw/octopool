@@ -72,6 +72,14 @@ Flow:
    The caller row is refreshed with the current login, user id, and verification time.
 6. The plaintext token is returned once, for the CLI to store locally.
 
+The CLI follows login and authenticated JSON request redirects only within the
+request's original origin: the same scheme, hostname, and effective port (80 for HTTP,
+443 for HTTPS when omitted). Cross-origin redirects, including HTTPS downgrades, fail
+before sending a request to the redirect target. `--trust-discovery-redirect` trusts
+only the discovered `api_base`; neither it nor `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` allows
+later credential-bearing requests to redirect to another origin. Credential-free
+discovery keeps its existing redirect behavior.
+
 Clients are 1-80 hostname-safe characters. New CLI versions send the local hostname and
 can override it with `--client`; older clients use `legacy`. Audit rows retain the matched
 caller-token id so stats can separate machines without storing caller token values.
