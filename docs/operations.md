@@ -509,6 +509,30 @@ Worker's explicit Durable Object bindings and does **not** establish D1 dormancy
 through its service binding. Per-stub eviction remains appropriate for testing
 the coordinator's constructor and storage cleanup.
 
+## Coordinator expiry retention
+
+Every `PoolCoordinator.selectIdentity` invocation performs two synchronous, indexed
+deletions: at most 16 leases and 16 cooldowns whose expiry is at or before one captured
+coordinator clock. Each statement selects and deletes its batch atomically, so a prior
+lease renewal or cooldown extension that is still live survives. Sticky and unavailable
+selections also clean up. Feedback and snapshots do not trigger cleanup, and rate history
+is retained. Distinct contents paths can create distinct route keys; route normalization
+and cooldown scope remain unchanged.
+
+The DO constructor adds `leases_expiry (expires_at, route_key)` and
+`cooldowns_expiry (expires_at, identity_id, route_key)` idempotently. These covering indexes
+bound expiry batch selection without scanning or sorting the whole history; snapshots
+also use expiry indexes. This is additive DO schema initialization, not a D1 migration.
+The first activation builds each index over retained rows, and subsequent writes maintain
+it. Existing rows and legacy RPC/table contracts survive reconstruction. A Worker rollback
+can leave the harmless indexes in place; older code simply stops this cleanup.
+
+The per-call budget does not bound absolute storage during arbitrary bursts or guarantee
+when idle rows are physically deleted. No timer, alarm, new RPC, or global object sweep is
+added. Deletions make SQLite space reusable, without promising file-size shrinkage or
+hosted billing savings. Publication-owner acquisition cleanup and its hourly fallback
+retain their separate authority and budgets described in [Cache](cache.md).
+
 ## SQL catalog
 
 Runtime SQL lives in `sql/queries/*.sql` with sqlc annotations. `sqlc.yaml` points sqlc at

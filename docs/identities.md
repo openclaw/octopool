@@ -64,6 +64,11 @@ keeps four SQLite tables in DO storage:
 
 `selectIdentity` logic:
 
+Before selection, each invocation removes at most 16 expired leases and 16 expired
+cooldowns using two indexed, atomic SQL statements and one captured coordinator clock.
+This also runs for sticky reuse and unavailable selections. Live rows are preserved;
+the cleanup does not change rate history or publication ownership.
+
 1. If a live lease for the route key points at a candidate that is not cooling down and
    not quota-exhausted, reuse it (`reason: sticky`).
 2. Otherwise score each non-cooling candidate by `remaining + weight` (unknown rate
@@ -128,7 +133,11 @@ resource-wide exhaustion or invent a reset.
 Each cooldown key retains its greatest expiry and the status/reason attached to that
 deadline. Equal or shorter updates do nothing. Route, resource and global keys remain
 independent; a success or newer rate window does not clear a live cooldown. Selection
-and snapshots ignore expired rows at exact deadline equality, without deleting them.
+and snapshots ignore expired rows at exact deadline equality. Selection also physically
+removes bounded batches of expired leases and cooldowns; snapshots and feedback do not
+perform cleanup. Idle objects need not wake, so expiry is not a physical deletion deadline.
+An expired backlog drains as selection activity resumes, subject to the 16-row budget per
+table on each call. Rate history remains stored even after its reset window expires.
 Rate and cooldown writes for one result use a synchronous storage transaction, so a
 failed second write cannot leave a partially accepted observation.
 

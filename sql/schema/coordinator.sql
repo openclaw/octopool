@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS cooldowns (
   PRIMARY KEY (identity_id, route_key)
 );
 
+CREATE INDEX IF NOT EXISTS leases_expiry ON leases(expires_at, route_key);
+CREATE INDEX IF NOT EXISTS cooldowns_expiry ON cooldowns(expires_at, identity_id, route_key);
+
 CREATE TABLE IF NOT EXISTS cache_fills (
   cache_key TEXT PRIMARY KEY,
   owner_token TEXT NOT NULL,

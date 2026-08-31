@@ -12,6 +12,14 @@ export const queries = {
   createCacheFillsTable:
     "CREATE TABLE IF NOT EXISTS cache_fills (\n  cache_key TEXT PRIMARY KEY,\n  owner_token TEXT NOT NULL,\n  expires_at INTEGER NOT NULL\n)",
   getLease: "SELECT identity_id, expires_at\nFROM leases\nWHERE route_key = ?",
+  createLeasesExpiryIndex:
+    "CREATE INDEX IF NOT EXISTS leases_expiry ON leases(expires_at, route_key)",
+  createCooldownsExpiryIndex:
+    "CREATE INDEX IF NOT EXISTS cooldowns_expiry ON cooldowns(expires_at, identity_id, route_key)",
+  deleteExpiredLeases:
+    "DELETE FROM leases\nWHERE route_key IN (\n  SELECT old.route_key FROM leases AS old WHERE old.expires_at <= ?1\n  ORDER BY old.expires_at LIMIT 16\n)",
+  deleteExpiredCooldowns:
+    "DELETE FROM cooldowns\nWHERE (identity_id, route_key) IN (\n  SELECT old.identity_id, old.route_key FROM cooldowns AS old WHERE old.expires_at <= ?1\n  ORDER BY old.expires_at LIMIT 16\n)",
   createLegacyCacheFillExpiryIndex:
     "CREATE INDEX IF NOT EXISTS cache_fills_expiry ON cache_fills(expires_at)",
   drainExpiredLegacyCacheFills:

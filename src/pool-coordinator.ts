@@ -77,6 +77,8 @@ export class PoolCoordinator extends DurableObject<Env> {
         // Existing Durable Objects already have the column; new ones get it from CREATE TABLE.
       }
       this.ctx.storage.sql.exec(queries.createCooldownsTable);
+      this.ctx.storage.sql.exec(queries.createLeasesExpiryIndex);
+      this.ctx.storage.sql.exec(queries.createCooldownsExpiryIndex);
       this.ctx.storage.sql.exec(queries.createCacheFillsTable);
       this.ctx.storage.sql.exec(queries.createLegacyCacheFillExpiryIndex);
     });
@@ -239,6 +241,8 @@ export class PoolCoordinator extends DurableObject<Env> {
 
   selectIdentity(request: SelectionRequest): SelectionResult {
     const now = Date.now();
+    this.ctx.storage.sql.exec(queries.deleteExpiredLeases, now);
+    this.ctx.storage.sql.exec(queries.deleteExpiredCooldowns, now);
     const candidateIds = new Set(request.candidates.map((candidate) => candidate.id));
     const lease = this.ctx.storage.sql
       .exec<LeaseRow>(queries.getLease, request.routeKey)

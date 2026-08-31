@@ -166,15 +166,7 @@ describe("selected identity credential failures", () => {
       const rows = await runInDurableObject(coordinator(), (_instance, state) =>
         state.storage.sql.exec("SELECT * FROM cooldowns").toArray(),
       );
-      expect(rows).toEqual([
-        {
-          identity_id: "primary",
-          route_key: "*",
-          status: 503,
-          reason: "identity_secret_missing",
-          expires_at: now + 120_000,
-        },
-      ]);
+      expect(rows).toEqual([]);
       await coordinator().recordResult({
         identityId: "primary",
         routeKey: "other",

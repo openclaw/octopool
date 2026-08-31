@@ -40,6 +40,26 @@ SELECT identity_id, expires_at
 FROM leases
 WHERE route_key = ?;
 
+-- name: CreateLeasesExpiryIndex :exec
+CREATE INDEX IF NOT EXISTS leases_expiry ON leases(expires_at, route_key);
+
+-- name: CreateCooldownsExpiryIndex :exec
+CREATE INDEX IF NOT EXISTS cooldowns_expiry ON cooldowns(expires_at, identity_id, route_key);
+
+-- name: DeleteExpiredLeases :exec
+DELETE FROM leases
+WHERE route_key IN (
+  SELECT old.route_key FROM leases AS old WHERE old.expires_at <= ?1
+  ORDER BY old.expires_at LIMIT 16
+);
+
+-- name: DeleteExpiredCooldowns :exec
+DELETE FROM cooldowns
+WHERE (identity_id, route_key) IN (
+  SELECT old.identity_id, old.route_key FROM cooldowns AS old WHERE old.expires_at <= ?1
+  ORDER BY old.expires_at LIMIT 16
+);
+
 -- name: CreateLegacyCacheFillExpiryIndex :exec
 CREATE INDEX IF NOT EXISTS cache_fills_expiry ON cache_fills(expires_at);
 
