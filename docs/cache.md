@@ -49,6 +49,14 @@ from edge, D1, stale fallback, fill coalescing, or conditional revalidation. Onl
 shaped release keys change; raw REST entries retain their keys. The generation applies
 to metadata-only projections too, since they share the same response body.
 
+Issue timelines and the three issue-event list/view routes include `issue-events-public-v2`
+for every representation, including raw REST and identity-specific keys. Older pooled bodies
+may retain private cross-reference details, even after anonymous revalidation removed their
+identity attribution. All old keys are retired across edge, D1, stale fallback, fill coalescing,
+and revalidation. Only anonymous responses populate the new generation. Caller conditionals
+bypass storage and use the anonymous API; a `304` never revives an old server-cached body.
+Repository/network activity feeds and unrelated cache keys are unchanged.
+
 PR file-list routes may include a validated
 `route_hint.pr_head_sha` or closed/merged `route_hint.pr_state` discriminator. Clients
 that already know the current PR state can use that to avoid mixing entries across head
@@ -129,6 +137,9 @@ The main transport classes are:
 - release list/latest/tag/id/asset reads via unauthenticated `api.github.com` requests so pooled
   credentials never expose draft releases; top-level `gh release view` also uses exact API
   data, preserving raw Markdown strings through fills, cache reads, and revalidation
+- issue timeline and issue-event list/view reads via the anonymous API, so cross-repository
+  issue and commit references retain public visibility; outages can use only the new cache
+  generation with the existing age, retention, and repository-proof checks
 
 Release bodies are never reconstructed from rendered HTML or replaced with changelog
 text. Whitespace, line endings, and Markdown syntax remain exactly as returned by the

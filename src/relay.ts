@@ -37,7 +37,7 @@ import {
   ensurePublicGitHubRepo,
   recordPublicGitHubRepo,
 } from "./public-repos";
-import { capabilitiesForRouteKind, isNativeReadRoute } from "./route-manifest";
+import { capabilitiesForRouteKind, isIssueEventRoute, isNativeReadRoute } from "./route-manifest";
 import {
   exactRunListRequest,
   filterRunListSuperset,
@@ -653,11 +653,22 @@ async function restoreSharedCacheFillState(
 }
 
 async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | undefined> {
-  if (state.cacheKey === undefined) {
+  if (state.cacheKey === undefined && !isIssueEventRoute(state.route.kind)) {
     return undefined;
   }
-  const response = await callGitHubWeb(state.env, state.cacheRequest, state.route);
+  // Caller conditionals bypass storage, but must still use anonymous visibility.
+  const response =
+    state.cacheKey === undefined
+      ? await callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route)
+      : await callGitHubWeb(state.env, state.cacheRequest, state.route);
   if (response === undefined) {
+    if (isIssueEventRoute(state.route.kind)) {
+      // No response to prove public: hand off before credentialed repo probes.
+      // The error handler may serve only a covered entry from the new generation.
+      throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+        reason: "web_only_unavailable",
+      });
+    }
     return undefined;
   }
   const completed =
@@ -665,12 +676,15 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
       ? await completeRunJobsSuperset(response, state.runJobsSuperset, anonymousRunJobsPage(state))
       : response;
   const github = sanitizeGitHubResponse(state.route, completed);
-  if (anonymousGitHubResponseProvesPublicRepo(state.route)) {
+  if (response.status !== 304 && anonymousGitHubResponseProvesPublicRepo(state.route)) {
     await recordPublicGitHubRepo(state.env, state.route);
   } else {
     await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
   }
-  return finalizeRelaySuccess(state, { github, backend: "web" });
+  return finalizeRelaySuccess(state, {
+    github,
+    backend: state.cacheKey === undefined ? "github_public" : "web",
+  });
 }
 
 async function callPublicBackend(state: ActiveRelay): Promise<Response> {

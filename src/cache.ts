@@ -10,6 +10,7 @@ import { defaultGitHubJSONAccept } from "./github-response";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
+import { isIssueEventRoute } from "./route-manifest";
 import type { CacheFillOutcome } from "./cache-fill";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
@@ -83,6 +84,9 @@ export async function githubCacheKey(
     ["release_view", "release_latest"].includes(route.kind)
       ? { representation: "release-summary-raw-v2" }
       : {}),
+    // Old raw event bodies may contain privileged references, even after a 304
+    // republished an identity entry as anonymous. Retire every variant together.
+    ...(isIssueEventRoute(route.kind) ? { representation: "issue-events-public-v2" } : {}),
     ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),
   };
   return hashToken(JSON.stringify(stable));

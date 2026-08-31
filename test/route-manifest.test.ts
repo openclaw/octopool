@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cachePolicyForRouteKind } from "../src/cache-policy";
-import { isNativeReadRoute, ROUTES } from "../src/route-manifest";
+import { isIssueEventRoute, isNativeReadRoute, ROUTES } from "../src/route-manifest";
 
 describe("route manifest", () => {
   it("has unique route identities and patterns", () => {
@@ -22,7 +22,7 @@ describe("route manifest", () => {
 
   it("defines backend eligibility on every concrete route", () => {
     expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(116);
-    expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(40);
+    expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(44);
     expect(ROUTES.filter((route) => route.capabilities.fallback === "github_public")).toHaveLength(
       1,
     );
@@ -50,6 +50,26 @@ describe("route manifest", () => {
       fresh: { kind: "static", seconds: 86_400 },
       staleSeconds: 86_400,
     });
+  });
+
+  it("keeps permission-dependent issue events anonymous while preserving activity feeds", () => {
+    const events = ROUTES.filter((route) => isIssueEventRoute(route.kind));
+    expect(events.map((route) => route.template)).toEqual([
+      "/repos/{owner}/{repo}/issues/{number}/events",
+      "/repos/{owner}/{repo}/issues/events",
+      "/repos/{owner}/{repo}/issues/events/{id}",
+      "/repos/{owner}/{repo}/issues/{number}/timeline",
+    ]);
+    for (const route of events) {
+      expect(route.capabilities).toEqual({
+        publicApi: true,
+        fallback: "local",
+        anonymousRepoProof: true,
+      });
+    }
+    for (const kind of ["repo_event_list", "network_event_list"]) {
+      expect(ROUTES.find((route) => route.kind === kind)?.capabilities.fallback).toBe("pool");
+    }
   });
 
   it("splits SHA-shaped and ref-named commit paths onto distinct routes", () => {

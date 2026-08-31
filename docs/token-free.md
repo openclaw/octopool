@@ -143,6 +143,22 @@ exact cached response may be served through the existing bounded stale policy; o
 the existing guarded local-`gh` fallback applies. Releases never use pooled credentials,
 and draft filtering remains in place.
 
+### Public issue-event visibility
+
+Issue timelines (`/issues/{number}/timeline`), per-issue events (`/issues/{number}/events`),
+repository issue events (`/issues/events`), and individual events (`/issues/events/{id}`)
+are anonymous-only, including caller conditional requests. GitHub's
+[cross-references](https://docs.github.com/en/rest/using-the-rest-api/issue-event-types#cross-referenced)
+and [closing-commit references](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-an-issues-only-repository)
+depend on access to the source repository. Proving the target public or removing a nested
+repository object does not prove the enclosing issue/commit details public.
+
+These routes preserve anonymous REST bodies and headers. Anonymous quota exhaustion or
+unavailability uses eligible public stale data or guarded native fallback; unsupported media
+also falls back locally. Old event representations are retired by the server's cache generation.
+Repository activity events use a different payload schema, and network events explicitly list
+public activity; neither is changed by this issue-reference restriction.
+
 ### Generated route catalog
 
 <!-- token-free-api-routes:start -->

@@ -133,6 +133,11 @@ export function isNativeReadRoute(route: { capabilities: RouteCapabilities }): b
   return !route.capabilities.publicApi && route.capabilities.fallback === "local";
 }
 
+// These responses can include cross-repository references visible only to a token.
+export function isIssueEventRoute(kind: RouteKind): boolean {
+  return ["issue_timeline", "issue_events", "issue_event_list", "issue_event_view"].includes(kind);
+}
+
 function normalizeRouteKeyTemplate(template: string): string {
   return template
     .replace(/^\/users\/\{login\}/, "/users/:login")
@@ -280,12 +285,12 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/issues/comments", "issue_comment_list"),
   route("/repos/{owner}/{repo}/issues/comments/{id}", "issue_comment_view"),
   route("/repos/{owner}/{repo}/issues/comments/{id}/reactions", "issue_comment_reactions"),
-  route("/repos/{owner}/{repo}/issues/{number}/events", "issue_events"),
-  route("/repos/{owner}/{repo}/issues/events", "issue_event_list"),
-  route("/repos/{owner}/{repo}/issues/events/{id}", "issue_event_view"),
+  localRoute("/repos/{owner}/{repo}/issues/{number}/events", "issue_events"),
+  localRoute("/repos/{owner}/{repo}/issues/events", "issue_event_list"),
+  localRoute("/repos/{owner}/{repo}/issues/events/{id}", "issue_event_view"),
   route("/repos/{owner}/{repo}/issues/{number}/labels", "issue_labels"),
   route("/repos/{owner}/{repo}/issues/{number}/reactions", "issue_reactions"),
-  route("/repos/{owner}/{repo}/issues/{number}/timeline", "issue_timeline"),
+  localRoute("/repos/{owner}/{repo}/issues/{number}/timeline", "issue_timeline"),
   route("/repos/{owner}/{repo}/assignees", "assignee_list"),
   route("/repos/{owner}/{repo}/assignees/{login}", "assignee_view"),
   route("/repos/{owner}/{repo}/labels", "label_list"),

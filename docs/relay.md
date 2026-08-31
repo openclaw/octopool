@@ -89,6 +89,12 @@ and patch hosts.
   local-`gh` fallback. Raw API requests retain exact REST response semantics.
   Octopool does not use pooled credentials for releases, so draft/private release visibility
   is not shared.
+- Issue timelines, per-issue events, repository issue-event lists, and individual issue events
+  use only the anonymous API, including conditional requests. A public target repository
+  does not prove that referenced issues or commits are public. Anonymous failures use bounded
+  public stale data or `424 fallback_local` (`web_only_unavailable`); pooled credentials and
+  legacy event cache entries cannot widen visibility. Public JSON and response validators
+  are preserved, and native fallback uses the caller's own credentials.
 - Supported top-level `gh run view --json jobs` reads prefer job and step metadata composed
   from public GitHub pages. Raw `/actions/runs/{id}/jobs` requests retain exact REST response
   semantics, and log bodies still require authenticated API access.
