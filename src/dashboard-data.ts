@@ -1,3 +1,4 @@
+import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
 import { queries } from "./generated/sql";
 import { HttpError, jsonResponse } from "./http";
 import {
@@ -244,11 +245,13 @@ async function dashboardIdentityUsage(env: Env, pool: string) {
 }
 
 async function dashboardPublicRepos(env: Env) {
-  const row = await env.DB.prepare(queries.dashboardPublicRepos).first<{
-    total_entries: number;
-    fresh_entries: number | null;
-    newest_checked_at: string | null;
-  }>();
+  const row = await env.DB.prepare(queries.dashboardPublicRepos)
+    .bind(CACHE_PUBLICATION_EPOCH)
+    .first<{
+      total_entries: number;
+      fresh_entries: number | null;
+      newest_checked_at: string | null;
+    }>();
   return {
     total_entries: row?.total_entries ?? 0,
     fresh_entries: row?.fresh_entries ?? 0,

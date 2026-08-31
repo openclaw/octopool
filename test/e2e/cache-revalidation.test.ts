@@ -13,6 +13,49 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end cache revalidation", () => {
+  it.each(["network", "timeout"])(
+    "recovers an asynchronous %s failure in explicit public API revalidation",
+    async (failure) => {
+      await seedPool();
+      const path = "/users/octocat";
+      let fullCalls = 0;
+      let conditionalCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          expect(request.url).toBe(`https://api.github.com${path}`);
+          expect(bearer(request)).toBeUndefined();
+          if (request.headers.get("if-none-match") === '"user-v1"') {
+            conditionalCalls++;
+            await Promise.resolve();
+            if (failure === "timeout") throw new DOMException("Synthetic timeout", "TimeoutError");
+            throw new TypeError("Synthetic network failure");
+          }
+          fullCalls++;
+          return jsonResponse(
+            { id: 8, login: "octocat", name: fullCalls === 1 ? "Before" : "After" },
+            200,
+            apiHeaders('"user-v1"'),
+          );
+        }),
+      );
+      expect((await relay(path)).status).toBe(200);
+      await expireCacheEntry("user_view");
+      const refreshed = await relay(path);
+      expect(refreshed.status).toBe(200);
+      expect(await refreshed.json<RelayEnvelope>()).toMatchObject({
+        body: { id: 8, name: "After" },
+        relay: { backend: "github_public", cache: "miss", route_kind: "user_view" },
+      });
+      expect(await (await relay(path)).json<RelayEnvelope>()).toMatchObject({
+        body: { id: 8, name: "After" },
+        relay: { cache: "hit" },
+      });
+      expect({ fullCalls, conditionalCalls }).toEqual({ fullCalls: 2, conditionalCalls: 1 });
+    },
+  );
+
   it.each([undefined, 0, 20])(
     "refreshes an anonymous API entry on 304 with max-age=%s",
     async (maxAge) => {
@@ -401,14 +444,14 @@ describe("Worker end-to-end cache revalidation", () => {
     await expireCacheEntry("run_view");
     // Cover the original entry, but require the follower to refresh proof for the new timestamp.
     await env.DB.prepare(
-      `UPDATE github_public_repos
+      `UPDATE github_public_repo_proofs
        SET checked_at = datetime(
          (SELECT created_at FROM github_cache_entries WHERE route_kind = 'run_view' LIMIT 1),
          '-5 seconds'
        )
        WHERE owner = 'openclaw' AND repo = 'octopool'`,
     ).run();
-    await deleteEdgeJSON("public-repo-v1", "openclaw/octopool");
+    await deleteEdgeJSON("public-repo-publication-v1", "openclaw/octopool");
     const leader = relay(RUN_PATH);
     const requests = [leader];
     try {
@@ -467,7 +510,7 @@ async function expireCacheEntry(routeKind: string): Promise<void> {
   )
     .bind(row!.cache_key)
     .run();
-  await deleteEdgeJSON("github-v1", row!.cache_key);
+  await deleteEdgeJSON("github-publication-v1", row!.cache_key);
 }
 
 function apiHeaders(etag: string): HeadersInit {

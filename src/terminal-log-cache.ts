@@ -4,7 +4,7 @@ import { callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { isRecord } from "./object";
 import { classifyRoute } from "./policy";
-import { anonymousGitHubResponseProvesPublicRepo, recordPublicGitHubRepo } from "./public-repos";
+import { observeAnonymousPublicRepo } from "./public-repos";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import type { GitHubRelayResponse, PoolPolicy, RelayRequest, RouteInfo } from "./types";
 
@@ -154,19 +154,11 @@ async function fetchFreshMetadata(
   policy: PoolPolicy,
 ): Promise<GitHubRelayResponse | undefined> {
   const route = classifyRoute(request, policy);
-  const fetched = await callGitHubWeb(env, request, route);
-  if (fetched === undefined) {
-    return undefined;
-  }
-  const response = sanitizeGitHubResponse(route, fetched);
-  if (
-    response.status >= 200 &&
-    response.status < 300 &&
-    anonymousGitHubResponseProvesPublicRepo(route)
-  ) {
-    await recordPublicGitHubRepo(env, route);
-  }
-  return response;
+  const observation = await observeAnonymousPublicRepo(env, route, async () => {
+    const fetched = await callGitHubWeb(env, request, route);
+    return fetched === undefined ? undefined : sanitizeGitHubResponse(route, fetched);
+  });
+  return observation.response;
 }
 
 function metadataProvesCompleted(response: GitHubRelayResponse | undefined): boolean {

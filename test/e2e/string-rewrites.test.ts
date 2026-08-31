@@ -259,7 +259,7 @@ async function put(rules: unknown, expectedRevision = 1): Promise<Response> {
 }
 
 async function expectNoPublication(): Promise<void> {
-  for (const table of ["audit_events", "github_cache_entries", "github_public_repos"]) {
+  for (const table of ["audit_events", "github_cache_entries", "github_public_repo_proofs"]) {
     expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first()).toEqual({
       count: 0,
     });

@@ -190,7 +190,7 @@ describe("Worker end-to-end PR-state cache", () => {
     )
       .bind(cacheRow!.cache_key)
       .run();
-    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
 
     vi.stubGlobal(
       "fetch",

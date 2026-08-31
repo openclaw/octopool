@@ -1,7 +1,8 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import { githubCacheKey, readEdgeGitHubCache, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey, readEdgeGitHubCache } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
@@ -33,7 +34,7 @@ async function warmExpiredDiff() {
   const rows = await env.DB.prepare("SELECT cache_key FROM github_cache_entries").all<{
     cache_key: string;
   }>();
-  for (const row of rows.results) await deleteEdgeJSON("github-v1", row.cache_key);
+  for (const row of rows.results) await deleteEdgeJSON("github-publication-v1", row.cache_key);
   await env.DB.prepare(
     "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second')",
   ).run();

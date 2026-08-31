@@ -13,7 +13,7 @@ describe("public issue-event cache generation", () => {
       { kind: "github_app" as const, id: "installation" },
     ]) {
       expect(await githubCacheKey(request.pool, request, route, identity)).not.toBe(
-        await legacyIssueEventKey(request, route, identity),
+        await legacyIssueEventKey(request, route, identity, "publication-v1"),
       );
     }
     const defaults = {
@@ -39,11 +39,11 @@ describe("public issue-event cache generation", () => {
     "/networks/openclaw/octopool/events",
     "/repos/openclaw/octopool/issues/42",
     "/repos/openclaw/octopool/issues/42/comments",
-  ])("preserves neighboring %s cache keys", async (path) => {
+  ])("composes protocol epoch with neighboring %s cache keys", async (path) => {
     const request = validateRelayRequest({ pool: "maintainers", method: "GET", path });
     const route = classifyRoute(request, defaultPolicy("openclaw"));
     expect(await githubCacheKey(request.pool, request, route)).toBe(
-      await legacyIssueEventKey(request, route),
+      await legacyIssueEventKey(request, route, undefined, "publication-v1"),
     );
   });
 });

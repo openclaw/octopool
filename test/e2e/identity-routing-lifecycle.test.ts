@@ -1,8 +1,9 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { clearConfigCache } from "../../src/config-cache";
-import { githubCacheKey, readGitHubCache, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey, readGitHubCache } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
@@ -30,7 +31,7 @@ async function expireEntries(): Promise<void> {
   const rows = await env.DB.prepare("SELECT cache_key FROM github_cache_entries").all<{
     cache_key: string;
   }>();
-  for (const row of rows.results) await deleteEdgeJSON("github-v1", row.cache_key);
+  for (const row of rows.results) await deleteEdgeJSON("github-publication-v1", row.cache_key);
   await env.DB.prepare(
     "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second')",
   ).run();
@@ -121,8 +122,8 @@ describe("identity routing lifecycle boundaries", () => {
           const waiting = await runInDurableObject(
             coordinator(),
             (instance) =>
-              (instance as unknown as { cacheFillWaiters: Map<string, unknown> }).cacheFillWaiters
-                .size,
+              (instance as unknown as { publicationWaiters: Map<string, unknown> })
+                .publicationWaiters.size,
           );
           expect(waiting).toBe(1);
         }),
@@ -472,6 +473,14 @@ describe("identity routing lifecycle boundaries", () => {
     const namespace = feedbackNamespace(async (_result, forward) => {
       writes++;
       await forward();
+      // Model a different publisher taking over while this request is paused
+      // in feedback. Waiting for its own still-renewing fill would deadlock.
+      const expired = await env.DB.prepare(
+        "UPDATE cache_publication_owners SET lease_until_ms = 0 WHERE resource_key = ? RETURNING id",
+      )
+        .bind(`cache:${key}`)
+        .all();
+      expect(expired.results).toHaveLength(1);
       expect(
         await writeGitHubCache(
           env,

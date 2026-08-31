@@ -26,7 +26,7 @@ describe("Actions summary cache generation", () => {
     ]) {
       for (const identity of [undefined, { kind: "pat" as const, id: "primary" }]) {
         expect(await githubCacheKey(request.pool, candidate, route, identity)).not.toBe(
-          await legacyActionsKey(candidate, route, identity),
+          await legacyActionsKey(candidate, route, identity, "publication-v1"),
         );
       }
     }
@@ -38,7 +38,7 @@ describe("Actions summary cache generation", () => {
     ["actions/workflows/ci.yml/runs", undefined],
     ["actions/runs/33167365292/attempts/1/jobs", "actions-jobs-v1"],
     ["pulls/651", "pr-summary-v1"],
-  ])("preserves unrelated %s (%s) keys", async (suffix, shape) => {
+  ])("composes protocol epoch with unrelated %s (%s) keys", async (suffix, shape) => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -47,7 +47,7 @@ describe("Actions summary cache generation", () => {
     });
     const route = classifyRoute(request, defaultPolicy("openclaw"));
     expect(await githubCacheKey(request.pool, request, route)).toBe(
-      await legacyActionsKey(request, route),
+      await legacyActionsKey(request, route, undefined, "publication-v1"),
     );
   });
 });

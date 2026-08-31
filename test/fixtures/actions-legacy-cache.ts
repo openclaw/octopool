@@ -6,9 +6,11 @@ export function legacyActionsKey(
   request: RelayRequest,
   route: RouteInfo,
   identity?: { kind: string; id: string },
+  protocolEpoch?: string,
 ) {
   return hashToken(
     JSON.stringify({
+      ...(protocolEpoch === undefined ? {} : { protocol_epoch: protocolEpoch }),
       pool: request.pool,
       method: request.method,
       path: request.path,

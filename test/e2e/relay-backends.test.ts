@@ -45,7 +45,7 @@ describe("Worker end-to-end relay backends", () => {
     expect(upstream).toHaveBeenCalledTimes(1);
     expect(
       await env.DB.prepare(
-        "SELECT owner, repo FROM github_public_repos WHERE owner = 'openclaw' AND repo = 'octopool'",
+        "SELECT owner, repo FROM github_public_repo_proofs WHERE owner = 'openclaw' AND repo = 'octopool'",
       ).first(),
     ).toEqual({ owner: "openclaw", repo: "octopool" });
     expect(
@@ -251,7 +251,7 @@ describe("Worker end-to-end relay backends", () => {
     )
       .bind(cacheRow!.cache_key)
       .run();
-    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async () => jsonResponse({ message: "unavailable" }, 503)),

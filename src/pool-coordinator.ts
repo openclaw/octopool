@@ -1,5 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import type { CacheFillAcquisition, CacheFillOutcome } from "./cache-fill";
+import {
+  CACHE_PUBLICATION_EPOCH,
+  PUBLICATION_LEASE_MS,
+  publicationBinding,
+  tryPublicationOwner,
+  type PublicationOwner,
+} from "./cache-publication";
 import { queries } from "./generated/sql";
 import { isCredentialFailureReason, type CredentialFailureReason } from "./github-auth";
 import { isRateInteger, isRateSeconds } from "./github-rate";
@@ -28,6 +35,11 @@ export function poolCoordinatorStub(env: Env, pool: string): DurableObjectStub<P
   return env.POOL_COORDINATOR.get(id, { locationHint: "wnam" });
 }
 
+type LegacyCacheFillAcquisition =
+  | { kind: "owner"; token: string }
+  | { kind: "completed"; outcome: CacheFillOutcome }
+  | { kind: "retry" };
+
 type CacheFillRow = {
   owner_token: string;
   expires_at: number;
@@ -36,13 +48,23 @@ type CacheFillRow = {
 type CacheFillWaiterGroup = {
   ownerToken: string;
   expiresAt: number;
-  completion: Promise<Exclude<CacheFillAcquisition, { kind: "owner" }>>;
-  resolve(result: Exclude<CacheFillAcquisition, { kind: "owner" }>): void;
+  completion: Promise<Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>>;
+  resolve(result: Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>): void;
   timer?: ReturnType<typeof setTimeout>;
 };
 
 export class PoolCoordinator extends DurableObject<Env> {
   private readonly cacheFillWaiters = new Map<string, CacheFillWaiterGroup>();
+
+  private readonly publicationWaiters = new Map<
+    string,
+    {
+      owner: PublicationOwner;
+      resolve(value: CacheFillAcquisition): void;
+      promise: Promise<CacheFillAcquisition>;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -56,10 +78,116 @@ export class PoolCoordinator extends DurableObject<Env> {
       }
       this.ctx.storage.sql.exec(queries.createCooldownsTable);
       this.ctx.storage.sql.exec(queries.createCacheFillsTable);
+      this.ctx.storage.sql.exec(queries.createLegacyCacheFillExpiryIndex);
     });
   }
 
-  acquireCacheFill(cacheKey: string): Promise<CacheFillAcquisition> | CacheFillAcquisition {
+  async tryAcquirePublication(resource: string): Promise<PublicationOwner | undefined> {
+    this.ctx.storage.sql.exec(queries.drainExpiredLegacyCacheFills, Date.now());
+    return tryPublicationOwner(this.env, resource);
+  }
+
+  async acquirePublication(resource: string): Promise<CacheFillAcquisition> {
+    const acquisition = await this.ctx.blockConcurrencyWhile(async () => {
+      this.ctx.storage.sql.exec(queries.drainExpiredLegacyCacheFills, Date.now());
+      const owner = await tryPublicationOwner(this.env, resource);
+      if (owner !== undefined) {
+        this.wakePublication(resource, { kind: "retry" });
+        return { result: { kind: "owner", owner } as CacheFillAcquisition };
+      }
+      const current = await this.env.DB.prepare(queries.readPublicationOwner)
+        .bind(CACHE_PUBLICATION_EPOCH, resource)
+        .first<PublicationOwner>();
+      if (current === null) return { result: { kind: "retry" } as CacheFillAcquisition };
+      let group = this.publicationWaiters.get(resource);
+      if (group?.owner.id !== current.id) {
+        this.wakePublication(resource, { kind: "retry" });
+        let resolve!: (value: CacheFillAcquisition) => void;
+        const promise = new Promise<CacheFillAcquisition>((done) => {
+          resolve = done;
+        });
+        group = {
+          owner: current,
+          resolve,
+          promise,
+          timer: setTimeout(
+            () => this.wakePublication(resource, { kind: "retry" }),
+            PUBLICATION_LEASE_MS,
+          ),
+        };
+        this.publicationWaiters.set(resource, group);
+      }
+      return { waiting: group!.promise };
+    });
+    return acquisition.result ?? acquisition.waiting!;
+  }
+
+  async renewPublication(owner: PublicationOwner): Promise<boolean> {
+    const row = await this.env.DB.prepare(queries.renewPublicationOwner)
+      .bind(...publicationBinding(owner), PUBLICATION_LEASE_MS)
+      .first<PublicationOwner>();
+    if (row === null) return false;
+    const group = this.publicationWaiters.get(owner.resource_key);
+    if (group?.owner.id === owner.id && group.owner.owner_token === owner.owner_token) {
+      clearTimeout(group.timer);
+      group.timer = setTimeout(
+        () => this.wakePublication(owner.resource_key, { kind: "retry" }),
+        PUBLICATION_LEASE_MS,
+      );
+    }
+    return true;
+  }
+
+  async completePublication(
+    owner: PublicationOwner,
+    outcome: CacheFillOutcome,
+    publicationId?: number,
+  ): Promise<boolean> {
+    if (
+      publicationId !== undefined &&
+      (outcome !== "shared" || !Number.isSafeInteger(publicationId) || publicationId < 1)
+    ) {
+      throw new Error("Invalid publication completion");
+    }
+    const row = await this.env.DB.prepare(
+      outcome === "failed" || outcome === "rejected" || outcome === "unknown"
+        ? queries.revokePublicationOwner
+        : queries.completePublicationOwner,
+    )
+      .bind(...publicationBinding(owner))
+      .first<{ id: number; was_live?: number }>();
+    if (row === null) return false;
+    // Revocation cleans expired rows too; only a live receipt accepts completion.
+    const accepted = row.was_live !== 0;
+    const group = this.publicationWaiters.get(owner.resource_key);
+    if (group?.owner.id === owner.id && group.owner.owner_token === owner.owner_token) {
+      this.wakePublication(
+        owner.resource_key,
+        accepted
+          ? {
+              kind: "completed",
+              outcome,
+              ...(publicationId === undefined ? {} : { publicationId }),
+            }
+          : { kind: "retry" },
+      );
+    }
+    return accepted;
+  }
+
+  private wakePublication(resource: string, result: CacheFillAcquisition): void {
+    const group = this.publicationWaiters.get(resource);
+    if (group === undefined) return;
+    this.publicationWaiters.delete(resource);
+    clearTimeout(group.timer);
+    group.resolve(result);
+  }
+
+  // In-flight pre-epoch Workers still call these RPCs. Their keys and proof table
+  // are retired for new readers. Remove this surface after old routing is drained.
+  acquireCacheFill(
+    cacheKey: string,
+  ): Promise<LegacyCacheFillAcquisition> | LegacyCacheFillAcquisition {
     const now = Date.now();
     const fill = this.cacheFill(cacheKey);
     if (fill !== undefined && fill.expires_at > now) {
@@ -255,14 +383,17 @@ export class PoolCoordinator extends DurableObject<Env> {
     return this.ctx.storage.sql.exec<CacheFillRow>(queries.getCacheFill, cacheKey).toArray()[0];
   }
 
-  private waitForCacheFill(cacheKey: string, fill: CacheFillRow): Promise<CacheFillAcquisition> {
+  private waitForCacheFill(
+    cacheKey: string,
+    fill: CacheFillRow,
+  ): Promise<LegacyCacheFillAcquisition> {
     let group = this.cacheFillWaiters.get(cacheKey);
     if (group === undefined || group.ownerToken !== fill.owner_token) {
       if (group !== undefined) {
         this.wakeCacheFill(cacheKey, group.ownerToken, { kind: "retry" });
       }
       let resolve!: CacheFillWaiterGroup["resolve"];
-      const completion = new Promise<Exclude<CacheFillAcquisition, { kind: "owner" }>>(
+      const completion = new Promise<Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>>(
         (complete) => {
           resolve = complete;
         },
@@ -308,7 +439,7 @@ export class PoolCoordinator extends DurableObject<Env> {
   private wakeCacheFill(
     cacheKey: string,
     ownerToken: string,
-    result: Exclude<CacheFillAcquisition, { kind: "owner" }>,
+    result: Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>,
   ): void {
     const group = this.cacheFillWaiters.get(cacheKey);
     if (group === undefined || group.ownerToken !== ownerToken) {
@@ -337,4 +468,10 @@ function classifyCooldown(result: RecordResult, now: number): { key: string; ttl
     return { key: `resource:${result.resource}`, ttlMs: 120_000 };
   }
   return { key: result.routeKey, ttlMs: 120_000 };
+}
+
+export function publicProofCoordinatorStub(env: Env): DurableObjectStub<PoolCoordinator> {
+  return env.POOL_COORDINATOR.get(env.POOL_COORDINATOR.idFromName("public-proof:global@wnam"), {
+    locationHint: "wnam",
+  });
 }

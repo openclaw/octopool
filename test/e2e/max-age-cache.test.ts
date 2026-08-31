@@ -62,7 +62,7 @@ describe("Worker end-to-end bounded-freshness cache", () => {
     )
       .bind(cacheRow!.cache_key)
       .run();
-    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
 
     const unbounded = await relay(PR_PATH);
     expect(await unbounded.json<RelayEnvelope>()).toMatchObject({
@@ -160,7 +160,7 @@ describe("Worker end-to-end bounded-freshness cache", () => {
           )
             .bind(`-${age} seconds`, expired ? "-60 seconds" : "+90 seconds", row!.cache_key)
             .run();
-          await deleteEdgeJSON("github-v1", row!.cache_key);
+          await deleteEdgeJSON("github-publication-v1", row!.cache_key);
 
           head = SECOND_HEAD;
           unavailable = true;

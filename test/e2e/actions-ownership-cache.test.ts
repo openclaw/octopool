@@ -1,9 +1,10 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { githubCacheKey, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
-import { recordPublicGitHubRepo } from "../../src/public-repos";
+import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import { runListSupersetView } from "../../src/run-list-superset";
 import { legacyActionsKey } from "../fixtures/actions-legacy-cache";
 import { exactRun, historicalHead, runIDs, wrongPatchHead } from "../fixtures/actions-ownership";
@@ -25,7 +26,7 @@ describe("Actions ownership cache migration", () => {
     ["/repos/openclaw/Peekaboo/actions/workflows/ci.yml/runs", "edge"],
   ])("ignores contaminated fresh %s in %s", async (routePath, layer) => {
     const { request, oldKey, body } = await seedLegacy(routePath);
-    if (layer === "shared") await deleteEdgeJSON("github-v1", oldKey);
+    if (layer === "shared") await deleteEdgeJSON("github-publication-v1", oldKey);
     const upstream = mockUpstream(body);
     const first = await relay(routePath, undefined, request);
     expect(first.status).toBe(200);
@@ -156,7 +157,7 @@ async function expire(key: string) {
   )
     .bind(key)
     .run();
-  await deleteEdgeJSON("github-v1", key);
+  await deleteEdgeJSON("github-publication-v1", key);
 }
 
 function mockUpstream(body: unknown) {

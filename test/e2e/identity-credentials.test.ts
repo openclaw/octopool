@@ -151,77 +151,85 @@ describe("selected identity credential failures", () => {
   it("recovers at exactly 120 seconds, persists across eviction and never shortens a longer cooldown", async () => {
     await seedPool();
     const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
-    vi.stubGlobal("fetch", githubUpstream({ primary: jsonResponse({ private: false }) }));
-    expect((await requestWithEnv({ TEST_PAT_PRIMARY: undefined })).status).toBe(503);
-    await evictDurableObject(coordinator());
-    clock.mockReturnValue(now + 119_999);
-    expect(await (await requestWithEnv()).json()).toMatchObject({
-      error: { details: { reason: "identities_cooling_down" } },
-    });
-    clock.mockReturnValue(now + 120_000);
-    expect(await (await requestWithEnv()).json()).toMatchObject({ identity: { id: "primary" } });
-    const rows = await runInDurableObject(coordinator(), (_instance, state) =>
-      state.storage.sql.exec("SELECT * FROM cooldowns").toArray(),
-    );
-    expect(rows).toEqual([
-      {
-        identity_id: "primary",
-        route_key: "*",
-        status: 503,
-        reason: "identity_secret_missing",
-        expires_at: now + 120_000,
-      },
-    ]);
-    await coordinator().recordResult({
-      identityId: "primary",
-      routeKey: "other",
-      resource: "core",
-      status: 401,
-      rate: { retryAfter: 500 },
-    });
-    await coordinator().recordCredentialFailure({
-      identityId: "primary",
-      reason: "github_app_key_format",
-    });
-    expect((await coordinator().snapshot()).cooldowns[0]).toMatchObject({
-      status: 401,
-      reason: "github_error",
-      expires_at: now + 620_000,
-    });
-    clock.mockRestore();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    try {
+      vi.stubGlobal("fetch", githubUpstream({ primary: jsonResponse({ private: false }) }));
+      expect((await requestWithEnv({ TEST_PAT_PRIMARY: undefined })).status).toBe(503);
+      await evictDurableObject(coordinator());
+      vi.setSystemTime(now + 119_999);
+      expect(await (await requestWithEnv()).json()).toMatchObject({
+        error: { details: { reason: "identities_cooling_down" } },
+      });
+      vi.setSystemTime(now + 120_000);
+      expect(await (await requestWithEnv()).json()).toMatchObject({ identity: { id: "primary" } });
+      const rows = await runInDurableObject(coordinator(), (_instance, state) =>
+        state.storage.sql.exec("SELECT * FROM cooldowns").toArray(),
+      );
+      expect(rows).toEqual([
+        {
+          identity_id: "primary",
+          route_key: "*",
+          status: 503,
+          reason: "identity_secret_missing",
+          expires_at: now + 120_000,
+        },
+      ]);
+      await coordinator().recordResult({
+        identityId: "primary",
+        routeKey: "other",
+        resource: "core",
+        status: 401,
+        rate: { retryAfter: 500 },
+      });
+      await coordinator().recordCredentialFailure({
+        identityId: "primary",
+        reason: "github_app_key_format",
+      });
+      expect((await coordinator().snapshot()).cooldowns[0]).toMatchObject({
+        status: 401,
+        reason: "github_error",
+        expires_at: now + 620_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retains a cached App token without a key, then fails over at refresh", async () => {
     await seedPool({ secondary: true });
     await appIdentity(92001);
     const now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
     let exchanges = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) => {
-        if (bearer(input, init) === "test-org-token") return jsonResponse({ private: false });
-        if (new Request(input, init).method === "POST") {
-          exchanges++;
-          return jsonResponse({
-            token: "synthetic-app",
-            expires_at: new Date(now + 3_600_000).toISOString(),
-          });
-        }
-        return jsonResponse({ private: false });
-      }),
-    );
-    expect(await (await requestWithEnv()).json()).toMatchObject({ identity: { id: "primary" } });
-    expect(await (await requestWithEnv({ TEST_APP_KEY: undefined })).json()).toMatchObject({
-      identity: { id: "primary" },
-    });
-    clock.mockReturnValue(now + 3_540_000);
-    expect(await (await requestWithEnv({ TEST_APP_KEY: undefined })).json()).toMatchObject({
-      identity: { id: "secondary" },
-    });
-    expect(exchanges).toBe(1);
-    clock.mockRestore();
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          if (bearer(input, init) === "test-org-token") return jsonResponse({ private: false });
+          if (new Request(input, init).method === "POST") {
+            exchanges++;
+            return jsonResponse({
+              token: "synthetic-app",
+              expires_at: new Date(now + 3_600_000).toISOString(),
+            });
+          }
+          return jsonResponse({ private: false });
+        }),
+      );
+      expect(await (await requestWithEnv()).json()).toMatchObject({ identity: { id: "primary" } });
+      expect(await (await requestWithEnv({ TEST_APP_KEY: undefined })).json()).toMatchObject({
+        identity: { id: "primary" },
+      });
+      vi.setSystemTime(now + 3_540_000);
+      expect(await (await requestWithEnv({ TEST_APP_KEY: undefined })).json()).toMatchObject({
+        identity: { id: "secondary" },
+      });
+      expect(exchanges).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

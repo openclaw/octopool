@@ -1,3 +1,4 @@
+import { fixtureOwner } from "./cache-fill-test-support";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cacheTTLSeconds,
@@ -754,6 +755,7 @@ describe("github cache policy", () => {
 
   it("serves fresh edge entries without reading D1", async () => {
     const cached = {
+      protocol_epoch: "publication-v1",
       status: 200,
       headers: { "content-type": "application/json" },
       body: { number: 42 },
@@ -790,8 +792,8 @@ describe("github cache policy", () => {
         delete: vi.fn(async () => true),
       },
     });
-    const run = vi.fn(async () => ({}));
-    const bind = vi.fn((..._args: unknown[]) => ({ run }));
+    const first = vi.fn(async () => ({ publication_id: 1, publication_token: "fixture" }));
+    const bind = vi.fn((..._args: unknown[]) => ({ first }));
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -807,10 +809,10 @@ describe("github cache policy", () => {
     } as unknown as Env;
 
     await expect(
-      writeGitHubCache(env, "cache-key", request, route, response({ number: 42 })),
+      writeGitHubCache(env, "cache-key", request, route, response({ number: 42 }), fixtureOwner()),
     ).resolves.toBe("shared");
 
-    expect(run).toHaveBeenCalledOnce();
+    expect(first).toHaveBeenCalledOnce();
     expect(put).toHaveBeenCalledOnce();
     const args = bind.mock.calls[0] as unknown[];
     expect(Date.parse(`${String(args[15])}Z`) - Date.parse(`${String(args[14])}Z`)).toBe(3_600_000);
@@ -827,8 +829,8 @@ describe("github cache policy", () => {
     vi.setSystemTime(now);
     const put = vi.fn(async () => undefined);
     vi.stubGlobal("caches", { default: { put } });
-    const run = vi.fn(async () => ({}));
-    const bind = vi.fn((..._args: unknown[]) => ({ run }));
+    const first = vi.fn(async () => ({ publication_id: 1, publication_token: "fixture" }));
+    const bind = vi.fn((..._args: unknown[]) => ({ first }));
     const env = { DB: { prepare: () => ({ bind }) } } as unknown as Env;
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -848,10 +850,11 @@ describe("github cache policy", () => {
         request,
         classifyRoute(request, policy),
         relayResponse,
+        fixtureOwner("fixture", "cache:issue-cache-key"),
       ),
     ).resolves.toBe("shared");
 
-    expect(run).toHaveBeenCalledOnce();
+    expect(first).toHaveBeenCalledOnce();
     expect(bind).toHaveBeenCalledOnce();
     const args = bind.mock.calls[0] as unknown[];
     const expiresAt = sqliteUTC(now + 3_600_000);
@@ -876,7 +879,7 @@ describe("github cache policy", () => {
         delete: vi.fn(async () => true),
       },
     });
-    const run = vi.fn(async () => ({}));
+    const first = vi.fn(async () => ({ publication_id: 1, publication_token: "fixture" }));
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -886,13 +889,20 @@ describe("github cache policy", () => {
     const env = {
       DB: {
         prepare: () => ({
-          bind: () => ({ run }),
+          bind: () => ({ first }),
         }),
       },
     } as unknown as Env;
 
     await expect(
-      writeGitHubCache(env, "cache-key", request, route, response({ blob: "x".repeat(300_000) })),
+      writeGitHubCache(
+        env,
+        "cache-key",
+        request,
+        route,
+        response({ blob: "x".repeat(300_000) }),
+        fixtureOwner(),
+      ),
     ).resolves.toBe("edge_only");
 
     // 120k CJK chars pass a UTF-16 code-unit count but exceed the cap in UTF-8 bytes.
@@ -903,10 +913,11 @@ describe("github cache policy", () => {
         request,
         route,
         response({ blob: "语".repeat(120_000) }),
+        fixtureOwner("fixture", "cache:cache-key-multibyte"),
       ),
     ).resolves.toBe("edge_only");
 
-    expect(run).not.toHaveBeenCalled();
+    expect(first).toHaveBeenCalled();
     expect(put).toHaveBeenCalledTimes(2);
   });
 
@@ -921,7 +932,7 @@ describe("github cache policy", () => {
         delete: vi.fn(async () => true),
       },
     });
-    const run = vi.fn(async () => ({}));
+    const first = vi.fn(async () => ({ publication_id: 1, publication_token: "fixture" }));
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -929,20 +940,27 @@ describe("github cache policy", () => {
     });
     const route = classifyRoute(request, policy);
     const env = {
-      DB: { prepare: () => ({ bind: () => ({ run }) }) },
+      DB: { prepare: () => ({ bind: () => ({ first }) }) },
     } as unknown as Env;
 
     await expect(
-      writeGitHubCache(env, "cache-key", request, route, response({ blob: "x".repeat(300_000) })),
+      writeGitHubCache(
+        env,
+        "cache-key",
+        request,
+        route,
+        response({ blob: "x".repeat(300_000) }),
+        fixtureOwner(),
+      ),
     ).resolves.toBe("failed");
-    expect(run).not.toHaveBeenCalled();
+    expect(first).toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledWith(
       "edge cache write failed",
-      expect.objectContaining({ namespace: "github-v1" }),
+      expect.objectContaining({ namespace: "github-publication-v1" }),
     );
   });
 
-  it("reports edge-only when D1 fails after a confirmed edge publication", async () => {
+  it("does not start an edge write when D1 authority is unknown", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal("caches", {
       default: {
@@ -961,7 +979,7 @@ describe("github cache policy", () => {
       DB: {
         prepare: () => ({
           bind: () => ({
-            run: async () => {
+            first: async () => {
               throw new Error("D1 unavailable");
             },
           }),
@@ -970,12 +988,9 @@ describe("github cache policy", () => {
     } as unknown as Env;
 
     await expect(
-      writeGitHubCache(env, "cache-key", request, route, response({ number: 42 })),
-    ).resolves.toBe("edge_only");
-    expect(consoleError).toHaveBeenCalledWith(
-      "github shared cache write failed",
-      expect.any(Error),
-    );
+      writeGitHubCache(env, "cache-key", request, route, response({ number: 42 }), fixtureOwner()),
+    ).resolves.toBe("unknown");
+    expect(consoleError).not.toHaveBeenCalled();
   });
 
   it("serves only stale cache rows inside the route grace window", async () => {

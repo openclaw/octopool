@@ -1,111 +1,180 @@
+import {
+  CACHE_PUBLICATION_EPOCH,
+  proofPublicationResource,
+  type PublicationOwner,
+} from "./cache-publication";
+import { publicProofCoordinatorStub } from "./pool-coordinator";
 import { envSecret } from "./auth";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
-import {
-  acquireOwnedCacheFill,
-  type CacheFillCoordinator,
-  type CacheFillOutcome,
-} from "./cache-fill";
-import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
+import { acquireOwnedCacheFill, startOwnedCacheFill, type CacheFillOutcome } from "./cache-fill";
+import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { requestTimeoutMs } from "./github-limits";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { HttpError, parsePositiveInt } from "./http";
 import { capabilitiesForRouteKind } from "./route-manifest";
-import type { RouteInfo } from "./types";
+import type { GitHubRelayResponse, RouteInfo } from "./types";
 
 type GitHubRepoResponse = {
   private?: unknown;
 };
 
 type PublicRepoProof = {
+  protocol_epoch: string;
   checked_at: string;
   expires_at: string;
-  is_public?: boolean | number;
+  is_public: boolean | number;
+  publication_id: number;
+  publication_token: string;
 };
 
 type PublicRepoProofSource = "edge" | "shared";
 
-const EDGE_CACHE_NAMESPACE = "public-repo-v1";
+export const PUBLIC_PROOF_EDGE_NAMESPACE = `public-repo-${CACHE_PUBLICATION_EPOCH}`;
+const EDGE_CACHE_NAMESPACE = PUBLIC_PROOF_EDGE_NAMESPACE;
 
 export async function ensurePublicGitHubRepo(
   env: GitHubEgressEnv,
   route: RouteInfo,
   cacheCreatedAt?: string,
-  coordinator?: CacheFillCoordinator,
 ): Promise<void> {
-  if (route.owner === undefined || route.repo === undefined) {
-    return;
-  }
+  if (route.owner === undefined || route.repo === undefined) return;
   const owner = route.owner.toLowerCase();
   const repo = route.repo.toLowerCase();
   const edgeProof = await rejectFreshNegativePublicRepoProof(env, owner, repo);
   if (
     cacheCreatedAt !== undefined &&
     (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, { edgeProof })) !== undefined
-  ) {
+  )
     return;
-  }
-  const proofKey = `public-repo:${owner}/${repo}`;
-  const proofStartedAt = sqliteTimestamp(new Date());
-  if (coordinator === undefined) {
-    await refreshPublicGitHubRepoProof(env, owner, repo, route, cacheCreatedAt);
-    return;
-  }
-
+  const coordinator = publicProofCoordinatorStub(env);
+  const resource = proofPublicationResource(owner, repo);
+  const startedAt = sqliteTimestamp(new Date());
+  let minimumPublicationId = 0;
   for (;;) {
-    const acquisition = await acquireOwnedCacheFill(coordinator, proofKey);
-    if (acquisition.kind !== "owner") {
-      if (acquisition.kind === "completed") {
-        const completedEdgeProof = await rejectFreshNegativePublicRepoProof(env, owner, repo);
-        const source =
-          acquisition.outcome === "shared"
-            ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
-                edgeProof: completedEdgeProof,
-              })
-            : acquisition.outcome === "edge_only"
-              ? await coveringPublicRepoProofSource(env, route, proofStartedAt, {
-                  source: "edge",
-                  edgeProof: completedEdgeProof,
-                })
-              : undefined;
-        if (source !== undefined) {
-          return;
-        }
-      }
+    const acquired = await acquireOwnedCacheFill(coordinator, resource);
+    if (acquired.kind !== "owner") {
+      if (
+        acquired.kind === "completed" &&
+        acquired.outcome === "shared" &&
+        acquired.publicationId !== undefined &&
+        (await readAuthoritativeProof(
+          env,
+          owner,
+          repo,
+          startedAt,
+          Math.max(minimumPublicationId, acquired.publicationId),
+        ))
+      )
+        return;
       continue;
     }
-
-    const ownerFill = acquisition.owner;
+    const fill = acquired.owner;
     try {
-      if (
-        cacheCreatedAt !== undefined &&
-        (await coveringPublicRepoProofSource(env, route, cacheCreatedAt, {
-          source: "shared",
-        })) === "shared"
-      ) {
-        await ownerFill.complete("shared");
+      const reused =
+        cacheCreatedAt === undefined
+          ? undefined
+          : await readAuthoritativeProof(env, owner, repo, cacheCreatedAt, minimumPublicationId);
+      if (reused !== undefined) {
+        await fill.complete("shared", reused.publication_id);
         return;
       }
-      const outcome = await ownerFill.publish(() =>
-        refreshPublicGitHubRepoProof(env, owner, repo, route, cacheCreatedAt),
+      const observation = await refreshPublicGitHubRepoProof(
+        env,
+        owner,
+        repo,
+        route,
+        cacheCreatedAt,
+        minimumPublicationId,
       );
-      if (outcome !== undefined) {
+      if (observation === undefined) {
+        await fill.complete("failed");
         return;
       }
+      minimumPublicationId = Math.max(minimumPublicationId, fill.capability.id);
+      const checkedAt = sqliteTimestamp(new Date());
+      const result = await fill.publish(() =>
+        storePublicRepoProof(env, owner, repo, observation, checkedAt, fill.capability),
+      );
+      if (
+        result.storage === "rejected" ||
+        result.completion !== "accepted" ||
+        parseSQLiteTimestamp(publicProofExpiresAt(env, observation, checkedAt)) <= Date.now()
+      ) {
+        // Keep this evidence floor even if the next acquisition joins another owner's reuse.
+        if (await readAuthoritativeProof(env, owner, repo, startedAt, minimumPublicationId)) return;
+        continue;
+      }
+      if (!observation) throwRepoNotPublic();
+      // A live direct probe can satisfy this request even if persistence failed.
+      return;
     } finally {
-      await ownerFill.fail();
+      await fill.fail();
     }
   }
 }
 
-export async function recordPublicGitHubRepo(env: Env, route: RouteInfo): Promise<void> {
-  if (route.owner === undefined || route.repo === undefined) {
-    return;
-  }
+async function readAuthoritativeProof(
+  env: Env,
+  owner: string,
+  repo: string,
+  at: string,
+  minimumId = 0,
+): Promise<PublicRepoProof | undefined> {
+  const proof = await env.DB.withSession("first-primary")
+    .prepare(queries.readPublicRepoProof)
+    .bind(CACHE_PUBLICATION_EPOCH, owner, repo)
+    .first<PublicRepoProof>();
+  if (proof === null || !publicProofIsFresh(proof) || proof.publication_id < minimumId)
+    return undefined;
+  if (!publicProofIsPublic(proof)) throwRepoNotPublic();
+  return publicProofCovers(proof, at) ? proof : undefined;
+}
+
+export type GitHubObservation<T = GitHubRelayResponse> = Readonly<{
+  response: T;
+  observedAt: number;
+}>;
+
+export async function observeAnonymousPublicRepo<T extends GitHubRelayResponse | undefined>(
+  env: Env,
+  route: RouteInfo,
+  observe: () => Promise<T>,
+): Promise<GitHubObservation<T>> {
+  if (!anonymousGitHubResponseProvesPublicRepo(route))
+    return { response: await observe(), observedAt: Date.now() };
+  const coordinator = publicProofCoordinatorStub(env);
+  const resource = proofPublicationResource(route.owner!, route.repo!);
+  let capability: PublicationOwner | undefined;
   try {
-    await storePublicRepoProof(env, route.owner.toLowerCase(), route.repo.toLowerCase());
-  } catch (error) {
-    console.error("public repo proof persistence failed", error);
+    capability = await coordinator.tryAcquirePublication(resource);
+  } catch {
+    // Exactly one optional attempt, before observation; no late evidence adoption.
+  }
+  const fill = capability === undefined ? undefined : startOwnedCacheFill(coordinator, capability);
+  try {
+    const response = await observe();
+    const observedAt = Date.now();
+    if (
+      fill !== undefined &&
+      response !== undefined &&
+      response.status >= 200 &&
+      response.status < 300
+    ) {
+      await fill.publish(() =>
+        storePublicRepoProof(
+          env,
+          route.owner!.toLowerCase(),
+          route.repo!.toLowerCase(),
+          true,
+          sqliteTimestamp(observedAt),
+          fill.capability,
+        ),
+      );
+    }
+    return { response, observedAt };
+  } finally {
+    await fill?.fail();
   }
 }
 
@@ -122,13 +191,13 @@ async function refreshPublicGitHubRepoProof(
   owner: string,
   repo: string,
   route: RouteInfo,
-  cacheCreatedAt?: string,
-): Promise<CacheFillOutcome> {
+  cacheCreatedAt: string | undefined,
+  minimumPublicationId: number,
+): Promise<boolean | undefined> {
   if (route.tokenFreeOnly) {
     const pageProof = await fetchPublicRepoPageProof(env, owner, repo);
     if (pageProof === false) {
-      await storePublicRepoProof(env, owner, repo, false);
-      throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
+      return false;
     }
     if (pageProof === undefined) {
       throw new HttpError(
@@ -137,7 +206,7 @@ async function refreshPublicGitHubRepoProof(
         "GitHub public repository page check failed",
       );
     }
-    return storePublicRepoProof(env, owner, repo);
+    return true;
   }
   let response = await fetchPublicRepoProof(env, owner, repo, true);
   let historicalProofEligibleResponse: Response | undefined;
@@ -150,25 +219,25 @@ async function refreshPublicGitHubRepoProof(
   if (!response.ok && publicCheckMayUseHistoricalProof(response)) {
     const pageProof = await fetchPublicRepoPageProof(env, owner, repo);
     if (pageProof === false) {
-      await storePublicRepoProof(env, owner, repo, false);
-      throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
+      return false;
     }
     if (pageProof === true) {
-      return storePublicRepoProof(env, owner, repo);
+      return true;
     }
   }
   if (response.status === 404) {
-    await storePublicRepoProof(env, owner, repo, false);
-    throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
+    return false;
   }
   if (!response.ok) {
     if (
       cacheCreatedAt !== undefined &&
       (publicCheckMayUseHistoricalProof(response) || historicalProofEligibleResponse !== undefined)
     ) {
-      const source = await coveringPublicRepoProofSource(env, route, cacheCreatedAt);
+      const source = await coveringPublicRepoProofSource(env, route, cacheCreatedAt, {
+        minimumPublicationId,
+      });
       if (source !== undefined) {
-        return source === "shared" ? "shared" : "edge_only";
+        return undefined;
       }
     }
     throw new HttpError(
@@ -179,10 +248,9 @@ async function refreshPublicGitHubRepoProof(
   }
   const body = (await response.json()) as GitHubRepoResponse;
   if (body.private !== false) {
-    await storePublicRepoProof(env, owner, repo, false);
-    throw new HttpError(403, "repo_not_public", "Octopool only relays public repositories");
+    return false;
   }
-  return storePublicRepoProof(env, owner, repo);
+  return true;
 }
 
 function fetchPublicRepoProof(
@@ -274,47 +342,79 @@ async function fetchPublicRepoPageProof(
   return undefined;
 }
 
-async function storePublicRepoProof(
+export async function storePublicRepoProof(
   env: Env,
   owner: string,
   repo: string,
-  isPublic = true,
+  isPublic: boolean,
+  checkedAt: string,
+  capability: PublicationOwner,
 ): Promise<CacheFillOutcome> {
+  if (
+    capability.protocol_epoch !== CACHE_PUBLICATION_EPOCH ||
+    capability.resource_key !== proofPublicationResource(owner, repo)
+  )
+    return "rejected";
+  const proof: PublicRepoProof = {
+    protocol_epoch: CACHE_PUBLICATION_EPOCH,
+    checked_at: checkedAt,
+    expires_at: publicProofExpiresAt(env, isPublic, checkedAt),
+    is_public: isPublic,
+    publication_id: capability.id,
+    publication_token: capability.owner_token,
+  };
+  let receipt: PublicRepoProof | null;
+  let ambiguous = false;
+  try {
+    receipt = await env.DB.prepare(queries.upsertPublicRepoProof)
+      .bind(
+        CACHE_PUBLICATION_EPOCH,
+        owner,
+        repo,
+        isPublic ? 1 : 0,
+        proof.checked_at,
+        proof.expires_at,
+        capability.id,
+        capability.owner_token,
+      )
+      .first<PublicRepoProof>();
+  } catch {
+    receipt = null;
+    ambiguous = true;
+  }
+  if (receipt === null) {
+    try {
+      receipt = await env.DB.withSession("first-primary")
+        .prepare(queries.readPublicRepoProof)
+        .bind(CACHE_PUBLICATION_EPOCH, owner, repo)
+        .first<PublicRepoProof>();
+    } catch {
+      return "unknown";
+    }
+    if (
+      receipt?.publication_id !== capability.id ||
+      receipt.publication_token !== capability.owner_token ||
+      receipt.checked_at !== proof.checked_at ||
+      receipt.expires_at !== proof.expires_at ||
+      publicProofIsPublic(receipt) !== isPublic
+    )
+      return ambiguous ? "unknown" : "rejected";
+  }
+  await writeEdgeJSON(
+    EDGE_CACHE_NAMESPACE,
+    publicProofKey(owner, repo),
+    proof,
+    Math.floor((parseSQLiteTimestamp(proof.expires_at) - Date.now()) / 1000),
+  );
+  return "shared";
+}
+
+function publicProofExpiresAt(env: Env, isPublic: boolean, checkedAt: string): string {
   const vars = env as unknown as Record<string, string | undefined>;
   const ttlSeconds = isPublic
     ? parsePositiveInt(vars.PUBLIC_REPO_TTL_SECONDS, 30)
     : parsePositiveInt(vars.PUBLIC_REPO_NEGATIVE_TTL_SECONDS, 3_600);
-  const checkedAt = new Date();
-  const proof: PublicRepoProof = {
-    checked_at: sqliteTimestamp(checkedAt),
-    expires_at: sqliteTimestamp(new Date(checkedAt.getTime() + ttlSeconds * 1000)),
-    is_public: isPublic,
-  };
-  const sharedWrite = (async () => {
-    try {
-      await env.DB.prepare(queries.upsertPublicRepoProof)
-        .bind(owner, repo, isPublic ? 1 : 0, `+${ttlSeconds} seconds`)
-        .run();
-      return true;
-    } catch (error) {
-      console.error("public repo shared proof write failed", error);
-      return false;
-    }
-  })();
-  const edgeWrite = writeEdgeJSON(
-    EDGE_CACHE_NAMESPACE,
-    publicProofKey(owner, repo),
-    proof,
-    ttlSeconds,
-  ).catch((error: unknown) => {
-    console.error("public repo edge proof write failed", error);
-    return false;
-  });
-  const [edgePublished, sharedPublished] = await Promise.all([edgeWrite, sharedWrite]);
-  if (!isPublic && !edgePublished) {
-    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, publicProofKey(owner, repo));
-  }
-  return sharedPublished ? "shared" : edgePublished ? "edge_only" : "failed";
+  return sqliteTimestamp(parseSQLiteTimestamp(checkedAt) + ttlSeconds * 1000);
 }
 
 function publicCheckMayRetryUnauthenticated(response: Response): boolean {
@@ -335,28 +435,27 @@ async function coveringPublicRepoProofSource(
   route: RouteInfo,
   cacheCreatedAt: string,
   options: {
-    source?: PublicRepoProofSource;
     edgeProof?: PublicRepoProof | undefined;
+    minimumPublicationId?: number;
   } = {},
 ): Promise<PublicRepoProofSource | undefined> {
+  const minimumPublicationId = options.minimumPublicationId ?? 0;
   if (route.owner === undefined || route.repo === undefined) {
     return "shared";
   }
   const owner = route.owner.toLowerCase();
   const repo = route.repo.toLowerCase();
   const edgeKey = publicProofKey(owner, repo);
-  if (options.source !== "shared") {
-    const edge =
-      options.edgeProof ?? (await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey));
-    if (edge !== undefined && publicProofIsPublic(edge)) {
-      if (publicProofCovers(edge, cacheCreatedAt)) {
-        return "edge";
-      }
-      await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey);
-    }
-    if (options.source === "edge") {
-      return undefined;
-    }
+  const edge =
+    options.edgeProof ?? (await readEdgeJSON<PublicRepoProof>(EDGE_CACHE_NAMESPACE, edgeKey));
+  if (
+    edge !== undefined &&
+    publicProofIsFresh(edge) &&
+    publicProofIsPublic(edge) &&
+    edge.publication_id >= minimumPublicationId &&
+    publicProofCovers(edge, cacheCreatedAt)
+  ) {
+    return "edge";
   }
   const row = await readD1PublicRepoProof(
     env,
@@ -365,7 +464,11 @@ async function coveringPublicRepoProofSource(
     repo,
     cacheCreatedAt,
   );
-  if (row === null || !publicProofCovers(row, cacheCreatedAt)) {
+  if (
+    row === null ||
+    !(row.publication_id >= minimumPublicationId) ||
+    !publicProofCovers(row, cacheCreatedAt)
+  ) {
     return undefined;
   }
   const ttlSeconds = Math.floor((parseSQLiteTimestamp(row.expires_at) - Date.now()) / 1000);
@@ -386,12 +489,9 @@ async function rejectFreshNegativePublicRepoProof(
     }
     return edge;
   }
-  if (edge !== undefined && !publicProofIsPublic(edge)) {
-    await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, edgeKey);
-  }
 
   const row = await env.DB.prepare(queries.freshNegativePublicRepoProof)
-    .bind(owner, repo)
+    .bind(owner, repo, CACHE_PUBLICATION_EPOCH)
     .first<PublicRepoProof>();
   if (row === null || row === undefined || publicProofIsPublic(row) || !publicProofIsFresh(row)) {
     return undefined;
@@ -408,7 +508,9 @@ function readD1PublicRepoProof(
   repo: string,
   cacheCreatedAt: string,
 ): Promise<PublicRepoProof | null> {
-  return env.DB.prepare(query).bind(owner, repo, cacheCreatedAt).first<PublicRepoProof>();
+  return env.DB.prepare(query)
+    .bind(owner, repo, cacheCreatedAt, CACHE_PUBLICATION_EPOCH)
+    .first<PublicRepoProof>();
 }
 
 function publicProofCovers(proof: PublicRepoProof, cacheCreatedAt: string): boolean {
@@ -425,7 +527,12 @@ function publicProofCovers(proof: PublicRepoProof, cacheCreatedAt: string): bool
 }
 
 function publicProofIsFresh(proof: PublicRepoProof): boolean {
-  if (typeof proof.checked_at !== "string" || typeof proof.expires_at !== "string") {
+  if (
+    proof.protocol_epoch !== CACHE_PUBLICATION_EPOCH ||
+    ![true, false, 0, 1].includes(proof.is_public) ||
+    typeof proof.checked_at !== "string" ||
+    typeof proof.expires_at !== "string"
+  ) {
     return false;
   }
   return (
@@ -435,7 +542,7 @@ function publicProofIsFresh(proof: PublicRepoProof): boolean {
 }
 
 function publicProofIsPublic(proof: PublicRepoProof): boolean {
-  return proof.is_public === undefined || proof.is_public === true || proof.is_public === 1;
+  return proof.is_public === true || proof.is_public === 1;
 }
 
 function throwRepoNotPublic(): never {

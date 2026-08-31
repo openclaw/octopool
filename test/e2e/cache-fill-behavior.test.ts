@@ -1,5 +1,8 @@
+import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { bearer, jsonResponse, POOL, relay, seedPool } from "./harness";
 import { ownedWork } from "./owned-work";
 
 const PATH = "/repos/openclaw/octopool/pulls/42";
@@ -46,8 +49,7 @@ describe("Worker end-to-end cache-fill outcomes", () => {
       await upstream.started;
       const follower = relay(PATH, undefined, OPTIONS);
       requests.push(follower);
-      await cache.waitForGitHubMatches(3);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitForFollower(follower);
       upstream.release();
       const followerResponse = await Promise.race([
         follower,
@@ -79,7 +81,7 @@ describe("Worker end-to-end cache-fill outcomes", () => {
       await upstream.started;
       const follower = relay(PATH, undefined, OPTIONS);
       requests.push(follower);
-      await cache.waitForGitHubMatches(3);
+      await waitForFollower(follower);
       await new Promise((resolve) => setTimeout(resolve, 8_500));
 
       expect(upstream.calls()).toBe(1);
@@ -108,14 +110,34 @@ async function concurrentFill(body: string, githubEntriesVisible: boolean) {
     await upstream.started;
     const follower = relay(PATH, undefined, OPTIONS);
     requests.push(follower);
-    await cache.waitForGitHubMatches(3);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForFollower(follower);
     upstream.release();
     return { responses: await Promise.all(requests), upstream };
   } finally {
     upstream.release();
     await Promise.allSettled(requests);
   }
+}
+
+async function waitForFollower(follower: Promise<Response>): Promise<void> {
+  await Promise.race([
+    // Cache reads precede identity-key acquisition; they do not prove a waiter exists.
+    vi.waitFor(
+      async () => {
+        const waiting = await runInDurableObject(
+          poolCoordinatorStub(env, POOL),
+          (instance) =>
+            (instance as unknown as { publicationWaiters: Map<string, unknown> }).publicationWaiters
+              .size,
+        );
+        expect(waiting).toBe(1);
+      },
+      { timeout: 5_000 },
+    ),
+    follower.then(() => {
+      throw new Error("Follower completed before coordinator waiting");
+    }),
+  ]);
 }
 
 function gatedDiffUpstream(body: string, options: { failFirst?: boolean } = {}) {
@@ -160,45 +182,18 @@ function gatedDiffUpstream(body: string, options: { failFirst?: boolean } = {}) 
 
 function edgeCache(githubEntriesVisible: boolean) {
   const entries = new Map<string, Response>();
-  let githubMatches = 0;
-  const matchWaiters = new Set<() => void>();
-  const defaultCache = {
-    match: vi.fn(async (request: Request) => {
-      if (request.url.includes("/github-v1/")) {
-        githubMatches++;
-        for (const wake of matchWaiters) {
-          wake();
-        }
-      }
-      if (!githubEntriesVisible && request.url.includes("/github-v1/")) {
-        return undefined;
-      }
-      return entries.get(request.url)?.clone();
-    }),
-    put: vi.fn(async (request: Request, response: Response) => {
-      entries.set(request.url, response.clone());
-    }),
-    delete: vi.fn(async (request: Request) => entries.delete(request.url)),
-  };
   return {
-    default: defaultCache,
-    async waitForGitHubMatches(count: number): Promise<void> {
-      while (githubMatches < count) {
-        let wake!: () => void;
-        let unregister!: () => void;
-        try {
-          await new Promise<void>((resolve, reject) => {
-            wake = resolve;
-            matchWaiters.add(wake);
-            unregister = ownedWork.registerRelease(() =>
-              reject(new Error("Cache match wait interrupted by teardown")),
-            );
-          });
-        } finally {
-          unregister();
-          matchWaiters.delete(wake);
+    default: {
+      match: vi.fn(async (request: Request) => {
+        if (!githubEntriesVisible && request.url.includes("/github-publication-v1/")) {
+          return undefined;
         }
-      }
+        return entries.get(request.url)?.clone();
+      }),
+      put: vi.fn(async (request: Request, response: Response) => {
+        entries.set(request.url, response.clone());
+      }),
+      delete: vi.fn(async (request: Request) => entries.delete(request.url)),
     },
   };
 }

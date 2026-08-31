@@ -1,3 +1,4 @@
+import type { PublicationOwner } from "./cache-publication";
 import { authenticateCaller } from "./auth";
 import {
   withGitHubEgress,
@@ -36,7 +37,8 @@ import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import {
   anonymousGitHubResponseProvesPublicRepo,
   ensurePublicGitHubRepo,
-  recordPublicGitHubRepo,
+  observeAnonymousPublicRepo,
+  type GitHubObservation,
 } from "./public-repos";
 import { capabilitiesForRouteKind, isIssueEventRoute, isNativeReadRoute } from "./route-manifest";
 import {
@@ -112,6 +114,7 @@ type ActiveRelay = RelayBase & {
 };
 
 type RelaySuccess = {
+  observedAt?: number;
   github: GitHubRelayResponse;
   identity?: Identity;
   backend?: "web" | "github_public";
@@ -287,7 +290,7 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
       state.cacheable = true;
       const cached = await readTerminalLogCache(state.env, key);
       if (cached !== undefined) {
-        await ensurePublicGitHubRepo(state.env, state.route, cached.created_at, state.coordinator);
+        await ensurePublicGitHubRepo(state.env, state.route, cached.created_at);
         if (terminalLogNeedsRevalidation(cached)) {
           state.terminalLogCached = cached;
         } else {
@@ -328,7 +331,7 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
     throw new HttpError(503, "token_free_unavailable", "Token-free GitHub search is unavailable");
   }
 
-  await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+  await ensurePublicGitHubRepo(state.env, state.route);
   const fallback = capabilitiesForRouteKind(state.route.kind).fallback;
   if (fallback === "local") {
     throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
@@ -375,14 +378,7 @@ async function readCacheEntry(
   const cached = await readGitHubCache(state.env, cacheKey, state.ctx, state.maxAgeSeconds);
   if (
     cached === undefined ||
-    !(await cachedResponseAvailable(
-      state.env,
-      state.request.pool,
-      state.route,
-      cached,
-      state.coordinator,
-      identity,
-    ))
+    !(await cachedResponseAvailable(state.env, state.request.pool, state.route, cached, identity))
   ) {
     return undefined;
   }
@@ -399,14 +395,7 @@ async function coalesceRelayCacheMiss(
     ctx: state.ctx,
     ...(state.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: state.maxAgeSeconds }),
     acceptCached: (cached) =>
-      cachedResponseAvailable(
-        state.env,
-        state.request.pool,
-        state.route,
-        cached,
-        state.coordinator,
-        state.identity,
-      ),
+      cachedResponseAvailable(state.env, state.request.pool, state.route, cached, state.identity),
   });
   state.cacheFill = fill.owner;
   return fill.cached;
@@ -543,17 +532,28 @@ async function callRevalidationAPI(
   tokenFree: boolean,
   identity?: Identity,
   token?: string,
-): Promise<GitHubRelayResponse | undefined> {
+): Promise<GitHubObservation | undefined> {
   const request: RelayRequest = {
     ...state.cacheRequest,
     headers: { ...state.cacheRequest.headers, ...candidate.headers },
   };
   try {
     if (tokenFree) {
-      const response = await callAnonymousGitHubAPI(state.env, request, state.route);
+      const { response, observedAt } = await observeAnonymousPublicRepo(
+        state.env,
+        state.route,
+        () => callAnonymousGitHubAPI(state.env, request, state.route),
+      );
       return response === undefined
         ? undefined
-        : completeRunJobsSuperset(response, state.runJobsSuperset, anonymousRunJobsPage(state));
+        : {
+            response: await completeRunJobsSuperset(
+              response,
+              state.runJobsSuperset,
+              anonymousRunJobsPage(state),
+            ),
+            observedAt,
+          };
     }
     if (identity !== undefined && token !== undefined) {
       state.paginatedIdentityRateRecorded = false;
@@ -561,15 +561,18 @@ async function callRevalidationAPI(
         state.route,
         await callGitHub(state.env, token, request, state.route),
       );
-      return completeRunJobsSuperset(
-        response,
-        state.runJobsSuperset,
-        identityRunJobsPage(state, identity, response),
-      );
+      const observedAt = Date.now();
+      return {
+        response: await completeRunJobsSuperset(
+          response,
+          state.runJobsSuperset,
+          identityRunJobsPage(state, identity, response),
+        ),
+        observedAt,
+      };
     }
-    return sanitizeGitHubResponse(
-      state.route,
-      await callPublicGitHub(state.env, request, state.route),
+    return await observeAnonymousPublicRepo(state.env, state.route, async () =>
+      sanitizeGitHubResponse(state.route, await callPublicGitHub(state.env, request, state.route)),
     );
   } catch (error) {
     rethrowStringRewriteDenial(error);
@@ -580,18 +583,17 @@ async function callRevalidationAPI(
 async function finishRevalidation(
   state: ActiveRelay,
   candidate: RevalidationCandidate,
-  github: GitHubRelayResponse,
+  { response: github, observedAt }: GitHubObservation,
   identity: Identity | undefined,
   result: Pick<RelaySuccess, "backend" | "leaseReason">,
 ): Promise<Response | undefined> {
   if (github.status >= 200 && github.status < 300) {
-    if (identity === undefined && anonymousGitHubResponseProvesPublicRepo(state.route)) {
-      await recordPublicGitHubRepo(state.env, state.route);
-    } else {
-      await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+    if (identity !== undefined || !anonymousGitHubResponseProvesPublicRepo(state.route)) {
+      await ensurePublicGitHubRepo(state.env, state.route);
     }
     return finalizeRelaySuccess(state, {
       github: sanitizeGitHubResponse(state.route, github),
+      observedAt,
       ...(identity === undefined ? {} : { identity }),
       ...result,
       rate: rateFromHeaders(github.headers),
@@ -619,7 +621,6 @@ async function finishRevalidation(
       state.request.pool,
       state.route,
       candidate.cached,
-      state.coordinator,
       candidate.cached.identity,
       true,
     );
@@ -640,6 +641,7 @@ async function finishRevalidation(
   };
   return finalizeRelaySuccess(state, {
     github: refreshed,
+    observedAt,
     ...(identity === undefined ? {} : { identity }),
     ...result,
     rate: rateFromHeaders(github.headers),
@@ -662,7 +664,7 @@ async function restoreSharedCacheFill(state: ActiveRelay): Promise<Response | un
 
 async function guardRevalidationPublicRepo(state: ActiveRelay): Promise<boolean> {
   try {
-    await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+    await ensurePublicGitHubRepo(state.env, state.route);
     return true;
   } catch (error) {
     rethrowStringRewriteDenial(error);
@@ -689,10 +691,11 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
     return undefined;
   }
   // Caller conditionals bypass storage, but must still use anonymous visibility.
-  const response =
+  const { response, observedAt } = await observeAnonymousPublicRepo(state.env, state.route, () =>
     state.cacheKey === undefined
-      ? await callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route)
-      : await callGitHubWeb(state.env, state.cacheRequest, state.route);
+      ? callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route)
+      : callGitHubWeb(state.env, state.cacheRequest, state.route),
+  );
   if (response === undefined) {
     if (isIssueEventRoute(state.route.kind)) {
       // No response to prove public: hand off before credentialed repo probes.
@@ -708,13 +711,12 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
       ? await completeRunJobsSuperset(response, state.runJobsSuperset, anonymousRunJobsPage(state))
       : response;
   const github = sanitizeGitHubResponse(state.route, completed);
-  if (response.status !== 304 && anonymousGitHubResponseProvesPublicRepo(state.route)) {
-    await recordPublicGitHubRepo(state.env, state.route);
-  } else {
-    await ensurePublicGitHubRepo(state.env, state.route, undefined, state.coordinator);
+  if (response.status === 304 || !anonymousGitHubResponseProvesPublicRepo(state.route)) {
+    await ensurePublicGitHubRepo(state.env, state.route);
   }
   return finalizeRelaySuccess(state, {
     github,
+    observedAt,
     backend: state.cacheKey === undefined ? "github_public" : "web",
   });
 }
@@ -798,6 +800,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
       state.route,
       await callGitHub(state.env, token, state.cacheRequest, state.route),
     );
+    const observedAt = Date.now();
     state.paginatedIdentityRateRecorded = false;
     const github = await completeRunJobsSuperset(
       firstPage,
@@ -814,6 +817,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     }
     return finalizeRelaySuccess(state, {
       github,
+      observedAt,
       identity,
       leaseReason: selection.reason,
       rate,
@@ -868,6 +872,7 @@ async function switchRelayCacheKey(
 }
 
 async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): Promise<Response> {
+  const observedAt = result.observedAt ?? Date.now();
   const cacheStatus = result.revalidated === true ? "hit" : state.cacheStatus;
   if (runJobsSupersetIncomplete(result.github, state.runJobsSuperset)) {
     if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
@@ -897,6 +902,8 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
         state.cacheRequest,
         state.route,
         result.github,
+        owner.capability,
+        observedAt,
         result.identity,
       ),
     );
@@ -1094,7 +1101,6 @@ async function serveStaleRelayCache(
         state.request.pool,
         state.route,
         cached,
-        state.coordinator,
         candidate.identity,
         true,
       ))
@@ -1292,10 +1298,21 @@ async function publishGitHubCache(
   request: Parameters<typeof writeGitHubCache>[2],
   route: Parameters<typeof writeGitHubCache>[3],
   response: Parameters<typeof writeGitHubCache>[4],
+  owner: PublicationOwner,
+  observedAt: number,
   identity?: Identity,
 ): Promise<CacheFillOutcome> {
   try {
-    return await writeGitHubCache(env, cacheKey, request, route, response, identity);
+    return await writeGitHubCache(
+      env,
+      cacheKey,
+      request,
+      route,
+      response,
+      owner,
+      identity,
+      observedAt,
+    );
   } catch (error) {
     console.error("github cache write failed", error);
     return "failed";
@@ -1558,7 +1575,6 @@ async function cachedResponseAvailable(
     identity?: Pick<Identity, "id" | "kind">;
     created_at: string;
   },
-  coordinator: DurableObjectStub<PoolCoordinator>,
   selectedIdentity?: Pick<Identity, "id" | "kind">,
   stale = false,
 ): Promise<boolean> {
@@ -1567,7 +1583,7 @@ async function cachedResponseAvailable(
     : cachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity);
   const [available] = await Promise.all([
     identityAvailable,
-    ensurePublicGitHubRepo(env, route, cached.created_at, coordinator),
+    ensurePublicGitHubRepo(env, route, cached.created_at),
   ]);
   return available;
 }

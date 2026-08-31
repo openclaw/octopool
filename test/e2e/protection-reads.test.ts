@@ -1,6 +1,7 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { githubCacheKey, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey } from "../../src/cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { isNativeReadRoute, ROUTES } from "../../src/route-manifest";
 import { CALLER_TOKEN, callWorker, POOL, relay, seedPool } from "./harness";
@@ -49,7 +50,7 @@ describe("Worker native protection reads", () => {
     expect(upstream).not.toHaveBeenCalled();
     for (const table of [
       "github_cache_entries",
-      "github_public_repos",
+      "github_public_repo_proofs",
       "github_public_api_rates",
     ]) {
       expect(await env.DB.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first()).toEqual({

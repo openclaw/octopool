@@ -8,7 +8,8 @@ export { PoolCoordinator } from "../../src/pool-coordinator";
 export default {
   ...worker,
   async fetch(request: Request, env: Env, native: ExecutionContext): Promise<Response> {
-    if (request.headers.get("x-test-identity-protocol") !== "missing-method") {
+    const protocol = request.headers.get("x-test-identity-protocol");
+    if (protocol !== "missing-method" && protocol !== "missing-publication") {
       return worker.fetch(request, env, native);
     }
     let calls = 0;
@@ -19,7 +20,14 @@ export default {
             const stub = target.get(...args);
             return new Proxy(stub, {
               get(real, method) {
-                if (method === "recordCredentialFailure")
+                if (protocol === "missing-publication" && method === "acquirePublication")
+                  return async () => {
+                    calls++;
+                    await (
+                      real as unknown as { absentPublication(): Promise<void> }
+                    ).absentPublication();
+                  };
+                if (protocol === "missing-method" && method === "recordCredentialFailure")
                   return async () => {
                     calls++;
                     await (

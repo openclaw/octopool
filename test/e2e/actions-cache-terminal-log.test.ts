@@ -1,7 +1,8 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { withGitHubEgress } from "../../src/github-egress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { githubCacheKey, readGitHubCache, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey, readGitHubCache } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import {
@@ -150,7 +151,7 @@ describe("terminal Actions log cache", () => {
       ),
     ).resolves.toBe(false);
     expect(
-      await env.DB.prepare("SELECT COUNT(*) AS count FROM github_public_repos").first(),
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM github_public_repo_proofs").first(),
     ).toEqual({ count: 0 });
   });
 
@@ -372,8 +373,8 @@ describe("terminal Actions log cache", () => {
     const fill = terminalLogUpstream("completed");
     vi.stubGlobal("fetch", fill);
     await relay(LOG_PATH);
-    await env.DB.prepare("DELETE FROM github_public_repos").run();
-    await deleteEdgeJSON("public-repo-v1", "openclaw/octopool");
+    await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+    await deleteEdgeJSON("public-repo-publication-v1", "openclaw/octopool");
     const guarded = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);

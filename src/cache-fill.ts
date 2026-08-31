@@ -1,30 +1,38 @@
-export type CacheFillOutcome = "shared" | "edge_only" | "failed";
+import type { PublicationOwner } from "./cache-publication";
+
+export type CacheFillOutcome = "shared" | "edge_only" | "failed" | "rejected" | "unknown";
 
 export type CacheFillAcquisition =
-  | { kind: "owner"; token: string }
-  | { kind: "completed"; outcome: CacheFillOutcome }
+  | { kind: "owner"; owner: PublicationOwner }
+  | { kind: "completed"; outcome: CacheFillOutcome; publicationId?: number }
   | { kind: "retry" };
 
 type Awaitable<T> = T | Promise<T>;
 
 export interface CacheFillCoordinator {
-  acquireCacheFill(cacheKey: string): Awaitable<CacheFillAcquisition>;
-  renewCacheFill(cacheKey: string, ownerToken: string): Awaitable<boolean>;
-  completeCacheFill(
-    cacheKey: string,
-    ownerToken: string,
+  acquirePublication(resource: string): Awaitable<CacheFillAcquisition>;
+  tryAcquirePublication(resource: string): Awaitable<PublicationOwner | undefined>;
+  renewPublication(owner: PublicationOwner): Awaitable<boolean>;
+  completePublication(
+    owner: PublicationOwner,
     outcome: CacheFillOutcome,
+    publicationId?: number,
   ): Awaitable<boolean>;
 }
+
+export type PublicationResult = {
+  storage: CacheFillOutcome;
+  completion: "accepted" | "lost" | "unknown";
+};
 
 const CACHE_FILL_RENEW_MS = 3_000;
 
 export type OwnedCacheFill = {
-  readonly token: string;
+  readonly capability: PublicationOwner;
   renew(): Promise<boolean>;
-  complete(outcome: CacheFillOutcome): Promise<boolean>;
+  complete(outcome: CacheFillOutcome, publicationId?: number): Promise<boolean>;
   fail(): Promise<boolean>;
-  publish(publisher: () => Promise<CacheFillOutcome>): Promise<CacheFillOutcome | undefined>;
+  publish(publisher: () => Promise<CacheFillOutcome>): Promise<PublicationResult>;
 };
 
 export async function acquireOwnedCacheFill(
@@ -35,26 +43,25 @@ export async function acquireOwnedCacheFill(
 > {
   let acquisition: CacheFillAcquisition;
   try {
-    acquisition = await coordinator.acquireCacheFill(cacheKey);
+    acquisition = await coordinator.acquirePublication(cacheKey);
   } catch {
     // A Durable Object restart rejects its in-memory waiting RPCs. Re-entering
     // the durable acquisition state either waits on the surviving owner or
     // returns retry at its persisted expiry.
-    acquisition = await coordinator.acquireCacheFill(cacheKey);
+    acquisition = await coordinator.acquirePublication(cacheKey);
   }
   if (acquisition.kind !== "owner") {
     return acquisition;
   }
   return {
     kind: "owner",
-    owner: startOwnedCacheFill(coordinator, cacheKey, acquisition.token),
+    owner: startOwnedCacheFill(coordinator, acquisition.owner),
   };
 }
 
-function startOwnedCacheFill(
+export function startOwnedCacheFill(
   coordinator: CacheFillCoordinator,
-  cacheKey: string,
-  token: string,
+  capability: PublicationOwner,
 ): OwnedCacheFill {
   let active = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -90,9 +97,9 @@ function startOwnedCacheFill(
     }
     const current = (async () => {
       try {
-        return await coordinator.renewCacheFill(cacheKey, token);
-      } catch (error) {
-        console.error("cache fill renewal failed", error);
+        return await coordinator.renewPublication(capability);
+      } catch {
+        console.error("cache fill renewal failed");
         return false;
       }
     })();
@@ -109,7 +116,7 @@ function startOwnedCacheFill(
     });
     return current;
   };
-  const complete = async (outcome: CacheFillOutcome): Promise<boolean> => {
+  const complete = async (outcome: CacheFillOutcome, publicationId?: number): Promise<boolean> => {
     if (!active) {
       return false;
     }
@@ -123,22 +130,27 @@ function startOwnedCacheFill(
     }
     deactivate();
     try {
-      return await coordinator.completeCacheFill(cacheKey, token, outcome);
-    } catch (error) {
-      console.error("cache fill completion failed", error);
+      return await coordinator.completePublication(capability, outcome, publicationId);
+    } catch {
+      completionUnknown = true;
+      console.error("cache fill completion failed");
       return false;
     }
   };
+  let completionUnknown = false;
   const publish = async (
     publisher: () => Promise<CacheFillOutcome>,
-  ): Promise<CacheFillOutcome | undefined> => {
+  ): Promise<PublicationResult> => {
     if (!(await renew())) {
-      return undefined;
+      return { storage: "rejected", completion: "lost" };
     }
     try {
       const outcome = await publisher();
-      await complete(outcome);
-      return outcome;
+      const accepted = await complete(outcome, outcome === "shared" ? capability.id : undefined);
+      return {
+        storage: outcome,
+        completion: accepted ? "accepted" : completionUnknown ? "unknown" : "lost",
+      };
     } catch (error) {
       await complete("failed");
       throw error;
@@ -147,7 +159,7 @@ function startOwnedCacheFill(
 
   scheduleRenewal();
   return {
-    token,
+    capability,
     renew,
     complete,
     fail: () => complete("failed"),

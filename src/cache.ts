@@ -1,10 +1,16 @@
+import {
+  CACHE_PUBLICATION_EPOCH,
+  bodyPublicationResource,
+  publicationBinding,
+  type PublicationOwner,
+} from "./cache-publication";
 import { hashToken } from "./auth";
 import {
   type CacheFreshStrategy,
   cachePolicyForRouteKind,
   isStateAwarePRRoute,
 } from "./cache-policy";
-import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "./edge-cache";
+import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { defaultGitHubJSONAccept } from "./github-response";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
@@ -16,7 +22,8 @@ import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./t
 
 const TERMINAL_CI_TTL_SECONDS = 3_600;
 const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
-const EDGE_CACHE_NAMESPACE = "github-v1";
+export const GITHUB_EDGE_CACHE_NAMESPACE = `github-${CACHE_PUBLICATION_EPOCH}`;
+const EDGE_CACHE_NAMESPACE = GITHUB_EDGE_CACHE_NAMESPACE;
 // Megabyte-class bodies (paged run lists, check-run sweeps) are the dominant D1
 // write cost and the trigger for "D1 DB is overloaded" queueing under bursts.
 // The per-colo edge cache still serves the hot same-client repoll pattern, so
@@ -68,6 +75,7 @@ export async function githubCacheKey(
   identity?: Pick<Identity, "id" | "kind">,
 ): Promise<string> {
   const stable = {
+    protocol_epoch: CACHE_PUBLICATION_EPOCH,
     pool,
     method: request.method,
     path: request.path,
@@ -123,12 +131,15 @@ export async function readGitHubCacheWithSource(
   cacheKey: string,
   ctx?: ExecutionContext,
   maxAgeSeconds?: number,
+  sharedOnly = false,
 ): Promise<GitHubCacheRead | undefined> {
-  const edge = await readEdgeGitHubCache(cacheKey, maxAgeSeconds);
+  const edge = sharedOnly ? undefined : await readEdgeGitHubCache(cacheKey, maxAgeSeconds);
   if (edge !== undefined) {
     return { cached: edge, source: "edge" };
   }
-  const row = await env.DB.prepare(queries.readGitHubCache).bind(cacheKey).first<CacheRow>();
+  const row = await env.DB.prepare(queries.readGitHubCache)
+    .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
+    .first<CacheRow>();
   const cached = cacheRowResponse(row);
   if (cached === undefined || !withinRequestedMaxAge(cached, maxAgeSeconds)) {
     return undefined;
@@ -143,16 +154,18 @@ export async function readEdgeGitHubCache(
   cacheKey: string,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
-  const edge = await readEdgeJSON<CachedGitHubResponse>(EDGE_CACHE_NAMESPACE, cacheKey);
-  if (edge !== undefined) {
+  const edge = await readEdgeJSON<CachedGitHubResponse & { protocol_epoch: string }>(
+    EDGE_CACHE_NAMESPACE,
+    cacheKey,
+  );
+  if (edge !== undefined && edge.protocol_epoch === CACHE_PUBLICATION_EPOCH) {
     if (freshCachedResponse(edge)) {
       if (withinRequestedMaxAge(edge, maxAgeSeconds)) {
-        return edge;
+        const { protocol_epoch: _epoch, ...cached } = edge;
+        return cached;
       }
       // Keep the still-fresh edge copy; another data center may have refilled
       // D1 more recently, so fall through instead of evicting.
-    } else {
-      await deleteEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey);
     }
   }
   return undefined;
@@ -176,7 +189,9 @@ export async function readStaleGitHubCache(
   route: RouteInfo,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
-  const row = await env.DB.prepare(queries.readGitHubCacheAny).bind(cacheKey).first<CacheRow>();
+  const row = await env.DB.prepare(queries.readGitHubCacheAny)
+    .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
+    .first<CacheRow>();
   if (row === null || !staleCacheAllowed(row, route)) {
     return undefined;
   }
@@ -252,16 +267,23 @@ export async function writeGitHubCache(
   request: RelayRequest,
   route: RouteInfo,
   response: GitHubRelayResponse,
+  owner: PublicationOwner,
   identity?: Identity,
+  observedAt = Date.now(),
 ): Promise<CacheFillOutcome> {
+  if (
+    owner.protocol_epoch !== CACHE_PUBLICATION_EPOCH ||
+    owner.resource_key !== bodyPublicationResource(cacheKey)
+  )
+    return "rejected";
   if (response.status < 200 || response.status >= 300) {
     return "failed";
   }
   const ttlSeconds = cacheTTLSeconds(route, response);
   const staleSeconds = staleCacheSeconds(route, ttlSeconds);
-  const createdAt = sqliteTimestamp(new Date());
-  const expiresAt = sqliteTimestamp(new Date(Date.now() + ttlSeconds * 1000));
-  const staleExpiresAt = sqliteTimestamp(new Date(Date.now() + (ttlSeconds + staleSeconds) * 1000));
+  const createdAt = sqliteTimestamp(observedAt);
+  const expiresAt = sqliteTimestamp(new Date(observedAt + ttlSeconds * 1000));
+  const staleExpiresAt = sqliteTimestamp(new Date(observedAt + (ttlSeconds + staleSeconds) * 1000));
   const cached: CachedGitHubResponse = {
     ...response,
     body_encoding: response.body_encoding ?? "json",
@@ -270,12 +292,36 @@ export async function writeGitHubCache(
     ...(identity === undefined ? {} : { identity: { id: identity.id, kind: identity.kind } }),
   };
   const bodyJson = JSON.stringify(response.body);
-  const edgeWrite = writeEdgeCachedResponse(cacheKey, cached);
-  let sharedWrite = Promise.resolve(false);
-  // UTF-8 bytes, not String.length: UTF-16 code units undercount multibyte
-  // content by up to 3x, which would let Unicode-heavy rows past the cap.
-  if (new TextEncoder().encode(bodyJson).byteLength <= MAX_D1_CACHE_BODY_BYTES) {
-    sharedWrite = env.DB.prepare(queries.writeGitHubCache)
+  // D1 acceptance precedes edge dispatch. Every timestamp above is frozen
+  // before awaiting the actual statement, including its acknowledgment.
+  if (new TextEncoder().encode(bodyJson).byteLength > MAX_D1_CACHE_BODY_BYTES) {
+    try {
+      const accepted = await env.DB.prepare(queries.authorizeEdgePublication)
+        .bind(...publicationBinding(owner), expiresAt)
+        .first();
+      if (accepted === null) return "rejected";
+    } catch {
+      return "unknown";
+    }
+    return (await writeEdgeCachedResponse(cacheKey, cached)) ? "edge_only" : "failed";
+  }
+  type Receipt = {
+    status: number;
+    publication_id: number;
+    publication_token: string;
+    created_at: string;
+    expires_at: string;
+    body_json: string;
+    response_headers_json: string;
+    body_encoding: string;
+    identity_id: string | null;
+    identity_kind: string | null;
+    stale_expires_at: string;
+  };
+  let receipt: Pick<Receipt, "publication_id"> | null;
+  let ambiguous = false;
+  try {
+    receipt = await env.DB.prepare(queries.writeGitHubCache)
       .bind(
         cacheKey,
         request.pool,
@@ -293,19 +339,45 @@ export async function writeGitHubCache(
         identity?.kind ?? null,
         expiresAt,
         staleExpiresAt,
+        createdAt,
+        owner.protocol_epoch,
+        owner.id,
+        owner.owner_token,
       )
-      .run()
-      .then(() => true)
-      .catch((error: unknown) => {
-        console.error("github shared cache write failed", error);
-        return false;
-      });
+      .first<Pick<Receipt, "publication_id">>();
+  } catch {
+    receipt = null;
+    ambiguous = true;
   }
-  const [edgePublished, sharedPublished] = await Promise.all([edgeWrite, sharedWrite]);
-  if (sharedPublished) {
-    return "shared";
+  if (receipt === null) {
+    // An exact immutable receipt can recover a replay or a lost write ack.
+    let persisted: Receipt | null;
+    try {
+      persisted = await env.DB.withSession("first-primary")
+        .prepare(queries.readBodyPublicationReceipt)
+        .bind(cacheKey, owner.protocol_epoch)
+        .first<Receipt>();
+    } catch {
+      return "unknown";
+    }
+    if (
+      persisted?.publication_id !== owner.id ||
+      persisted.publication_token !== owner.owner_token ||
+      persisted.created_at !== createdAt ||
+      persisted.expires_at !== expiresAt ||
+      persisted.status !== response.status ||
+      persisted.body_json !== bodyJson ||
+      persisted.response_headers_json !== JSON.stringify(response.headers) ||
+      persisted.body_encoding !== (response.body_encoding ?? "json") ||
+      persisted.identity_id !== (identity?.id ?? null) ||
+      persisted.identity_kind !== (identity?.kind ?? null) ||
+      persisted.stale_expires_at !== staleExpiresAt
+    ) {
+      return ambiguous ? "unknown" : "rejected";
+    }
   }
-  return edgePublished ? "edge_only" : "failed";
+  await writeEdgeCachedResponse(cacheKey, cached);
+  return "shared";
 }
 
 function freshCachedResponse(cached: CachedGitHubResponse): boolean {
@@ -325,7 +397,12 @@ function freshCachedResponse(cached: CachedGitHubResponse): boolean {
 function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse): Promise<boolean> {
   const expiresAt = parseSQLiteTimestamp(cached.expires_at);
   const ttlSeconds = Math.floor((expiresAt - Date.now()) / 1000);
-  return writeEdgeJSON(EDGE_CACHE_NAMESPACE, cacheKey, cached, ttlSeconds);
+  return writeEdgeJSON(
+    EDGE_CACHE_NAMESPACE,
+    cacheKey,
+    { ...cached, protocol_epoch: CACHE_PUBLICATION_EPOCH },
+    ttlSeconds,
+  );
 }
 
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {

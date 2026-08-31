@@ -13,10 +13,14 @@ describe("cache miss coalescing", () => {
       readShared,
     });
 
-    expect(result.owner?.token).toBe("leader");
+    expect(result.owner?.capability.owner_token).toBe("leader");
     expect(readShared).toHaveBeenCalledOnce();
     await result.owner?.fail();
-    expect(coordinator.completeCacheFill).toHaveBeenCalledWith("cache-key", "leader", "failed");
+    expect(coordinator.completePublication).toHaveBeenCalledWith(
+      expect.objectContaining({ owner_token: "leader" }),
+      "failed",
+      undefined,
+    );
   });
 
   it.each([
@@ -45,9 +49,13 @@ describe("cache miss coalescing", () => {
         }),
       ).rejects.toThrow();
 
-      expect(coordinator.completeCacheFill).toHaveBeenCalledWith("cache-key", "leader", "failed");
+      expect(coordinator.completePublication).toHaveBeenCalledWith(
+        expect.objectContaining({ owner_token: "leader" }),
+        "failed",
+        undefined,
+      );
       await vi.advanceTimersByTimeAsync(6_000);
-      expect(coordinator.renewCacheFill).not.toHaveBeenCalled();
+      expect(coordinator.renewPublication).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -66,7 +74,7 @@ describe("cache miss coalescing", () => {
     expect(result.cached).toMatchObject({ body: { status: "completed" } });
     expect(readShared).toHaveBeenCalledOnce();
     expect(readEdge).not.toHaveBeenCalled();
-    expect(coordinator.acquireCacheFill).toHaveBeenCalledOnce();
+    expect(coordinator.acquirePublication).toHaveBeenCalledOnce();
   });
 
   it("serves an edge-only completion from the same colo without D1", async () => {
@@ -97,10 +105,10 @@ describe("cache miss coalescing", () => {
       readEdge,
     });
 
-    expect(result.owner?.token).toBe("takeover");
+    expect(result.owner?.capability.owner_token).toBe("takeover");
     expect(readEdge).toHaveBeenCalledOnce();
     expect(readShared).toHaveBeenCalledOnce();
-    expect(coordinator.acquireCacheFill).toHaveBeenCalledTimes(2);
+    expect(coordinator.acquirePublication).toHaveBeenCalledTimes(2);
     await result.owner?.fail();
   });
 
@@ -117,7 +125,7 @@ describe("cache miss coalescing", () => {
       readEdge,
     });
 
-    expect(result.owner?.token).toBe("retry-owner");
+    expect(result.owner?.capability.owner_token).toBe("retry-owner");
     expect(readShared).toHaveBeenCalledOnce();
     expect(readEdge).not.toHaveBeenCalled();
     await result.owner?.fail();
@@ -127,7 +135,7 @@ describe("cache miss coalescing", () => {
     vi.useFakeTimers();
     try {
       const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "lost-owner" }]);
-      coordinator.renewCacheFill.mockResolvedValueOnce(false);
+      coordinator.renewPublication.mockResolvedValueOnce(false);
       const acquisition = await acquireOwnedCacheFill(coordinator, "cache-key");
       expect(acquisition.kind).toBe("owner");
       if (acquisition.kind !== "owner") {
@@ -137,8 +145,8 @@ describe("cache miss coalescing", () => {
       await expect(acquisition.owner.renew()).resolves.toBe(false);
       await expect(acquisition.owner.complete("shared")).resolves.toBe(false);
       await vi.advanceTimersByTimeAsync(6_000);
-      expect(coordinator.renewCacheFill).toHaveBeenCalledOnce();
-      expect(coordinator.completeCacheFill).not.toHaveBeenCalled();
+      expect(coordinator.renewPublication).toHaveBeenCalledOnce();
+      expect(coordinator.completePublication).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -152,7 +160,7 @@ describe("cache miss coalescing", () => {
       const renewal = new Promise<boolean>((resolve) => {
         resolveRenewal = resolve;
       });
-      coordinator.renewCacheFill.mockReturnValue(renewal);
+      coordinator.renewPublication.mockReturnValue(renewal);
       const acquisition = await acquireOwnedCacheFill(coordinator, "cache-key");
       expect(acquisition.kind).toBe("owner");
       if (acquisition.kind !== "owner") {
@@ -161,14 +169,18 @@ describe("cache miss coalescing", () => {
 
       const explicitRenewal = acquisition.owner.renew();
       const publication = acquisition.owner.publish(async () => "shared");
-      expect(coordinator.renewCacheFill).toHaveBeenCalledOnce();
+      expect(coordinator.renewPublication).toHaveBeenCalledOnce();
       resolveRenewal(true);
       await expect(explicitRenewal).resolves.toBe(true);
-      await expect(publication).resolves.toBe("shared");
-      expect(coordinator.completeCacheFill).toHaveBeenCalledWith("cache-key", "leader", "shared");
+      await expect(publication).resolves.toEqual({ storage: "shared", completion: "accepted" });
+      expect(coordinator.completePublication).toHaveBeenCalledWith(
+        expect.objectContaining({ owner_token: "leader" }),
+        "shared",
+        acquisition.owner.capability.id,
+      );
 
       await vi.advanceTimersByTimeAsync(6_000);
-      expect(coordinator.renewCacheFill).toHaveBeenCalledOnce();
+      expect(coordinator.renewPublication).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
@@ -176,14 +188,14 @@ describe("cache miss coalescing", () => {
 
   it("re-enters acquisition after a waiting RPC is reset", async () => {
     const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "recovered-owner" }]);
-    coordinator.acquireCacheFill.mockRejectedValueOnce(new Error("Durable Object reset"));
+    coordinator.acquirePublication.mockRejectedValueOnce(new Error("Durable Object reset"));
 
     const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
       readShared: async () => undefined,
     });
 
-    expect(result.owner?.token).toBe("recovered-owner");
-    expect(coordinator.acquireCacheFill).toHaveBeenCalledTimes(2);
+    expect(result.owner?.capability.owner_token).toBe("recovered-owner");
+    expect(coordinator.acquirePublication).toHaveBeenCalledTimes(2);
     await result.owner?.fail();
   });
 });

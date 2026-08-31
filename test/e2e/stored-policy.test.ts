@@ -1,12 +1,13 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { githubCacheKey, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey } from "../../src/cache";
 import { ensurePool, loadPoolPolicy } from "../../src/db";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { recordPublicGitHubRepo } from "../../src/public-repos";
+import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import { malformedStoredPolicies, restrictivePolicy } from "../fixtures/stored-policy";
 import {
   bearer,
@@ -101,7 +102,7 @@ describe("Worker stored pool policy", () => {
       const upstream = mockUpstream();
       const edgeMatch = vi.spyOn(caches.default, "match");
       await expectUnavailable(await relay(CHECK_PATH));
-      await deleteEdgeJSON("github-v1", key);
+      await deleteEdgeJSON("github-publication-v1", key);
       await expectUnavailable(await relay(CHECK_PATH));
       await expectUnavailable(
         await relay(CHECK_PATH, CALLER_TOKEN, { headers: { "if-none-match": '"miss"' } }),

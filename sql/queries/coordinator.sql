@@ -40,6 +40,16 @@ SELECT identity_id, expires_at
 FROM leases
 WHERE route_key = ?;
 
+-- name: CreateLegacyCacheFillExpiryIndex :exec
+CREATE INDEX IF NOT EXISTS cache_fills_expiry ON cache_fills(expires_at);
+
+-- name: DrainExpiredLegacyCacheFills :exec
+DELETE FROM cache_fills
+WHERE cache_key IN (
+  SELECT old.cache_key FROM cache_fills AS old WHERE old.expires_at <= ?1
+  ORDER BY old.expires_at LIMIT 16
+);
+
 -- name: GetRateState :one
 SELECT limit_count, remaining, reset_at
 FROM rate_states

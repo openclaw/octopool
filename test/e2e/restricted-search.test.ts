@@ -1,9 +1,10 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { githubCacheKey, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
-import { recordPublicGitHubRepo } from "../../src/public-repos";
+import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import {
   deniedRepoSearchQueries,
   repoSearchPaths,
@@ -112,7 +113,7 @@ describe.each(repoSearchPaths)("Worker restricted search boundary for %s", (path
           body: searchBody,
           body_encoding: "json",
         });
-        if (layer === "shared") await deleteEdgeJSON("github-v1", key);
+        if (layer === "shared") await deleteEdgeJSON("github-publication-v1", key);
       }
       const before = await cacheRows();
       expect(before).toHaveLength(2);

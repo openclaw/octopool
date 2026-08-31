@@ -436,7 +436,7 @@ describe("Worker end-to-end relay", () => {
     )
       .bind(cacheRow!.cache_key)
       .run();
-    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
     const limited = githubUpstream({
       primary: jsonResponse(
         { message: "rate limited" },
@@ -513,7 +513,7 @@ describe("Worker end-to-end relay", () => {
     )
       .bind(cacheRow!.cache_key)
       .run();
-    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
 
     const upstream = githubUpstream({
       primary: jsonResponse(
@@ -565,7 +565,7 @@ describe("Worker end-to-end relay", () => {
     )
       .bind(cacheRow!.cache_key)
       .run();
-    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
 
     const upstream = githubUpstream({
       primary: jsonResponse(
@@ -638,7 +638,7 @@ describe("Worker end-to-end relay", () => {
     )
       .bind(cacheRow!.cache_key)
       .run();
-    await deleteEdgeJSON("github-v1", cacheRow!.cache_key);
+    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
 
     const limited = vi.fn<typeof fetch>(async (input, init) => {
       const token = bearer(input, init);

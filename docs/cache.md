@@ -7,7 +7,7 @@ reduce load on pooled identities.
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
 `src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
-`0002`/`0003`/`0006`/`0011`/`0013`.
+`0002`/`0003`/`0006`/`0011`/`0013`/`0020`.
 
 ## Read-through edge + D1 cache
 
@@ -29,7 +29,10 @@ are never sent across transports.
 ### Cache key
 
 SHA-256 (base64url) over a stable, sorted JSON of: pool, method, path, normalized
-query, the vary headers, the normalized route key, and any validated state discriminator.
+query, the vary headers, the normalized route key, any validated state discriminator, and
+the server-owned publication protocol epoch (`publication-v1`). Every body key, including
+raw REST, identity, canonical, stale, and conditional-revalidation candidates, changes
+with this epoch. Readers never fall back to a previous epoch.
 Default pagination
 (`page=1`, `per_page=30`) and default JSON `accept` variants are folded together; custom
 media types and non-default query values still produce distinct entries. The key is
@@ -41,12 +44,13 @@ and repository/workflow run lists, including canonical supersets and identity-sp
 entries, cannot reuse summaries cached before the ownership fix. Existing
 `actions-summary-v1` clients keep the same wire format but miss those old entries in
 edge, D1, stale fallback, fill coalescing, and conditional revalidation. Raw REST and
-unrelated shapes keep their existing keys; no cache purge is needed.
+unrelated shapes have no Actions representation discriminator; the common publication
+epoch still applies. No cache purge is needed.
 
 Release views and latest-release reads with `release-summary-v1` similarly include
 `release-summary-raw-v2`. Existing clients cannot reuse the old HTML-derived bodies
-from edge, D1, stale fallback, fill coalescing, or conditional revalidation. Only the
-shaped release keys change; raw REST entries retain their keys. The generation applies
+from edge, D1, stale fallback, fill coalescing, or conditional revalidation. Only shaped releases carry this representation discriminator; raw REST entries still
+carry the common publication epoch. The generation applies
 to metadata-only projections too, since they share the same response body.
 
 Issue timelines and the three issue-event list/view routes include `issue-events-public-v2`
@@ -55,7 +59,8 @@ may retain private cross-reference details, even after anonymous revalidation re
 identity attribution. All old keys are retired across edge, D1, stale fallback, fill coalescing,
 and revalidation. Only anonymous responses populate the new generation. Caller conditionals
 bypass storage and use the anonymous API; a `304` never revives an old server-cached body.
-Repository/network activity feeds and unrelated cache keys are unchanged.
+Repository/network activity feeds and unrelated routes do not carry the issue-event
+discriminator; they still carry the common publication epoch.
 
 PR file-list routes may include a validated
 `route_hint.pr_head_sha` or closed/merged `route_hint.pr_state` discriminator. Clients
@@ -317,22 +322,76 @@ age bound retain this outage fallback; an explicit bound must also be satisfied.
 Otherwise the existing typed failure/local-fallback flow applies. Stale serves still
 run the public-repo guard and active-identity check before returning.
 
-Cache publication is awaited before returning a miss response, closing the response/write
-race for immediate repeat reads. Concurrent identical misses acquire renewable,
-token-fenced ownership in the pool Durable Object. Followers wait on coordinator completion,
-not Cache API or D1 polling. `shared` completion triggers one edge+D1 read; `edge_only`
-triggers one local-edge read; an absent promised result, `failed` publication, owner expiry,
-or Durable Object recovery returns to atomic acquisition before any upstream work. Owners
-renew while valid upstream calls run, verify ownership immediately before publication, and
-complete before audit work; stale tokens cannot publish completion or release a newer owner.
-Public-repository proof refreshes use the same acquisition, renewal, completion, and fencing
-lifecycle on the pool coordinator colocated with the D1 primary, reporting `shared` only after
-confirmed D1 persistence. Edge-only publication remains local to the serving colo. Audit writes
-remain deferred.
-An hourly scheduled task deletes cache entries after each entry's route-specific
-`stale_expires_at` deadline in bounded batches, preserving every configured stale-serving
-window while keeping D1 growth bounded. R2 expiry is handled by the operator-configured
-bucket lifecycle rule described above.
+Cache publication is awaited before returning a miss response. D1 grants renewable
+publication authority: `(protocol epoch, resource key, global AUTOINCREMENT ID, random token)`.
+The capability comes only from a successfully committed `RETURNING` result. D1's execution
+clock sets/checks the eight-second lease; owners renew every three seconds, never shorten
+a later persisted deadline, and retain the final renewal before publication. Neither a DO waiter map nor a pre-write
+renewal grants permission to publish: the **actual INSERT/UPDATE** requires the exact live
+D1 owner and the original unexpired evidence deadline. Both absent-row insertion and
+replacement are guarded. IDs remain unique after completion/GC because `sqlite_sequence`
+is retained. No payload has an owner foreign key or deletion cascade.
+
+Pool DOs notify/coalesce body waiters; one reserved global proof DO coordinates normalized
+repository names across pools and both verdicts. A nonblocking attempt precedes each of the
+three existing anonymous observations. Busy/unknown acquisition still fetches normally but
+never persists that observation opportunistically. The scope releases before explicit proof
+guards, body-key switches, finalization, or canonical/exact continuation. Body ownership may
+precede proof ownership; proof ownership never waits for a body owner. Anonymous `304`
+revalidates a body, never repository visibility.
+
+Body fetch/304 validation time is captured with the initial response, before awaited proof
+publication, explicit guards or first-page aggregation. Internal response/time metadata
+keeps that evidence and its original expiry through SQL acknowledgment without adding fields
+to the relay payload or stored user body.
+
+Storage (`shared`, `edge_only`, `failed`, `rejected`, `unknown`) and completion acknowledgment
+(`accepted`, `lost`, `unknown`) are distinct internal results. A zero-row write is rejected
+unless an exact immutable already-committed receipt recovers a replay/lost acknowledgment.
+A stored denial completes successfully before returning `repo_not_public`. Shared proof
+completions identify the actual published or reused proof, not the notifier's newer ownership
+ID. Ownership-only completion does not fabricate a publication receipt. Shared waiters
+reread authoritative D1; a waiting proof follower cannot use an older positive edge entry to
+supersede the completed denial. Missing results and expired owners return to acquisition
+before upstream work. Failure to obtain D1 authority cannot create a local/shared owner.
+Every lost/unknown completion rereads authoritative proof before authorizing from a probe,
+including when storage history is unknown. Only a receipt from the same or a newer owner can
+supersede that observation; an older positive proof cannot override a newly observed denial.
+That request-local evidence floor survives retries, other owners' reuse notifications, and
+historical-proof fallback without adding persistent state or a hot-hit lookup.
+Revocation can clean an expired exact owner,
+but that cleanup is not an accepted live completion. Persistence failure alone can still
+permit the direct request when its exact owner completes live and the observed evidence
+has not expired; it does not mint a shared proof.
+Receipts and capability tokens stay internal, outside relay envelopes and health snapshots.
+
+D1 acceptance precedes the edge put for D1-sized bodies and proofs. Oversized bodies still
+store only at the edge, but require a small guarded D1 authorization statement. Each edge
+entry embeds an immutable absolute expiry and protocol epoch; D1 warming preserves that
+expiry. Edge storage has **bounded freshness, not CAS or linearizable latest-value semantics**:
+a delayed accepted put can replace a newer edge entry until its original expiry. It does not
+extend that expiry, and failed/stale publication never deletes a replacement edge entry.
+Independent hot body-plus-covering-proof hits add no publication D1/DO calls. Existing
+identity eligibility/auth-cache reads and audit writes retain their own contracts.
+
+Completed owners are deleted immediately. Every durable acquisition attempt batches an
+indexed atomic deletion of at most 16 expired owner rows with acquisition: one D1 binding
+operation, two SQL statements, including on contention. The same-statement busy prefilter
+avoids allocator advancement for a known-live owner. Each attempt can abandon at most one
+new owner; once expired, traffic can remove up to sixteen. This bounds per-attempt work,
+not absolute storage during an arbitrary burst or outage. Idle backlog has a separate
+hourly fallback of at most 20 × 500 owner deletions. Payload and expired-proof pruning have
+independent 20 × 500 budgets and never reset the sequence or delete live ownership.
+
+Native local D1 measurements for a short body fill, including the final renewal, were
+four binding operations / five SQL statements and 13 rows read / 11 written (empty owner
+backlog). A 16-row owner GC read 80 rows and wrote 16 using the expiry index. Three attempts
+removed an expired backlog of 33 as 17 → 1 → 0. Proof warming measured four binding operations / five statements and 14 rows read /
+10 written in the same fixture, including acquisition, final renewal, proof write and completion; long observations add one renewal statement
+per active owner every three seconds. A 3.2-second renewable body fill measured five binding operations / six statements,
+15 rows read / 13 written, including its periodic and final renewals. These are local
+runtime counters and logical calls, not hosted D1 billing or a throughput claim. See [operations](operations.md#cache-publication-upgrade-and-restore)
+for rollout, restore, and backlog monitoring requirements.
 
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and
@@ -370,7 +429,7 @@ is public.
   responses still run an explicit visibility check because an empty result does not prove
   that a `repo:` qualifier names a public repository; token-free-only shaped search uses
   the public repository page marker directly.
-- A successful public check is recorded in `github_public_repos` with a TTL
+- A successful public check is recorded in `github_public_repo_proofs` with a TTL
   (`PUBLIC_REPO_TTL_SECONDS`, default 30s; the hosted deployment sets 900s) and the edge
   cache; subsequent cache hits reuse the fresh proof instead of re-hitting GitHub. A
   proof refresh stalls concurrent requests for that repo behind one probe, so a short
@@ -391,8 +450,9 @@ hard `404`/private response always denies.
 
 - `github_cache_entries` — cache key, pool, method, path, query/headers JSON, route
   key/kind, status, response headers JSON, body JSON, body encoding, source identity,
-  created/fresh/stale expiration timestamps (migrations `0002` and `0011`).
-- `github_public_repos` — `owner`, `repo`, `checked_at`, `expires_at` (migration `0003`).
+  created/fresh/stale expiration timestamps and internal publication receipt (migrations `0002`, `0011`, `0020`).
+- `cache_publication_owners` — live/abandoned capabilities, global AUTOINCREMENT fence, unique epoch/resource, indexed D1-clock expiry (`0020`); retain its `sqlite_sequence`.
+- `github_public_repo_proofs` — epoch-isolated positive/negative evidence, immutable timestamps and internal publication receipt (`0020`). Legacy `github_public_repos` is ignored by new readers.
 - `github_pr_state_proofs` — short-lived validated PR head/state discriminators for
   state-scoped PR subresource cache keys (migration `0006`).
 - `audit_events.cache_status` / `audit_events.cacheable` — per-request cache metrics
@@ -404,4 +464,5 @@ hard `404`/private response always denies.
 - `ACTIONS_LOGS` R2 binding (`octopool-actions-logs`) — raw terminal Actions log objects;
   no D1 migration is required.
 
-Secret values are never written to either cache.
+Upstream credentials are never written to either cache. Internal publication capability
+tokens are stored only in ownership/receipt metadata; they are not public response fields.

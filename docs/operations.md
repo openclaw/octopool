@@ -179,6 +179,65 @@ Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
 ## Migrations
 
+### Cache publication upgrade and restore
+
+Apply additive `0020_cache_publication.sql` after `0019` and before routing traffic to
+the publication-fenced Worker. Verify the owner table's AUTOINCREMENT primary key,
+safe-integer CHECK, unique epoch/resource index and expiry index, the body receipt
+columns, and the new `github_public_repo_proofs` table. The migration does not copy
+legacy positive proofs, purge bodies, alter identity feedback, or apply itself remotely.
+
+The server-owned `publication-v1` epoch composes with every existing representation
+generation. New readers refuse old bodies/proofs, including stale and 304 candidates.
+Warm-up therefore costs fresh upstream observations; no global purge is necessary.
+Old Workers still in flight can call the retained legacy cache-fill RPCs and publish
+only to their old key/proof namespaces. Each new acquisition also drains at most 16
+expired `cache_fills` rows in its contacted DO using a local expiry index; live fills,
+identity leases, cooldowns and rate feedback remain intact. Dormant old DOs retain their
+rows until contacted. Remove the legacy RPC/table surface only after old Worker routing
+and in-flight requests are demonstrably drained. Rolling back to old readers restores
+the old publication defect, regardless of the new schema.
+
+Never reset, drop/recreate, or restore `cache_publication_owners.sqlite_sequence` behind
+issued capabilities within the same epoch. Backup/export must retain its high-water mark.
+If restore/import/rebuild can lower it, deploy a **new isolated server epoch** before
+resuming new-reader publication, covering body keys, proof keys and edge namespaces.
+Do not reuse an epoch name or copy old positives into it. The final safe ID is
+9007199254740991; exhaustion fails closed, rather than rounding, wrapping, or recycling.
+There is no dynamic epoch registry: retired code may still write its own old namespace.
+Drain its routing before claiming every request is repaired.
+
+Owner completion deletes immediately. Each D1 acquisition batches indexed GC of at most
+16 expired owners plus allocation (two SQL statements, one binding call). The hourly
+idle fallback is at most 10,000 expired owners, separately from proof/body/audit pruning.
+Traffic cleanup has sixteen removals per attempt versus at most one newly abandoned
+grant; the eight-second expiry, bursts, outages and no-traffic periods still determine
+transient occupancy. Monitor expired count and oldest expiry rather than claiming a
+fixed cardinality or treating a bounded batch as a bounded backlog. DELETE makes pages
+reusable and does not guarantee that the allocated SQLite file shrinks.
+
+The following operator diagnostics are aggregate-only; they do not expose capability
+tokens. Run them only through the operator's normal authorized database workflow:
+
+```sql
+SELECT count(*) AS owners,
+       sum(lease_until_ms <= unixepoch('now') * 1000) AS expired_owners,
+       min(CASE WHEN lease_until_ms <= unixepoch('now') * 1000
+                THEN lease_until_ms END) AS oldest_expired_ms
+FROM cache_publication_owners;
+SELECT seq, 9007199254740991 - seq AS remaining_safe_ids
+FROM sqlite_sequence WHERE name = 'cache_publication_owners';
+```
+
+These approximate monitoring timestamps have second resolution; publication and renewal
+use the millisecond D1 execution clock. Local native D1 tests establish generated-query
+behavior, retained sequence, commit receipts, expiry/GC, DO eviction, and Cache API
+lifecycle. They do not establish hosted retry timing, globally ordered edge puts, D1
+billing, or an atomic D1/DO/Cache API commit. An accepted delayed edge put can remain
+visible until its original immutable expiry; hot hits add no new authority lookup.
+
+### Migration inventory
+
 D1 schema lives in `migrations/`:
 
 - `0001_init.sql` — pools, callers, caller_pools, identities, identity_scopes,
@@ -208,6 +267,8 @@ D1 schema lives in `migrations/`:
   apply before the [rolling Worker upgrade](auth.md#immutable-membership-upgrade). Old timestamp writes cannot authorize new Workers.
 - `0018_active_caller_enrollment.sql` — unique active immutable GitHub ID plus case-insensitive org;
   refuses ambiguous duplicates without changing caller history. Apply before the updated enrollment Worker.
+- `0019_client_name_guards.sql` — schema guards for normalized client-name aliases.
+- `0020_cache_publication.sql` — committed publication ownership, body receipts, and isolated repository proofs.
 
 Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
 

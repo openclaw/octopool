@@ -1,3 +1,4 @@
+import { bodyPublicationResource } from "./cache-publication";
 import {
   readEdgeGitHubCache,
   readGitHubCacheWithSource,
@@ -29,7 +30,7 @@ export async function coalesceGitHubCacheMiss(
   const accepted = options.acceptCached ?? (async () => true);
 
   for (;;) {
-    const acquisition = await acquireOwnedCacheFill(coordinator, cacheKey);
+    const acquisition = await acquireOwnedCacheFill(coordinator, bodyPublicationResource(cacheKey));
     if (acquisition.kind === "owner") {
       try {
         const rechecked = await readShared();
@@ -46,7 +47,10 @@ export async function coalesceGitHubCacheMiss(
 
     let cached: CachedGitHubResponse | undefined;
     if (acquisition.kind === "completed" && acquisition.outcome === "shared") {
-      cached = (await readShared())?.cached;
+      cached = (
+        await (options.readShared?.() ??
+          readGitHubCacheWithSource(env, cacheKey, options.ctx, options.maxAgeSeconds, true))
+      )?.cached;
     } else if (acquisition.kind === "completed" && acquisition.outcome === "edge_only") {
       cached = await readEdge();
     }

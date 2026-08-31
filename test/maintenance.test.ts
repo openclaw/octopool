@@ -10,6 +10,7 @@ describe("scheduled maintenance", () => {
           queries.push(query);
           return {
             bind: () => ({
+              all: async () => ({ results: [] }),
               run: async () => ({ meta: { changes: 0 } }),
             }),
           };
@@ -20,6 +21,8 @@ describe("scheduled maintenance", () => {
     await runScheduledMaintenance(env);
 
     expect(queries).toEqual([
+      expect.stringContaining("DELETE FROM cache_publication_owners"),
+      expect.stringContaining("DELETE FROM github_public_repo_proofs"),
       expect.stringContaining("DELETE FROM github_cache_entries"),
       expect.stringContaining("DELETE FROM audit_events"),
     ]);

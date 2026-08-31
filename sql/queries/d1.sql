@@ -82,6 +82,7 @@ VALUES (?1, ?2, (SELECT id FROM caller_tokens WHERE id = ?3), ?4, ?5, ?6, ?7, ?8
 SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
 FROM github_cache_entries
 WHERE cache_key = ?1
+  AND publication_epoch = ?2
   AND expires_at > CURRENT_TIMESTAMP;
 
 -- name: ReadGitHubCacheAny :one
@@ -89,14 +90,21 @@ SELECT status, response_headers_json, body_json, body_encoding, identity_id, ide
        created_at, expires_at, stale_expires_at
 FROM github_cache_entries
 WHERE cache_key = ?1
+  AND publication_epoch = ?2
   AND stale_expires_at > CURRENT_TIMESTAMP;
 
--- name: WriteGitHubCache :exec
+-- name: WriteGitHubCache :one
 INSERT INTO github_cache_entries
   (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,
    status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,
-   expires_at, stale_expires_at)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+   expires_at, stale_expires_at, created_at, publication_epoch, publication_id, publication_token)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
+FROM cache_publication_owners
+WHERE protocol_epoch = ?18 AND resource_key = 'cache:' || ?1
+  AND id = ?19 AND owner_token = ?20
+  AND lease_until_ms > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+    + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+  AND ?15 > strftime('%Y-%m-%d %H:%M:%f', 'now')
 ON CONFLICT(cache_key) DO UPDATE SET
   status = excluded.status,
   response_headers_json = excluded.response_headers_json,
@@ -104,9 +112,21 @@ ON CONFLICT(cache_key) DO UPDATE SET
   body_encoding = excluded.body_encoding,
   identity_id = excluded.identity_id,
   identity_kind = excluded.identity_kind,
-  created_at = CURRENT_TIMESTAMP,
+  created_at = excluded.created_at,
   expires_at = excluded.expires_at,
-  stale_expires_at = excluded.stale_expires_at;
+  stale_expires_at = excluded.stale_expires_at,
+  publication_epoch = excluded.publication_epoch,
+  publication_id = excluded.publication_id,
+  publication_token = excluded.publication_token
+WHERE github_cache_entries.publication_epoch = excluded.publication_epoch
+  AND github_cache_entries.publication_id < excluded.publication_id
+RETURNING publication_id;
+
+-- name: ReadBodyPublicationReceipt :one
+SELECT status, publication_id, publication_token, created_at, expires_at, body_json, response_headers_json, body_encoding, identity_id, identity_kind, stale_expires_at
+FROM github_cache_entries
+WHERE cache_key = ?1 AND publication_epoch = ?2
+  AND expires_at > strftime('%Y-%m-%d %H:%M:%f', 'now');
 
 -- name: DeleteExpiredGitHubCacheBatch :exec
 DELETE FROM github_cache_entries
@@ -294,7 +314,8 @@ SELECT
   COUNT(*) AS total_entries,
   SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
   MAX(checked_at) AS newest_checked_at
-FROM github_public_repos;
+FROM github_public_repo_proofs
+WHERE protocol_epoch = ?1;
 
 -- name: PoolHealth :one
 SELECT
@@ -424,32 +445,52 @@ UPDATE web_sessions
 SET last_seen_at = CURRENT_TIMESTAMP
 WHERE session_hash = ?1;
 
--- name: UpsertPublicRepoProof :exec
-INSERT INTO github_public_repos (owner, repo, is_public, checked_at, expires_at)
-VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, ?4))
-ON CONFLICT(owner, repo) DO UPDATE SET
+-- name: UpsertPublicRepoProof :one
+INSERT INTO github_public_repo_proofs
+  (protocol_epoch, owner, repo, is_public, checked_at, expires_at, publication_id, publication_token)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+FROM cache_publication_owners
+WHERE protocol_epoch = ?1 AND resource_key = 'public-repo:' || ?2 || '/' || ?3
+  AND id = ?7 AND owner_token = ?8
+  AND lease_until_ms > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+    + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)
+  AND ?6 > strftime('%Y-%m-%d %H:%M:%f', 'now')
+ON CONFLICT(protocol_epoch, owner, repo) DO UPDATE SET
   is_public = excluded.is_public,
   checked_at = excluded.checked_at,
-  expires_at = excluded.expires_at;
+  expires_at = excluded.expires_at,
+  publication_id = excluded.publication_id,
+  publication_token = excluded.publication_token
+WHERE github_public_repo_proofs.publication_id < excluded.publication_id
+RETURNING publication_id, publication_token, checked_at, expires_at, is_public;
+
+-- name: ReadPublicRepoProof :one
+SELECT protocol_epoch, checked_at, expires_at, is_public, publication_id, publication_token
+FROM github_public_repo_proofs
+WHERE protocol_epoch = ?1 AND owner = ?2 AND repo = ?3
+  AND expires_at > strftime('%Y-%m-%d %H:%M:%f', 'now');
 
 -- name: CoveringPublicRepoProof :one
-SELECT checked_at, expires_at
-FROM github_public_repos
-WHERE lower(owner) = ?1
-  AND lower(repo) = ?2
+SELECT protocol_epoch, checked_at, expires_at, is_public, publication_id, publication_token
+FROM github_public_repo_proofs
+WHERE protocol_epoch = ?4 AND owner = ?1 AND repo = ?2
   AND is_public = 1
   AND checked_at >= datetime(?3, '-5 seconds')
-  AND expires_at > CURRENT_TIMESTAMP
-LIMIT 1;
+  AND expires_at > CURRENT_TIMESTAMP;
 
 -- name: FreshNegativePublicRepoProof :one
-SELECT checked_at, expires_at, is_public
-FROM github_public_repos
-WHERE lower(owner) = ?1
-  AND lower(repo) = ?2
+SELECT protocol_epoch, checked_at, expires_at, is_public, publication_id, publication_token
+FROM github_public_repo_proofs
+WHERE protocol_epoch = ?3 AND owner = ?1 AND repo = ?2
   AND is_public = 0
-  AND expires_at > CURRENT_TIMESTAMP
-LIMIT 1;
+  AND expires_at > CURRENT_TIMESTAMP;
+
+-- name: DeleteExpiredPublicRepoProofs :exec
+DELETE FROM github_public_repo_proofs
+WHERE (protocol_epoch, owner, repo) IN (
+  SELECT protocol_epoch, owner, repo FROM github_public_repo_proofs
+  WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1
+);
 
 -- name: FreshPRStateProof :one
 SELECT 1

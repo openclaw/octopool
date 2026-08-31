@@ -1,10 +1,11 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { githubCacheKey, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { sanitizeGitHubResponse } from "../../src/github-sanitize";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
-import { recordPublicGitHubRepo } from "../../src/public-repos";
+import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import type { Identity } from "../../src/types";
 import { issueEventCases, legacyIssueEventKey } from "../fixtures/issue-event-visibility";
 import { jsonResponse, rateHeaders, relay, seedPool } from "./harness";
@@ -80,7 +81,10 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
     const calls = mockUpstream(() => jsonResponse(publicBody, 200, apiHeaders('"public"')));
     for (const layer of ["miss", "edge", "shared"]) {
       if (layer === "shared")
-        await deleteEdgeJSON("github-v1", await githubCacheKey(request.pool, request, route));
+        await deleteEdgeJSON(
+          "github-publication-v1",
+          await githubCacheKey(request.pool, request, route),
+        );
       const response = await relay(path);
       expect(response.status).toBe(200);
       const envelope = await response.json<Envelope>();
@@ -207,7 +211,7 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
           identity,
         );
         if (layer === "stale") await expire(key);
-        if (layer === "shared") await deleteEdgeJSON("github-v1", key);
+        if (layer === "shared") await deleteEdgeJSON("github-publication-v1", key);
       }
       const before = await cacheRows();
       const calls = mockUpstream((upstream) =>
@@ -303,8 +307,8 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
     mockUpstream(() => jsonResponse(publicBody, 200, apiHeaders('"public"')));
     expect((await relay(path)).status).toBe(200);
     await expire(await githubCacheKey(request.pool, request, route));
-    await env.DB.prepare("DELETE FROM github_public_repos").run();
-    await deleteEdgeJSON("public-repo-v1", "openclaw/octopool");
+    await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+    await deleteEdgeJSON("public-repo-publication-v1", "openclaw/octopool");
     const calls: Request[] = [];
     vi.stubGlobal(
       "fetch",
@@ -333,7 +337,7 @@ async function expire(key: string) {
   )
     .bind(key)
     .run();
-  await deleteEdgeJSON("github-v1", key);
+  await deleteEdgeJSON("github-publication-v1", key);
 }
 
 function cacheRows() {

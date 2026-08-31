@@ -16,14 +16,14 @@ describe("release summary cache generation", () => {
       const route = classifyRoute(request, defaultPolicy("openclaw"));
       for (const identity of [undefined, { kind: "pat" as const, id: "primary" }]) {
         expect(await githubCacheKey(request.pool, request, route, identity)).not.toBe(
-          await legacyReleaseKey(request, route, identity),
+          await legacyReleaseKey(request, route, identity, "publication-v1"),
         );
       }
     },
   );
 
   it.each(["releases", "releases/latest", "releases/tags/v0.8.0", "releases/123", "pulls/5"])(
-    "preserves raw REST %s keys",
+    "composes protocol epoch with raw REST %s keys",
     async (suffix) => {
       const request = validateRelayRequest({
         pool: "maintainers",
@@ -32,7 +32,7 @@ describe("release summary cache generation", () => {
       });
       const route = classifyRoute(request, defaultPolicy("openclaw"));
       expect(await githubCacheKey(request.pool, request, route)).toBe(
-        await legacyReleaseKey(request, route),
+        await legacyReleaseKey(request, route, undefined, "publication-v1"),
       );
     },
   );

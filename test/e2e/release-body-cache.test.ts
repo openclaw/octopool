@@ -1,9 +1,10 @@
+import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { githubCacheKey, writeGitHubCache } from "../../src/cache";
+import { githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
-import { recordPublicGitHubRepo } from "../../src/public-repos";
+import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import { legacyReleaseKey, releaseMarkdown } from "../fixtures/release-summary";
 import { jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
@@ -20,7 +21,7 @@ describe.each(["tags/v0.8.0", "latest"])("release %s body cache", (suffix) => {
     "retires legacy HTML from %s and preserves new cached source",
     async (layer) => {
       const { request, route, oldKey } = await seedLegacy(path);
-      if (layer === "shared") await deleteEdgeJSON("github-v1", oldKey);
+      if (layer === "shared") await deleteEdgeJSON("github-publication-v1", oldKey);
       const upstream = mockAPI(path);
 
       const first = await (await relay(path, undefined, request)).json<Envelope>();
@@ -28,7 +29,7 @@ describe.each(["tags/v0.8.0", "latest"])("release %s body cache", (suffix) => {
       expect(first.relay.cache).toBe("miss");
       const key = await githubCacheKey(request.pool, request, route);
       for (const cachedLayer of ["edge", "shared"]) {
-        if (cachedLayer === "shared") await deleteEdgeJSON("github-v1", key);
+        if (cachedLayer === "shared") await deleteEdgeJSON("github-publication-v1", key);
         const cached = await (await relay(path, undefined, request)).json<Envelope>();
         expect(cached.body).toEqual(body);
         expect(cached.relay.cache).toBe("hit");
@@ -134,7 +135,7 @@ async function expire(key: string) {
   )
     .bind(key)
     .run();
-  await deleteEdgeJSON("github-v1", key);
+  await deleteEdgeJSON("github-publication-v1", key);
 }
 
 function mockAPI(path: string) {
