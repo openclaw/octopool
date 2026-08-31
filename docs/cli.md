@@ -493,7 +493,7 @@ With active rules, the initial local publication vocabulary is deliberately cons
   from implicitly pushing or forking. Reviews require one explicit review action. PR/issue creation
   accepts one `--label`/`-l` and one `--assignee`/`-a` value (use comma-separated lists),
   while PR/issue edits accept metadata-only add/remove label and assignee flags. Assignees may
-  include native `@me` or `@copilot`. PR create/edit/comment and issue create also accept repeated
+  include native `@me` or `@copilot`. PR/issue create/edit/comment also accept repeated
   `--attach` image/video files as described below.
 - Release `create`/`edit`: explicit title/notes or notes files and one tag.
   Creation requires `--verify-tag`, so gh cannot create a missing tag. Generated notes,
@@ -575,7 +575,7 @@ transaction. A failed child can leave a partial remote draft. Octopool does not 
 drafts, replace assets, clobber, retry uploads, or publish after failure. This capability
 does not add modeled standalone `release upload` support or new release-edit forms.
 
-Protected PR create/edit/comment and issue create commands accept up to 16 repeated `--attach FILE`
+Protected PR/issue create/edit/comment commands accept up to 16 repeated `--attach FILE`
 or `--attach=FILE` values. Raster image extensions are GIF, JPEG/JPG, PNG, and WebP; video
 extensions are MOV, MP4, and WebM. Images are limited to 10 MiB each, videos to 100 MiB each,
 and all attachments together to 100 MiB. The source path is structurally checked, optional
@@ -585,11 +585,13 @@ Markdown links/images that point at an attached local file are rewritten to the 
 so native `gh` can preserve labels, alt text, titles, and normal upload-URL replacement. Up to 64
 matched inline references are rewritten with bounded parser verification. Code spans remain literal;
 matching reference-style definitions are blocked rather than published with broken paths. Empty
-files, directories, other extensions, and video alt text are blocked. A new PR comment
-may consist only of attachments. PR edits with attachments and PR comment `--edit-last` attachment
-updates require explicit `--body` or `--body-file`, because native `gh` would otherwise fetch and
-republish existing text after the guard runs. Title or metadata flags do not satisfy this requirement
-for PR edits. PR edits allow an explicitly supplied empty body after inspection. Other
+files, directories, other extensions, and video alt text are blocked. A new PR/issue comment
+may consist only of attachments, including with `--edit-last=false`. PR/issue edits with attachments
+and PR/issue comment `--edit-last` (or `--edit-last=true`) attachment updates require an explicit
+complete `--body` or `--body-file`, including when `--create-if-none` is set, because native `gh`
+would otherwise fetch and republish existing text after the guard runs. Title or metadata flags do
+not satisfy this requirement for PR/issue edits. PR/issue edits allow an explicitly supplied empty
+body after inspection. Other
 modeled body requirements stay unchanged; issue creation still requires an explicit title and body.
 Attachment bytes are not text- or vision-inspected, so callers remain responsible for reviewing
 the media itself before publication.

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Allow typed attachments on protected `gh issue edit` and `gh issue comment` through existing strict snapshots and inline-reference rewriting, requiring explicit complete bodies for attachment edits.
 - Honor native input declarations and reject malformed nonempty declared JSON before dispatch, preserving explicit UTF-8 text, zero-byte best-effort compatibility, and existing interactive-input limits.
 - Normalize compound client-name aliases consistently across CLI, login and stats, safely rotate historical singletons in place, and refuse ambiguous legacy families without changing credentials; apply the schema write guards before rollout.
 - Include eligible wildcard PATs for explicitly allowed owners and fail over selected local credential errors with bounded shared cooldowns, preserving cache authorization, valid credential continuations, and hard aggregate egress denials.
