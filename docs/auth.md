@@ -85,8 +85,12 @@ only the discovered `api_base`; neither it nor `OCTOPOOL_ALLOW_INSECURE_LOGIN=1`
 later credential-bearing requests to redirect to another origin. Credential-free
 discovery keeps its existing redirect behavior.
 
-Clients are 1-80 hostname-safe characters. New CLI versions send the local hostname and
-can override it with `--client`; older clients use `legacy`. Audit rows retain the matched
+Clients are 1-80 hostname-safe characters after trimming and normalization. Every trailing
+`.local` suffix is removed, case-insensitively, while base case is preserved: `Host.local.local`
+and `Host.LOCAL` both mean `Host`, distinct from `host`. Compound spellings are aliases under
+this naming policy; the original hostname intent cannot be recovered from stored labels.
+New CLI versions send the local hostname and can override it with `--client`; older clients
+use `legacy`. The literal names `legacy`, `admin`, and `unknown` remain distinct clients. Audit rows retain the matched
 caller-token id so stats can separate machines without storing caller token values.
 
 Concurrent logins for one client converge on one caller and one stored token. The last
@@ -103,7 +107,21 @@ login may create a new active row, without inheriting the disabled row's grants 
 Null-ID history is never claimed by username, and neither disabled rows nor their
 credentials are reactivated.
 
-Migration `0018_active_caller_enrollment.sql` must precede this Worker upgrade. It rejects
+Verified token enrollment also reconciles a historical singleton alias in the same batch:
+it renames that token row, preserving its ID, creation time and audit links, then rotates its
+hash. If two or more stored tokens map to the requested name, login returns
+`409 client_name_ambiguous` with administrator guidance. The whole enrollment batch rolls
+back, including profile refresh, grants, rotation and pruning; all existing credentials
+continue to authenticate subject to their normal access checks. No credential is chosen or
+retired automatically. Browser enrollment does not reconcile client tokens.
+
+Migration `0019_client_name_guards.sql` must precede the Worker upgrade. Its insert/update
+triggers leave existing rows untouched and reject raw aliases and conflicting old-writer
+inserts. During a mixed-version rollout, old Workers cannot reconcile aliases and may reject
+login; old CLIs may still pre-normalize only one suffix. Complete the Worker and CLI rollout
+before claiming consistent presentation. See the [client-name upgrade](operations.md#client-name-upgrade).
+
+Migration `0018_active_caller_enrollment.sql` must also precede this Worker upgrade. It rejects
 ambiguous active duplicates without merging privileges or deleting history. Enrollment
 fails closed if the index is missing. See the [upgrade gate](operations.md#atomic-enrollment-upgrade).
 

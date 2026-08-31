@@ -259,8 +259,8 @@ bootstrap-hash authentication fallback. Same-client rotation retains token row I
 audit links. Ordinary cap pruning keeps the audit event, caller ID, and recorded client
 name while the deleted token's audit FK becomes NULL. Browser sessions remain attached
 to their original caller. Historical noncanonical client names (for example `host.local`
-versus `host`) need a separate reviewed inventory/retirement decision; this migration does
-not normalize or silently combine stored client keys.
+versus `host`) are not changed by migration 0018; see the client-name upgrade below for
+verified singleton reconciliation and the remaining ambiguity decision.
 
 During rollout, old code against the new index can reject a competing initial login;
 new code without the index fails enrollment closed. Coordinate an enrollment quiet window
@@ -268,6 +268,42 @@ if transient errors matter. Keep the index on a Worker rollback. A failed migrat
 the old enrollment race unresolved and must block rollout, not trigger a fallback. The
 normal 30-second cross-isolate auth-cache window still applies after rotation or row
 revocation. The deployment operator owns production preflight and deployment.
+
+## Client-name upgrade
+
+Apply `0019_client_name_guards.sql` before deploying the client-name Worker fix. Verify the
+migration record and both `caller_tokens_canonical_insert` and `caller_tokens_canonical_update`
+trigger definitions. Keep these guards on rollback. This schema-only migration never rewrites
+existing token names, hashes, audit labels or foreign keys, and deliberately permits existing
+ambiguous families to remain authenticated. It adds no per-relay write or history backfill.
+
+The policy removes every trailing `.local` suffix, case-insensitively, preserving base case.
+It treats compound spellings as aliases, not evidence of their original intent or physical
+host identity. Verified login resolves the immutable caller inside the existing atomic batch,
+renames an unambiguous singleton in place, rotates its token, then applies the normal cap.
+The row ID, creation time and audit links survive; unrelated clients, roles, grants and browser
+sessions are preserved. A family with multiple stored rows refuses with `409 client_name_ambiguous`;
+no new credential, profile refresh, grant or pruning commits. Existing credentials keep working.
+
+An operator must review each refused family and explicitly decide which credentials, if any,
+to retire. Do not choose by age, recent use or display label, union privileges, reparent audit
+history, or globally backfill names. Deleting a token clears its audit token FK under the existing
+schema; retaining every retired token identity would require a separately approved retirement
+design. The deployment operator owns production inventory and that unresolved decision.
+
+The triggers reject new noncanonical names and canonical inserts conflicting with a historical
+alias. Old Workers may therefore reject compound-name or historical-alias login during rollout;
+they cannot reintroduce a raw alias after corrected rotation. Old canonical writes still rotate
+an already reconciled singleton. Coordinate an enrollment quiet window if transient old-Worker
+errors matter. Deploy schema first and drain old Workers; new code without the guards is not a
+supported deployment. Upgrade CLIs and re-login to refresh saved labels. The 30-second
+cross-isolate auth-cache window and issuing-isolate invalidation remain unchanged.
+
+Login adds one indexed, caller-scoped reconciliation statement and bounded trigger checks over
+that caller's tokens (normally at most 16). Stats filters compare canonical aliases within the
+existing pool/time window; client groups project distinct recorded labels for the caller/window
+before aggregating and limiting results. Audit writes and stored history remain unchanged.
+Stats grouping cannot resolve credential ambiguity or establish that two labels were one machine.
 
 ## Activating string protection
 

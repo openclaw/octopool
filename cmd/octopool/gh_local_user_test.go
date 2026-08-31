@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,6 +65,23 @@ func TestNormalizeClientName(t *testing.T) {
 	} {
 		if got := normalizeClientName(input); got != expected {
 			t.Fatalf("normalizeClientName(%q)=%q want %q", input, got, expected)
+		}
+	}
+}
+
+func TestNormalizeCompoundClientName(t *testing.T) {
+	for input, expected := range map[string]string{
+		"Host.LoCaL.local.LOCAL": "Host",
+		"local.local.local":      "local",
+		".local.local":           ".local",
+		"Host.locality.local":    "Host.locality",
+		"Host.local-x.local":     "Host.local-x",
+		"  Host.local.local\t":   "Host",
+		"legacy":                 "legacy", "admin": "admin", "unknown": "unknown",
+		strings.Repeat("a", 80) + strings.Repeat(".local", 1000): strings.Repeat("a", 80),
+	} {
+		if got := normalizeClientName(input); got != expected || normalizeClientName(got) != expected {
+			t.Fatalf("normalization got %q want %q", got, expected)
 		}
 	}
 }

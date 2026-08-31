@@ -94,8 +94,13 @@ octopool login --client build-mac
   login, client, timestamp).
 - The default client name is the local hostname. `--client` overrides it; re-login rotates
   only that named client's caller token and leaves the user's other clients active.
-  macOS `.local` suffixes are normalized away at login and audit time so the same host does
-  not split usage across Bonjour and short hostname spellings.
+  All trailing `.local` suffixes are normalized away, case-insensitively, preserving base
+  case (`Host.local.local` becomes `Host`, distinct from `host`). The default hostname is
+  normalized then truncated to 80 characters; login normalizes that result again. Explicit
+  `--client` values are never truncated and must satisfy the server's 1-80 character limit
+  after normalization. `whoami` displays the saved login response; re-login updates an old
+  saved spelling. An ambiguous historical client family returns `client_name_ambiguous`:
+  ask an admin to review the conflicting credentials. Refusal leaves existing tokens valid.
 - Each caller retains up to 16 named clients. Adding another retires the least recently
   updated session, which bounds abandoned hostname and ephemeral-runner credentials.
 - Octopool validates the GitHub identity and OpenClaw org membership during login, and
@@ -376,6 +381,10 @@ Fetches `GET /v1/pools/<pool>/health` using the stored token. Returns identity c
 policy version.
 
 ### `octopool stats [--pool <id>] [--since 24h] [--client <name>] [--json]`
+
+Client filters and client groups use the same suffix policy for both current and historical
+audit labels. These are derived labels, not proof that credentials or physical machines
+were reconciled; stored audit names and caller/token links remain unchanged.
 
 Fetches `GET /v1/pools/<pool>/stats` using the stored token. The default human output
 shows the pool request count, service errors, expected local fallbacks, raw and

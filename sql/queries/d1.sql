@@ -317,6 +317,16 @@ DO UPDATE SET
   updated_at = CURRENT_TIMESTAMP
 RETURNING id, name, github_login, org_login;
 
+-- name: ReconcileCallerClient :exec
+UPDATE caller_tokens SET client_name = ?3
+WHERE caller_id = (
+  SELECT enrolled.id FROM callers AS enrolled
+  WHERE enrolled.github_user_id = ?1 AND enrolled.org_login = ?2 COLLATE NOCASE AND enrolled.status = 'active'
+)
+AND client_name <> ?3
+AND substr(client_name, 1, length(?3)) = ?3
+AND replace(lower(substr(client_name, length(?3) + 1)), '.local', '') = '';
+
 -- name: UpsertCallerToken :exec
 INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at)
 VALUES (?1, (
@@ -513,7 +523,10 @@ FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2)
   AND (?3 = '' OR caller_id = ?3)
-  AND (?4 = '' OR client_name = ?4);
+  AND (?4 = '' OR (
+    substr(client_name, 1, length(?4)) = ?4
+    AND replace(lower(substr(client_name, length(?4) + 1)), '.local', '') = ''
+  ));
 
 -- name: UsageRoutes :many
 SELECT
@@ -554,14 +567,28 @@ FROM audit_events
 WHERE pool_id = ?1
   AND created_at >= datetime('now', ?2)
   AND (?3 = '' OR caller_id = ?3)
-  AND (?4 = '' OR client_name = ?4)
+  AND (?4 = '' OR (
+    substr(client_name, 1, length(?4)) = ?4
+    AND replace(lower(substr(client_name, length(?4) + 1)), '.local', '') = ''
+  ))
 GROUP BY route_kind
 ORDER BY requests DESC, route_kind
 LIMIT 12;
 
 -- name: UsageClients :many
+WITH RECURSIVE client_labels(raw_name, end_pos) AS (
+  SELECT DISTINCT client_name AS raw_name, length(client_name) AS end_pos
+  FROM audit_events
+  WHERE pool_id = ?1 AND caller_id = ?2 AND created_at >= datetime('now', ?3)
+  UNION ALL
+  SELECT raw_name, end_pos - 6 FROM client_labels
+  WHERE end_pos > 6 AND lower(substr(raw_name, end_pos - 5, 6)) = '.local'
+), canonical_labels AS (
+  SELECT raw_name, substr(raw_name, 1, end_pos) AS client_name FROM client_labels
+  WHERE raw_name IS NULL OR end_pos <= 6 OR lower(substr(raw_name, end_pos - 5, 6)) <> '.local'
+)
 SELECT
-  audit_events.client_name,
+  canonical_labels.client_name,
   COUNT(*) AS requests,
   SUM(CASE WHEN audit_events.status >= 400 THEN 1 ELSE 0 END) AS errors,
   SUM(CASE
@@ -587,9 +614,10 @@ SELECT
   SUM(CASE WHEN audit_events.coalesced = 1 THEN 1 ELSE 0 END) AS coalesced,
   MAX(audit_events.created_at) AS latest_seen_at
 FROM audit_events
+JOIN canonical_labels ON canonical_labels.raw_name IS audit_events.client_name
 WHERE audit_events.pool_id = ?1
   AND audit_events.caller_id = ?2
   AND audit_events.created_at >= datetime('now', ?3)
-GROUP BY audit_events.client_name
+GROUP BY canonical_labels.client_name
 ORDER BY requests DESC, latest_seen_at DESC
 LIMIT 40;

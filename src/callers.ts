@@ -65,6 +65,7 @@ async function ensureCaller(
     ...(client === undefined
       ? []
       : [
+          env.DB.prepare(queries.reconcileCallerClient).bind(user.id, org, client.clientName),
           env.DB.prepare(queries.upsertCallerToken).bind(
             `caller_token_${crypto.randomUUID()}`,
             user.id,
@@ -77,7 +78,18 @@ async function ensureCaller(
   ];
   // Identity subselects resolve every dependent write inside this transaction.
   // The candidate UUID is never authoritative after an enrollment conflict.
-  const [enrollment] = await env.DB.batch<Omit<LoginCaller, "pool" | "client_name">>(statements);
+  const [enrollment] = await env.DB.batch<Omit<LoginCaller, "pool" | "client_name">>(
+    statements,
+  ).catch((error: unknown) => {
+    if (error instanceof Error && error.message.includes("client_name_ambiguous")) {
+      throw new HttpError(
+        409,
+        "client_name_ambiguous",
+        "Multiple stored clients share this name. Ask an Octopool admin to review the conflicting credentials before retrying; existing tokens remain unchanged.",
+      );
+    }
+    throw error;
+  });
   const caller = enrollment?.results[0];
   if (caller === undefined) {
     throw new Error("Enrollment returned no caller");

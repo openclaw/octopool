@@ -209,3 +209,87 @@ func TestNormalizeLoginArgsAllowsFlagsAfterServer(t *testing.T) {
 		t.Fatalf("normalizeLoginArgs() = %#v", got)
 	}
 }
+
+// The server is a synthetic wire fixture; storage/rotation is proven in Workerd/D1.
+func TestLoginCompoundClientWhoamiAndStats(t *testing.T) {
+	for _, input := range []string{"Host.local.local", "Host.LoCaL.local.LOCAL"} {
+		t.Run(input, func(t *testing.T) {
+			isolateTestConfig(t)
+			t.Setenv("GH_TOKEN", "synthetic-github")
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("content-type", "application/json")
+				switch r.URL.Path {
+				case "/.well-known/octopool":
+					_ = json.NewEncoder(w).Encode(map[string]any{"service": "octopool", "version": 1, "api_base": server.URL, "default_pool": "maintainers", "auth": map[string]bool{"cli_github_token": true}})
+				case "/v1/login/github-cli":
+					var body map[string]string
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if body["client_name"] != "Host" {
+						t.Errorf("wire client = %q, want Host", body["client_name"])
+					}
+					_, _ = io.WriteString(w, `{"caller":{"github_login":"alice","pool":"maintainers","client_name":"Host"},"token":"synthetic-caller"}`)
+				case "/v1/pools/maintainers/stats":
+					if r.URL.Query().Get("client") != input || r.Header.Get("Authorization") != "Bearer synthetic-caller" {
+						t.Error("stats lost original filter or saved credential")
+					}
+					_, _ = io.WriteString(w, `{"operator":{"client_name":"Host"},"client_usage":{"requests":1}}`)
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+			var out bytes.Buffer
+			if err := runLogin(t.Context(), []string{server.URL, "--client", input}, &out); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "from Host\n") {
+				t.Fatal(out.String())
+			}
+			out.Reset()
+			if err := runWhoami([]string{"--json"}, &out); err != nil {
+				t.Fatal(err)
+			}
+			var who map[string]string
+			if err := json.Unmarshal(out.Bytes(), &who); err != nil {
+				t.Fatal(err)
+			}
+			if who["client"] != "Host" {
+				t.Fatal(who)
+			}
+			out.Reset()
+			if err := runStats(t.Context(), []string{"--client", input, "--json"}, &out); err != nil {
+				t.Fatal(err)
+			}
+			var stats statsResponse
+			if err := json.Unmarshal(out.Bytes(), &stats); err != nil {
+				t.Fatal(err)
+			}
+			if stats.ClientUsage.Requests != 1 || stats.Operator.ClientName != "Host" {
+				t.Fatal(out.String())
+			}
+		})
+	}
+}
+
+func TestDefaultHostnameClientName(t *testing.T) {
+	for _, tc := range []struct{ input, defaultName, wireName string }{
+		{"", "unknown", "unknown"},
+		{" \t", "unknown", "unknown"},
+		{"Host.local.local.local", "Host", "Host"},
+		{strings.Repeat("a", 80) + ".local.local", strings.Repeat("a", 80), strings.Repeat("a", 80)},
+		{strings.Repeat("a", 81) + ".local", strings.Repeat("a", 80), strings.Repeat("a", 80)},
+		// Preserve normalization before default-only truncation, then login normalization.
+		{strings.Repeat("a", 74) + ".local-extra", strings.Repeat("a", 74) + ".local", strings.Repeat("a", 74)},
+	} {
+		got := defaultHostnameClientName(tc.input)
+		if got != tc.defaultName || normalizeClientName(got) != tc.wireName {
+			t.Fatalf("default=%q wire=%q", got, normalizeClientName(got))
+		}
+	}
+	if got := normalizeClientName(strings.Repeat("a", 81) + ".local.local"); len(got) != 81 {
+		t.Fatalf("explicit input was truncated: %q", got)
+	}
+}

@@ -95,7 +95,14 @@ func runLogin(ctx context.Context, args []string, stdout io.Writer) error {
 
 func defaultClientName() string {
 	hostname, err := os.Hostname()
-	if err != nil || strings.TrimSpace(hostname) == "" {
+	if err != nil {
+		return "unknown"
+	}
+	return defaultHostnameClientName(hostname)
+}
+
+func defaultHostnameClientName(hostname string) string {
+	if strings.TrimSpace(hostname) == "" {
 		return "unknown"
 	}
 	hostname = normalizeClientName(hostname)
@@ -107,8 +114,8 @@ func defaultClientName() string {
 
 func normalizeClientName(value string) string {
 	value = strings.TrimSpace(value)
-	if len(value) > len(".local") && strings.HasSuffix(strings.ToLower(value), ".local") {
-		return value[:len(value)-len(".local")]
+	for len(value) > len(".local") && strings.EqualFold(value[len(value)-len(".local"):], ".local") {
+		value = value[:len(value)-len(".local")]
 	}
 	return value
 }

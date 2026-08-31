@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Normalize compound client-name aliases consistently across CLI, login and stats, safely rotate historical singletons in place, and refuse ambiguous legacy families without changing credentials; apply the schema write guards before rollout.
 - Include eligible wildcard PATs for explicitly allowed owners and fail over selected local credential errors with bounded shared cooldowns, preserving cache authorization, valid credential continuations, and hard aggregate egress denials.
 - Keep persisted identity quota and cooldown feedback monotonic across delayed responses, reject invalid numeric observations, and atomically preserve rate/cooldown state on storage failure.
 - Keep `--jq` expressions literal, preserve native `gh` output bytes with native jq 1.7+ on Windows, and recognize `octopool.exe` when resolving the shim target without requiring Unix execute bits.

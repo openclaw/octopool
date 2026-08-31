@@ -2,9 +2,12 @@ import { HttpError } from "./http";
 
 export function normalizeClientName(value: string): string {
   const trimmed = value.trim();
-  return trimmed.length > ".local".length && trimmed.toLowerCase().endsWith(".local")
-    ? trimmed.slice(0, -".local".length)
-    : trimmed;
+  let end = trimmed.length;
+  // Inspect each suffix once; never lowercase or copy the shrinking prefix.
+  while (end > 6 && trimmed.slice(end - 6, end).toLowerCase() === ".local") {
+    end -= 6;
+  }
+  return trimmed.slice(0, end);
 }
 
 export function parseClientName(value: unknown): string {

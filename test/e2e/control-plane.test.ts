@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { beforeClientNameUpgrade, applyClientNameUpgrade } from "./client-name-upgrade";
 import { hashToken } from "../../src/auth";
 import { captureD1Baseline } from "./d1-baseline";
 import { insertAudit } from "../../src/db";
@@ -276,10 +277,12 @@ describe("Worker end-to-end control plane", () => {
   });
 
   it("attributes legacy macOS .local client aliases to the canonical host", async () => {
+    await beforeClientNameUpgrade();
     await seedPool();
     await env.DB.prepare(
       "UPDATE caller_tokens SET client_name = 'clawstudio.local' WHERE id = 'caller-client-token'",
     ).run();
+    await applyClientNameUpgrade();
 
     const response = await authenticatedGet(`/v1/pools/${POOL}/stats?since=24h`);
     expect(response.status).toBe(200);

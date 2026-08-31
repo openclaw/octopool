@@ -62,6 +62,29 @@ describe("active caller enrollment migration", () => {
     expect(after[3]!.results.map((row) => [row.session_hash, row.caller_id])).toEqual(
       before[3]!.results.map((row) => [row.session_hash, row.caller_id]),
     );
+    const namedResponse = await loginClient("host.local.local");
+    expect(namedResponse.status).toBe(201);
+    const named = await namedResponse.json<Enrollment>();
+    expect(named.caller.client_name).toBe("host");
+    expect(await health(issued.token)).toBe(200);
+    expect(await health(named.token)).toBe(200);
+    const legacyResponse = await callWorker("/v1/login/github-cli", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ github_token: "synthetic-github" }),
+    });
+    expect(legacyResponse.status).toBe(201);
+    const legacy = await legacyResponse.json<Enrollment>();
+    expect(legacy.caller.client_name).toBe("legacy");
+    expect(await health(issued.token)).toBe(401);
+    expect(await health(legacy.token)).toBe(200);
+    expect(await health(named.token)).toBe(200);
+    expect(
+      await env.DB.prepare(
+        "SELECT id FROM caller_tokens WHERE caller_id = 'singleton' AND client_name = 'legacy'",
+      ).first(),
+    ).toEqual({ id: "legacy_singleton" });
+    expect((await history())[2]).toEqual(before[2]);
     expect((await env.DB.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
   });
 
