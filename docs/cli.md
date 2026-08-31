@@ -448,8 +448,25 @@ from `GET /v1/pools/<pool>/string-rewrites`. Each relay request and every final 
 dispatch checks policy; a fallback cannot reuse approval for different arguments. There is
 no persistent policy cache, offline allowance, or fallback on authentication/policy errors.
 Policy HTTP requests reject redirects, use a five-second deadline, and bound the response
-to 65,536 bytes. Help/version and narrowly parsed GitHub authentication bootstrap commands
-remain available without a policy.
+to 65,536 bytes. Empty invocations, singleton help/version, known built-in topic help,
+and narrowly parsed GitHub authentication bootstrap commands remain available without a policy.
+
+Topic help accepts exactly `help <topic>`, `<topic> --help`, or `<topic> -h` for these
+built-in paths:
+
+- Roots: `api`, `pr`, `issue`, `release`, `auth`, `status`.
+- PR: `pr create|edit|comment|review|view|list|status|merge|ready`.
+- Issue: `issue create|edit|comment|view|list|status`.
+- Release: `release create|edit|view|list`.
+- Auth: `auth login|status`, using long `--help` or `help <topic>` only.
+
+For example, `gh pr merge --help`, `gh pr ready -h`, and `gh help pr merge` do not
+require policy access. `auth login -h` and `auth status -h` require a hostname value;
+`auth login -h github.com` and `auth status -h github.com` retain their narrow auth
+bootstrap route. Parent `auth -h` is help. Aliases, extension names, additional topics,
+operands, and options (including extended help spellings) follow ordinary policy and
+input protection. A value spelled `--help`, such as `--body-file --help`, still belongs
+to its input flag.
 
 The same strict JSON file configures server rules and optional local rules:
 

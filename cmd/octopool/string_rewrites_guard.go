@@ -283,18 +283,18 @@ func rewriteBootstrapInvocation(args []string) bool {
 		return true
 	}
 	if len(args) >= 2 && (args[len(args)-1] == "--help" || args[len(args)-1] == "-h") {
-		return rewriteBootstrapInvocation(append([]string{"help"}, args[:len(args)-1]...))
+		// Auth leaves own -h as a hostname value. Failed suffix checks stay
+		// terminal so value-bearing auth invocations cannot fall through here.
+		if len(args) == 3 && args[0] == "auth" && (args[1] == "login" || args[1] == "status") && args[2] == "-h" {
+			return false
+		}
+		return rewriteBootstrapHelpTopic(args[:len(args)-1])
 	}
 	if len(args) == 1 && (args[0] == "--version" || args[0] == "version" || args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
 		return true
 	}
 	if len(args) >= 2 && args[0] == "help" {
-		for _, arg := range args[1:] {
-			if !slices.Contains([]string{"api", "pr", "issue", "release", "auth", "status", "login", "create", "edit", "comment", "review", "view", "list"}, arg) {
-				return false
-			}
-		}
-		return true
+		return rewriteBootstrapHelpTopic(args[1:])
 	}
 	if len(args) == 8 && args[0] == "api" && args[1] == "graphql" && args[2] == "--hostname" && args[3] == "github.com" && args[4] == "-f" && args[5] == "query="+authStatusViewerQuery && args[6] == "--jq" && args[7] == ".data.viewer.login" {
 		return true
@@ -332,6 +332,29 @@ func rewriteBootstrapInvocation(args []string) bool {
 		}
 	}
 	return true
+}
+
+// Match complete registered topic paths: a root extension or a permutation of
+// built-in words does not inherit a built-in command's help exception.
+func rewriteBootstrapHelpTopic(topic []string) bool {
+	if len(topic) == 1 {
+		return slices.Contains([]string{"api", "pr", "issue", "release", "auth", "status"}, topic[0])
+	}
+	if len(topic) != 2 {
+		return false
+	}
+	switch topic[0] {
+	case "pr":
+		return slices.Contains([]string{"create", "edit", "comment", "review", "view", "list", "status", "merge", "ready"}, topic[1])
+	case "issue":
+		return slices.Contains([]string{"create", "edit", "comment", "view", "list", "status"}, topic[1])
+	case "release":
+		return slices.Contains([]string{"create", "edit", "view", "list"}, topic[1])
+	case "auth":
+		return topic[1] == "login" || topic[1] == "status"
+	default:
+		return false
+	}
 }
 
 func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*rewritePreparation, error) {
