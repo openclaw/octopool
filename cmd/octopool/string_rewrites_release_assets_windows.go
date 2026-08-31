@@ -68,7 +68,9 @@ func openRewriteWindowsPath(path string, directory bool) (*os.File, func(), erro
 		isDirectory := i < len(paths)-1 || directory
 		access, share := uint32(windows.GENERIC_READ), uint32(windows.FILE_SHARE_READ)
 		if isDirectory {
-			access, share = windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE
+			// Attribute/security-only access does not participate in sharing checks.
+			// Directory list access makes omitting FILE_SHARE_DELETE pin the name.
+			access, share = windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE
 		}
 		name, err := windows.UTF16PtrFromString(path)
 		if err != nil {

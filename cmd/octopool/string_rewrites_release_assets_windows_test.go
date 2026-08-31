@@ -11,6 +11,77 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// Clean the destination after deferred handle closure even if a pinning assertion
+// unexpectedly moves the tree away from the preparation's cleanup path.
+func rewriteWindowsRenameDestination(t *testing.T, path string) string {
+	t.Helper()
+	moved := path + "-moved"
+	if _, err := os.Lstat(moved); !os.IsNotExist(err) {
+		t.Fatalf("rename destination already exists or cannot be checked: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(moved); err != nil {
+			t.Errorf("remove rename destination: %v", err)
+		}
+	})
+	return moved
+}
+
+func TestReleaseAssetsWindowsPinsDirectoryAncestors(t *testing.T) {
+	for _, target := range []string{"staging", "parent", "ancestor"} {
+		t.Run(target, func(t *testing.T) {
+			ancestor := filepath.Join(t.TempDir(), "ancestor")
+			parent := filepath.Join(ancestor, "parent")
+			if err := os.MkdirAll(parent, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for _, variable := range []string{"TMPDIR", "TMP", "TEMP"} {
+				t.Setenv(variable, parent)
+			}
+			prepared := &rewritePreparation{ctx: t.Context()}
+			defer prepared.cleanup()
+			snapshot, err := prepared.snapshot([]byte("snapshot"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := prepared.directory
+			if target == "parent" {
+				path = parent
+			} else if target == "ancestor" {
+				path = ancestor
+			}
+			moved := rewriteWindowsRenameDestination(t, path)
+			if err := os.Rename(path, moved); err == nil {
+				t.Fatalf("%s directory was not pinned", target)
+			}
+			if target == "staging" {
+				// Exercise the owned release callback without deleting the directory
+				// so its name can be renamed after the handles are closed.
+				prepared.closeDirectory()
+				prepared.closeDirectory = nil
+			} else {
+				prepared.cleanup()
+				if _, err := os.Stat(prepared.directory); !os.IsNotExist(err) {
+					t.Fatalf("private directory leaked after cleanup: %v", err)
+				}
+			}
+			if err := os.Rename(path, moved); err != nil {
+				t.Fatalf("%s remained pinned after handle release: %v", target, err)
+			}
+			if err := os.Rename(moved, path); err != nil {
+				t.Fatalf("restore %s after rename: %v", target, err)
+			}
+			if target == "staging" {
+				if data, err := os.ReadFile(snapshot); err != nil || string(data) != "snapshot" {
+					t.Fatalf("snapshot changed after rename: %q, %v", data, err)
+				}
+			}
+			prepared.cleanup()
+			assertReleaseAssetTempEmpty(t, parent)
+		})
+	}
+}
+
 func TestReleaseAssetsWindowsMetadataStagingSpecialTemp(t *testing.T) {
 	policy, err := compileStringRewriteRules([]stringRewriteRule{{Pattern: "private-term", Replacement: "public"}})
 	if err != nil {
@@ -94,7 +165,8 @@ func TestReleaseAssetsWindowsMetadataStagingSpecialTemp(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := os.Rename(prepared.directory, prepared.directory+"-moved"); err == nil {
+					moved := rewriteWindowsRenameDestination(t, prepared.directory)
+					if err := os.Rename(prepared.directory, moved); err == nil {
 						t.Fatal("staging directory was not pinned")
 					}
 					prepared.cleanup()
@@ -124,7 +196,8 @@ func TestReleaseAssetsWindowsPrivateStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeDir()
-	if err := os.Rename(prepared.directory, prepared.directory+"-moved"); err == nil {
+	moved := rewriteWindowsRenameDestination(t, prepared.directory)
+	if err := os.Rename(prepared.directory, moved); err == nil {
 		t.Fatal("private staging directory was not pinned")
 	}
 	source := releaseAssetFile(t, "archive.zip", []byte{0, 0xff, 0xfe, 3})
