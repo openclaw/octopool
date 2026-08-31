@@ -153,7 +153,7 @@ function outageResponse(request: Request) {
   if (request.url === "https://api.github.com/repos/openclaw/octopool") {
     return jsonResponse({ private: false });
   }
-  expect(request.url).toMatch(/^https:\/\/api.github.com\/repos\/openclaw\/octopool\/releases\//);
+  expect(request.url).toMatch(/^https:\/\/api\.github\.com\/repos\/openclaw\/octopool\/releases\//);
   expect(request.headers.has("authorization")).toBe(false);
   return jsonResponse(
     { message: "rate limited" },
