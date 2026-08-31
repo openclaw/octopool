@@ -465,6 +465,9 @@ func pinBestEffortPositionalRepositories(policy stringRewritePolicy, args []stri
 	}
 	switch out[0] {
 	case "repo":
+		if out[1] == "clone" {
+			return out, validateBestEffortCloneRepository(policy, out[2:])
+		}
 		for _, value := range out[2:] {
 			candidate, err := validateBestEffortRepoValue(policy, value)
 			if candidate && err != nil {
@@ -480,6 +483,50 @@ func pinBestEffortPositionalRepositories(policy stringRewritePolicy, args []stri
 		}
 	}
 	return out, nil
+}
+
+func validateBestEffortCloneRepository(policy stringRewritePolicy, args []string) error {
+	// Native gh uses the first positional as the source, even after --.
+	help := false
+	for index := 0; index < len(args); index++ {
+		value := args[index]
+		switch {
+		case value == "--":
+			index++
+			if index >= len(args) {
+				return errRewriteBlocked
+			}
+			value = args[index]
+		case value == "--upstream-remote-name" || value == "-u":
+			index++
+			if index >= len(args) {
+				return errRewriteBlocked
+			}
+			continue
+		case value == "--no-upstream" || strings.HasPrefix(value, "--no-upstream="):
+			continue
+		case value == "--help" || value == "-h" || strings.HasPrefix(value, "--help=") || strings.HasPrefix(value, "-h="):
+			help = true
+			continue
+		case strings.HasPrefix(value, "--upstream-remote-name=") || strings.HasPrefix(value, "-u"):
+			continue
+		case strings.HasPrefix(value, "-"):
+			return errRewriteBlocked
+		}
+		if !strings.ContainsAny(value, "/:") {
+			// Bare names resolve under the authenticated user on the pinned host.
+			if !rewriteRepoPattern.MatchString("owner/"+value) || strings.Contains(value, "..") {
+				return errRewriteBlocked
+			}
+			return policy.checkStructural("github.com/" + value)
+		}
+		_, err := normalizeBestEffortRepo(policy, value)
+		return err
+	}
+	if help {
+		return nil
+	}
+	return errRewriteBlocked
 }
 
 func validateBestEffortRepoValue(policy stringRewritePolicy, value string) (bool, error) {

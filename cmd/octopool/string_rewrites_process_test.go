@@ -1062,6 +1062,120 @@ func TestStringRewriteReadFallbackCompatibility(t *testing.T) {
 	}
 }
 
+func TestStringRewriteBestEffortClone(t *testing.T) {
+	policyStore, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	t.Setenv("GH_HOST", "ghe.example")
+	t.Setenv("GH_REPO", "ghe.example/other/repo")
+	for _, test := range []struct {
+		name    string
+		args    []string
+		want    []string
+		blocked bool
+		policy  string
+	}{
+		{name: "dotted destination", args: []string{"https://github.com/openclaw/openclaw", ".artifacts/proof/live-project"}},
+		{name: "long help", args: []string{"--help"}},
+		{name: "short help", args: []string{"-h"}},
+		{name: "help option before source", args: []string{"--help=false", "acme/repo"}},
+		{name: "nested destination", args: []string{"acme/repo", "workspace/proof/repo"}},
+		{name: "absolute destination", args: []string{"acme/repo", "/tmp/proof/repo"}},
+		{name: "current directory", args: []string{"acme/repo", "."}},
+		{name: "dot relative destination", args: []string{"acme/repo", "./proof/repo"}},
+		{name: "parent relative destination", args: []string{"acme/repo", "../proof/repo"}},
+		{name: "git flags without destination", args: []string{"acme/repo", "--", "-c", "core.hooksPath=/dev/null"}},
+		{name: "git flags with destination", args: []string{"acme/repo", ".artifacts/proof/repo", "--", "-c", "core.hooksPath=/dev/null"}},
+		{name: "destination after delimiter", args: []string{"acme/repo", "--", ".artifacts/proof/repo", "-c", "core.hooksPath=/dev/null"}},
+		{name: "source after delimiter", args: []string{"--", "https://github.com/acme/repo", ".artifacts/proof/repo"}},
+		{name: "boolean before source", args: []string{"--no-upstream", "acme/repo", ".artifacts/proof/repo"}},
+		{name: "boolean equals before source", args: []string{"--no-upstream=false", "acme/repo"}},
+		{name: "long value before source", args: []string{"--upstream-remote-name", "ghe.example/acme/upstream", "acme/repo"}},
+		{name: "long equals before source", args: []string{"--upstream-remote-name=upstream", "acme/repo"}},
+		{name: "short value before source", args: []string{"-u", "upstream", "acme/repo"}},
+		{name: "short attached before source", args: []string{"-uupstream", "acme/repo"}},
+		{name: "short equals before source", args: []string{"-u=upstream", "acme/repo"}},
+		{name: "delimiter as option value", args: []string{"-u", "--", "acme/repo"}},
+		{name: "native option after source", args: []string{"acme/repo", "--upstream-remote-name", "ghe.example/acme/upstream", ".artifacts/proof/repo"}},
+		{name: "bare repository", args: []string{"myrepo", ".artifacts/proof/repo"}},
+		{name: "host qualified github source", args: []string{"github.com/acme/repo", ".artifacts/proof/repo"}},
+		{name: "https protocol", args: []string{"https://github.com/acme/repo.git", ".artifacts/proof/repo"}},
+		{name: "ssh protocol", args: []string{"ssh://git@github.com/acme/repo.git", ".artifacts/proof/repo"}},
+		{name: "scp protocol", args: []string{"git@github.com:acme/repo.git", ".artifacts/proof/repo"}},
+		{
+			name: "visible destination and git values rewritten",
+			args: []string{"acme/repo", ".artifacts/internal-model/repo", "--", "-c", "core.hooksPath=/internal-model/null", "--branch=internal-model"},
+			want: []string{"acme/repo", ".artifacts/public/repo", "--", "-c", "core.hooksPath=/public/null", "--branch=public"},
+		},
+		{
+			name: "native option value rewritten",
+			args: []string{"-u", "internal-model", "acme/repo"},
+			want: []string{"-u", "public", "acme/repo"},
+		},
+		{name: "enterprise https", args: []string{"https://ghe.example/acme/repo", ".artifacts/proof/repo"}, blocked: true},
+		{name: "enterprise host qualified", args: []string{"ghe.example/acme/repo"}, blocked: true},
+		{name: "enterprise scp", args: []string{"ghe.example:acme/repo"}, blocked: true},
+		{name: "enterprise scp user", args: []string{"alice@ghe.example:acme/repo"}, blocked: true},
+		{name: "enterprise ssh", args: []string{"ssh://git@ghe.example/acme/repo.git"}, blocked: true},
+		{name: "enterprise ssh without user", args: []string{"ssh://ghe.example/acme/repo.git"}, blocked: true},
+		{name: "enterprise deep url", args: []string{"https://ghe.example/acme/repo/tree/main"}, blocked: true},
+		{name: "enterprise single label host", args: []string{"enterprise/acme/repo"}, blocked: true},
+		{name: "enterprise after delimiter", args: []string{"--", "https://ghe.example/acme/repo"}, blocked: true},
+		{name: "enterprise after option value", args: []string{"-u", "acme/safe", "ghe.example/acme/repo"}, blocked: true},
+		{name: "enterprise after consumed delimiter", args: []string{"--upstream-remote-name", "--", "ssh://git@ghe.example/acme/repo.git"}, blocked: true},
+		{name: "unknown option before source", args: []string{"--future-option", "acme/safe", "ghe.example/acme/repo"}, blocked: true},
+		{name: "unknown option with safe source", args: []string{"--future-option", "acme/repo"}, blocked: true},
+		{name: "missing option value", args: []string{"-u"}, blocked: true},
+		{name: "missing source after delimiter", args: []string{"--"}, blocked: true},
+		{name: "matching source", args: []string{"https://github.com/acme/internal-model", ".artifacts/proof/repo"}, blocked: true},
+		{name: "matching bare source", args: []string{"internal-model"}, blocked: true},
+		{
+			name:    "rewritten option exposes enterprise source",
+			args:    []string{"--upstream-remote-name", "ghe.example/acme/repo", "acme/safe"},
+			blocked: true,
+			policy:  `{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"--upstream-remote-name","replacement":"--no-upstream"}]}`,
+		},
+		{
+			name:    "rewritten source protocol revalidated",
+			args:    []string{"https://github.com/acme/repo"},
+			blocked: true,
+			policy:  `{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^https://github[.]com/","replacement":"ssh://git@ghe.example/"}]}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			policy := test.policy
+			if policy == "" {
+				policy = rewriteActiveTestPolicy
+			}
+			policyStore.Store(policy)
+			capturePath := captureRewriteGH(t)
+			args := append([]string{"repo", "clone"}, test.args...)
+			err := runGH(t.Context(), args, io.Discard, io.Discard)
+			if test.blocked {
+				if err != errRewriteBlocked {
+					t.Errorf("clone denial error=%v", err)
+				}
+				if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+					t.Fatal("denied clone reached child")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := args
+			if test.want != nil {
+				want = append([]string{"repo", "clone"}, test.want...)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			if !slices.Equal(capture.Args, want) {
+				t.Fatalf("clone argv=%q, want %q", capture.Args, want)
+			}
+			if capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != "" {
+				t.Fatalf("clone host was not pinned: %v", capture.Env)
+			}
+		})
+	}
+}
+
 func TestStringRewriteBestEffortFallback(t *testing.T) {
 	policyStore, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 

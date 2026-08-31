@@ -578,6 +578,13 @@ Alternate API/repository hosts, explicit credential headers,
 unresolved API placeholders, invalid UTF-8, policy
 material, residual matches, and bounded-read failures remain blocked.
 
+For `gh repo clone`, positional repository checks apply only to the source, accounting for
+native clone options and their values. A `--` ends native option parsing; if the source has
+not appeared yet, the next argument is still the source. Unknown options before the source
+fail closed. Source protocol is preserved, with structural and GitHub.com host validation
+before and after rewriting. Destination paths and forwarded Git flags and values still
+receive visible-argument filtering without being treated as additional repository inputs.
+
 Best effort is intentionally not the same guarantee as a modeled snapshot. Live terminal
 input is passed through so native prompts still work, and deferred content sources other than
 `--input` and typed field `@source` files—for example an editor, generated notes,

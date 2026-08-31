@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Validate protected `gh repo clone` repository inputs according to native argument ownership, preserving destination paths and Git flags while retaining visible-argument filtering and GitHub.com-only source checks.
 - Keep issue timelines and issue-event reads anonymous-only, retiring cached private cross-references and preserving safe conditional and native fallback behavior.
 - Preserve contributor credit in protected exact-head squash merges by accepting merge body files through the existing text rewriting and private snapshot checks.
 - Keep CLI caller tokens bound to the loaded server URL when another login replaces saved auth during request setup.
