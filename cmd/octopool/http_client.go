@@ -57,6 +57,10 @@ func doJSONRequest(req *http.Request) (*http.Response, error) {
 		}
 		if redirectErr == nil {
 			followedRedirect = true
+			// Older Go versions drop Authorization when only hostname casing changes.
+			if authorization := req.Header.Get("Authorization"); authorization != "" {
+				next.Header.Set("Authorization", authorization)
+			}
 		}
 		return redirectErr
 	}
