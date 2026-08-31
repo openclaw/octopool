@@ -281,8 +281,14 @@ policy files private and use the dedicated authenticated admin import path.
 
 Modeled CLI submissions retain strict structural snapshots. Unmodeled native `gh` commands
 use bounded best-effort rewriting of visible arguments, declared piped JSON/text, and `--input`
-snapshots so an evolving CLI surface does not halt normal operations. Interactive or deferred
-native content remains outside that guarantee. Server-mediated relay requests remain strict.
+snapshots so an evolving CLI surface does not halt normal operations. Nonempty native workflow
+JSON and API input declared as JSON (including the native default Content-Type) must parse
+strictly; failures never downgrade to text. Explicit non-JSON API input remains bounded UTF-8
+text, and exactly zero-byte best-effort input retains native compatibility. Interactive or
+deferred native content and downstream reinterpretation of mislabeled text remain outside
+that guarantee. Arbitrary input readers remain byte-bounded, not promptly cancellable.
+See [CLI](cli.md#outbound-string-rewrite-protection) for declaration and header-order limits.
+Server-mediated relay requests remain strict.
 
 Each relay request owns a frozen transport context with its checked policy snapshot;
 there is no global mutable policy or stale policy fallback. Canonical outgoing URLs and

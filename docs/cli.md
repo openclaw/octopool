@@ -598,10 +598,11 @@ Commands and flags outside the modeled vocabulary use a bounded best-effort pass
 instead of being denied solely for being new or unfamiliar. Octopool rewrites every visible
 argument, snapshots and filters `--input` files or `--input=-`, snapshots typed
 `-F`/`--field key=@source` text without changing its formatting, and filters stdin when the
-command explicitly declares it (currently `workflow run --json`). Valid JSON request stdin/files are decoded recursively so string keys and values are rewritten
-without corrupting JSON; other valid UTF-8 is rewritten as text. This keeps workflow
-dispatches (`gh workflow run` field or `--json` forms), job-log reads, unmodeled uploads, and newly
-introduced native flags working while active rules still remove visible matches. Native
+command explicitly declares it (currently `workflow run --json`). Nonempty declared JSON
+must pass strict UTF-8, surrogate, decoded duplicate-key, single-value, and depth validation;
+malformed JSON never falls back to text. Decoded string keys and values are rewritten and
+the final JSON is bounded again. This keeps workflow dispatches, job-log reads, unmodeled
+uploads, and newly introduced native flags working within the declared-input boundary. Native
 children force `GH_HOST=github.com` and remove inherited `GH_REPO`; best-effort
 `--repo`/`-R` values are structurally checked before rewriting and normalized to
 `github.com/owner/repo`. Native `gh search` repository filters retain `owner/repo`, because the
@@ -610,6 +611,36 @@ Repo-capable commands without an explicit selector pin the current GitHub.com re
 Alternate API/repository hosts, explicit credential headers,
 unresolved API placeholders, invalid UTF-8, policy
 material, residual matches, and bounded-read failures remain blocked.
+
+For native `gh api --input`, a missing or empty effective `Content-Type` defaults to JSON;
+explicit JSON and `+json` media types also require strict JSON. A valid explicit non-JSON
+Content-Type keeps bounded UTF-8 text filtering without JSON reformatting, including
+JSON-looking text. Content-Type is a native capability, not an additional relay header.
+Repeated headers follow native `Header.Add` order: an empty first Content-Type selects the
+native JSON default; otherwise declarations must be equivalent, and conflicting or malformed
+media types block. Exactly zero-byte best-effort input retains native no-input compatibility;
+whitespace-only declared JSON blocks. Modeled API empty-body rules remain unchanged.
+
+Workflow JSON flags accept native Boolean spellings (`1/t/T/true/TRUE/True` and
+`0/f/F/false/FALSE/False`), validate every occurrence, and use the final assignment.
+Bare `--json` means true; `--json false` includes a positional `false`. Absent or final-false
+JSON flags do not cause preparation to read idle stdin. True workflow help also leaves
+JSON stdin unread; native short `-h` requests help immediately, while long `--help` uses
+its final Boolean assignment. Known API `-i` bundles preserve each include option and the
+following value-taking flag. Parser metadata never adds synthetic flag names or default
+values to the text being rewritten. Known option values retain their ownership, including
+flag-looking values and interleaved repository options. A real `--`
+ends declarations: subsequent arguments are visible text, not file/stdin sources or headers.
+Generated repository/hostname pins precede that delimiter.
+
+Original sources are captured before argument rewriting, and newly introduced sources are
+captured afterward. The stricter original/final JSON declaration applies to captured bytes;
+rewriting cannot downgrade inspection or reopen a substituted original path. Typed field
+sources remain literal text, and raw fields remain literal arguments. Only other commands'
+undeclared input retains the previous opportunistic JSON-or-text handling. These checks do
+not infer formats from filenames, endpoints, or bytes, decode nested obfuscation, or protect
+against downstream reinterpretation of deliberately mislabeled text. Binary API input has
+no exemption from UTF-8 validation. The existing 1 MiB content and aggregate budgets apply.
 
 For `gh repo clone`, positional repository checks apply only to the source, accounting for
 native clone options and their values. A `--` ends native option parsing; if the source has
@@ -624,7 +655,9 @@ input is passed through so native prompts still work, and deferred content sourc
 extension-owned files, or content native
 `gh` derives after the guard—cannot be inspected. Direct real `gh`, browsers, Git pushes,
 and deliberate encoding/obfuscation remain outside the boundary. Use a modeled command when
-publication content needs the strict guarantee.
+publication content needs the strict guarantee. Reads are byte-bounded, not time-bounded:
+an arbitrary producer can stall preparation before EOF or the limit. Existing child
+cancellation and snapshot cleanup do not make a blocked arbitrary reader interruptible.
 
 Modeled content paths also reject recognizable active rule material before rewriting
 and in the final text: complete JSON objects with exactly string `pattern` and

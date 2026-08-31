@@ -76,6 +76,11 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 			key, value, ok := strings.Cut(flag.value, ":")
 			key = strings.ToLower(strings.TrimSpace(key))
 			value = strings.TrimSpace(value)
+			// Content-Type declares native raw-body semantics; it is not a relay
+			// header capability. Final preparation validates every native header.
+			if ok && key == "content-type" {
+				return result, errRewriteUnsupported
+			}
 			if !ok || !safeRelayHeader(key) {
 				return result, errRewriteBlocked
 			}

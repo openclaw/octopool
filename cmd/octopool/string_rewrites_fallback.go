@@ -16,13 +16,10 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 	if len(args) == 0 {
 		return errRewriteBlocked
 	}
-	if args[0] == "api" {
-		if err := validateBestEffortAPI(args); err != nil {
-			return err
-		}
+	declaration, err := describeBestEffortInput(args)
+	if err != nil {
+		return err
 	}
-
-	var err error
 	prepared.args, err = pinBestEffortRepositories(policy, args)
 	if err != nil {
 		return err
@@ -31,8 +28,9 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 	if err != nil {
 		return err
 	}
+	captures := map[string]*bestEffortCapturedInput{}
 	var stdinConsumed bool
-	prepared.args, stdinConsumed, err = snapshotBestEffortSources(policy, prepared.args, stdin, prepared, false)
+	prepared.args, stdinConsumed, err = snapshotBestEffortSources(policy, prepared.args, stdin, prepared, captures, false)
 	if err != nil {
 		return err
 	}
@@ -40,7 +38,9 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 	if err != nil {
 		return err
 	}
-	prepared.args, stdinConsumed, err = snapshotBestEffortSources(policy, prepared.args, stdin, prepared, stdinConsumed)
+	// Validate final host/header/repository declarations before reading any new
+	// source, including declarations introduced by a visible argument rewrite.
+	final, err := describeBestEffortInput(prepared.args)
 	if err != nil {
 		return err
 	}
@@ -52,40 +52,47 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 	if err != nil {
 		return err
 	}
-	prepared.forceGitHubHost = true
-	if args[0] == "api" {
-		if !bestEffortAPIHasHostname(prepared.args) {
-			if err := policy.checkStructural("github.com"); err != nil {
-				return err
-			}
-			prepared.args = append(prepared.args, "--hostname=github.com")
-		}
-		if err := validateBestEffortAPI(prepared.args); err != nil {
-			return err
-		}
-	}
-
-	if stdinConsumed {
-		prepared.stdin = strings.NewReader("")
-		return nil
-	}
-	if stdin == nil || rewriteReaderIsTerminal(stdin) || !bestEffortConsumesStdin(prepared.args) {
-		prepared.stdin = stdin
-		return nil
-	}
-	remaining := rewriteMaxContent - prepared.bestEffortSources
-	if remaining < 0 {
-		return errRewriteBlocked
-	}
-	data, err := boundedRewriteRead(stdin, remaining)
+	prepared.args, stdinConsumed, err = snapshotBestEffortSources(policy, prepared.args, stdin, prepared, captures, stdinConsumed)
 	if err != nil {
 		return err
 	}
-	prepared.bestEffortSources += len(data)
-	if prepared.bestEffortSources > rewriteMaxContent {
-		return errRewriteBlocked
+	prepared.args, err = finishBestEffortSources(policy, prepared.args, prepared, captures)
+	if err != nil {
+		return err
 	}
-	rewritten, err := rewriteBestEffortData(policy, data, prepared)
+	prepared.forceGitHubHost = true
+	if declaration.command == "api" || final.command == "api" {
+		final, err = describeBestEffortInput(prepared.args)
+		if err != nil {
+			return err
+		}
+		hasHost := false
+		for _, token := range final.args {
+			hasHost = hasHost || token.name == "--hostname"
+		}
+		if !hasHost {
+			if err := policy.checkStructural("github.com"); err != nil {
+				return err
+			}
+			prepared.args = insertBestEffortFlag(prepared.args, final, "--hostname=github.com")
+		}
+	}
+	if stdinConsumed {
+		if final.workflowJSON {
+			return errRewriteBlocked
+		}
+		prepared.stdin = strings.NewReader("")
+		return nil
+	}
+	if stdin == nil || rewriteReaderIsTerminal(stdin) || !final.workflowJSON {
+		prepared.stdin = stdin
+		return nil
+	}
+	data, err := readBestEffortSource("-", stdin, prepared)
+	if err != nil {
+		return err
+	}
+	rewritten, err := rewriteBestEffortData(policy, data, prepared, bestEffortDeclaredJSON)
 	if err != nil {
 		return err
 	}
@@ -94,50 +101,24 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 }
 
 func rewriteBestEffortArguments(policy stringRewritePolicy, args []string, prepared *rewritePreparation) ([]string, error) {
+	declaration, err := describeBestEffortInput(args)
+	if err != nil {
+		return nil, err
+	}
+	args = declaration.argv
 	out := make([]string, 0, len(args))
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		if arg == "--repo" || arg == "-R" || arg == "--input" {
-			index++
-			if index >= len(args) {
-				return nil, errRewriteBlocked
-			}
-			out = append(out, arg, args[index])
+	for _, token := range declaration.args {
+		if token.name == "--repo" || token.name == "--input" || (token.name == "--field" && bestEffortFieldIsSource(token.value)) {
+			out = append(out, args[token.start:token.end]...)
 			continue
 		}
-		if strings.HasPrefix(arg, "--repo=") || (strings.HasPrefix(arg, "-R") && len(arg) > 2) || strings.HasPrefix(arg, "--input=") {
-			out = append(out, arg)
-			continue
-		}
-		if arg == "--field" || arg == "-F" {
-			index++
-			if index >= len(args) {
-				return nil, errRewriteBlocked
-			}
-			if bestEffortFieldIsSource(args[index]) {
-				out = append(out, arg, args[index])
-				continue
-			}
-			rewrittenFlag, err := prepared.text(policy, arg)
+		for _, arg := range args[token.start:token.end] {
+			rewritten, err := prepared.text(policy, arg)
 			if err != nil {
 				return nil, err
 			}
-			rewrittenValue, err := prepared.text(policy, args[index])
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, rewrittenFlag, rewrittenValue)
-			continue
+			out = append(out, rewritten)
 		}
-		if field, ok := bestEffortAttachedField(arg); ok && bestEffortFieldIsSource(field) {
-			out = append(out, arg)
-			continue
-		}
-		rewritten, err := prepared.text(policy, arg)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, rewritten)
 	}
 	return out, nil
 }
@@ -147,98 +128,95 @@ func bestEffortFieldIsSource(field string) bool {
 	return ok && strings.HasPrefix(value, "@")
 }
 
-func snapshotBestEffortSources(policy stringRewritePolicy, args []string, stdin io.Reader, prepared *rewritePreparation, stdinConsumed bool) ([]string, bool, error) {
+func snapshotBestEffortSources(policy stringRewritePolicy, args []string, stdin io.Reader, prepared *rewritePreparation, captures map[string]*bestEffortCapturedInput, stdinConsumed bool) ([]string, bool, error) {
+	declaration, err := describeBestEffortInput(args)
+	if err != nil {
+		return nil, false, err
+	}
+	args = declaration.argv
 	out := make([]string, 0, len(args))
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		if arg == "--input" {
-			index++
-			if index >= len(args) || (args[index] == "-" && stdinConsumed) {
+	for _, token := range declaration.args {
+		source, key, kind := token.value, "", declaration.inputKind
+		field := token.name == "--field" && bestEffortFieldIsSource(token.value)
+		if token.name != "--input" && !field {
+			out = append(out, args[token.start:token.end]...)
+			continue
+		}
+		if field {
+			key, source, _ = strings.Cut(token.value, "=")
+			source, kind = strings.TrimPrefix(source, "@"), bestEffortText
+			if key == "" {
 				return nil, false, errRewriteBlocked
 			}
-			if prepared.snapshots[args[index]] {
-				out = append(out, "--input="+args[index])
-				continue
+		}
+		capture := captures[source]
+		path := source
+		if capture == nil {
+			if source == "" || (source == "-" && stdinConsumed) {
+				return nil, false, errRewriteBlocked
 			}
-			path, err := snapshotBestEffortInput(policy, args[index], stdin, prepared)
+			data, err := readBestEffortSource(source, stdin, prepared)
 			if err != nil {
 				return nil, false, err
 			}
-			stdinConsumed = stdinConsumed || args[index] == "-"
+			path, err = prepared.snapshot(nil)
+			if err != nil {
+				return nil, false, err
+			}
+			captures[path] = &bestEffortCapturedInput{data: data, kind: kind}
+			stdinConsumed = stdinConsumed || source == "-"
+			if field {
+				key, err = prepared.text(policy, key)
+				if err != nil || key == "" {
+					return nil, false, errRewriteBlocked
+				}
+			}
+		} else if kind == bestEffortDeclaredJSON {
+			capture.kind = bestEffortDeclaredJSON
+		}
+		if field {
+			out = append(out, token.capturedField(key+"=@"+path))
+		} else {
 			out = append(out, "--input="+path)
-			continue
 		}
-		if value, ok := strings.CutPrefix(arg, "--input="); ok {
-			if value == "-" && stdinConsumed {
-				return nil, false, errRewriteBlocked
-			}
-			if prepared.snapshots[value] {
-				out = append(out, arg)
-				continue
-			}
-			path, err := snapshotBestEffortInput(policy, value, stdin, prepared)
-			if err != nil {
-				return nil, false, err
-			}
-			stdinConsumed = stdinConsumed || value == "-"
-			out = append(out, "--input="+path)
-			continue
-		}
-		if arg == "--field" || arg == "-F" {
-			index++
-			if index >= len(args) {
-				return nil, false, errRewriteBlocked
-			}
-			rewritten, handled, consumed, err := snapshotBestEffortField(policy, args[index], stdin, prepared, stdinConsumed)
-			if err != nil {
-				return nil, false, err
-			}
-			if handled {
-				stdinConsumed = stdinConsumed || consumed
-				out = append(out, "--field="+rewritten)
-			} else {
-				out = append(out, arg, args[index])
-			}
-			continue
-		}
-		if value, ok := bestEffortAttachedField(arg); ok {
-			rewritten, handled, consumed, err := snapshotBestEffortField(policy, value, stdin, prepared, stdinConsumed)
-			if err != nil {
-				return nil, false, err
-			}
-			if handled {
-				stdinConsumed = stdinConsumed || consumed
-				out = append(out, "--field="+rewritten)
-				continue
-			}
-		}
-		out = append(out, arg)
 	}
 	return out, stdinConsumed, nil
 }
 
-func snapshotBestEffortInput(policy stringRewritePolicy, source string, stdin io.Reader, prepared *rewritePreparation) (string, error) {
-	data, err := readBestEffortSource(source, stdin, prepared)
+func finishBestEffortSources(policy stringRewritePolicy, args []string, prepared *rewritePreparation, captures map[string]*bestEffortCapturedInput) ([]string, error) {
+	declaration, err := describeBestEffortInput(args)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	rewritten, err := rewriteBestEffortData(policy, data, prepared)
-	if err != nil {
-		return "", err
+	args = declaration.argv
+	out := append([]string(nil), args...)
+	for _, token := range declaration.args {
+		source, key := token.value, ""
+		if token.name == "--field" {
+			key, source, _ = strings.Cut(source, "=")
+			source = strings.TrimPrefix(source, "@")
+		} else if token.name != "--input" {
+			continue
+		}
+		capture := captures[source]
+		if capture == nil {
+			continue
+		}
+		data, err := rewriteBestEffortData(policy, capture.data, prepared, capture.kind)
+		if err != nil {
+			return nil, err
+		}
+		path, err := prepared.snapshot(data)
+		if err != nil {
+			return nil, err
+		}
+		if token.name == "--field" {
+			out[token.start] = token.capturedField(key + "=@" + path)
+		} else {
+			out[token.start] = "--input=" + path
+		}
 	}
-	return prepared.snapshot(rewritten)
-}
-
-func snapshotBestEffortTextInput(policy stringRewritePolicy, source string, stdin io.Reader, prepared *rewritePreparation) (string, error) {
-	data, err := readBestEffortSource(source, stdin, prepared)
-	if err != nil {
-		return "", err
-	}
-	text, err := prepared.text(policy, string(data))
-	if err != nil {
-		return "", err
-	}
-	return prepared.snapshot([]byte(text))
+	return out, nil
 }
 
 func readBestEffortSource(source string, stdin io.Reader, prepared *rewritePreparation) ([]byte, error) {
@@ -257,59 +235,22 @@ func readBestEffortSource(source string, stdin io.Reader, prepared *rewritePrepa
 	return data, nil
 }
 
-func snapshotBestEffortField(policy stringRewritePolicy, field string, stdin io.Reader, prepared *rewritePreparation, stdinConsumed bool) (string, bool, bool, error) {
-	key, value, ok := strings.Cut(field, "=")
-	if !ok || !strings.HasPrefix(value, "@") {
-		return "", false, false, nil
-	}
-	if key == "" {
-		return "", false, false, errRewriteBlocked
-	}
-	source := strings.TrimPrefix(value, "@")
-	if source == "" || (source == "-" && stdinConsumed) {
-		return "", false, false, errRewriteBlocked
-	}
-	rewrittenKey, err := prepared.text(policy, key)
-	if err != nil || rewrittenKey == "" {
-		return "", false, false, errRewriteBlocked
-	}
-	if prepared.snapshots[source] {
-		return rewrittenKey + "=@" + source, true, false, nil
-	}
-	path, err := snapshotBestEffortTextInput(policy, source, stdin, prepared)
-	if err != nil {
-		return "", false, false, err
-	}
-	return rewrittenKey + "=@" + path, true, source == "-", nil
-}
-
-func bestEffortAttachedField(arg string) (string, bool) {
-	if value, ok := strings.CutPrefix(arg, "--field="); ok {
-		return value, true
-	}
-	if value, ok := strings.CutPrefix(arg, "-F"); ok && value != "" {
-		return strings.TrimPrefix(value, "="), true
-	}
-	return "", false
-}
-
-func bestEffortAPIHasHostname(args []string) bool {
-	for _, arg := range args[1:] {
-		if arg == "--hostname" || strings.HasPrefix(arg, "--hostname=") {
-			return true
-		}
-	}
-	return false
-}
-
-func rewriteBestEffortData(policy stringRewritePolicy, data []byte, prepared *rewritePreparation) ([]byte, error) {
+func rewriteBestEffortData(policy stringRewritePolicy, data []byte, prepared *rewritePreparation, kind bestEffortInputKind) ([]byte, error) {
 	if len(data) == 0 {
 		return data, nil
 	}
 	if policy.containsRuleMaterial(string(data)) {
 		return nil, errRewriteBlocked
 	}
-	if value, err := strictRewriteJSON(data, rewriteMaxContent); err == nil {
+	if kind == bestEffortText {
+		text, err := prepared.text(policy, string(data))
+		return []byte(text), err
+	}
+	value, parseErr := strictRewriteJSON(data, rewriteMaxContent)
+	if kind == bestEffortDeclaredJSON && parseErr != nil {
+		return nil, errRewriteBlocked
+	}
+	if parseErr == nil {
 		rewritten, err := rewriteBestEffortJSON(policy, value, prepared)
 		if err != nil {
 			return nil, err
@@ -363,18 +304,6 @@ func rewriteBestEffortJSON(policy stringRewritePolicy, value any, prepared *rewr
 	}
 }
 
-func bestEffortConsumesStdin(args []string) bool {
-	if len(args) < 2 || args[0] != "workflow" || args[1] != "run" {
-		return false
-	}
-	for _, arg := range args[2:] {
-		if arg == "--json" || arg == "--json=true" {
-			return true
-		}
-	}
-	return false
-}
-
 func rewriteReaderIsTerminal(reader io.Reader) bool {
 	file, ok := reader.(*os.File)
 	if !ok {
@@ -385,48 +314,37 @@ func rewriteReaderIsTerminal(reader io.Reader) bool {
 }
 
 func pinBestEffortRepositories(policy stringRewritePolicy, args []string) ([]string, error) {
+	declaration, err := describeBestEffortInput(args)
+	if err != nil {
+		return nil, err
+	}
+	args = declaration.argv
 	out := append([]string(nil), args...)
 	hasRepo := false
-	searchFilter := len(out) >= 2 && out[0] == "search"
-	for index := 0; index < len(out); index++ {
-		arg := out[index]
-		if arg == "--repo" || arg == "-R" {
-			hasRepo = true
-			index++
-			if index >= len(out) {
-				return nil, errRewriteBlocked
-			}
-			repo, err := normalizeBestEffortRepo(policy, out[index])
-			if err != nil {
-				return nil, err
-			}
-			out[index] = bestEffortRepoFlagValue(repo, searchFilter)
+	for _, token := range declaration.args {
+		if token.name != "--repo" {
 			continue
 		}
-		if value, ok := strings.CutPrefix(arg, "--repo="); ok {
-			hasRepo = true
-			repo, err := normalizeBestEffortRepo(policy, value)
-			if err != nil {
-				return nil, err
-			}
-			out[index] = "--repo=" + bestEffortRepoFlagValue(repo, searchFilter)
-			continue
+		hasRepo = true
+		repo, err := normalizeBestEffortRepo(policy, token.value)
+		if err != nil {
+			return nil, err
 		}
-		if value, ok := strings.CutPrefix(arg, "-R"); ok && value != "" {
-			hasRepo = true
-			repo, err := normalizeBestEffortRepo(policy, strings.TrimPrefix(value, "="))
-			if err != nil {
-				return nil, err
-			}
-			out[index] = "--repo=" + bestEffortRepoFlagValue(repo, searchFilter)
+		value := bestEffortRepoFlagValue(repo, declaration.command == "search")
+		if token.end-token.start == 2 {
+			out[token.start+1] = value
+		} else if token.booleanPrefix != "" {
+			out[token.start] = token.booleanPrefix + "R=" + value
+		} else {
+			out[token.start] = "--repo=" + value
 		}
 	}
-	if !hasRepo && bestEffortNeedsRepository(out) {
+	if !hasRepo && bestEffortNeedsRepository([]string{declaration.command}) {
 		repo, err := currentBestEffortRepo(policy)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, "--repo="+repo)
+		out = insertBestEffortFlag(out, declaration, "--repo="+repo)
 	}
 	return out, nil
 }
@@ -610,68 +528,6 @@ func normalizeBestEffortRepo(policy stringRewritePolicy, value string) (string, 
 		return "", err
 	}
 	return pinned, nil
-}
-
-func validateBestEffortAPI(args []string) error {
-	endpoint := ""
-	for index := 1; index < len(args); index++ {
-		arg := args[index]
-		switch {
-		case arg == "--hostname":
-			index++
-			if index >= len(args) || args[index] != "github.com" {
-				return errRewriteBlocked
-			}
-		case strings.HasPrefix(arg, "--hostname="):
-			if strings.TrimPrefix(arg, "--hostname=") != "github.com" {
-				return errRewriteBlocked
-			}
-		case arg == "--header" || arg == "-H":
-			index++
-			if index >= len(args) || sensitiveBestEffortHeader(args[index]) {
-				return errRewriteBlocked
-			}
-		case strings.HasPrefix(arg, "--header="):
-			if sensitiveBestEffortHeader(strings.TrimPrefix(arg, "--header=")) {
-				return errRewriteBlocked
-			}
-		case strings.HasPrefix(arg, "-H") && len(arg) > 2:
-			if sensitiveBestEffortHeader(strings.TrimPrefix(arg[2:], "=")) {
-				return errRewriteBlocked
-			}
-		case bestEffortAPISeparateValueFlag(arg):
-			index++
-			if index >= len(args) {
-				return errRewriteBlocked
-			}
-		case bestEffortAPIAttachedValueFlag(arg):
-			continue
-		case !strings.HasPrefix(arg, "-") && endpoint == "":
-			endpoint = arg
-		}
-	}
-	if endpoint == "" || strings.Contains(endpoint, "://") || rewriteEndpointPlaceholder.MatchString(endpoint) {
-		return errRewriteBlocked
-	}
-	return nil
-}
-
-func bestEffortAPISeparateValueFlag(arg string) bool {
-	switch arg {
-	case "--method", "-X", "--input", "--field", "-F", "--raw-field", "-f", "--jq", "-q":
-		return true
-	default:
-		return false
-	}
-}
-
-func bestEffortAPIAttachedValueFlag(arg string) bool {
-	for _, prefix := range []string{"--method=", "--input=", "--field=", "--raw-field=", "--jq=", "-X", "-F", "-f", "-q"} {
-		if strings.HasPrefix(arg, prefix) && len(arg) > len(prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func sensitiveBestEffortHeader(value string) bool {

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Honor native input declarations and reject malformed nonempty declared JSON before dispatch, preserving explicit UTF-8 text, zero-byte best-effort compatibility, and existing interactive-input limits.
 - Normalize compound client-name aliases consistently across CLI, login and stats, safely rotate historical singletons in place, and refuse ambiguous legacy families without changing credentials; apply the schema write guards before rollout.
 - Include eligible wildcard PATs for explicitly allowed owners and fail over selected local credential errors with bounded shared cooldowns, preserving cache authorization, valid credential continuations, and hard aggregate egress denials.
 - Keep persisted identity quota and cooldown feedback monotonic across delayed responses, reject invalid numeric observations, and atomically preserve rate/cooldown state on storage failure.
