@@ -1,5 +1,13 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { hashToken } from "../../src/auth";
+import { captureD1Baseline } from "./d1-baseline";
+import {
+  concurrentEnrollments,
+  loginClient,
+  mockEnrollmentAccount,
+  type Enrollment,
+} from "./enrollment-support";
 import {
   bearer,
   callWorker,
@@ -13,6 +21,151 @@ import {
 const APP = "https://octopool.openclaw.ai";
 
 describe("Worker end-to-end web sessions", () => {
+  it.each(["new", "singleton", "disabled"])(
+    "shares atomic browser/CLI enrollment for a %s identity without transferring authority",
+    async (state) => {
+      let oldSession: string | undefined;
+      if (state !== "new") {
+        await seedPool();
+        oldSession = await seedWebSession();
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO pools (id, name, policy_json) VALUES ('restricted', 'restricted', '{}')",
+          ),
+          env.DB.prepare(
+            "INSERT INTO caller_pools (caller_id, pool_id) VALUES ('caller', 'restricted')",
+          ),
+          env.DB.prepare(
+            "UPDATE callers SET org_login = 'OpenClaw', status = ? WHERE id = 'caller'",
+          ).bind(state === "disabled" ? "disabled" : "active"),
+        ]);
+      }
+      mockEnrollmentAccount(42);
+      const callback = await prepareCallback();
+      const [webResponse, cliResponse] = await concurrentEnrollments([
+        callback,
+        () => loginClient("test-mac"),
+      ]);
+      expect(webResponse!.status).toBe(302);
+      expect(cliResponse!.status).toBe(201);
+      const cli = await cliResponse!.json<Enrollment>();
+      const session = cookieValue(webResponse!, "octopool_session")!;
+      const sessionCaller = await callWorker(`${APP}/v1/me`, {
+        headers: { cookie: `octopool_session=${session}` },
+      });
+      expect(sessionCaller.status).toBe(state === "singleton" ? 200 : 403);
+      expect(
+        await env.DB.prepare("SELECT caller_id FROM web_sessions WHERE session_hash = ?")
+          .bind(await hashToken(session))
+          .first(),
+      ).toEqual({ caller_id: cli.caller.id });
+      expect(
+        await env.DB.prepare("SELECT dashboard_role FROM callers WHERE id = ?")
+          .bind(cli.caller.id)
+          .first(),
+      ).toEqual({ dashboard_role: state === "singleton" ? "admin" : "none" });
+      expect(
+        (
+          await env.DB.prepare(
+            "SELECT id FROM callers WHERE status = 'active' AND github_user_id = 42",
+          ).all()
+        ).results,
+      ).toEqual([{ id: cli.caller.id }]);
+      expect(
+        (
+          await env.DB.prepare("SELECT client_name FROM caller_tokens WHERE caller_id = ?")
+            .bind(cli.caller.id)
+            .all()
+        ).results,
+      ).toEqual([{ client_name: "test-mac" }]);
+      const grants = (
+        await env.DB.prepare(
+          "SELECT pool_id FROM caller_pools WHERE caller_id = ? ORDER BY pool_id",
+        )
+          .bind(cli.caller.id)
+          .all()
+      ).results;
+      expect(grants).toEqual(
+        state === "singleton"
+          ? [{ pool_id: POOL }, { pool_id: "restricted" }]
+          : [{ pool_id: POOL }],
+      );
+      const dashboard = await callWorker(`${APP}/v1/dashboard`, {
+        headers: { cookie: `octopool_session=${session}` },
+      });
+      expect(dashboard.status).toBe(state === "singleton" ? 200 : 403);
+      expect(
+        (
+          await callWorker(`/v1/pools/${POOL}/health`, {
+            headers: { authorization: `Bearer ${cli.token}` },
+          })
+        ).status,
+      ).toBe(200);
+      if (oldSession !== undefined) {
+        expect(cli.caller.id === "caller").toBe(state === "singleton");
+        const oldCookie = await callWorker(`${APP}/v1/me`, {
+          headers: { cookie: `octopool_session=${oldSession}` },
+        });
+        expect(oldCookie.status).toBe(state === "singleton" ? 200 : 401);
+        expect(
+          (
+            await callWorker(`/v1/pools/${POOL}/health`, {
+              headers: { authorization: "Bearer caller-token" },
+            })
+          ).status,
+        ).toBe(401);
+        expect(
+          await env.DB.prepare(
+            "SELECT dashboard_role, status FROM callers WHERE id = 'caller'",
+          ).first(),
+        ).toEqual({
+          dashboard_role: "admin",
+          status: state === "disabled" ? "disabled" : "active",
+        });
+        expect(
+          await env.DB.prepare(
+            "SELECT caller_id FROM caller_tokens WHERE id = 'caller-client-token'",
+          ).first(),
+        ).toEqual({ caller_id: "caller" });
+        expect(
+          (
+            await env.DB.prepare(
+              "SELECT caller_id FROM web_sessions WHERE caller_id = 'caller'",
+            ).all()
+          ).results,
+        ).toHaveLength(state === "singleton" ? 2 : 1);
+      }
+      expect((await env.DB.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
+    },
+  );
+
+  it("rolls back browser enrollment when its grant write fails without issuing a cookie", async () => {
+    await seedPool();
+    mockEnrollmentAccount(101);
+    const callback = await prepareCallback();
+    await env.DB.prepare(
+      "CREATE TRIGGER browser_grant_abort AFTER INSERT ON caller_pools BEGIN SELECT RAISE(ABORT, 'synthetic-grant-failure'); END",
+    ).run();
+    const before = await captureD1Baseline(env.DB);
+    const response = await callback();
+    expect(response.status).toBe(500);
+    expect(cookieValue(response, "octopool_session")).toBeUndefined();
+    expect(await captureD1Baseline(env.DB)).toEqual(before);
+  });
+
+  it("fails browser enrollment closed when the active identity index is missing", async () => {
+    await seedPool();
+    mockEnrollmentAccount(42);
+    const callback = await prepareCallback();
+    await env.DB.prepare("DROP INDEX idx_callers_active_github_org").run();
+    const before = await captureD1Baseline(env.DB);
+    const response = await callback();
+    expect(response.status).toBe(500);
+    expect(cookieValue(response, "octopool_session")).toBeUndefined();
+    expect(await response.text()).toContain("internal_error");
+    expect(await captureD1Baseline(env.DB)).toEqual(before);
+  });
+
   it("rejects OAuth membership for a substituted account without creating a session", async () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
@@ -264,4 +417,16 @@ function cookieValue(response: Response, name: string): string | undefined {
   const header = response.headers.get("set-cookie") ?? "";
   const match = new RegExp(`(?:^|,\\s*)${name}=([^;]*)`).exec(header);
   return match === null ? undefined : decodeURIComponent(match[1] ?? "");
+}
+
+async function prepareCallback(): Promise<() => Promise<Response>> {
+  const start = await callWorker(`${APP}/login/github`);
+  const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+  return () =>
+    callWorker(
+      `${APP}/login/github/callback?code=synthetic-code&state=${encodeURIComponent(state)}`,
+      {
+        headers: { cookie: `octopool_oauth_state=${encodeURIComponent(state)}` },
+      },
+    );
 }

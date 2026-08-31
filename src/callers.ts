@@ -1,6 +1,7 @@
 import { hashToken, newToken } from "./auth";
 import { ensurePool } from "./db";
 import { queries } from "./generated/sql";
+import { HttpError } from "./http";
 
 type GitHubLoginUser = {
   id: number;
@@ -44,122 +45,46 @@ async function ensureCaller(
   identityVerifiedAt: string,
   client?: { token: string; clientName: string },
 ): Promise<LoginCaller> {
+  if (!Number.isSafeInteger(user.id) || user.id <= 0) {
+    throw new HttpError(502, "github_user_invalid", "GitHub user response was incomplete");
+  }
   await ensurePool(env, pool);
-  const name = user.name ?? user.login;
-  const existing = await findLoginCaller(env, pool, user.id);
-  if (existing === null) {
-    return insertCaller(env, pool, user, name, identityVerifiedAt, client);
-  }
-
-  const statements = [
-    env.DB.prepare(queries.updateCallerWebLogin).bind(
-      name,
-      user.login,
-      user.id,
-      identityVerifiedAt,
-      existing.id,
-    ),
-    env.DB.prepare(queries.insertCallerPool).bind(existing.id, pool),
-    ...(client === undefined
-      ? []
-      : [
-          env.DB.prepare(queries.upsertCallerToken).bind(
-            `caller_token_${crypto.randomUUID()}`,
-            existing.id,
-            await hashToken(client.token),
-            client.clientName,
-          ),
-          env.DB.prepare(queries.pruneCallerTokens).bind(
-            existing.id,
-            client.clientName,
-            existing.id,
-            client.clientName,
-          ),
-        ]),
-  ];
-  await env.DB.batch(statements);
-  return loginCaller(
-    existing.id,
-    name,
-    user.login,
-    env.ALLOWED_GITHUB_ORG,
-    pool,
-    client?.clientName,
-  );
-}
-
-async function findLoginCaller(
-  env: Env,
-  pool: string,
-  githubUserId: number,
-): Promise<{ id: string } | null> {
-  const alreadyGranted = await env.DB.prepare(queries.loginExistingCaller)
-    .bind(githubUserId, env.ALLOWED_GITHUB_ORG, pool)
-    .first<{ id: string }>();
-  if (alreadyGranted !== null) {
-    return alreadyGranted;
-  }
-  return env.DB.prepare(queries.findActiveCallerByGitHubUser)
-    .bind(githubUserId, env.ALLOWED_GITHUB_ORG)
-    .first<{ id: string }>();
-}
-
-async function insertCaller(
-  env: Env,
-  pool: string,
-  user: GitHubLoginUser,
-  name: string,
-  identityVerifiedAt: string,
-  client?: { token: string; clientName: string },
-): Promise<LoginCaller> {
-  const callerId = `caller_${crypto.randomUUID()}`;
   const tokenHash = await hashToken(client?.token ?? newToken("op"));
+  const org = env.ALLOWED_GITHUB_ORG;
   const statements = [
-    env.DB.prepare(queries.insertCaller).bind(
-      callerId,
-      name,
+    env.DB.prepare(queries.upsertCallerEnrollment).bind(
+      `caller_${crypto.randomUUID()}`,
+      user.name ?? user.login,
       tokenHash,
       user.login,
       user.id,
-      env.ALLOWED_GITHUB_ORG,
+      org,
       identityVerifiedAt,
     ),
-    env.DB.prepare(queries.insertCallerPool).bind(callerId, pool),
+    env.DB.prepare(queries.insertCallerPool).bind(user.id, org, pool),
     ...(client === undefined
       ? []
       : [
           env.DB.prepare(queries.upsertCallerToken).bind(
             `caller_token_${crypto.randomUUID()}`,
-            callerId,
+            user.id,
+            org,
             tokenHash,
             client.clientName,
           ),
-          env.DB.prepare(queries.pruneCallerTokens).bind(
-            callerId,
-            client.clientName,
-            callerId,
-            client.clientName,
-          ),
+          env.DB.prepare(queries.pruneCallerTokens).bind(user.id, org, client.clientName),
         ]),
   ];
-  await env.DB.batch(statements);
-  return loginCaller(callerId, name, user.login, env.ALLOWED_GITHUB_ORG, pool, client?.clientName);
-}
-
-function loginCaller(
-  id: string,
-  name: string,
-  githubLogin: string,
-  orgLogin: string,
-  pool: string,
-  clientName?: string,
-): LoginCaller {
+  // Identity subselects resolve every dependent write inside this transaction.
+  // The candidate UUID is never authoritative after an enrollment conflict.
+  const [enrollment] = await env.DB.batch<Omit<LoginCaller, "pool" | "client_name">>(statements);
+  const caller = enrollment?.results[0];
+  if (caller === undefined) {
+    throw new Error("Enrollment returned no caller");
+  }
   return {
-    id,
-    name,
-    github_login: githubLogin,
-    org_login: orgLogin,
+    ...caller,
     pool,
-    ...(clientName === undefined ? {} : { client_name: clientName }),
+    ...(client === undefined ? {} : { client_name: client.clientName }),
   };
 }

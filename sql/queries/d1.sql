@@ -299,50 +299,53 @@ LEFT JOIN identities ON identities.pool_id = pools.id
 WHERE pools.id = ?1
 GROUP BY pools.id;
 
--- name: LoginExistingCaller :one
-SELECT callers.id
-FROM callers
-JOIN caller_pools ON caller_pools.caller_id = callers.id
-WHERE callers.github_user_id = ?1
-  AND callers.org_login = ?2
-  AND callers.status = 'active'
-  AND caller_pools.pool_id = ?3
-LIMIT 1;
-
--- name: FindActiveCallerByGitHubUser :one
-SELECT id
-FROM callers
-WHERE github_user_id = ?1
-  AND org_login = ?2
-  AND status = 'active'
-LIMIT 1;
-
--- name: InsertCaller :exec
+-- name: UpsertCallerEnrollment :one
 INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_identity_verified_at, status)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active');
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')
+ON CONFLICT(github_user_id, org_login COLLATE NOCASE)
+WHERE status = 'active' AND github_user_id IS NOT NULL
+DO UPDATE SET
+  name = excluded.name,
+  github_login = excluded.github_login,
+  org_identity_verified_at = excluded.org_identity_verified_at,
+  updated_at = CURRENT_TIMESTAMP
+RETURNING id, name, github_login, org_login;
 
 -- name: UpsertCallerToken :exec
 INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at)
-VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%d %H:%M:%f', 'now'))
+VALUES (?1, (
+  SELECT enrolled.id FROM callers AS enrolled
+  WHERE enrolled.github_user_id = ?2 AND enrolled.org_login = ?3 COLLATE NOCASE AND enrolled.status = 'active'
+), ?4, ?5, strftime('%Y-%m-%d %H:%M:%f', 'now'))
 ON CONFLICT(caller_id, client_name) DO UPDATE SET
   token_hash = excluded.token_hash,
   updated_at = excluded.updated_at;
 
 -- name: PruneCallerTokens :exec
 DELETE FROM caller_tokens
-WHERE caller_tokens.caller_id = ?1
-  AND caller_tokens.client_name <> ?2
-  AND caller_tokens.id NOT IN (
-    SELECT kept.id
-    FROM caller_tokens AS kept
-    WHERE kept.caller_id = ?3 AND kept.client_name <> ?4
-    ORDER BY julianday(kept.updated_at) DESC, kept.rowid DESC
-    LIMIT 15
-  );
+WHERE caller_tokens.caller_id = (
+  SELECT enrolled.id FROM callers AS enrolled
+  WHERE enrolled.github_user_id = ?1 AND enrolled.org_login = ?2 COLLATE NOCASE AND enrolled.status = 'active'
+)
+AND caller_tokens.client_name <> ?3
+AND caller_tokens.id NOT IN (
+  SELECT kept.id FROM caller_tokens AS kept
+  WHERE kept.caller_id = (
+    SELECT enrolled.id FROM callers AS enrolled
+    WHERE enrolled.github_user_id = ?1 AND enrolled.org_login = ?2 COLLATE NOCASE AND enrolled.status = 'active'
+  )
+  AND kept.client_name <> ?3
+  ORDER BY julianday(kept.updated_at) DESC, kept.rowid DESC
+  LIMIT 15
+);
 
 -- name: InsertCallerPool :exec
-INSERT OR IGNORE INTO caller_pools (caller_id, pool_id)
-VALUES (?1, ?2);
+INSERT INTO caller_pools (caller_id, pool_id)
+VALUES ((
+  SELECT enrolled.id FROM callers AS enrolled
+  WHERE enrolled.github_user_id = ?1 AND enrolled.org_login = ?2 COLLATE NOCASE AND enrolled.status = 'active'
+), ?3)
+ON CONFLICT(caller_id, pool_id) DO NOTHING;
 
 -- name: GetIdentityPoolKind :one
 SELECT pool_id, kind
@@ -368,15 +371,6 @@ WHERE identity_id = ?1;
 INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)
 VALUES (?1, ?2, ?3, 'read', ?4);
 
--- name: UpdateCallerWebLogin :exec
-UPDATE callers
-SET name = ?1,
-    github_login = ?2,
-    github_user_id = ?3,
-    org_identity_verified_at = ?4,
-    updated_at = CURRENT_TIMESTAMP
-WHERE id = ?5;
-
 -- name: InsertWebSession :exec
 INSERT INTO web_sessions (session_hash, caller_id, expires_at)
 VALUES (?1, ?2, ?3);
@@ -400,7 +394,7 @@ JOIN callers ON callers.id = web_sessions.caller_id
 WHERE web_sessions.session_hash = ?1
   AND web_sessions.expires_at > CURRENT_TIMESTAMP
   AND callers.status = 'active'
-  AND callers.org_login = ?2;
+  AND callers.org_login = ?2 COLLATE NOCASE;
 
 -- name: GetCallerPoolGrant :one
 SELECT 1

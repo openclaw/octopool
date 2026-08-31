@@ -66,13 +66,15 @@ Flow:
    are never a fallback for this GitHub.com-only exchange.
 3. The Worker resolves the GitHub user (`GET /user`) and verifies that user is a member
    of `ALLOWED_GITHUB_ORG` using the supplied token.
-4. The caller row and requested default-pool grant are created or refreshed by immutable
-   GitHub **user id**, org, active status, and pool.
+4. One active caller is created or refreshed by immutable GitHub **user id** and org
+   (case-insensitive). CLI, admin, and browser enrollment share this storage owner;
+   the authorized pool grant is added in the same transaction.
 5. A new caller token (`op_…`) is generated and hashed. It replaces only the token for
    the same caller and client name; sessions for the caller's other machines remain valid.
    Callers retain at most 16 named sessions, with least-recently-updated sessions retired
    as new client names are added.
-   The caller row is refreshed with the current login, user id, and verification time.
+   Caller enrollment, the grant, token rotation, and pruning commit atomically. The caller
+   keeps its random ID and receives the current login and identity-bound verification time.
 6. The plaintext token is returned once, for the CLI to store locally.
 
 The CLI follows login and authenticated JSON request redirects only within the
@@ -86,6 +88,24 @@ discovery keeps its existing redirect behavior.
 Clients are 1-80 hostname-safe characters. New CLI versions send the local hostname and
 can override it with `--client`; older clients use `legacy`. Audit rows retain the matched
 caller-token id so stats can separate machines without storing caller token values.
+
+Concurrent logins for one client converge on one caller and one stored token. The last
+committed rotation wins, regardless of response delivery order; an overlapping successful
+response can already carry a superseded token. Login clears the issuing isolate's caller
+cache after commit. Other warm isolates may accept a rotated or disabled token for up to
+30 seconds; rotation does not promise instantaneous global revocation.
+
+Existing singleton caller IDs, grants, dashboard roles, browser sessions, and the token
+row ID for a rotated client are preserved. A new enrollment starts with dashboard role
+`none` and only the pool authorized by its entry point. Disabling a row revokes that row's
+credentials, subject to the cache window; it is not an account-level ban. A later verified
+login may create a new active row, without inheriting the disabled row's grants or role.
+Null-ID history is never claimed by username, and neither disabled rows nor their
+credentials are reactivated.
+
+Migration `0018_active_caller_enrollment.sql` must precede this Worker upgrade. It rejects
+ambiguous active duplicates without merging privileges or deleting history. Enrollment
+fails closed if the index is missing. See the [upgrade gate](operations.md#atomic-enrollment-upgrade).
 
 ### Pool restriction
 

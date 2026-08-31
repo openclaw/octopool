@@ -1,7 +1,15 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
+import { hashToken } from "../../src/auth";
+import { captureD1Baseline } from "./d1-baseline";
 import { insertAudit } from "../../src/db";
 import { poolHealth } from "../../src/health";
+import {
+  concurrentEnrollments,
+  loginClient,
+  mockEnrollmentAccount,
+  type Enrollment,
+} from "./enrollment-support";
 import {
   bearer,
   callWorker,
@@ -17,6 +25,219 @@ import {
 } from "./harness";
 
 describe("Worker end-to-end control plane", () => {
+  it("atomically enrolls concurrent first logins and revokes both originals on a third rotation", async () => {
+    mockEnrollmentAccount();
+    const responses = await concurrentEnrollments([
+      () => loginClient("same-client"),
+      () => loginClient("same-client"),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const originals = await Promise.all(responses.map((response) => response.json<Enrollment>()));
+    const before = await env.DB.prepare(
+      "SELECT count(*) AS n FROM callers WHERE github_user_id = 101 AND status = 'active'",
+    ).first();
+    const originalAuth = await Promise.all(originals.map(({ token }) => tokenHealth(token)));
+    const third = await loginClient("same-client");
+    expect(third.status).toBe(201);
+    const replacement = await third.json<Enrollment>();
+    const afterAuth = await Promise.all(originals.map(({ token }) => tokenHealth(token)));
+    expect.soft(new Set(originals.map(({ caller }) => caller.id)).size).toBe(1);
+    expect.soft(before).toEqual({ n: 1 });
+    expect.soft(originalAuth.sort()).toEqual([200, 401]);
+    expect.soft(afterAuth).toEqual([401, 401]);
+    expect.soft(replacement.caller.id).toBe(originals[0]!.caller.id);
+    expect(await tokenHealth(replacement.token)).toBe(200);
+    expect
+      .soft(await env.DB.prepare("SELECT count(*) AS n FROM caller_tokens").first())
+      .toEqual({ n: 1 });
+    expect
+      .soft(await env.DB.prepare("SELECT count(*) AS n FROM caller_pools").first())
+      .toEqual({ n: 1 });
+  });
+
+  it("converges concurrent distinct clients and admin grants without promoting roles", async () => {
+    mockEnrollmentAccount();
+    const responses = await concurrentEnrollments([
+      () => loginClient("laptop"),
+      () => loginClient("studio"),
+      () => adminEnrollment("restricted"),
+      () => adminEnrollment("restricted"),
+    ]);
+    expect(responses.map(({ status }) => status)).toEqual([201, 201, 201, 201]);
+    const issued = await Promise.all(responses.map((response) => response.json<Enrollment>()));
+    expect(new Set(issued.map(({ caller }) => caller.id)).size).toBe(1);
+    const id = issued[0]!.caller.id;
+    expect(
+      await env.DB.prepare("SELECT dashboard_role FROM callers WHERE id = ?").bind(id).first(),
+    ).toEqual({ dashboard_role: "none" });
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT pool_id FROM caller_pools WHERE caller_id = ? ORDER BY pool_id",
+        )
+          .bind(id)
+          .all()
+      ).results,
+    ).toEqual([{ pool_id: POOL }, { pool_id: "restricted" }]);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT client_name FROM caller_tokens WHERE caller_id = ? ORDER BY client_name",
+        )
+          .bind(id)
+          .all()
+      ).results,
+    ).toEqual([{ client_name: "admin" }, { client_name: "laptop" }, { client_name: "studio" }]);
+    expect(await tokenHealth(issued[0]!.token)).toBe(200);
+    expect(await tokenHealth(issued[1]!.token)).toBe(200);
+    const adminAuth = await Promise.all(
+      issued.slice(2).map(({ token }) => tokenHealth(token, "restricted")),
+    );
+    expect(adminAuth.sort()).toEqual([200, 401]);
+    const rotated = await (await adminEnrollment("restricted")).json<Enrollment>();
+    for (const { token } of issued.slice(2))
+      expect(await tokenHealth(token, "restricted")).toBe(401);
+    expect(await tokenHealth(rotated.token, "restricted")).toBe(200);
+  });
+
+  it("serializes additions at the 16-client cap with stable ties and preserved audit attribution", async () => {
+    await seedPool();
+    await seedClientCap();
+    mockEnrollmentAccount(42);
+    await seedAudit("pruned", "caller", "repo_view", "miss", 200, {
+      callerTokenId: "old-0",
+      clientName: "old-0",
+    });
+    await seedAudit("rotated", "caller", "repo_view", "miss", 200);
+    const responses = await concurrentEnrollments([
+      () => loginClient("new-a"),
+      () => loginClient("new-b"),
+    ]);
+    expect(responses.map(({ status }) => status)).toEqual([201, 201]);
+    const issued = await Promise.all(responses.map((response) => response.json<Enrollment>()));
+    for (const entry of issued) {
+      expect(entry.caller.id).toBe("caller");
+      expect(await tokenHealth(entry.token)).toBe(200);
+    }
+    const names = (
+      await env.DB.prepare("SELECT client_name FROM caller_tokens ORDER BY client_name").all<{
+        client_name: string;
+      }>()
+    ).results.map(({ client_name }) => client_name);
+    expect(names).toHaveLength(16);
+    expect(names).not.toContain("old-0");
+    expect(names).not.toContain("old-1");
+    expect(names).toEqual(expect.arrayContaining(["old-2", "test-mac", "new-a", "new-b"]));
+    const rotated = await (await loginClient("test-mac")).json<Enrollment>();
+    expect(await tokenHealth(rotated.token)).toBe(200);
+    expect(await tokenHealth(CALLER_TOKEN)).toBe(401);
+    expect(
+      await env.DB.prepare("SELECT id FROM caller_tokens WHERE client_name = 'test-mac'").first(),
+    ).toEqual({ id: "caller-client-token" });
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT request_id, caller_id, caller_token_id, client_name FROM audit_events ORDER BY request_id",
+        ).all()
+      ).results,
+    ).toEqual([
+      { request_id: "pruned", caller_id: "caller", caller_token_id: null, client_name: "old-0" },
+      {
+        request_id: "rotated",
+        caller_id: "caller",
+        caller_token_id: "caller-client-token",
+        client_name: "test-mac",
+      },
+    ]);
+    expect((await env.DB.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
+  });
+
+  it.each(["first insert", "rotation", "pruning"])(
+    "rolls back enrollment and dependent writes after a later %s failure",
+    async (failure) => {
+      await seedPool();
+      mockEnrollmentAccount(failure === "first insert" ? 101 : 42, "changed-profile");
+      if (failure === "pruning") await seedClientCap();
+      await env.DB.prepare(
+        "INSERT INTO pools (id, name, policy_json) VALUES ('restricted', 'restricted', '{}')",
+      ).run();
+      const event =
+        failure === "first insert" ? "INSERT" : failure === "rotation" ? "UPDATE" : "DELETE";
+      await env.DB.prepare(
+        `CREATE TRIGGER enrollment_abort AFTER ${event} ON caller_tokens BEGIN SELECT RAISE(ABORT, 'synthetic-later-write'); END`,
+      ).run();
+      const before = await captureD1Baseline(env.DB);
+      const response =
+        failure === "rotation"
+          ? await loginClient("test-mac")
+          : await adminEnrollment("restricted", "changed-profile");
+      expect(response.status).toBe(500);
+      const body = await response.text();
+      expect(JSON.parse(body)).toMatchObject({ error: { code: "internal_error" } });
+      expect(JSON.parse(body)).not.toHaveProperty("token");
+      expect(body).not.toContain("synthetic-later-write");
+      expect(await captureD1Baseline(env.DB)).toEqual(before);
+      expect(await tokenHealth(CALLER_TOKEN)).toBe(200);
+    },
+  );
+
+  it.each(["CLI", "admin"])(
+    "fails %s enrollment closed without the required index",
+    async (surface) => {
+      await seedPool();
+      mockEnrollmentAccount(42);
+      await env.DB.prepare("DROP INDEX idx_callers_active_github_org").run();
+      const before = await captureD1Baseline(env.DB);
+      const response =
+        surface === "CLI" ? await loginClient("test-mac") : await adminEnrollment(POOL);
+      expect(response.status).toBe(500);
+      const body = await response.json();
+      expect(body).toMatchObject({ error: { code: "internal_error" } });
+      expect(body).not.toHaveProperty("token");
+      expect(await captureD1Baseline(env.DB)).toEqual(before);
+    },
+  );
+
+  it.each(["rotation", "disable"])(
+    "respects the 30-second warm-isolate cache after external %s",
+    async (change) => {
+      await seedPool();
+      const start = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+      const warmHealth = () =>
+        callWarmWorker(`/v1/pools/${POOL}/health`, {
+          headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+        });
+      expect(await tokenHealth(CALLER_TOKEN)).toBe(200);
+      if (change === "rotation") {
+        await env.DB.prepare(
+          "UPDATE caller_tokens SET token_hash = ? WHERE id = 'caller-client-token'",
+        )
+          .bind(await hashToken("external-replacement"))
+          .run();
+      } else {
+        await env.DB.prepare("UPDATE callers SET status = 'disabled' WHERE id = 'caller'").run();
+      }
+      clock.mockReturnValue(start + 29_999);
+      expect((await warmHealth()).status).toBe(200);
+      clock.mockReturnValue(start + 30_000);
+      expect((await warmHealth()).status).toBe(401);
+    },
+  );
+
+  it("invalidates the issuing isolate's cached token only after successful login", async () => {
+    await seedPool();
+    mockEnrollmentAccount(42);
+    const warmHealth = (token: string) =>
+      callWarmWorker(`/v1/pools/${POOL}/health`, { headers: { authorization: `Bearer ${token}` } });
+    expect((await warmHealth(CALLER_TOKEN)).status).toBe(200);
+    const response = await loginClient("test-mac");
+    expect(response.status).toBe(201);
+    const { token } = await response.json<Enrollment>();
+    expect((await warmHealth(CALLER_TOKEN)).status).toBe(401);
+    expect((await warmHealth(token)).status).toBe(200);
+  });
+
   it("rejects membership from a replacement account without refreshing the enrolled caller", async () => {
     await seedPool();
     const stale = "2020-01-01T00:00:00.000Z";
@@ -677,6 +898,12 @@ describe("Worker end-to-end control plane", () => {
   });
 });
 
+async function tokenHealth(token: string, pool = POOL): Promise<number> {
+  return (
+    await callWorker(`/v1/pools/${pool}/health`, { headers: { authorization: `Bearer ${token}` } })
+  ).status;
+}
+
 const STALE = "2020-01-01T00:00:00.000Z";
 
 function membershipPage(userId: number, logins: string[], cursor: string | null = null): Response {
@@ -738,4 +965,28 @@ function cacheEntry(cacheKey: string, staleOffset: string): D1PreparedStatement 
     ) VALUES (?, ?, 'GET', '/fixture', '{}', '{}', 'fixture', 'repo_view', 200, '{}', '{}',
       'json', datetime('now', ?), datetime('now', ?))`,
   ).bind(cacheKey, POOL, staleOffset, staleOffset);
+}
+
+function adminEnrollment(pool: string, login = "enrollment-user"): Promise<Response> {
+  return callWarmWorker("/v1/admin/callers", {
+    method: "POST",
+    headers: { authorization: "Bearer test-admin-token", "content-type": "application/json" },
+    body: JSON.stringify({ pool, github_login: login }),
+  });
+}
+
+async function seedClientCap(): Promise<void> {
+  // Equal instants in both supported formats exercise julianday + rowid ties.
+  await env.DB.batch(
+    Array.from({ length: 15 }, (_, index) =>
+      env.DB.prepare(
+        "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at) VALUES (?, 'caller', ?, ?, ?)",
+      ).bind(
+        `old-${index}`,
+        `synthetic-hash-${index}`,
+        `old-${index}`,
+        index % 2 ? "2020-01-01T00:00:00.000Z" : "2020-01-01 00:00:00",
+      ),
+    ),
+  );
 }

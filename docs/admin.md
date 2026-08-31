@@ -31,6 +31,16 @@ In practice callers usually run `octopool login`, which creates or refreshes thi
 for the default login pool automatically. Use this admin command for manual backfills,
 nonstandard pools, or one-time token issuance.
 
+Admin provisioning uses the same atomic active-ID/org enrollment as CLI and browser
+login. It adds only the requested pool grant and rotates the named `admin` client under
+the shared 16-client cap; it does not promote dashboard roles. Existing active singleton
+roles and grants remain attached to their caller ID. A disabled row stays disabled; a
+fresh enrollment starts with role `none` and does not inherit its authority.
+
+Before upgrading, follow the [atomic enrollment migration gate](operations.md#atomic-enrollment-upgrade).
+Ambiguous active duplicates require an explicit operator ownership decision. There is no
+automatic survivor selection, grant union, role promotion, or token/session transfer.
+
 ## Register an identity
 
 Creates or updates a pooled GitHub identity and its repo scopes. The secret material is

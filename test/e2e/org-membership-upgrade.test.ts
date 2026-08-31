@@ -272,7 +272,11 @@ function migrations(): D1Migration[] {
 async function applyUpgrade(): Promise<void> {
   const upgrade = migrations().find(({ name }) => name === "0017_org_identity_verification.sql");
   expect(upgrade).toBeDefined();
-  await applyD1Migrations(env.DB, [upgrade!]);
+  // Current enrollment also requires later additive migrations.
+  await applyD1Migrations(
+    env.DB,
+    migrations().filter(({ name }) => name >= upgrade!.name),
+  );
 }
 
 async function legacyRefresh(timestamp: string): Promise<void> {

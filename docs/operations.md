@@ -42,9 +42,9 @@ Edit `wrangler.jsonc`:
   OAuth callback when browser sign-in starts on a different host.
 - `routes[]` — the custom domain you want octopool served on.
 
-If you only need one host, ignore `wrangler.public-proxy.jsonc`. OpenClaw uses it only
-because `octopool.dev` lives in a different Cloudflare account from the authoritative
-`octopool.openclaw.ai` data plane.
+If you only need one host, ignore `wrangler.public-proxy.jsonc`. OpenClaw uses it to
+forward `octopool.dev` to the authoritative `octopool.openclaw.ai` data plane. Both
+Workers run in the OpenClaw Services Cloudflare account.
 
 ### 2. Create the data plane
 
@@ -206,8 +206,68 @@ D1 schema lives in `migrations/`:
   seeds explicit empty rules at revision 1.
 - `0017_org_identity_verification.sql` — add a separate nullable identity-bound proof timestamp without backfill or changes to old data;
   apply before the [rolling Worker upgrade](auth.md#immutable-membership-upgrade). Old timestamp writes cannot authorize new Workers.
+- `0018_active_caller_enrollment.sql` — unique active immutable GitHub ID plus case-insensitive org;
+  refuses ambiguous duplicates without changing caller history. Apply before the updated enrollment Worker.
 
 Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
+
+## Atomic enrollment upgrade
+
+Before applying `0018_active_caller_enrollment.sql`, run this aggregate-only, read-only
+preflight on the intended database. Rerun it at deployment: an earlier clean observation
+is not a lock. Do not include caller names, IDs, hashes, or credentials in public proof.
+
+```sql
+WITH enrollment_groups AS (
+  SELECT github_user_id, org_login COLLATE NOCASE AS org,
+         COUNT(*) AS n, SUM(status = 'active') AS active_n
+  FROM callers
+  WHERE github_user_id IS NOT NULL
+  GROUP BY github_user_id, org_login COLLATE NOCASE
+)
+SELECT
+  (SELECT COUNT(*) FROM enrollment_groups WHERE active_n > 1)
+    AS blocking_active_duplicate_groups,
+  (SELECT COALESCE(SUM(active_n - 1), 0) FROM enrollment_groups WHERE active_n > 1)
+    AS excess_active_rows,
+  (SELECT COUNT(*) FROM enrollment_groups WHERE n > 1 AND active_n <= 1)
+    AS nonblocking_historical_groups,
+  (SELECT COUNT(*) FROM callers WHERE github_user_id IS NULL) AS null_id_rows,
+  (SELECT COUNT(*) FROM callers WHERE github_user_id IS NULL AND status = 'active')
+    AS active_null_id_rows,
+  (SELECT COUNT(*) FROM callers WHERE github_user_id IS NOT NULL AND
+    (typeof(github_user_id) <> 'integer' OR github_user_id <= 0
+     OR github_user_id > 9007199254740991)) AS invalid_nonnull_id_rows;
+```
+
+A nonzero active-duplicate or malformed-ID count blocks deployment for operator review.
+Historical/NULL counts are inventory, not evidence of ownership or permission to merge.
+The index covers only active nonnull immutable IDs and uses `COLLATE NOCASE` for orgs;
+malformed-ID review is a preflight gate, not a new schema constraint.
+
+Apply schema first, including `0017_org_identity_verification.sql`, then verify the
+migration record and the actual `idx_callers_active_github_org` definition before deploying
+the Worker. Index creation is the authoritative uniqueness gate and fails unchanged if a
+new duplicate appeared after preflight. Never automatically choose an oldest/newest row,
+union grants, promote roles, or move tokens, sessions, or audit history. An operator must
+explicitly decide which ambiguous rows to retire in place before retrying. Retired rows
+must not be re-enabled as a recovery shortcut; that can revive attached credentials.
+
+Existing singletons, disabled history, and NULL-ID records survive unchanged. Migration
+0012's named `legacy` tokens are preserved without replaying that migration or adding a
+bootstrap-hash authentication fallback. Same-client rotation retains token row IDs and
+audit links. Ordinary cap pruning keeps the audit event, caller ID, and recorded client
+name while the deleted token's audit FK becomes NULL. Browser sessions remain attached
+to their original caller. Historical noncanonical client names (for example `host.local`
+versus `host`) need a separate reviewed inventory/retirement decision; this migration does
+not normalize or silently combine stored client keys.
+
+During rollout, old code against the new index can reject a competing initial login;
+new code without the index fails enrollment closed. Coordinate an enrollment quiet window
+if transient errors matter. Keep the index on a Worker rollback. A failed migration leaves
+the old enrollment race unresolved and must block rollout, not trigger a fallback. The
+normal 30-second cross-isolate auth-cache window still applies after rotation or row
+revocation. The deployment operator owns production preflight and deployment.
 
 ## Activating string protection
 

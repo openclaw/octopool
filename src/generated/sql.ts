@@ -90,30 +90,25 @@ export const queries = {
     "SELECT\n  COUNT(*) AS total_entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  MAX(checked_at) AS newest_checked_at\nFROM github_public_repos",
   poolHealth:
     "SELECT\n  COUNT(identities.id) AS identities_total,\n  SUM(CASE WHEN identities.status = 'active' THEN 1 ELSE 0 END) AS identities_healthy\nFROM pools\nLEFT JOIN identities ON identities.pool_id = pools.id\nWHERE pools.id = ?1\nGROUP BY pools.id",
-  loginExistingCaller:
-    "SELECT callers.id\nFROM callers\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE callers.github_user_id = ?1\n  AND callers.org_login = ?2\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?3\nLIMIT 1",
-  findActiveCallerByGitHubUser:
-    "SELECT id\nFROM callers\nWHERE github_user_id = ?1\n  AND org_login = ?2\n  AND status = 'active'\nLIMIT 1",
-  insertCaller:
-    "INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_identity_verified_at, status)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')",
+  upsertCallerEnrollment:
+    "INSERT INTO callers (id, name, token_hash, github_login, github_user_id, org_login, org_identity_verified_at, status)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active')\nON CONFLICT(github_user_id, org_login COLLATE NOCASE)\nWHERE status = 'active' AND github_user_id IS NOT NULL\nDO UPDATE SET\n  name = excluded.name,\n  github_login = excluded.github_login,\n  org_identity_verified_at = excluded.org_identity_verified_at,\n  updated_at = CURRENT_TIMESTAMP\nRETURNING id, name, github_login, org_login",
   upsertCallerToken:
-    "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at)\nVALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%d %H:%M:%f', 'now'))\nON CONFLICT(caller_id, client_name) DO UPDATE SET\n  token_hash = excluded.token_hash,\n  updated_at = excluded.updated_at",
+    "INSERT INTO caller_tokens (id, caller_id, token_hash, client_name, updated_at)\nVALUES (?1, (\n  SELECT enrolled.id FROM callers AS enrolled\n  WHERE enrolled.github_user_id = ?2 AND enrolled.org_login = ?3 COLLATE NOCASE AND enrolled.status = 'active'\n), ?4, ?5, strftime('%Y-%m-%d %H:%M:%f', 'now'))\nON CONFLICT(caller_id, client_name) DO UPDATE SET\n  token_hash = excluded.token_hash,\n  updated_at = excluded.updated_at",
   pruneCallerTokens:
-    "DELETE FROM caller_tokens\nWHERE caller_tokens.caller_id = ?1\n  AND caller_tokens.client_name <> ?2\n  AND caller_tokens.id NOT IN (\n    SELECT kept.id\n    FROM caller_tokens AS kept\n    WHERE kept.caller_id = ?3 AND kept.client_name <> ?4\n    ORDER BY julianday(kept.updated_at) DESC, kept.rowid DESC\n    LIMIT 15\n  )",
-  insertCallerPool: "INSERT OR IGNORE INTO caller_pools (caller_id, pool_id)\nVALUES (?1, ?2)",
+    "DELETE FROM caller_tokens\nWHERE caller_tokens.caller_id = (\n  SELECT enrolled.id FROM callers AS enrolled\n  WHERE enrolled.github_user_id = ?1 AND enrolled.org_login = ?2 COLLATE NOCASE AND enrolled.status = 'active'\n)\nAND caller_tokens.client_name <> ?3\nAND caller_tokens.id NOT IN (\n  SELECT kept.id FROM caller_tokens AS kept\n  WHERE kept.caller_id = (\n    SELECT enrolled.id FROM callers AS enrolled\n    WHERE enrolled.github_user_id = ?1 AND enrolled.org_login = ?2 COLLATE NOCASE AND enrolled.status = 'active'\n  )\n  AND kept.client_name <> ?3\n  ORDER BY julianday(kept.updated_at) DESC, kept.rowid DESC\n  LIMIT 15\n)",
+  insertCallerPool:
+    "INSERT INTO caller_pools (caller_id, pool_id)\nVALUES ((\n  SELECT enrolled.id FROM callers AS enrolled\n  WHERE enrolled.github_user_id = ?1 AND enrolled.org_login = ?2 COLLATE NOCASE AND enrolled.status = 'active'\n), ?3)\nON CONFLICT(caller_id, pool_id) DO NOTHING",
   getIdentityPoolKind: "SELECT pool_id, kind\nFROM identities\nWHERE id = ?1",
   upsertIdentity:
     "INSERT INTO identities (id, pool_id, kind, login, secret_ref, installation_id, status, weight)\nVALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7)\nON CONFLICT(id) DO UPDATE SET\n  login = excluded.login,\n  secret_ref = excluded.secret_ref,\n  installation_id = excluded.installation_id,\n  status = 'active',\n  weight = excluded.weight,\n  updated_at = CURRENT_TIMESTAMP",
   deleteIdentityScopes: "DELETE FROM identity_scopes\nWHERE identity_id = ?1",
   insertIdentityScope:
     "INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private)\nVALUES (?1, ?2, ?3, 'read', ?4)",
-  updateCallerWebLogin:
-    "UPDATE callers\nSET name = ?1,\n    github_login = ?2,\n    github_user_id = ?3,\n    org_identity_verified_at = ?4,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id = ?5",
   insertWebSession:
     "INSERT INTO web_sessions (session_hash, caller_id, expires_at)\nVALUES (?1, ?2, ?3)",
   deleteWebSession: "DELETE FROM web_sessions\nWHERE session_hash = ?1",
   getWebSession:
-    "SELECT\n  callers.id,\n  callers.name,\n  callers.github_login,\n  callers.github_user_id,\n  callers.org_login,\n  callers.org_identity_verified_at AS org_verified_at,\n  callers.dashboard_role,\n  web_sessions.expires_at\nFROM web_sessions\nJOIN callers ON callers.id = web_sessions.caller_id\nWHERE web_sessions.session_hash = ?1\n  AND web_sessions.expires_at > CURRENT_TIMESTAMP\n  AND callers.status = 'active'\n  AND callers.org_login = ?2",
+    "SELECT\n  callers.id,\n  callers.name,\n  callers.github_login,\n  callers.github_user_id,\n  callers.org_login,\n  callers.org_identity_verified_at AS org_verified_at,\n  callers.dashboard_role,\n  web_sessions.expires_at\nFROM web_sessions\nJOIN callers ON callers.id = web_sessions.caller_id\nWHERE web_sessions.session_hash = ?1\n  AND web_sessions.expires_at > CURRENT_TIMESTAMP\n  AND callers.status = 'active'\n  AND callers.org_login = ?2 COLLATE NOCASE",
   getCallerPoolGrant:
     "SELECT 1\nFROM caller_pools\nWHERE caller_id = ?1\n  AND pool_id = ?2\nLIMIT 1",
   touchWebSession:
