@@ -1,12 +1,11 @@
 import { bytesToBase64 } from "./encoding";
 import type { GitHubEgressEnv } from "./github-egress";
-import { githubToken } from "./github-auth";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import { githubResponseHeaders } from "./github-response";
 import { HttpError } from "./http";
 import { readBodyCapped } from "./response-body";
-import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
+import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 export type GitHubLogProbe =
   | { kind: "exists"; status: number; headers: Record<string, string> }
@@ -15,11 +14,10 @@ export type GitHubLogProbe =
 
 export async function callGitHub(
   env: GitHubEgressEnv,
-  identity: Identity,
+  token: string,
   request: RelayRequest,
   route: RouteInfo,
 ): Promise<GitHubRelayResponse> {
-  const token = await githubToken(env, identity);
   return callGitHubAPI(env, request, route, token);
 }
 
@@ -33,10 +31,9 @@ export async function callPublicGitHub(
 
 export async function probeGitHubLog(
   env: GitHubEgressEnv,
-  identity: Identity,
+  token: string,
   request: RelayRequest,
 ): Promise<GitHubLogProbe> {
-  const token = await githubToken(env, identity);
   const response = await env.githubEgress.fetch(githubUrl(request), {
     method: "GET",
     headers: githubHeaders(token, request.headers),

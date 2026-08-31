@@ -49,10 +49,16 @@ FROM identities
 JOIN identity_scopes ON identity_scopes.identity_id = identities.id
 WHERE identities.pool_id = ?1
   AND identities.status = 'active'
-  AND lower(identity_scopes.owner) = lower(?2)
   AND (
-    lower(identity_scopes.repo) = lower(?3)
-    OR identity_scopes.repo IS NULL
+    (
+      lower(identity_scopes.owner) = lower(?2)
+      AND (lower(identity_scopes.repo) = lower(?3) OR identity_scopes.repo IS NULL)
+    )
+    OR (
+      identities.kind = 'pat'
+      AND identity_scopes.owner = '*'
+      AND identity_scopes.repo IS NULL
+    )
   );
 
 -- name: ListActivePublicIdentitiesForPool :many

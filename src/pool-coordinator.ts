@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { CacheFillAcquisition, CacheFillOutcome } from "./cache-fill";
 import { queries } from "./generated/sql";
+import { isCredentialFailureReason, type CredentialFailureReason } from "./github-auth";
 import { isRateInteger, isRateSeconds } from "./github-rate";
 import type { CoordinatorSnapshot, RecordResult, SelectionRequest, SelectionResult } from "./types";
 
@@ -194,6 +195,24 @@ export class PoolCoordinator extends DurableObject<Env> {
         );
       }
     });
+  }
+
+  recordCredentialFailure(result: { identityId: string; reason: CredentialFailureReason }): void {
+    if (
+      typeof result?.identityId !== "string" ||
+      result.identityId === "" ||
+      !isCredentialFailureReason(result.reason)
+    ) {
+      throw new Error("Invalid credential failure observation");
+    }
+    this.ctx.storage.sql.exec(
+      queries.upsertCooldown,
+      result.identityId,
+      "*",
+      503,
+      result.reason,
+      Date.now() + 120_000,
+    );
   }
 
   snapshot(): CoordinatorSnapshot {

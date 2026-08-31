@@ -110,6 +110,26 @@ Notes:
   (`409 identity_conflict`).
 - Identity selection between equal candidates is biased by `weight` (default 100).
 
+A wildcard PAT is eligible after public proof even when the requested owner is explicitly
+allowed by the pool. Registration and `GET /v1/pools/:pool/health` describe stored rows:
+`identities_healthy` counts active identities, not verified credential readiness or current
+coordinator availability. Neither operation eagerly validates every Worker binding.
+
+The relay checks the selected credential at use time. Classified local configuration
+failures can select another eligible identity after recording a shared 120-second
+cooldown; exhaustion returns the first generic credential error without secret binding
+names. Each observation can extend the cooldown, and a revision with healthy secrets may
+be suppressed by observations from a revision with missing secrets. A repaired binding
+does not clear that shared state immediately. A valid cached App token can avoid reading
+the private key, but App ID and installation prerequisites still apply, and refresh needs
+the key. See [identity routing](identities.md) for the aggregate and anonymous-fallback limits.
+
+Deploy callers and coordinators with compatible credential-feedback methods. A new caller
+reaching an old coordinator without `recordCredentialFailure` treats the missing method
+as infrastructure failure: no alternate dispatch, fabricated success acknowledgment, or
+compensating storage clear. This method-availability interval lasts for the version overlap;
+the 120-second credential cooldown does not bound it.
+
 ## Pools
 
 Pools are created implicitly the first time they are referenced (caller provisioning,

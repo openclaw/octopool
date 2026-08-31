@@ -18,6 +18,7 @@ import { coalesceGitHubCacheMiss } from "./cache-coalesce";
 import type { CacheFillOutcome, OwnedCacheFill } from "./cache-fill";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";
+import { githubToken, IdentityCredentialError } from "./github-auth";
 import { supportsAnonymousGitHubAPI } from "./github-public-api";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
@@ -101,6 +102,8 @@ type ActiveRelay = RelayBase & {
   sharedCacheKey: string | undefined;
   cacheKey: string | undefined;
   attemptedIdentityCacheKeys: { cacheKey: string; identity: Pick<Identity, "id" | "kind"> }[];
+  failedIdentityIds: Set<string>;
+  firstCredentialError: IdentityCredentialError | undefined;
   cacheFill: OwnedCacheFill | undefined;
   cacheStatus: "miss" | "bypass";
   cacheable: boolean;
@@ -122,6 +125,16 @@ type RevalidationCandidate = {
   cached: CachedGitHubResponse;
   headers: Record<string, string>;
 };
+
+// Acquisition and feedback failures must cross opportunistic cache/probe catches.
+class IdentityOperationError extends Error {
+  constructor(
+    readonly failure: unknown,
+    readonly feedback = false,
+  ) {
+    super("Identity operation failed");
+  }
+}
 
 export async function relayGitHub(
   request: Request,
@@ -196,7 +209,11 @@ async function relayGitHubRequest(
     active = await prepareRelay(base, policy);
     return await executeRelay(active);
   } catch (error) {
-    return await handleRelayError(base, active, error);
+    return await handleRelayError(
+      base,
+      active,
+      error instanceof IdentityOperationError ? error.failure : error,
+    );
   } finally {
     await active?.cacheFill?.fail();
   }
@@ -238,6 +255,8 @@ async function prepareRelay(
     sharedCacheKey: cacheKey,
     cacheKey,
     attemptedIdentityCacheKeys: [],
+    failedIdentityIds: new Set(),
+    firstCredentialError: undefined,
     cacheFill: undefined,
     cacheStatus: cacheKey === undefined ? "bypass" : "miss",
     cacheable: cacheKey !== undefined,
@@ -398,6 +417,8 @@ async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response |
     return await attemptStaleRelayCacheRevalidation(state);
   } catch (error) {
     rethrowStringRewriteDenial(error);
+    if (error instanceof IdentityOperationError || error instanceof IdentityCredentialError)
+      throw error;
     return restoreSharedCacheFill(state);
   }
 }
@@ -458,7 +479,9 @@ async function attemptStaleRelayCacheRevalidation(
     selection = await selectIdentity(state.coordinator, {
       routeKey: state.route.routeKey,
       resource: state.route.resource,
-      candidates: identities.map((identity) => ({ id: identity.id, weight: identity.weight })),
+      candidates: identities
+        .filter((identity) => !state.failedIdentityIds.has(identity.id))
+        .map((identity) => ({ id: identity.id, weight: identity.weight })),
     });
   } catch {
     return undefined;
@@ -483,7 +506,9 @@ async function attemptStaleRelayCacheRevalidation(
   if (state.cacheFill === undefined) {
     return restoreSharedCacheFill(state);
   }
-  const github = await callRevalidationAPI(state, candidates[0]!, false, identity);
+  const token = await acquireIdentityToken(state, identity);
+  if (token === undefined) return restoreSharedCacheFill(state);
+  const github = await callRevalidationAPI(state, candidates[0]!, false, identity, token);
   if (github === undefined) {
     return restoreSharedCacheFill(state);
   }
@@ -517,6 +542,7 @@ async function callRevalidationAPI(
   candidate: RevalidationCandidate,
   tokenFree: boolean,
   identity?: Identity,
+  token?: string,
 ): Promise<GitHubRelayResponse | undefined> {
   const request: RelayRequest = {
     ...state.cacheRequest,
@@ -529,11 +555,11 @@ async function callRevalidationAPI(
         ? undefined
         : completeRunJobsSuperset(response, state.runJobsSuperset, anonymousRunJobsPage(state));
     }
-    if (identity !== undefined) {
+    if (identity !== undefined && token !== undefined) {
       state.paginatedIdentityRateRecorded = false;
       const response = sanitizeGitHubResponse(
         state.route,
-        await callGitHub(state.env, identity, request, state.route),
+        await callGitHub(state.env, token, request, state.route),
       );
       return completeRunJobsSuperset(
         response,
@@ -573,6 +599,12 @@ async function finishRevalidation(
   }
   if (github.status !== 304) {
     if (identity !== undefined) {
+      if (
+        githubResponseLocalFallbackReason(github.status, rateFromHeaders(github.headers)) !==
+        undefined
+      ) {
+        state.failedIdentityIds.add(identity.id);
+      }
       await state.coordinator.recordResult(
         coordinatorResult(state, identity, github.status, rateFromHeaders(github.headers)),
       );
@@ -703,7 +735,8 @@ async function callPublicBackend(state: ActiveRelay): Promise<Response> {
     try {
       return await callIdentityPool(state);
     } catch (error) {
-      rethrowStringRewriteDenial(error);
+      if (error instanceof IdentityOperationError && error.feedback) throw error;
+      rethrowStringRewriteDenial(error instanceof IdentityOperationError ? error.failure : error);
       // The anonymous request already had a clean local fallback. Preserve it
       // if the opportunistic pooled attempt cannot serve the request.
     }
@@ -719,30 +752,31 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     throw new HttpError(503, "no_identity", "No active identity can serve this route");
   }
   await rememberIdentityCacheKeys(state, identities);
-  const attemptedIdentityIds = new Set<string>();
-  let fallbackReason = "identity_pool_depleted";
-  for (let attempt = 0; attempt < identities.length; attempt++) {
+  // Prior revalidation failures retain the existing cooling outcome. Only an
+  // ordinary resource attempt in this phase replaces it with its own reason.
+  let fallbackReason = "identities_cooling_down";
+  for (let attempt = 0; attempt <= identities.length; attempt++) {
+    const identityCached = await serveFreshIdentityCache(state, identities);
+    if (identityCached !== undefined) return identityCached;
     const candidates = identities
-      .filter((candidate) => !attemptedIdentityIds.has(candidate.id))
+      .filter((candidate) => !state.failedIdentityIds.has(candidate.id))
       .map((candidate) => ({ id: candidate.id, weight: candidate.weight }));
-    if (candidates.length === 0) {
+    if (candidates.length === 0 || attempt === identities.length) {
       break;
     }
-    const identityCached = await serveFreshIdentityCache(state, identities, attemptedIdentityIds);
-    if (identityCached !== undefined) {
-      return identityCached;
-    }
-    const selection = await selectIdentity(state.coordinator, {
+    const selection = await state.coordinator.selectIdentity({
       routeKey: state.route.routeKey,
       resource: state.route.resource,
       candidates,
     });
+    if (selection.kind === "unavailable") {
+      throw (
+        state.firstCredentialError ??
+        new HttpError(503, "identities_cooling_down", "All identity candidates are cooling down")
+      );
+    }
     const identity = findIdentity(identities, selection.identityId);
     state.identity = identity;
-    const terminalLog = await revalidateCachedTerminalLog(state, identity, selection.reason);
-    if (terminalLog !== undefined) {
-      return terminalLog;
-    }
     const identityCacheKey = state.cacheEnabled
       ? await githubCacheKey(state.request.pool, state.cacheRequest, state.route, identity)
       : undefined;
@@ -756,9 +790,13 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     if (coalesced !== undefined) {
       return serveFreshCachedRelayResponse(state, coalesced, { coalesced: true });
     }
+    const token = await acquireIdentityToken(state, identity);
+    if (token === undefined) continue;
+    const terminalLog = await revalidateCachedTerminalLog(state, identity, selection.reason, token);
+    if (terminalLog !== undefined) return terminalLog;
     const firstPage = sanitizeGitHubResponse(
       state.route,
-      await callGitHub(state.env, identity, state.cacheRequest, state.route),
+      await callGitHub(state.env, token, state.cacheRequest, state.route),
     );
     state.paginatedIdentityRateRecorded = false;
     const github = await completeRunJobsSuperset(
@@ -769,7 +807,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     const rate = rateFromHeaders(github.headers);
     const identityFallback = githubResponseLocalFallbackReason(github.status, rate);
     if (identityFallback !== undefined) {
-      attemptedIdentityIds.add(identity.id);
+      state.failedIdentityIds.add(identity.id);
       fallbackReason = identityFallback;
       await state.coordinator.recordResult(coordinatorResult(state, identity, github.status, rate));
       continue;
@@ -781,6 +819,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
       rate,
     });
   }
+  if (state.firstCredentialError !== undefined) throw state.firstCredentialError;
   const stale = await serveStaleRelayCache(state, fallbackReason);
   if (stale !== undefined) {
     return stale;
@@ -788,6 +827,28 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
   throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
     reason: fallbackReason,
   });
+}
+
+async function acquireIdentityToken(
+  state: ActiveRelay,
+  identity: Identity,
+): Promise<string | undefined> {
+  try {
+    return await githubToken(state.env, identity);
+  } catch (error) {
+    if (!(error instanceof IdentityCredentialError)) throw new IdentityOperationError(error);
+    state.failedIdentityIds.add(identity.id);
+    state.firstCredentialError ??= error;
+    try {
+      await state.coordinator.recordCredentialFailure({
+        identityId: identity.id,
+        reason: error.reason,
+      });
+    } catch (feedbackError) {
+      throw new IdentityOperationError(feedbackError, true);
+    }
+    return undefined;
+  }
 }
 
 async function switchRelayCacheKey(
@@ -959,9 +1020,11 @@ function identityRunJobsPage(
 ): (request: RelayRequest) => Promise<GitHubRelayResponse> {
   return async (request) => {
     await recordFirstPaginatedIdentityRate(state, identity, firstPage);
+    // A partially collected aggregate cannot restart selection or mix identities.
+    const token = await githubToken(state.env, identity);
     const page = sanitizeGitHubResponse(
       state.route,
-      await callGitHub(state.env, identity, request, state.route),
+      await callGitHub(state.env, token, request, state.route),
     );
     await state.coordinator.recordResult(
       coordinatorResult(state, identity, page.status, rateFromHeaders(page.headers)),
@@ -1255,6 +1318,7 @@ async function revalidateCachedTerminalLog(
   state: ActiveRelay,
   identity: Identity,
   leaseReason: SelectionLeaseReason,
+  token: string,
 ): Promise<Response | undefined> {
   const cached = state.terminalLogCached;
   const key = state.terminalLogCacheKey;
@@ -1263,7 +1327,7 @@ async function revalidateCachedTerminalLog(
   }
   state.terminalLogCached = undefined;
   try {
-    const probe = await probeGitHubLog(state.env, identity, state.request);
+    const probe = await probeGitHubLog(state.env, token, state.request);
     if (probe.kind === "exists") {
       await publishTerminalLogCache(state.env, key, cached);
       state.ctx.waitUntil(
@@ -1393,15 +1457,11 @@ function staleFallbackReasonFromError(error: unknown): string | undefined {
 async function serveFreshIdentityCache(
   state: ActiveRelay,
   identities: Identity[],
-  attemptedIdentityIds: Set<string>,
 ): Promise<Response | undefined> {
   if (!state.cacheEnabled) {
     return undefined;
   }
   for (const identity of identities) {
-    if (attemptedIdentityIds.has(identity.id)) {
-      continue;
-    }
     const cacheKey = await githubCacheKey(
       state.request.pool,
       state.cacheRequest,

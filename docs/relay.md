@@ -349,6 +349,22 @@ request queue backed up, the relay returns `424 fallback_local` with reason
 
 Every repo route additionally passes a public-visibility check before a pooled identity
 or cache entry is used — see [Cache & public-repo guard](cache.md).
+An eligible wildcard PAT also covers explicitly allowed owners. Missing local bindings
+do not widen scopes or bypass policy, native-only, private-repository, or token-free
+release/event boundaries. Credentials are resolved only after identity selection; a
+classified local configuration failure records shared health and tries another eligible
+identity. If every selected credential fails locally, the first generic typed `503` is
+returned without binding names or secret contents, rather than serving stale bytes.
+The existing clean anonymous local fallback is preserved when opportunistic pooling
+cannot help; string-protection denials and credential-feedback infrastructure failures
+still propagate. See [identities](identities.md) for per-observation cooldowns, cached App
+token prerequisites, and mixed-version method availability.
+
+An aggregate already in progress does not restart or splice pages from another identity
+if a later App refresh lacks credentials. It refuses the incomplete result without partial
+publication or new local credential health; page-fetch and refresh string-protection
+denials remain hard `403` failures.
+
 The complete list of relay paths eligible for anonymous API or public web/raw/Git
 transport is in [Token-Free GitHub Endpoints](token-free.md).
 

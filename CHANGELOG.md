@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Include eligible wildcard PATs for explicitly allowed owners and fail over selected local credential errors with bounded shared cooldowns, preserving cache authorization, valid credential continuations, and hard aggregate egress denials.
 - Keep persisted identity quota and cooldown feedback monotonic across delayed responses, reject invalid numeric observations, and atomically preserve rate/cooldown state on storage failure.
 - Keep `--jq` expressions literal, preserve native `gh` output bytes with native jq 1.7+ on Windows, and recognize `octopool.exe` when resolving the shim target without requiring Unix execute bits.
 - Reject malformed stored pool policies before cache reuse or pooled GitHub access with a typed configuration-unavailable error, preserving valid partial-policy defaults.

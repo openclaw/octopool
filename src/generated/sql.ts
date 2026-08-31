@@ -49,7 +49,7 @@ export const queries = {
   listActiveIdentitiesForPool:
     "SELECT id, kind, login, secret_ref, installation_id, weight\nFROM identities\nWHERE pool_id = ?1\n  AND status = 'active'",
   listActiveIdentitiesForRoute:
-    "SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight\nFROM identities\nJOIN identity_scopes ON identity_scopes.identity_id = identities.id\nWHERE identities.pool_id = ?1\n  AND identities.status = 'active'\n  AND lower(identity_scopes.owner) = lower(?2)\n  AND (\n    lower(identity_scopes.repo) = lower(?3)\n    OR identity_scopes.repo IS NULL\n  )",
+    "SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight\nFROM identities\nJOIN identity_scopes ON identity_scopes.identity_id = identities.id\nWHERE identities.pool_id = ?1\n  AND identities.status = 'active'\n  AND (\n    (\n      lower(identity_scopes.owner) = lower(?2)\n      AND (lower(identity_scopes.repo) = lower(?3) OR identity_scopes.repo IS NULL)\n    )\n    OR (\n      identities.kind = 'pat'\n      AND identity_scopes.owner = '*'\n      AND identity_scopes.repo IS NULL\n    )\n  )",
   listActivePublicIdentitiesForPool:
     "SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight\nFROM identities\nJOIN identity_scopes ON identity_scopes.identity_id = identities.id\nWHERE identities.pool_id = ?1\n  AND identities.status = 'active'\n  AND identities.kind = 'pat'\n  AND identity_scopes.owner = '*'\n  AND identity_scopes.repo IS NULL",
   insertAudit:

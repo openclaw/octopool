@@ -31,12 +31,19 @@ The private key must be `BEGIN PRIVATE KEY` (PKCS#8) PEM — `BEGIN RSA PRIVATE 
 PKCS#8. For v1 the `octopool-cache` App is installed on selected repositories only
 (`openclaw/openclaw`); no private-repo installations.
 
+A valid cached installation token can serve without the private key until refresh is
+needed. A valid installation ID and configured App ID are still required before cache
+lookup. Token-exchange HTTP failures, transport errors, and unexpected crypto failures
+are not classified as local credential configuration failures or retried with another
+identity.
+
 ## Scopes
 
 Each identity has one or more `identity_scopes` rows (`owner`, optional `repo`,
 `allow_private`). When a request targets `owner/repo`, only identities scoped to that
 owner (with a matching `repo` or an owner-wide `NULL` repo) are candidates. A PAT scoped
-to `*` can serve any repository after public proof; scoped PATs and GitHub Apps remain
+to `*` with an owner-wide `NULL` repo can serve any public repository after public proof,
+including owners explicitly listed in `allowed_owners`; scoped PATs and GitHub Apps remain
 limited to their configured owner/repository. Routes with no owner (e.g. `/rate_limit`)
 consider all active identities in the pool.
 
@@ -69,6 +76,22 @@ keeps four SQLite tables in DO storage:
 The winning route gets a fresh 10s lease so concurrent callers stick to the same identity
 briefly instead of stampeding.
 
+Credential readiness is checked only for the selected identity, separately from scope
+eligibility. A missing, blank, or invalid local credential configuration records a
+shared cooldown and lets selection try another eligible identity. Failed IDs remain
+excluded across this request's revalidation and full-fetch phases; a usable credential
+can still serve an existing revalidation-to-full-fetch or canonical-to-exact continuation.
+If all selected credentials fail locally, the relay returns the first typed `503` with
+a generic message, without binding names or secret contents. Local credential failures
+do not permit stale serving. An already-established anonymous local fallback remains
+available when opportunistic pooling cannot help.
+
+Fresh cache eligibility does not depend on live credentials or cooldowns: the relay
+checks current identity scope and public proof before reuse, and checks again for fresh
+publications between attempts. Normal identity metadata may remain cached for 30 seconds;
+cache-source authorization uses a fresh eligibility read. There is no eager scan of all
+credential bindings.
+
 ## Health feedback (cooldowns)
 
 After an identity-backed GitHub resource call, `recordResult` merges complete, valid
@@ -87,7 +110,7 @@ bypass live exhaustion. This is conservative feedback, not quota reservation: re
 already in flight can still consume the same last unit, and same-window quota increases
 remain suppressed until reset.
 
-Only `401`/`403`/`429` write cooldowns, independently of quota validation:
+For GitHub resource responses, only `401`/`403`/`429` write cooldowns, independently of quota validation:
 
 - `401` → global `*` cooldown (usable Retry-After, otherwise 120s).
 - `403` or `429` with usable Retry-After → global `*` cooldown for that duration.
@@ -109,6 +132,19 @@ and snapshots ignore expired rows at exact deadline equality, without deleting t
 Rate and cooldown writes for one result use a synchronous storage transaction, so a
 failed second write cannot leave a partially accepted observation.
 
+Selected local configuration failures use the separate `recordCredentialFailure` RPC:
+an allowlisted credential reason, status `503`, and a global `*` cooldown ending 120
+seconds after each observation. This write preserves any longer existing deadline and
+does not invent a GitHub response or rate observation. Repeated observations may extend
+the deadline. A revision with working secrets can therefore be suppressed by another
+revision's missing configuration until the shared cooldown expires; repairing a binding
+does not immediately clear health state.
+
+Later-page App refresh has a narrower contract: if credentials become unavailable after
+an aggregate starts, the relay refuses the incomplete result without switching identities,
+publishing partial pages, or recording a new local credential cooldown. String-protection
+denials remain hard failures, including during token refresh.
+
 The trusted route determines the identity's `core`/`search` bucket; the response resource
 header cannot override it. Anonymous API snapshots and App token-exchange responses do
 not update identity budgets. State survives Durable Object eviction. Replaying the same
@@ -116,6 +152,12 @@ absolute SQL observation is idempotent; replaying the relative-duration `recordR
 RPC can extend a cooldown. Feedback errors do not initiate retries or compensating state
 deletion. No schema migration or state reset is required; previously overwritten
 observations cannot be reconstructed by this repair.
+
+Credential feedback infrastructure failures stop the attempt without alternate dispatch,
+replay, or compensating state deletion. During mixed-version deployment, a new caller
+reaching an old coordinator without `recordCredentialFailure` also fails this way; the
+method-availability interval depends on version overlap and is **not bounded by 120
+seconds**. See [administration](admin.md) for health interpretation.
 
 ## Registration
 

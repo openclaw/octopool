@@ -12,9 +12,10 @@ const TEST_APP_KEY = generateKeyPairSync("rsa", {
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => ({
-      main: "./src/index.ts",
+      main: "./test/e2e/identity-routing-native-main.ts",
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
+        serviceBindings: { IDENTITY_PROTOCOL: { name: "octopool" } },
         bindings: {
           TEST_MIGRATIONS: await readD1Migrations(path.resolve("migrations")),
           TEST_PAT_PRIMARY: "test-primary-token",

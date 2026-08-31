@@ -1,6 +1,7 @@
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-public-utils";
 import { isRecord } from "./object";
+import { rethrowStringRewriteDenial } from "./github-egress";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const MAX_PAGE_SIZE = 100;
@@ -104,7 +105,8 @@ export async function completeRunJobsSuperset(
         ...view.cacheRequest,
         query: { ...view.cacheRequest.query, page: String(page) },
       });
-    } catch {
+    } catch (error) {
+      rethrowStringRewriteDenial(error);
       return response;
     }
     if (

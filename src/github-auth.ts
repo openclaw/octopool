@@ -6,6 +6,25 @@ import type { Identity } from "./types";
 
 const installationTokenCache = new Map<string, { token: string; expiresAt: number }>();
 
+const credentialFailureMessages = {
+  identity_secret_missing: "Identity credential is not configured",
+  github_app_installation_missing: "GitHub App installation id is missing or invalid",
+  github_app_id_missing: "GitHub App ID is not configured",
+  github_app_key_format: "GitHub App private key must be valid PKCS#8",
+} as const;
+
+export type CredentialFailureReason = keyof typeof credentialFailureMessages;
+
+export function isCredentialFailureReason(value: unknown): value is CredentialFailureReason {
+  return typeof value === "string" && Object.hasOwn(credentialFailureMessages, value);
+}
+
+export class IdentityCredentialError extends HttpError {
+  constructor(readonly reason: CredentialFailureReason) {
+    super(503, reason, credentialFailureMessages[reason]);
+  }
+}
+
 export async function githubToken(env: GitHubEgressEnv, identity: Identity): Promise<string> {
   switch (identity.kind) {
     case "pat":
@@ -19,12 +38,8 @@ async function githubAppInstallationToken(
   env: GitHubEgressEnv,
   identity: Identity,
 ): Promise<string> {
-  if (identity.installation_id === null) {
-    throw new HttpError(
-      503,
-      "github_app_installation_missing",
-      "GitHub App installation id is missing",
-    );
+  if (!Number.isSafeInteger(identity.installation_id) || identity.installation_id! <= 0) {
+    throw new IdentityCredentialError("github_app_installation_missing");
   }
   const appId = githubAppID(env);
   const cacheKey = `${appId}:${identity.installation_id}:${identity.secret_ref}`;
@@ -66,9 +81,9 @@ async function githubAppInstallationToken(
 }
 
 function githubAppID(env: Env): string {
-  const value = (env as unknown as Record<string, string | undefined>).OCTOPOOL_GITHUB_APP_ID;
-  if (value === undefined || value.trim() === "") {
-    throw new HttpError(503, "github_app_id_missing", "GitHub App ID is not configured");
+  const value = (env as unknown as Record<string, unknown>).OCTOPOOL_GITHUB_APP_ID;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new IdentityCredentialError("github_app_id_missing");
   }
   return value.trim();
 }
@@ -93,37 +108,39 @@ async function githubAppJWT(appId: string, privateKeyPEM: string): Promise<strin
 
 async function importPrivateKey(privateKeyPEM: string): Promise<CryptoKey> {
   if (privateKeyPEM.includes("BEGIN RSA PRIVATE KEY")) {
-    throw new HttpError(
-      503,
-      "github_app_key_format",
-      "GitHub App private key must be stored as PKCS#8 BEGIN PRIVATE KEY",
-    );
+    throw new IdentityCredentialError("github_app_key_format");
   }
   const base64 = privateKeyPEM
     .replace(/-----BEGIN PRIVATE KEY-----/g, "")
     .replace(/-----END PRIVATE KEY-----/g, "")
     .replace(/\s+/g, "");
   if (base64 === "") {
-    throw new HttpError(503, "github_app_key_format", "GitHub App private key is empty");
+    throw new IdentityCredentialError("github_app_key_format");
   }
-  const der = base64ToBytes(base64);
-  return crypto.subtle.importKey(
-    "pkcs8",
-    der,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
+  try {
+    const der = base64ToBytes(base64);
+    return await crypto.subtle.importKey(
+      "pkcs8",
+      der,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  } catch (error) {
+    if (
+      error instanceof DOMException &&
+      (error.name === "InvalidCharacterError" || error.name === "DataError")
+    ) {
+      throw new IdentityCredentialError("github_app_key_format");
+    }
+    throw error;
+  }
 }
 
 function githubSecret(env: Env, secretRef: string): string {
-  const value = (env as unknown as Record<string, string | undefined>)[secretRef];
-  if (value === undefined || value.trim() === "") {
-    throw new HttpError(
-      503,
-      "identity_secret_missing",
-      `Identity secret ${secretRef} is not configured`,
-    );
+  const value = (env as unknown as Record<string, unknown>)[secretRef];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new IdentityCredentialError("identity_secret_missing");
   }
   return value;
 }
