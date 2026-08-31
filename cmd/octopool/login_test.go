@@ -133,7 +133,7 @@ func TestFormatLoginFailureQuotesProvisioningCommandArguments(t *testing.T) {
 
 func TestLoginAcceptsPositionalServerAndStoresDiscoveredAuth(t *testing.T) {
 	t.Setenv("GH_TOKEN", "gh_test")
-	isolateHTTPTestConfig(t)
+	isolateTestConfig(t)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

@@ -163,7 +163,7 @@ func TestRunGHSearchFallsBackForUnimplementedSort(t *testing.T) {
 }
 
 func TestRunGHSearchFallsBackForQualifiedQuery(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateTestConfig(t)
 	var out bytes.Buffer
 	result := handleGHSearch(t.Context(), []string{
 		"issues",
@@ -178,7 +178,7 @@ func TestRunGHSearchFallsBackForQualifiedQuery(t *testing.T) {
 }
 
 func TestRunGHSearchFallsBackForUnsupportedTerm(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateTestConfig(t)
 	var out bytes.Buffer
 	result := handleGHSearch(t.Context(), []string{
 		"issues",

@@ -9,8 +9,7 @@ import (
 )
 
 func TestWriteLocalUserLogin(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", "")
+	isolateTestConfig(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/pools/maintainers/health" || request.Header.Get("authorization") != "Bearer op_token" {
 			t.Fatalf("unexpected health request: %s auth=%q", request.URL.Path, request.Header.Get("authorization"))
@@ -32,8 +31,7 @@ func TestWriteLocalUserLogin(t *testing.T) {
 }
 
 func TestWriteLocalUserLoginRejectsOverridesAndBroaderShapes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", "")
+	isolateTestConfig(t)
 	if err := saveAuth(authFile{
 		URL: "https://octopool.dev", Pool: "maintainers", Token: "op_token", Login: "alice", CreatedAt: time.Now(),
 	}); err != nil {

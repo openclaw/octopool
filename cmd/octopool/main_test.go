@@ -21,7 +21,7 @@ func TestVersionCommand(t *testing.T) {
 }
 
 func TestCommandHelp(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateTestConfig(t)
 	authFile, err := authPath()
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestValidateAuthURLForRequestNormalizesTrailingSlash(t *testing.T) {
 }
 
 func TestWhoamiPrintsSavedLogin(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateTestConfig(t)
 	if err := saveAuth(authFile{
 		URL:       "https://octopool.example.com",
 		Pool:      "core",
@@ -132,7 +132,7 @@ func TestWhoamiPrintsSavedLogin(t *testing.T) {
 }
 
 func TestWhoamiJSON(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateTestConfig(t)
 	if err := saveAuth(authFile{
 		URL:       "https://octopool.example.com",
 		Pool:      "core",

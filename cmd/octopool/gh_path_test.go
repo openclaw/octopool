@@ -188,25 +188,10 @@ func buildGHPathFixture(t *testing.T, module, command string) string {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(dir, "fixture.exe")
-	goTool := executableName("go")
-	// -trimpath can leave GOROOT empty; use PATH only in that case.
-	if root := runtime.GOROOT(); root != "" {
-		goTool = filepath.Join(root, "bin", goTool)
-	}
-	goPath, err := exec.LookPath(goTool)
-	if err != nil {
-		t.Fatalf("locate Go compiler for fixture (%q): %v", goTool, err)
-	}
+	goPath, env := testCompiler(t)
 	cmd := exec.CommandContext(t.Context(), goPath, "build", "-buildvcs=false", "-o", binary, "./cmd/"+command)
 	cmd.Dir = dir
-	// Ignore caller Go configuration, including workspace, flags and experiments.
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if !strings.HasPrefix(key, "GO") && !strings.HasPrefix(key, "CGO_") {
-			cmd.Env = append(cmd.Env, entry)
-		}
-	}
-	cmd.Env = append(cmd.Env, "GOENV=off", "GO111MODULE=on", "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off", "CGO_ENABLED=0")
+	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build Go fixture: %v\n%s", err, out)
 	}
@@ -264,7 +249,7 @@ func TestResolveGHPathAcceptsExplicitRelativePath(t *testing.T) {
 
 func TestResolveGHPathAcceptsExplicitCommandName(t *testing.T) {
 	dir := t.TempDir()
-	realGH := filepath.Join(dir, "custom-gh")
+	realGH := filepath.Join(dir, executableName("custom-gh"))
 	if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -289,8 +274,16 @@ func TestResolveGHPathSkipsInvalidCandidates(t *testing.T) {
 	if err := os.Mkdir(realDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(nonExecutableDir, "gh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
-		t.Fatal(err)
+	invalid := filepath.Join(nonExecutableDir, "gh")
+	if runtime.GOOS == "windows" {
+		// Windows has no Unix executable bits; a directory is unusable on both.
+		if err := os.Mkdir(invalid, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := os.WriteFile(invalid, []byte("#!/bin/sh\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	realGH := filepath.Join(realDir, "gh")
 	if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {

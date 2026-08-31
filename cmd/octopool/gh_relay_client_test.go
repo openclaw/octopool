@@ -249,7 +249,7 @@ func TestShouldRunRealGH(t *testing.T) {
 }
 
 func TestNewGHRelayClientMissingLoginUsesFallbackSentinel(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	isolateTestConfig(t)
 	t.Setenv("OCTOPOOL_TOKEN", "")
 	_, err := newGHRelayClient()
 	if !errors.Is(err, errOctopoolNotLoggedIn) {
@@ -295,8 +295,7 @@ func newRelayTestClient(
 	respond func(call int64) (status int, body string),
 ) (ghRelayClient, *atomic.Int64) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateTestConfig(t)
 	t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
 	calls := &atomic.Int64{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

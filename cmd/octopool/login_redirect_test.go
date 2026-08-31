@@ -20,7 +20,7 @@ func TestLoginRedirects(t *testing.T) {
 	for _, code := range []int{307, 308} {
 		for _, destination := range []string{"direct", "same-origin", "cross-port", "cross-host", "downgrade", "same-origin-then-cross-port", "trusted-discovery", "trusted-discovery-same-origin", "insecure-opt-in"} {
 			t.Run(strconv.Itoa(code)+"/"+destination, func(t *testing.T) {
-				isolateHTTPTestConfig(t)
+				isolateTestConfig(t)
 				t.Setenv("GH_TOKEN", githubToken)
 				t.Setenv("GITHUB_TOKEN", "")
 				t.Setenv("OCTOPOOL_POOL", "")
@@ -131,7 +131,7 @@ func writeRedirectTestDiscovery(w http.ResponseWriter, apiBase string) {
 }
 
 func TestLoginDiscoveryHTTPRedirect(t *testing.T) {
-	isolateHTTPTestConfig(t)
+	isolateTestConfig(t)
 	var targetRequests atomic.Int32
 	var discoveryURL string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func TestLoginMalformedRedirects(t *testing.T) {
 	const token = "synthetic-github-token"
 	for _, code := range []int{307, 308} {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
-			isolateHTTPTestConfig(t)
+			isolateTestConfig(t)
 			t.Setenv("GH_TOKEN", token)
 			t.Setenv("GITHUB_TOKEN", "")
 			t.Setenv("OCTOPOOL_POOL", "")

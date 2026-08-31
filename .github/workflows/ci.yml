@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   release-asset-windows:
-    name: Windows release asset helpers
+    name: Windows Go suite and release asset helpers
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -29,6 +29,10 @@ jobs:
           cache: false
       - name: Test native Windows staging and filesystem protection
         run: go test -v ./cmd/octopool -run '^TestReleaseAssets(Windows.*|Filename(Validation|SourceDirectories)|StagingFilesystemSyntax|LimitsAndIdentity|BoundedCopyFailures|SnapshotWriteCloseAndCancellationCleanup|ExactBasenameAndTextBudget)$' -count=1
+      - name: Test full native Windows Go suite
+        run: go test ./... -count=1
+      - name: Vet native Windows Go code
+        run: go vet ./...
 
   check:
     name: Check

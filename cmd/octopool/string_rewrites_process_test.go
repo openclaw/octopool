@@ -184,8 +184,7 @@ func rewriteTestServer(t *testing.T, policyBody string, relay http.HandlerFunc) 
 	body := &atomic.Value{}
 	body.Store(policyBody)
 	calls := &atomic.Int64{}
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateTestConfig(t)
 	t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-token" {

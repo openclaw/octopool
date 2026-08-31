@@ -95,7 +95,7 @@ func TestCallerRequestFlagsAuthSnapshot(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			isolateHTTPTestConfig(t)
+			isolateTestConfig(t)
 			for _, name := range []string{"OCTOPOOL_URL", "OCTOPOOL_POOL", "OCTOPOOL_TOKEN", "OCTOPOOL_TEST_CALLER_TOKEN"} {
 				t.Setenv(name, tt.env[name])
 			}

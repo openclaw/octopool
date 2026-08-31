@@ -8,21 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
-
-func isolateHTTPTestConfig(t *testing.T) {
-	t.Helper()
-	root := t.TempDir()
-	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "AppData", "APPDATA", "USERPROFILE", "GH_CONFIG_DIR"} {
-		t.Setenv(name, filepath.Join(root, name))
-	}
-}
 
 func useHTTPTestTransport(t *testing.T, transport http.RoundTripper) {
 	t.Helper()
@@ -68,7 +59,7 @@ func TestAuthenticatedJSONRedirects(t *testing.T) {
 		for _, code := range []int{301, 302, 303, 307, 308} {
 			for _, destination := range []string{"direct", "same-origin", "cross-port", "cross-host", "downgrade", "same-origin-then-cross-port"} {
 				t.Run(method+"/"+strconv.Itoa(code)+"/"+destination, func(t *testing.T) {
-					isolateHTTPTestConfig(t)
+					isolateTestConfig(t)
 					token := "synthetic-caller-token"
 					if method == http.MethodPost {
 						token = "synthetic-admin-token"
@@ -154,7 +145,7 @@ func TestAuthenticatedJSONRedirectEffectiveOrigin(t *testing.T) {
 	for _, scheme := range []string{"http", "https"} {
 		for _, explicitFirst := range []bool{false, true} {
 			t.Run(scheme+"/explicit-first="+strconv.FormatBool(explicitFirst), func(t *testing.T) {
-				isolateHTTPTestConfig(t)
+				isolateTestConfig(t)
 				host, port := "LOCALHOST", "80"
 				if scheme == "https" {
 					host, port = "127.0.0.1", "443"
@@ -201,7 +192,7 @@ func TestAuthenticatedJSONRedirectEffectiveOrigin(t *testing.T) {
 }
 
 func TestAuthenticatedJSONRedirectLimit(t *testing.T) {
-	isolateHTTPTestConfig(t)
+	isolateTestConfig(t)
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -219,7 +210,7 @@ func TestAuthenticatedJSONMalformedRedirects(t *testing.T) {
 		for _, code := range []int{307, 308} {
 			for _, location := range []string{"token-escape", "token-port", "nonsecret", "same-origin-then-malformed"} {
 				t.Run(method+"/"+strconv.Itoa(code)+"/"+location, func(t *testing.T) {
-					isolateHTTPTestConfig(t)
+					isolateTestConfig(t)
 					token := "synthetic-caller-token"
 					if method == http.MethodPost {
 						token = "synthetic-admin-token"
@@ -280,7 +271,7 @@ func TestAuthenticatedJSONMalformedRedirects(t *testing.T) {
 func TestAuthenticatedJSONIgnoresUnusedLocations(t *testing.T) {
 	for _, code := range []int{200, 300, 304, 307, 308} {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
-			isolateHTTPTestConfig(t)
+			isolateTestConfig(t)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if code < 307 {
 					w.Header().Set("Location", "/%zz/nonsecret")
@@ -303,7 +294,7 @@ func TestAuthenticatedJSONIgnoresUnusedLocations(t *testing.T) {
 func TestAuthenticatedJSONRequestErrors(t *testing.T) {
 	for _, failure := range []string{"canceled", "deadline", "connection-refused"} {
 		t.Run(failure, func(t *testing.T) {
-			isolateHTTPTestConfig(t)
+			isolateTestConfig(t)
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
@@ -353,7 +344,7 @@ func TestAuthenticatedJSONRedirectRequestErrors(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		for _, code := range []int{307, 308} {
 			t.Run(method+"/"+strconv.Itoa(code), func(t *testing.T) {
-				isolateHTTPTestConfig(t)
+				isolateTestConfig(t)
 				const token = "synthetic-reflected-credential"
 				var followed atomic.Bool
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

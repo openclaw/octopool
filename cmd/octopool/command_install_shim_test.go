@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,11 +16,15 @@ func TestUpdateShimBlockAppendsAndReplaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(first)
+	wantShimDir := "octopool_shim_dir='/home/alice/.local/share/octopool/bin'"
+	if runtime.GOOS == "windows" {
+		wantShimDir = `octopool_shim_dir='\home\alice\.local\share\octopool\bin'`
+	}
 	for _, want := range []string{
 		"export EXISTING=1",
 		shimBlockStart,
 		"export OCTOPOOL_GH_PATH='/opt/bin/gh'",
-		"octopool_shim_dir='/home/alice/.local/share/octopool/bin'",
+		wantShimDir,
 		`export PATH="$octopool_path_next"`,
 		shimBlockEnd,
 	} {
@@ -38,6 +43,7 @@ func TestUpdateShimBlockAppendsAndReplaces(t *testing.T) {
 }
 
 func TestUpdateShimBlockKeepsPathIdempotentInZsh(t *testing.T) {
+	isolateTestConfig(t)
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
 		t.Skip("zsh is required to exercise .zshenv PATH behavior")
@@ -134,6 +140,7 @@ func TestApplyShimInstallPlanIsIdempotent(t *testing.T) {
 }
 
 func TestVerifyShimInstallChecksLoginShell(t *testing.T) {
+	isolateTestConfig(t)
 	zsh, err := exec.LookPath("zsh")
 	if err != nil {
 		t.Skip("zsh is required to verify shell startup behavior")

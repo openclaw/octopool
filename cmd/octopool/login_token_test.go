@@ -35,7 +35,7 @@ func TestLoginGitHubTokenSelection(t *testing.T) {
 		{name: "empty github.com token rejects Enterprise fallback", storedToken: " \t\n", wantError: "gh auth token returned empty output"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			isolateHTTPTestConfig(t)
+			isolateTestConfig(t)
 			t.Setenv("GH_TOKEN", tt.ghToken)
 			t.Setenv("GITHUB_TOKEN", tt.githubToken)
 			t.Setenv("GH_HOST", "ghe.example.test")

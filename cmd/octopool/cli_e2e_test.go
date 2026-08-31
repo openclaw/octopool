@@ -253,8 +253,10 @@ type cliResult struct {
 func buildCLIBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), executableName("octopool"))
-	cmd := exec.Command("go", "build", "-o", bin, ".")
+	tool, env := testCompiler(t)
+	cmd := exec.CommandContext(t.Context(), tool, "build", "-o", bin, ".")
 	cmd.Dir = "."
+	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
@@ -266,10 +268,8 @@ func runCLI(t *testing.T, bin string, serverURL string, extra map[string]string,
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
-	home := t.TempDir()
-	env := append(os.Environ(),
-		"HOME="+home,
-		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
+	env := append(os.Environ(), testConfigEnv(t.TempDir())...)
+	env = append(env,
 		"OCTOPOOL_STRING_REWRITE_FILE=",
 		"OCTOPOOL_TOKEN=test-token",
 		"OCTOPOOL_POOL=maintainers",

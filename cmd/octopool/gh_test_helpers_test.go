@@ -15,8 +15,7 @@ type relayTestResponse struct {
 
 func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	isolateTestConfig(t)
 	t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
 	t.Setenv("OCTOPOOL_TOKEN", "test-token")
 	t.Setenv("OCTOPOOL_POOL", "maintainers")

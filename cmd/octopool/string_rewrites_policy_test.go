@@ -29,8 +29,7 @@ func TestStringRewritePolicyFailuresNeverRunChild(t *testing.T) {
 		{"unpaired surrogate", 200, strings.Replace(rewriteActiveTestPolicy, "public", `\ud800`, 1)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			isolateTestConfig(t)
 			t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
 			var calls atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
