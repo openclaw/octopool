@@ -681,6 +681,10 @@ invalidation.
   `OCTOPOOL_URL`) to a different host requires an explicit `OCTOPOOL_TOKEN`, or a fresh
   `octopool login` for that URL. This prevents leaking the token to an attacker-supplied
   endpoint.
+- `request`, `health`, and `stats` bind the saved URL and caller token to the same
+  loaded auth snapshot, so another login cannot replace the token midway through
+  request setup. An explicit nonblank token environment variable (`--token-env`,
+  default `OCTOPOOL_TOKEN`) still takes precedence over the saved token.
 - Login, caller, and admin JSON requests follow redirects only to the same scheme,
   hostname, and effective port as the original request (omitted ports mean 80 for HTTP
   and 443 for HTTPS). Cross-origin redirects and HTTPS downgrades fail before the target

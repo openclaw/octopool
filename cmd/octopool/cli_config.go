@@ -49,20 +49,6 @@ func requiredEnv(name string) (string, error) {
 	return value, nil
 }
 
-func callerToken(envName string) (string, error) {
-	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
-		return value, nil
-	}
-	auth, err := loadAuth()
-	if err != nil {
-		return "", err
-	}
-	if auth.Token == "" {
-		return "", errors.New("not logged in; run: octopool login")
-	}
-	return auth.Token, nil
-}
-
 func defaultAuthURL(auth authFile) string {
 	return envDefault("OCTOPOOL_URL", firstNonEmpty(auth.URL, defaultURL))
 }
@@ -107,7 +93,13 @@ func (flags callerRequestFlags) authorize(auth authFile) (string, error) {
 	if err := validateAuthURLForRequest(auth, *flags.baseURL, *flags.tokenEnv); err != nil {
 		return "", err
 	}
-	return callerToken(*flags.tokenEnv)
+	if value := strings.TrimSpace(os.Getenv(*flags.tokenEnv)); value != "" {
+		return value, nil
+	}
+	if auth.Token == "" {
+		return "", errors.New("not logged in; run: octopool login")
+	}
+	return auth.Token, nil
 }
 
 func validateAuthURLForRequest(auth authFile, effectiveURL string, tokenEnvName string) error {
