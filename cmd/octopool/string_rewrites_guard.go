@@ -332,7 +332,7 @@ func rewriteBootstrapInvocation(args []string) bool {
 }
 
 func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*rewritePreparation, error) {
-	prepared := &rewritePreparation{args: args, stdin: stdin}
+	prepared := &rewritePreparation{ctx: ctx, args: args, stdin: stdin}
 	if rewriteBootstrapInvocation(args) {
 		prepared.forceGitHubHost = true
 		return prepared, nil

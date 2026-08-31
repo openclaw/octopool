@@ -185,6 +185,7 @@ func TestStringRewritePreparationRejectsUnknownShapes(t *testing.T) {
 		{"pr", "comment", "1", "--body", "safe", "--editor", "--repo", "acme/repo"},
 		{"pr", "review", "1", "--body", "safe", "--repo", "acme/repo"},
 		{"pr", "review", "1", "--approve", "--comment", "--body", "safe", "--repo", "acme/repo"},
+		// Asset-bearing creation requires an explicit draft, even with verify-tag.
 		{"release", "create", "v1", "asset.zip", "--notes", "safe", "--title", "safe", "--verify-tag", "--repo", "acme/repo"},
 		{"release", "create", "v1", "--notes", "safe", "--title", "safe", "--repo", "acme/repo"},
 		{"release", "create", "v1", "--notes", "safe", "--title", "safe", "--verify-tag=false", "--repo", "acme/repo"},

@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -78,6 +78,8 @@ func rewriteFlagNames(spec string) map[string]string {
 func (flags rewriteFlags) has(name string) bool { _, ok := flags.values[name]; return ok }
 
 type rewritePreparation struct {
+	ctx               context.Context
+	closeDirectory    func()
 	preflight         []string
 	args              []string
 	stdin             io.Reader
@@ -90,6 +92,10 @@ type rewritePreparation struct {
 }
 
 func (prepared *rewritePreparation) cleanup() {
+	if prepared.closeDirectory != nil {
+		prepared.closeDirectory()
+		prepared.closeDirectory = nil
+	}
 	if prepared.directory != "" {
 		_ = os.RemoveAll(prepared.directory)
 	}
@@ -113,12 +119,8 @@ func (prepared *rewritePreparation) snapshot(data []byte) (string, error) {
 	if len(data) > rewriteMaxContent {
 		return "", errRewriteBlocked
 	}
-	if prepared.directory == "" {
-		directory, err := os.MkdirTemp("", "octopool-content-")
-		if err != nil {
-			return "", errRewriteBlocked
-		}
-		prepared.directory = directory
+	if err := prepared.ensureSnapshotDirectory(); err != nil {
+		return "", err
 	}
 	file, err := os.CreateTemp(prepared.directory, "snapshot-")
 	if err != nil {
@@ -130,12 +132,7 @@ func (prepared *rewritePreparation) snapshot(data []byte) (string, error) {
 	if writeErr != nil || closeErr != nil {
 		return "", errRewriteBlocked
 	}
-	path = filepath.Clean(path)
-	if prepared.snapshots == nil {
-		prepared.snapshots = map[string]bool{}
-	}
-	prepared.snapshots[path] = true
-	return path, nil
+	return prepared.registerSnapshot(path), nil
 }
 
 var rewriteRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
@@ -222,12 +219,16 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	}
 	create := args[1] == "create"
 	release := args[0] == "release"
+	assetMode := command == "release create" && len(flags.positionals) > 1
+	if assetMode && (flags.values["--draft"] != "true" || flags.values["--verify-tag"] != "true") {
+		return errRewriteBlocked
+	}
 	if create && !release {
 		if len(flags.positionals) != 0 {
 			return errRewriteBlocked
 		}
 	} else {
-		if len(flags.positionals) != 1 {
+		if len(flags.positionals) != 1 && !assetMode {
 			return errRewriteBlocked
 		}
 		selector := flags.positionals[0]
@@ -295,7 +296,16 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 			return errRewriteBlocked
 		}
 	}
-	prepared.args = append([]string{args[0], args[1]}, flags.positionals...)
+	positionals := flags.positionals
+	var assets []rewriteReleaseAsset
+	if assetMode {
+		assets, err = prepared.releaseAssets(policy, positionals[1:], defaultRewriteReleaseLimits)
+		if err != nil {
+			return err
+		}
+		positionals = positionals[:1]
+	}
+	prepared.args = append([]string{args[0], args[1]}, positionals...)
 	prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
 	attachmentArgs := make([]string, 0, len(attachments))
 	attachmentSnapshots := make([]rewriteAttachmentSnapshot, 0, len(attachments))
@@ -348,9 +358,13 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 				}
 				text = string(data)
 			}
+			original := text
 			text, err = prepared.text(policy, text)
 			if err != nil {
 				return err
+			}
+			if assetMode && text != original {
+				return errRewriteBlocked
 			}
 			if flag.name != "--title" {
 				previousLength := len(text)
@@ -381,6 +395,15 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 		}
 	}
 	prepared.args = append(prepared.args, attachmentArgs...)
+	remaining := defaultRewriteReleaseLimits.total
+	for _, asset := range assets {
+		path, size, err := prepared.snapshotReleaseAsset(asset, min(remaining, defaultRewriteReleaseLimits.file), copyRewriteSnapshot)
+		if err != nil || !validRewriteReleasePath(path) || policy.check(path) != nil {
+			return errRewriteBlocked
+		}
+		remaining -= size
+		prepared.args = append(prepared.args, path)
+	}
 	prepared.stdin = strings.NewReader("")
 	return nil
 }

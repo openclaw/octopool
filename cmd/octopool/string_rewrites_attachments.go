@@ -1,8 +1,6 @@
 package main
 
 import (
-	"errors"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -461,12 +459,8 @@ func (prepared *rewritePreparation) snapshotAttachment(attachment rewriteAttachm
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > limit || !os.SameFile(attachment.info, info) {
 		return "", 0, errRewriteBlocked
 	}
-	if prepared.directory == "" {
-		directory, err := os.MkdirTemp("", "octopool-content-")
-		if err != nil {
-			return "", 0, errRewriteBlocked
-		}
-		prepared.directory = directory
+	if err := prepared.ensureSnapshotDirectory(); err != nil {
+		return "", 0, err
 	}
 	extension := strings.ToLower(filepath.Ext(attachment.source))
 	output, err := os.CreateTemp(prepared.directory, "attachment-*"+extension)
@@ -474,18 +468,9 @@ func (prepared *rewritePreparation) snapshotAttachment(attachment rewriteAttachm
 		return "", 0, errRewriteBlocked
 	}
 	path := output.Name()
-	copied, copyErr := io.CopyN(output, input, limit+1)
-	if errors.Is(copyErr, io.EOF) {
-		copyErr = nil
-	}
-	closeErr := output.Close()
-	if copyErr != nil || closeErr != nil || copied != info.Size() || copied > limit {
+	copied, copyErr := copyRewriteSnapshot(prepared.context(), output, input, info.Size(), limit)
+	if copyErr != nil {
 		return "", 0, errRewriteBlocked
 	}
-	path = filepath.Clean(path)
-	if prepared.snapshots == nil {
-		prepared.snapshots = map[string]bool{}
-	}
-	prepared.snapshots[path] = true
-	return path, copied, nil
+	return prepared.registerSnapshot(path), copied, nil
 }

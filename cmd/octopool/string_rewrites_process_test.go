@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -45,8 +46,16 @@ func TestRewriteCaptureProcess(t *testing.T) {
 	capture := rewriteCapture{Args: args, Files: map[string]string{}, FileData: map[string][]byte{}, Modes: map[string]uint32{}, DirectoryModes: map[string]uint32{}, Env: map[string]string{"GH_HOST": os.Getenv("GH_HOST"), "GH_REPO": os.Getenv("GH_REPO")}}
 	input, _ := io.ReadAll(os.Stdin)
 	capture.Stdin = string(input)
-	for _, arg := range args {
+	if path := os.Getenv("OCTOPOOL_TEST_REWRITE_MUTATE_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte("later source bytes"), 0600); err != nil {
+			os.Exit(83)
+		}
+	}
+	for index, arg := range args {
 		paths := []string{}
+		if len(args) > 2 && args[0] == "release" && args[1] == "create" && index > 2 && !strings.HasPrefix(arg, "-") {
+			paths = append(paths, arg)
+		}
 		for _, prefix := range []string{"--body-file=", "--notes-file=", "--input=", "--attach="} {
 			if path, ok := strings.CutPrefix(arg, prefix); ok {
 				if prefix == "--attach=" {
@@ -77,6 +86,13 @@ func TestRewriteCaptureProcess(t *testing.T) {
 	data, _ := json.Marshal(capture)
 	if err := os.WriteFile(capturePath, data, 0600); err != nil {
 		os.Exit(81)
+	}
+	if os.Getenv("OCTOPOOL_TEST_REWRITE_WAIT") == "1" {
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, os.Interrupt)
+		_, _ = io.WriteString(os.Stdout, "child ready\n")
+		<-interrupt
+		os.Exit(82)
 	}
 	_, _ = io.WriteString(os.Stdout, "child stdout\n")
 	_, _ = io.WriteString(os.Stderr, "child stderr\n")

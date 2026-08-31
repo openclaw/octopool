@@ -115,6 +115,9 @@ func execRealGHWithStdinAndEnv(
 		return err
 	}
 	defer prepared.cleanup()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(prepared.preflight) != 0 {
 		if err := execRealGHWithStdinAndEnv(ctx, prepared.preflight, strings.NewReader(""), io.Discard, io.Discard, env); err != nil {
 			return errRewriteBlocked

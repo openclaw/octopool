@@ -457,9 +457,11 @@ With active rules, the initial local publication vocabulary is deliberately cons
   while PR/issue edits accept metadata-only add/remove label and assignee flags. Assignees may
   include native `@me` or `@copilot`. PR create/edit/comment and issue create also accept repeated
   `--attach` image/video files as described below.
-- Release `create`/`edit`: explicit title/notes or notes files; one tag and no asset uploads.
+- Release `create`/`edit`: explicit title/notes or notes files and one tag.
   Creation requires `--verify-tag`, so gh cannot create a missing tag. Generated notes,
-  notes from tags, and other implicit content sources are blocked.
+  notes from tags, and other implicit content sources are blocked. Asset-bearing creation
+  additionally requires explicit `--draft=true` (or `--draft`) and unchanged metadata,
+  as described below. Release editing still accepts exactly one tag and no assets.
 - Raw REST API equivalents: allowlisted issue/PR/review/comment/release endpoints with
   `-f`/`--raw-field`, `-F`/`--field`, or `--input` JSON. Literal and typed fields retain
   their distinction; only typed `@file`/`@-` values read files/stdin. Nested review comments
@@ -478,6 +480,61 @@ explicit `https://github.com/owner/repo` and GitHub SSH forms are accepted, whil
 are blocked. Input files are read into bounded snapshots, never modified, and never reopened
 by the child. Sanitized snapshots use a private 0700 directory and 0600 files, removed
 after execution, including nonzero exits. These modeled commands do not retain live stdin.
+
+With active rules, `gh release create TAG --repo OWNER/REPO --draft --verify-tag
+--title TITLE --notes-file NOTES FILE...` accepts up to 16 explicit local asset paths
+on macOS, Linux, and Windows. Each asset must be a nonempty regular file, at most 1 GiB;
+the aggregate asset limit is 4 GiB. Public basenames are limited to 255 bytes and use
+only ASCII letters, digits, internal periods, underscores, and hyphens. A basename
+cannot start with a period or hyphen, or end with a period; a leading underscore is
+allowed. Empty and Windows reserved names remain rejected. GitHub
+[documents filename rewriting during asset uploads](https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28#upload-a-release-asset)
+without specifying a complete normalization algorithm. This is Octopool's conservative
+supported subset; other public names are rejected rather than silently sanitized.
+The existing 1 MiB text budget remains unchanged. Title, notes, original/resolved source
+paths, and exact public basenames undergo policy, material, residual, and UTF-8 checks;
+if filtering would change any of them, the entire command is rejected. Canonical notes
+are preserved byte for byte. Assetless release creation retains its existing filtering.
+
+Asset operands cannot be stdin, URLs, unexpanded globs, `#label` forms, traversal paths,
+symlinks, Windows UNC/device paths, or unsafe portable filenames (including control
+characters, Windows reserved names, and trailing dots/spaces). Public-name restrictions
+apply to the original basename before filesystem access. Source components have separate
+validation: `.claude`, spaces, Unicode, and leading hyphens are allowed in parent
+directories and private staging paths, subject to the existing path and policy checks.
+Duplicate basenames, case-fold collisions, hard links to the same file, and resource-limit
+violations are rejected. Parent directory aliases such as macOS `/tmp` are resolved and checked;
+Windows reparse points, including ancestor reparse points, are rejected.
+
+Generated release asset paths undergo the same literal-operand validation as source
+operands, in addition to policy checks. A temp-root path containing `#` or glob syntax
+therefore blocks asset-bearing creation and cleans up staging before native `gh` starts:
+[`gh release create` interprets asset operands as filenames/patterns with optional `#label` syntax](https://cli.github.com/manual/gh_release_create).
+Ordinary metadata snapshots use filesystem paths rather than release operand syntax;
+legal `#` or bracket characters in a private temp directory remain supported there.
+Windows shared staging still enforces local filesystem, device, traversal, reparse,
+handle-pinning and private ACL checks. Hidden, space-bearing and Unicode temp directories
+remain supported for release assets when their paths contain no release operand syntax.
+
+Every asset is copied in 64 KiB chunks into exclusively created private snapshot files
+before native `gh` starts, preserving names, order, and opaque bytes. Descriptor identity
+and before/after file metadata reject observed replacement, size changes, or in-place
+mutation. Unix opens do not follow symlink operands and cannot block on a substituted
+FIFO. Windows requires persistent filesystem ACLs, creates staging with a protected
+current-user-only inheritable ACL, pins directory handles against deletion, and excludes
+source write/delete sharing while capturing. Cancellation is checked between chunks and
+before execution. Snapshots are removed on preparation/start/child failures and handled
+cancellation; uncatchable termination and power loss can leave temporary files behind.
+
+Assets, including checksums and provenance, are opaque: Octopool does not rewrite,
+unpack, rebuild, sign, or certify their contents as secret-free. The caller owns artifact
+review, provenance, and a reviewed, frozen source directory. Staging isolates subsequent
+source changes; metadata checks cannot prove correspondence with earlier verification
+against arbitrary hostile local writers before capture. There is no digest handoff.
+Local preparation is all-or-nothing, but remote draft creation and upload are not a
+transaction. A failed child can leave a partial remote draft. Octopool does not delete
+drafts, replace assets, clobber, retry uploads, or publish after failure. This capability
+does not add modeled standalone `release upload` support or new release-edit forms.
 
 Protected PR create/edit/comment and issue create commands accept up to 16 repeated `--attach FILE`
 or `--attach=FILE` values. Raster image extensions are GIF, JPEG/JPG, PNG, and WebP; video
