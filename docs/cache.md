@@ -76,7 +76,20 @@ bounded pagination window also fall back.
 
 ### What is cached
 
-Only successful `2xx` responses on cacheable routes are stored. The edge + D1 cache is
+Only successful `2xx` responses on cacheable routes are stored, except pending `202`
+responses on repository statistics routes (`contributors`, `commit_activity`,
+`code_frequency`, `participation`, and `punch_card`). These responses reach the caller
+unchanged and store no body, so the next poll can reach GitHub's completed result.
+Concurrent followers reacquire fill ownership before fetching; there is no retry timer.
+A successful anonymous pending response may still warm the separate public-repository proof.
+
+Readers also reject existing statistics `202` entries from edge, D1, identity-specific keys,
+coalesced completions, revalidation and outage stale fallback, including late old writes.
+No generation change or purge is needed. A forced refresh that returns pending leaves any
+ready body's original timestamps and contents intact. Statistics `200`/`204`, their validators
+and bounded stale windows, and unrelated routes' `202` behavior remain unchanged.
+
+The edge + D1 cache is
 **bypassed** when:
 
 - the route is a large-payload route or `rate_limit` (completed Actions logs use the
@@ -345,9 +358,11 @@ publication, explicit guards or first-page aggregation. Internal response/time m
 keeps that evidence and its original expiry through SQL acknowledgment without adding fields
 to the relay payload or stored user body.
 
-Storage (`shared`, `edge_only`, `failed`, `rejected`, `unknown`) and completion acknowledgment
+Storage (`shared`, `edge_only`, `none`, `failed`, `rejected`, `unknown`) and completion acknowledgment
 (`accepted`, `lost`, `unknown`) are distinct internal results. A zero-row write is rejected
 unless an exact immutable already-committed receipt recovers a replay/lost acknowledgment.
+Intentional statistics nonpublication uses `none` without a publication ID; it revokes the
+exact owner, including expired cleanup, without claiming that absent data is shared.
 A stored denial completes successfully before returning `repo_not_public`. Shared proof
 completions identify the actual published or reused proof, not the notifier's newer ownership
 ID. Ownership-only completion does not fabricate a publication receipt. Shared waiters
@@ -400,6 +415,11 @@ count both fresh and stale hits as saved GitHub requests and expose an eligible 
 that excludes failed misses and deliberate local fallback responses.
 Successful `304` refreshes use the existing `hit` status so current stats and CLI parsers count
 the saved request, with `fallback_reason = cache_revalidated` as the distinct audit marker.
+Audit backend describes the resource fetch or verifier for that request: anonymous API
+`200` replacements and `304` validations use `github_api`, regardless of the cached body's
+source. Request-only verifier metadata does not alter stored identity, body encoding, delivered
+status, or the broad relay backend label. A following cache-only hit has no audit backend;
+an ancillary visibility probe does not supply one or spend pooled identity quota.
 
 Identity availability feedback is separate from cache-source eligibility. Overlapping
 identity responses merge quota and cooldown observations conservatively in the pool

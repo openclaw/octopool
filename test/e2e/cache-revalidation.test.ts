@@ -1,7 +1,21 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { deleteEdgeJSON } from "../../src/edge-cache";
-import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import {
+  bearer,
+  CALLER_TOKEN,
+  callWorker,
+  jsonResponse,
+  POOL,
+  rateHeaders,
+  relay,
+  seedPool,
+} from "./harness";
+import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { githubCacheKey } from "../../src/cache";
+import { loadIdentities } from "../../src/db";
+import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import { ownedWork } from "./owned-work";
 
 const RUN_PATH = "/repos/openclaw/octopool/actions/runs/123";
@@ -56,24 +70,30 @@ describe("Worker end-to-end cache revalidation", () => {
     },
   );
 
-  it.each([undefined, 0, 20])(
-    "refreshes an anonymous API entry on 304 with max-age=%s",
-    async (maxAge) => {
+  // Persisted audit/stats must describe this API verifier, not the materialized body.
+  // Existing native 304 coverage omitted backend/identity accounting; no new seam.
+  it.each([
+    [undefined, "etag"],
+    [0, "etag"],
+    [20, "etag"],
+    [undefined, "last-modified"],
+  ] as const)(
+    "refreshes an anonymous API entry on 304 with max-age=%s and %s",
+    async (maxAge, validator) => {
       await seedPool();
       let apiCalls = 0;
+      const value = validator === "etag" ? '"run-v1"' : "Mon, 31 Aug 2026 00:00:00 GMT";
+      const validatorHeader = validator === "etag" ? "if-none-match" : "if-modified-since";
+      const headers = { ...rateHeaders({ remaining: 59 }), [validator]: value };
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
         expect(bearer(request)).toBeUndefined();
         expect(request.url).toBe(`https://api.github.com${RUN_PATH}`);
         apiCalls++;
-        if (request.headers.get("if-none-match") === '"run-v1"') {
-          return new Response(null, { status: 304, headers: apiHeaders('"run-v1"') });
+        if (request.headers.get(validatorHeader) === value) {
+          return new Response(null, { status: 304, headers });
         }
-        return jsonResponse(
-          { id: 123, status: "in_progress", conclusion: null },
-          200,
-          apiHeaders('"run-v1"'),
-        );
+        return jsonResponse({ id: 123, status: "in_progress", conclusion: null }, 200, headers);
       });
       vi.stubGlobal("fetch", upstream);
 
@@ -84,8 +104,11 @@ describe("Worker end-to-end cache revalidation", () => {
       });
 
       expect(await response.json<RelayEnvelope>()).toMatchObject({
+        status: 200,
+        body_encoding: "json",
+        headers: { [validator]: value },
         body: { id: 123, status: "in_progress" },
-        relay: { cache: "hit", route_kind: "run_view" },
+        relay: { backend: "web", cache: "hit", route_kind: "run_view" },
       });
       expect(apiCalls).toBe(2);
       expect(
@@ -96,18 +119,27 @@ describe("Worker end-to-end cache revalidation", () => {
       ).toEqual({ ttl: 60 });
       expect(
         await env.DB.prepare(
-          "SELECT cache_status, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+          "SELECT backend, identity_id, status, cache_status, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
         ).first(),
-      ).toEqual({ cache_status: "hit", fallback_reason: "cache_revalidated" });
+      ).toEqual({
+        backend: "github_api",
+        identity_id: null,
+        status: 200,
+        cache_status: "hit",
+        fallback_reason: "cache_revalidated",
+      });
       const shared = await relay(RUN_PATH);
       expect(await shared.json<RelayEnvelope>()).toMatchObject({
         body: { id: 123, status: "in_progress" },
         relay: { cache: "hit" },
       });
       expect(apiCalls).toBe(2);
+      await expectAnonymousAuditStats(true);
     },
   );
 
+  // Conditional 200 uses the actual API payload marker; observe stored audits and stats.
+  // This extends the real replacement fixture rather than testing a private classifier.
   it.each([undefined, 0, 20])(
     "stores a conditional 200 replacement with max-age=%s",
     async (maxAge) => {
@@ -147,6 +179,17 @@ describe("Worker end-to-end cache revalidation", () => {
       expect(apiCalls).toBe(2);
       expect(
         await env.DB.prepare(
+          "SELECT backend, identity_id, status, cache_status, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+        ).first(),
+      ).toEqual({
+        backend: "github_api",
+        identity_id: null,
+        status: 200,
+        cache_status: "miss",
+        fallback_reason: null,
+      });
+      expect(
+        await env.DB.prepare(
           `SELECT json_extract(body_json, '$.status') AS status,
                 unixepoch(expires_at) - unixepoch(created_at) AS ttl
          FROM github_cache_entries WHERE route_kind = 'run_view'`,
@@ -158,6 +201,7 @@ describe("Worker end-to-end cache revalidation", () => {
         relay: { cache: "hit" },
       });
       expect(apiCalls).toBe(2);
+      await expectAnonymousAuditStats(false);
     },
   );
 
@@ -358,6 +402,80 @@ describe("Worker end-to-end cache revalidation", () => {
     ).toHaveLength(1);
   });
 
+  // Behavior: the anonymous verifier owns audit attribution while original source
+  // eligibility and body storage retain their contracts. Gap: no native cross-source
+  // audit proof existed; reuse the actual owned publication fixture and stats endpoint.
+  it("audits an anonymous 304 of an eligible identity body without pooled quota", async () => {
+    await seedPool();
+    const request = { pool: POOL, method: "GET" as const, path: RUN_PATH };
+    const route = classifyRoute(request, defaultPolicy("openclaw"));
+    const identity = (await loadIdentities(env, POOL, route))[0]!;
+    const key = await githubCacheKey(POOL, request, route, identity);
+    await seedPublicRepoProof(env, route);
+    expect(
+      await writeOwnedGitHubCache(
+        env,
+        key,
+        request,
+        route,
+        {
+          status: 200,
+          headers: apiHeaders('"identity-run"') as Record<string, string>,
+          body: { id: 123, status: "in_progress" },
+          body_encoding: "json",
+        },
+        identity,
+      ),
+    ).toBe("shared");
+    await expireCacheEntry("run_view");
+    const original = await env.DB.prepare("SELECT * FROM github_cache_entries WHERE cache_key = ?")
+      .bind(key)
+      .first();
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe(`https://api.github.com${RUN_PATH}`);
+      expect(bearer(request)).toBeUndefined();
+      expect(request.headers.get("if-none-match")).toBe('"identity-run"');
+      return new Response(null, { status: 304, headers: apiHeaders('"identity-run"') });
+    });
+    vi.stubGlobal("fetch", upstream);
+    const result = await (await relay(RUN_PATH)).json<Record<string, unknown>>();
+    expect(result).toMatchObject({
+      status: 200,
+      body: { id: 123, status: "in_progress" },
+      body_encoding: "json",
+      relay: { backend: "web", cache: "hit" },
+    });
+    expect(result).not.toHaveProperty("identity");
+    expect(result).not.toHaveProperty("upstreamBackend");
+    expect(
+      await env.DB.prepare("SELECT * FROM github_cache_entries WHERE cache_key = ?")
+        .bind(key)
+        .first(),
+    ).toEqual(original);
+    expect(
+      await env.DB.prepare(
+        "SELECT identity_id, body_json FROM github_cache_entries WHERE cache_key != ?",
+      )
+        .bind(key)
+        .first(),
+    ).toEqual({ identity_id: null, body_json: '{"id":123,"status":"in_progress"}' });
+    expect(
+      await env.DB.prepare(
+        "SELECT backend, identity_id, status, cache_status, fallback_reason FROM audit_events",
+      ).first(),
+    ).toEqual({
+      backend: "github_api",
+      identity_id: null,
+      status: 200,
+      cache_status: "hit",
+      fallback_reason: "cache_revalidated",
+    });
+    await relay(RUN_PATH);
+    await expectAnonymousAuditStats(true, 1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed before authenticated revalidation when a repository becomes private", async () => {
     await seedPool();
     const path = "/repos/openclaw/octopool/pulls/42";
@@ -515,4 +633,39 @@ async function expireCacheEntry(routeKind: string): Promise<void> {
 
 function apiHeaders(etag: string): HeadersInit {
   return { ...rateHeaders({ remaining: 59 }), etag };
+}
+
+async function expectAnonymousAuditStats(revalidated: boolean, requests = 2): Promise<void> {
+  expect(
+    await env.DB.prepare(
+      "SELECT backend, identity_id, status, cache_status, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+    ).first(),
+  ).toEqual({
+    backend: null,
+    identity_id: null,
+    status: 200,
+    cache_status: "hit",
+    fallback_reason: null,
+  });
+  const stats = await callWorker(`/v1/pools/${POOL}/stats`, {
+    headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+  });
+  expect(stats.status).toBe(200);
+  expect(await stats.json()).toMatchObject({
+    backends: [
+      {
+        backend: "github_api",
+        route_kind: "run_view",
+        requests,
+        cache_misses: revalidated ? requests - 1 : requests,
+        revalidated: revalidated ? 1 : 0,
+      },
+    ],
+  });
+  expect((await poolCoordinatorStub(env, POOL).snapshot()).rates).toEqual([]);
+  expect(
+    await env.DB.prepare(
+      "SELECT remaining FROM github_public_api_rates WHERE resource = 'core'",
+    ).first(),
+  ).toEqual({ remaining: 59 });
 }

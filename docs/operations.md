@@ -549,6 +549,11 @@ without unbounded D1 growth.
 
 `GET /v1/pools/<pool>/stats?since=24h` returns pool-, caller-, and client-specific cache stats,
 plus bounded backend-by-route and local-fallback-reason aggregates.
+Anonymous API conditional replacements and `304` verifications are attributed to `github_api`
+prospectively. Existing misattributed history is not backfilled and expires under normal audit
+retention. This correction requires no schema or cache-generation change. During a rolling
+upgrade, old Workers may still emit the former attribution and serve cached statistics `202`;
+new readers reject pending entries, including late writes, without purging valid ready data.
 The CLI wraps this as `octopool stats`. The browser dashboard at `/dashboard` exposes the
 same data plus identity health, live leases, seven-day normalized request patterns and
 outcome causes, and per-caller/client usage — see

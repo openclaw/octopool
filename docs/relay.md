@@ -118,6 +118,12 @@ and patch hosts.
   `cache_expires_at` are included on those responses.
 - `backend` is present as `web` or `github_public` when a cache miss or identity-less cache hit
   was served without a pooled API identity.
+  Audit backend separately describes the resource fetch/verifier: anonymous API replacements
+  and `304` validations count as `github_api`; a cache-only hit has no audit backend.
+- Repository statistics `202` responses are returned unchanged without body caching. Each
+  later poll can reach upstream readiness; old pending entries cannot serve hits, revalidate,
+  or supply outage stale data. A forced pending refresh preserves any ready entry's original
+  lifetime, and unrelated routes keep their existing `202` behavior.
 - `lease_reason` is `sticky` or `highest_remaining` — see
   [Identities & routing](identities.md).
 

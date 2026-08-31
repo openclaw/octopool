@@ -16,6 +16,7 @@ import {
   writeGitHubCache,
 } from "./cache";
 import { coalesceGitHubCacheMiss } from "./cache-coalesce";
+import { cacheResponseEligible } from "./cache-policy";
 import type { CacheFillOutcome, OwnedCacheFill } from "./cache-fill";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";
@@ -122,6 +123,7 @@ type RelaySuccess = {
   rate?: GitHubRate;
   revalidated?: boolean;
   upstreamStatus?: number;
+  upstreamBackend?: GitHubRelayResponse["backend"];
 };
 
 type RevalidationCandidate = {
@@ -647,6 +649,7 @@ async function finishRevalidation(
     rate: rateFromHeaders(github.headers),
     revalidated: true,
     upstreamStatus: 304,
+    upstreamBackend: github.backend,
   });
 }
 
@@ -1203,7 +1206,10 @@ function auditBackend(result: RelaySuccess): AuditBackend | undefined {
   if (result.identity !== undefined) {
     return "github_identity";
   }
-  if (result.backend === "github_public" || result.github.backend === "github") {
+  if (
+    result.backend === "github_public" ||
+    (result.upstreamBackend ?? result.github.backend) === "github"
+  ) {
     return "github_api";
   }
   return result.backend === "web" ? "github_web" : undefined;
@@ -1578,6 +1584,7 @@ async function cachedResponseAvailable(
   selectedIdentity?: Pick<Identity, "id" | "kind">,
   stale = false,
 ): Promise<boolean> {
+  if (!cacheResponseEligible(route.kind, cached.status)) return false;
   const identityAvailable = stale
     ? staleCachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity)
     : cachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity);

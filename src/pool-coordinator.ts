@@ -150,7 +150,7 @@ export class PoolCoordinator extends DurableObject<Env> {
       throw new Error("Invalid publication completion");
     }
     const row = await this.env.DB.prepare(
-      outcome === "failed" || outcome === "rejected" || outcome === "unknown"
+      outcome === "none" || outcome === "failed" || outcome === "rejected" || outcome === "unknown"
         ? queries.revokePublicationOwner
         : queries.completePublicationOwner,
     )

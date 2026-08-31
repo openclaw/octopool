@@ -8,6 +8,7 @@ import { hashToken } from "./auth";
 import {
   type CacheFreshStrategy,
   cachePolicyForRouteKind,
+  cacheResponseEligible,
   isStateAwarePRRoute,
 } from "./cache-policy";
 import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
@@ -192,7 +193,11 @@ export async function readStaleGitHubCache(
   const row = await env.DB.prepare(queries.readGitHubCacheAny)
     .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
     .first<CacheRow>();
-  if (row === null || !staleCacheAllowed(row, route)) {
+  if (
+    row === null ||
+    !cacheResponseEligible(route.kind, row.status) ||
+    !staleCacheAllowed(row, route)
+  ) {
     return undefined;
   }
   const cached = cacheRowResponse(row);
@@ -278,6 +283,9 @@ export async function writeGitHubCache(
     return "rejected";
   if (response.status < 200 || response.status >= 300) {
     return "failed";
+  }
+  if (!cacheResponseEligible(route.kind, response.status)) {
+    return "none";
   }
   const ttlSeconds = cacheTTLSeconds(route, response);
   const staleSeconds = staleCacheSeconds(route, ttlSeconds);

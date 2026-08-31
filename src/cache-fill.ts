@@ -1,6 +1,6 @@
 import type { PublicationOwner } from "./cache-publication";
 
-export type CacheFillOutcome = "shared" | "edge_only" | "failed" | "rejected" | "unknown";
+export type CacheFillOutcome = "shared" | "edge_only" | "none" | "failed" | "rejected" | "unknown";
 
 export type CacheFillAcquisition =
   | { kind: "owner"; owner: PublicationOwner }

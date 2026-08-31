@@ -1,5 +1,20 @@
 import type { RouteKind } from "./route-manifest";
 
+export function cacheResponseEligible(kind: RouteKind, status: number): boolean {
+  if (status < 200 || status >= 300) return false;
+  if (status !== 202) return true;
+  switch (kind) {
+    case "repo_stats_contributors":
+    case "repo_stats_commit_activity":
+    case "repo_stats_code_frequency":
+    case "repo_stats_participation":
+    case "repo_stats_punch_card":
+      return false;
+    default:
+      return true;
+  }
+}
+
 export type CacheFreshStrategy =
   | { kind: "static"; seconds: number }
   | { kind: "pr" }

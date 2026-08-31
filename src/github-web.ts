@@ -94,7 +94,13 @@ export async function callAnonymousGitHubAPI(
   }
   try {
     const body = await readWebBody(response, api.capBytes);
-    return await api.payload(new Uint8Array(body), response.headers, response.status, responseURL);
+    const payload = await api.payload(
+      new Uint8Array(body),
+      response.headers,
+      response.status,
+      responseURL,
+    );
+    return payload === undefined ? undefined : { ...payload, backend: "github" };
   } catch (error) {
     rethrowStringRewriteDenial(error);
     return undefined;
