@@ -64,7 +64,7 @@ describe("Actions job-list superset", () => {
       status: 200,
       headers: {
         etag: '"canonical"',
-        link: '<https://api.github.com/jobs?page=2>; rel="next"',
+        link: '<https://api.github.com/jobs?page=1>; rel="prev"',
         "content-length": "123",
         "content-type": "application/json",
       },
@@ -99,7 +99,10 @@ describe("Actions job-list superset", () => {
     const response = await completeRunJobsSuperset(
       {
         status: 200,
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          link: '<https://api.github.com/jobs?page=2>; rel="next"',
+        },
         body: { total_count: 250, jobs: jobs(1, 100) },
         body_encoding: "json",
       },
@@ -109,7 +112,10 @@ describe("Actions job-list superset", () => {
         pages.push(page);
         return {
           status: 200,
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            link: `<https://api.github.com/jobs?page=${page === "2" ? 3 : 2}>; rel="${page === "2" ? "next" : "prev"}"`,
+          },
           body: {
             total_count: 250,
             jobs: page === "2" ? jobs(101, 100) : jobs(201, 50),
@@ -122,6 +128,53 @@ describe("Actions job-list superset", () => {
     expect(pages).toEqual(["2", "3"]);
     expect(response.body).toMatchObject({ total_count: 250 });
     expect((response.body as { jobs: unknown[] }).jobs).toHaveLength(250);
+    expect(response.headers).not.toHaveProperty("link");
+  });
+
+  it.each([
+    { name: "partial rerun metadata", total: 3, jobs: jobs(3, 1), link: undefined },
+    {
+      name: "next link despite matching count",
+      total: 1,
+      jobs: jobs(3, 1),
+      link: '<https://api.github.com/jobs?page=2>; rel="next"',
+    },
+    {
+      name: "next link at the cap",
+      total: 300,
+      jobs: jobs(1, 100),
+      link: '<https://api.github.com/jobs?page=2>; rel="next"',
+    },
+  ])("rejects $name without publishing a partial superset", async (test) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs",
+      headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+    });
+    const view = runJobsSupersetView(request, classifyRoute(request, policy));
+    const pages: string[] = [];
+    const response = await completeRunJobsSuperset(
+      {
+        status: 200,
+        headers: test.link ? { Link: test.link } : {},
+        body: { total_count: test.total, jobs: test.jobs },
+        body_encoding: "json",
+      },
+      view,
+      async (pageRequest) => {
+        const page = Number(pageRequest.query?.page);
+        pages.push(String(page));
+        return {
+          status: 200,
+          headers: { link: `<https://api.github.com/jobs?page=${page + 1}>; rel="next"` },
+          body: { total_count: test.total, jobs: jobs((page - 1) * 100 + 1, 100) },
+          body_encoding: "json",
+        };
+      },
+    );
+    expect(runJobsSupersetIncomplete(response, view)).toBe(true);
+    expect(pages).toEqual(test.total === 300 ? ["2", "3"] : []);
   });
 });
 

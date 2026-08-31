@@ -157,9 +157,21 @@ func runJobs(envelope relayEnvelope) ([]any, error) {
 }
 
 func runJobsPage(envelope relayEnvelope) ([]any, int, error) {
-	rawJobs, total, err := envelopeCollectionPage(envelope, "jobs")
+	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
 		return nil, 0, err
+	}
+	var response map[string]any
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, 0, err
+	}
+	rawJobs, ok := response["jobs"].([]any)
+	if !ok {
+		return nil, 0, errors.New("workflow jobs response did not include jobs")
+	}
+	total, ok := jsonNumericInt(response["total_count"])
+	if !ok {
+		return nil, 0, localFallbackError{Reason: "workflow jobs response did not include a valid total_count"}
 	}
 	jobs := make([]any, 0, len(rawJobs))
 	for _, rawJob := range rawJobs {

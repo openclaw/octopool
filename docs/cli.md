@@ -266,12 +266,27 @@ verified PR head SHA, allowing file pages to share a five-minute state-scoped ca
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share
 one upstream PR read at most 60 seconds old, and the check/status reads for that SHA use
 the normal cache TTLs. Native `gh run watch` and `gh pr checks --watch` polling also stays
-on the relay, floors intervals at 30 seconds, and backs off to 120 seconds. If the relay
-explicitly returns `fallback_local` during an active watch, the shim prints one handoff
-boundary and continues the original command with real `gh`; real `gh` then owns output and
-the exact exit status. Its first snapshot may repeat the last relay-rendered state. Client-side
-incompleteness, auth reinterpretation, transport/decode failures, and ordinary relay service
-errors remain terminal after progress and do not spend local GitHub quota. Ask for raw `gh api`
+on the relay, floors intervals at 30 seconds, and backs off to 120 seconds.
+
+Supported `gh run watch` commands keep polling on the relay, including under active rewrite
+rules. Relay failures, including
+`fallback_local` for pagination or exhausted pool retries, stop the watch with an error;
+they never start a personal-token watcher. This applies to the initial read, later polls,
+fresh completion confirmation, and final job hydration. Jobs are fetched only after a fresh
+completed run response, using its exact `run_attempt`. Missing or inconsistent job metadata
+fails explicitly without printing a partial job summary or a successful completion message.
+Octopool preserves the job set returned for that attempt, including reused successes when
+present, and does not reconstruct missing jobs from earlier attempts. With complete data,
+`--exit-status` returns 1 for a non-successful run; without it, a completed run returns 0.
+Read failures return nonzero with or without `--exit-status`. Unsupported command shapes
+still delegate, and an explicit `repo_not_public` refusal on the initial run lookup retains
+guarded native fallback. A refusal after watch progress never hands off.
+
+For `gh pr checks --watch`, an explicit relay `fallback_local` after progress still prints a
+handoff boundary and continues the command with real `gh`, which owns output and exit status.
+Its first snapshot may repeat the last relay-rendered state. Client-side incompleteness,
+auth, transport/decode failures, and ordinary relay service errors remain terminal after
+progress and do not spend local GitHub quota. Ask for raw `gh api`
 conditional requests only when instant freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
@@ -724,8 +739,9 @@ These are dev/CI escape hatches, not the everyday UX:
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
   `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and
   malformed 502/503/504 gateway responses are retried against the relay (1s, then 3s for
-  subsequent retries). Exhausted transient fallbacks may delegate to real `gh`; exhausted
-  service errors remain failures instead of spending local GitHub quota. Default `2`; `0`
+  subsequent retries). Exhausted transient fallbacks may delegate to real `gh` except for
+  supported `gh run watch`, which fails explicitly. Exhausted service errors remain failures
+  instead of spending local GitHub quota. Default `2`; `0`
   disables retries.
 - `OCTOPOOL_ADMIN_TOKEN` — admin token for `octopool admin`.
 - `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` — permit non-HTTPS login for local dev.

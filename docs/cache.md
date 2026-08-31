@@ -274,11 +274,19 @@ Before granting the one-hour job-list TTL, Octopool separately verifies that exa
 run endpoint is completed; a list of currently completed jobs alone is not treated as proof.
 
 Equivalent shaped `page=1`, omitted/`latest` filter, and `per_page` values up to 100 share one
-100-job attempt-qualified cache entry. Octopool truncates that complete superset locally and
-removes upstream representation validators, lengths, and pagination links. If `total_count`
-exceeds the returned jobs—or is missing or invalid—the shaped request fails over to real `gh`
-without publishing or returning the partial page. `filter=all`, later pages, unshaped REST
-requests, active attempt data, and unsupported query variants retain exact semantics.
+attempt-qualified cache entry, filled from at most three 100-job API pages. Octopool slices
+that complete superset locally and removes upstream representation validators, lengths,
+and pagination links. All pages must have consistent valid `total_count` metadata and the
+merged list must match that count. A remaining `Link: rel="next"` also prevents completion,
+even when the count matches; the first page's link is removed only after a complete merge.
+
+If a partial rerun exposes count metadata that disagrees with the returned job set, a count
+disagreement alone does not establish another page or prove which successful jobs were
+reused. Octopool rejects that ambiguous shaped response with `pagination_exhausted`, without
+caching it, inventing jobs, or treating a short page as a complete summary. Supported
+`gh run watch` stops with an explicit error on that refusal and never starts real `gh`;
+ordinary run-view fallback remains available. `filter=all`, later pages, unshaped REST
+requests, and unsupported query variants retain exact upstream semantics.
 
 ## Cache-hit integrity
 

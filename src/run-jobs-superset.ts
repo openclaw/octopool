@@ -57,7 +57,9 @@ export function runJobsSupersetIncomplete(
     typeof total !== "number" ||
     !Number.isSafeInteger(total) ||
     total < 0 ||
-    total !== response.body.jobs.length
+    total > MAX_API_JOBS ||
+    total !== response.body.jobs.length ||
+    hasNextJobsPage(response)
   );
 }
 
@@ -80,14 +82,22 @@ export async function completeRunJobsSuperset(
     typeof total !== "number" ||
     !Number.isSafeInteger(total) ||
     total <= response.body.jobs.length ||
-    total > MAX_API_JOBS
+    total > MAX_API_JOBS ||
+    response.body.jobs.length !== MAX_PAGE_SIZE
   ) {
     return response;
   }
 
   const jobs = [...response.body.jobs];
   const pageCount = Math.ceil(total / MAX_PAGE_SIZE);
+  let last = response;
   for (let page = 2; page <= pageCount; page++) {
+    if (
+      Object.keys(last.headers).some((key) => key.toLowerCase() === "link") &&
+      !hasNextJobsPage(last)
+    ) {
+      return response;
+    }
     let next: GitHubRelayResponse | undefined;
     try {
       next = await fetchPage({
@@ -103,19 +113,38 @@ export async function completeRunJobsSuperset(
       next.status >= 300 ||
       !isRecord(next.body) ||
       next.body.total_count !== total ||
-      !Array.isArray(next.body.jobs)
+      !Array.isArray(next.body.jobs) ||
+      next.body.jobs.length !== Math.min(MAX_PAGE_SIZE, total - jobs.length)
     ) {
       return response;
     }
     jobs.push(...next.body.jobs);
+    last = next;
   }
-  if (jobs.length !== total) {
+  if (jobs.length !== total || hasNextJobsPage(last)) {
     return response;
   }
   return {
     ...response,
+    // The first page's next link no longer describes the merged collection.
+    headers: Object.fromEntries(
+      Object.entries(response.headers).filter(([key]) => key.toLowerCase() !== "link"),
+    ),
     body: { ...response.body, total_count: total, jobs },
   };
+}
+
+function hasNextJobsPage(response: GitHubRelayResponse): boolean {
+  const link = Object.entries(response.headers).find(([key]) => key.toLowerCase() === "link")?.[1];
+  if (link === undefined) {
+    return false;
+  }
+  for (const match of link.matchAll(/;\s*rel\s*=\s*(?:"([^"]*)"|([^;,\s]+))/gi)) {
+    if ((match[1] ?? match[2] ?? "").toLowerCase().split(/\s+/).includes("next")) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function filterRunJobsSuperset(

@@ -1860,9 +1860,11 @@ func TestStringRewriteRelayReadAndAuthFailure(t *testing.T) {
 	}
 }
 
-func TestStringRewriteTopLevelWatchFallbackIsBestEffort(t *testing.T) {
+func TestStringRewritePrivateRunWatchFallback(t *testing.T) {
 	recordWatchSleeps(t)
+	relayCalls := 0
 	rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+		relayCalls++
 		var request map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
@@ -1870,16 +1872,54 @@ func TestStringRewriteTopLevelWatchFallbackIsBestEffort(t *testing.T) {
 		if request["path"] != "/repos/acme/repo/actions/runs/42" {
 			t.Error("unexpected watch path")
 		}
-		writeCLIFallback(t, w, "route_denied")
+		writeCLIFallback(t, w, "repo_not_public")
 	})
 	capture := captureRewriteGH(t)
 	args := []string{"run", "watch", "42", "-Racme/repo", "-i5", "--exit-status"}
 	if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
-		t.Fatalf("native watch best-effort fallback failed: %v", err)
+		t.Fatalf("private watch fallback failed: %v", err)
 	}
-	want := []string{"run", "watch", "42", "--repo=github.com/acme/repo", "-i5", "--exit-status"}
+	if relayCalls != 1 {
+		t.Fatalf("relay calls=%d, want initial lookup before private fallback", relayCalls)
+	}
+	want := []string{"run", "watch", "42", "--repo=acme/repo", "--interval=30", "--exit-status"}
 	if got := readRewriteCapture(t, capture); !slices.Equal(got.Args, want) || got.Env["GH_HOST"] != "github.com" {
 		t.Fatalf("native watch args=%v env=%v", got.Args, got.Env)
+	}
+}
+
+func TestStringRewriteRunWatchKeepsRelayOwnership(t *testing.T) {
+	recordWatchSleeps(t)
+	for _, failAt := range []int{1, 2, 3} {
+		t.Run(strconv.Itoa(failAt), func(t *testing.T) {
+			calls := 0
+			rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				var request map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				calls++
+				wantPath := "/repos/acme/repo/actions/runs/42"
+				if calls == 3 {
+					wantPath += "/attempts/2/jobs"
+				}
+				if request["path"] != wantPath {
+					t.Errorf("path=%v want=%s", request["path"], wantPath)
+				}
+				if calls == failAt {
+					writeCLIFallback(t, w, "pagination_exhausted")
+					return
+				}
+				writeCLIEnvelope(t, w, map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 2})
+			})
+			t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			var stdout, stderr bytes.Buffer
+			err := runGH(t.Context(), []string{"run", "watch", "42", "-Racme/repo", "-i120", "--exit-status", "--compact"}, &stdout, &stderr)
+			if err == nil || shouldRunRealGH(err) || calls != failAt || strings.Contains(stdout.String(), fakeGHArgvPrefix) {
+				t.Fatalf("calls=%d err=%v stdout=%q stderr=%q", calls, err, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

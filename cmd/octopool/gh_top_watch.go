@@ -118,7 +118,7 @@ func handleGHRunWatch(ctx context.Context, args []string, stdout io.Writer) ghRe
 		return ghDelegated()
 	}
 	opts.repo = repo
-	return ghWatchCompleted(relayRunWatch(ctx, stdout, opts))
+	return ghCompleted(relayRunWatch(ctx, stdout, opts))
 }
 
 func parseGHRunWatchOptions(args []string) (ghRunWatchOptions, bool) {
@@ -173,7 +173,7 @@ func attachedWatchInterval(arg string) string {
 func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions) error {
 	client, err := newGHRelayClient()
 	if err != nil {
-		return err
+		return runWatchError(err, false)
 	}
 	backoff := newWatchBackoff(opts.interval)
 	previousStatus := ""
@@ -186,11 +186,11 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			return pollErr
 		})
 		if err != nil {
-			return watchError(err, progressPrinted)
+			return runWatchError(err, progressPrinted)
 		}
 		status := watchSafeText(firstString(run, "status"))
 		if status == "" {
-			return watchError(errors.New("workflow run response did not include status"), progressPrinted)
+			return runWatchError(errors.New("workflow run response did not include status"), progressPrinted)
 		}
 		if !progressPrinted {
 			if _, err := fmt.Fprintf(stdout, "Watching run %s in %s (status: %s)\n", opts.id, opts.repo, status); err != nil {
@@ -214,9 +214,12 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 				return pollErr
 			})
 			if err != nil {
-				return watchError(err, progressPrinted)
+				return runWatchError(err, progressPrinted)
 			}
 			confirmedStatus := watchSafeText(firstString(confirmed, "status"))
+			if confirmedStatus == "" {
+				return errors.New("workflow run confirmation did not include status")
+			}
 			if confirmedStatus != "completed" {
 				if confirmedStatus != "" && confirmedStatus != status {
 					if _, err := fmt.Fprintf(stdout, "run %s: %s -> %s\n", opts.id, status, confirmedStatus); err != nil {
@@ -231,16 +234,19 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			}
 			attempt, ok := positiveJSONInt(confirmed["run_attempt"])
 			if !ok {
-				return watchError(localFallbackError{Reason: "workflow run response did not include run_attempt"}, progressPrinted)
+				return runWatchError(localFallbackError{Reason: "workflow run response did not include run_attempt"}, progressPrinted)
+			}
+			conclusion := watchSafeText(firstString(confirmed, "conclusion"))
+			if conclusion == "" {
+				return errors.New("workflow run confirmation did not include conclusion")
 			}
 			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, opts.id, attempt, &backoff)
 			if err != nil {
-				return watchError(err, true)
+				return runWatchError(err, true)
 			}
 			if err := printWatchRunJobs(stdout, jobs); err != nil {
 				return err
 			}
-			conclusion := watchSafeText(firstString(confirmed, "conclusion"))
 			if _, err := fmt.Fprintf(stdout, "Run %s completed with '%s'\n", opts.id, conclusion); err != nil {
 				return err
 			}
@@ -309,10 +315,27 @@ func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, i
 			}
 			if page == 1 {
 				total = pageTotal
+			} else if pageTotal != total {
+				return localFallbackError{Reason: "workflow jobs total_count changed during pagination"}
 			}
 			jobs = append(jobs, pageJobs...)
-			if len(jobs) >= total || len(pageJobs) < relayPageSize {
+			link, linked := relayResponseHeader(envelope.Headers, "link")
+			next, hasNext := relayNextLink(link)
+			if len(jobs) > total || (len(jobs) == total && hasNext) {
+				return localFallbackError{Reason: "workflow jobs pagination contradicts total_count"}
+			}
+			if len(jobs) == total {
 				return nil
+			}
+			// A short page is not proof of completion when the advertised total
+			// still includes missing jobs (for example, partial rerun metadata).
+			if len(pageJobs) < relayPageSize || (linked && !hasNext) {
+				return localFallbackError{Reason: "workflow jobs response is incomplete"}
+			}
+			if hasNext {
+				if nextPage, ok := relayLinkNumericPage(next); !ok || nextPage != page+1 {
+					return localFallbackError{Reason: "workflow jobs pagination link is inconsistent"}
+				}
 			}
 		}
 		return localFallbackError{Reason: "workflow jobs pagination exhausted"}
@@ -582,6 +605,18 @@ func bodySafeText(raw string) string {
 		}
 		return r
 	}, raw)
+}
+
+func runWatchError(err error, progressPrinted bool) error {
+	if fallback, ok := explicitRelayFallback(err); ok && !progressPrinted && fallback.Reason == "repo_not_public" {
+		return err
+	}
+	if shouldRunRealGH(err) {
+		// The run watcher owns the whole polling session. A failed hydration
+		// must not restart that session using the caller's personal quota.
+		return fmt.Errorf("run watch stopped without local gh fallback: %v", err)
+	}
+	return err
 }
 
 func watchError(err error, progressPrinted bool) error {

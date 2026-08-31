@@ -141,12 +141,13 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 		name     string
 		args     []string
 		exitCode int
+		native   bool
 		serve    func(*testing.T, map[string]any, http.ResponseWriter)
 	}{
 		{
-			name:     "run watch exit 0",
+			name:     "run watch fails without native handoff",
 			args:     []string{"gh", "run", "watch", "42", "-R", "openclaw/octopool", "--exit-status", "-i", "5"},
-			exitCode: 0,
+			exitCode: 1,
 			serve: func(t *testing.T, body map[string]any, w http.ResponseWriter) {
 				headers, _ := body["headers"].(map[string]any)
 				if headers["cache-control"] == "max-age=0" {
@@ -160,6 +161,7 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 			name:     "pr checks watch exit 7",
 			args:     []string{"gh", "pr", "checks", "7", "-R", "openclaw/octopool", "--watch", "--interval=5"},
 			exitCode: 7,
+			native:   true,
 			serve: func(t *testing.T, body map[string]any, w http.ResponseWriter) {
 				path := body["path"].(string)
 				switch {
@@ -203,6 +205,14 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 				if !errors.As(result.err, &exitErr) || exitErr.ExitCode() != command.exitCode {
 					t.Fatalf("err=%v, want exit %d", result.err, command.exitCode)
 				}
+			}
+			if !command.native {
+				if strings.Contains(result.stdout, fakeGHArgvPrefix) ||
+					!strings.Contains(result.stdout, "Watching run") ||
+					!strings.Contains(result.stderr, "run watch stopped without local gh fallback") {
+					t.Fatalf("stdout=%q stderr=%q", result.stdout, result.stderr)
+				}
+				return
 			}
 			wantArgv := strings.Join(floorGHWatchDelegateArgs(command.args[1:]), " ")
 			wantChild := fakeGHArgvPrefix + wantArgv

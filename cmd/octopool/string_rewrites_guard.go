@@ -161,6 +161,9 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	case "run view":
 		values += " --attempt"
 		booleans = "--log --log-failed --exit-status"
+	case "run watch":
+		values += " --interval,-i"
+		booleans = "--exit-status --compact"
 	case "run list":
 		values += " --limit,-L --branch --workflow --status"
 	case "pr checks":

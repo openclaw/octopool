@@ -695,10 +695,10 @@ func TestWatchErrorClassification(t *testing.T) {
 	}
 }
 
-func TestGHWatchExplicitRelayFallbackBeforeProgressDelegates(t *testing.T) {
+func TestGHRunWatchPrivateRepoBeforeProgressDelegates(t *testing.T) {
 	t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
 	t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
-	relayTestServer(t, func(map[string]any) any { return relayFallbackFixture("relay_overloaded") })
+	relayTestServer(t, func(map[string]any) any { return relayFallbackFixture("repo_not_public") })
 	var stdout, stderr bytes.Buffer
 	if err := runGH(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)

@@ -77,7 +77,8 @@ Durable Object partition key: `pool:<pool_id>`.
 9. Sanitize and publish eligible `200` responses to D1 and the edge cache.
 10. Return the relay envelope; asynchronously record the authenticated/validated outcome.
 11. If a safe read cannot be served, return `424 fallback_local` with a reason. The CLI
-    reruns the original command with real `gh` unless local fallback is disabled.
+    reruns the original command with real `gh` unless local fallback is disabled or the
+    supported run-watch ownership rules below require an explicit failure.
 12. Complete the owned fill immediately after publication; every other owned exit completes
     `failed`, while lost/stale tokens cannot release a newer owner.
 
@@ -215,6 +216,9 @@ failures occur before audit context exists. Bodies, credentials, and raw tokens 
   their shape is unknown.
 - Safe requests contact Octopool first and delegate only on explicit `fallback_local` or
   stale/invalid Octopool auth. `OCTOPOOL_NO_FALLBACK` disables delegation.
+- Supported `gh run watch` fails explicitly on relay or pagination failures, including
+  initial reads and final job hydration, without starting a personal-token watcher. Only an
+  initial `repo_not_public` refusal retains guarded fallback; unsupported shapes still delegate.
 - The canonical relay client loop retries selected transient pool fallbacks and
   `5xx internal_error` responses plus malformed 502/503/504 gateway responses with bounded
   backoff; exhausted service failures do not delegate to local GitHub quota.
