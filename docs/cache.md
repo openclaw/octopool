@@ -43,6 +43,12 @@ entries, cannot reuse summaries cached before the ownership fix. Existing
 edge, D1, stale fallback, fill coalescing, and conditional revalidation. Raw REST and
 unrelated shapes keep their existing keys; no cache purge is needed.
 
+Release views and latest-release reads with `release-summary-v1` similarly include
+`release-summary-raw-v2`. Existing clients cannot reuse the old HTML-derived bodies
+from edge, D1, stale fallback, fill coalescing, or conditional revalidation. Only the
+shaped release keys change; raw REST entries retain their keys. The generation applies
+to metadata-only projections too, since they share the same response body.
+
 PR file-list routes may include a validated
 `route_hint.pr_head_sha` or closed/merged `route_hint.pr_state` discriminator. Clients
 that already know the current PR state can use that to avoid mixing entries across head
@@ -121,8 +127,14 @@ The main transport classes are:
 - supported top-level `gh pr view` summaries and `gh workflow view` metadata can use bounded
   public GitHub page data before the anonymous API
 - release list/latest/tag/id/asset reads via unauthenticated `api.github.com` requests so pooled
-  credentials never expose draft releases; supported top-level `gh release view` summaries
-  prefer public release HTML, while raw API requests retain exact REST semantics
+  credentials never expose draft releases; top-level `gh release view` also uses exact API
+  data, preserving raw Markdown strings through fills, cache reads, and revalidation
+
+Release bodies are never reconstructed from rendered HTML or replaced with changelog
+text. Whitespace, line endings, and Markdown syntax remain exactly as returned by the
+API. This costs anonymous API quota on release cache misses, including metadata-only
+views. If the API is unavailable, eligible exact stale data or the existing guarded
+local-`gh` fallback applies; pooled identities remain excluded.
 
 Anonymous API rate snapshots are recorded by GitHub resource from API responses.
 When a public-page/raw/Git parser cannot satisfy a request, Octopool falls back to the

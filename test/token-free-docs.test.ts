@@ -56,7 +56,6 @@ describe("token-free endpoint documentation", () => {
       "/issues?q=is%3Aissue",
       "/actions/runs/{id}/job_groups_batch?attempt={attempt}",
       "/actions/workflows_partial?query=&page={page}",
-      "/releases/tag/{tag}",
     ]) {
       expect(docs).toContain(source);
     }

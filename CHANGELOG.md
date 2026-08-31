@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Preserve exact raw Markdown in release-view JSON via the anonymous API and retire cached HTML-derived release summaries for existing clients.
 - Return native uppercase PR-list lifecycle states and lowercase merged PR-search states from nested merge metadata before `--jq`, preserving raw API and cache payloads.
 - Cache page-derived closed issues for one hour, matching REST closed issues while preserving response state casing and cached bodies.
 

@@ -15,7 +15,6 @@ import {
   parseIssueListHTML,
   parseLabelListHTML,
   parsePullRequestHTML,
-  parseReleaseHTML,
   parseWorkflowListHTML,
   parseWorkflowPageCount,
 } from "./github-html";
@@ -258,46 +257,4 @@ function searchQualifier(key: string, value: string): string | undefined {
 
 function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-export function releasePageRequest(
-  env: Env,
-  request: RelayRequest,
-  route: RouteInfo,
-): WebRequest | undefined {
-  if (
-    request.method !== "GET" ||
-    route.owner === undefined ||
-    route.repo === undefined ||
-    request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.releaseSummary ||
-    !defaultGitHubJSONAccept(request.headers?.accept) ||
-    Object.keys(request.query ?? {}).length !== 0
-  ) {
-    return undefined;
-  }
-  let url: string;
-  if (route.kind === "release_latest") {
-    url = `https://github.com/${encodedPathSegments([route.owner, route.repo, "releases", "latest"])}`;
-  } else if (route.kind === "release_view") {
-    const encodedTag = /\/releases\/tags\/([^/?#]+)$/.exec(request.path)?.[1];
-    if (encodedTag === undefined) {
-      return undefined;
-    }
-    const tag = decodePathStrict(encodedTag);
-    if (tag === undefined) {
-      return undefined;
-    }
-    url = `https://github.com/${encodedPathSegments([route.owner, route.repo, "releases", "tag"])}/${encodeURIComponent(tag)}`;
-  } else {
-    return undefined;
-  }
-  return htmlWebRequest(env, url, (body, headers, status, responseURL) => {
-    const parsed = parseReleaseHTML(
-      new TextDecoder().decode(body),
-      route.owner!,
-      route.repo!,
-      responseURL,
-    );
-    return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed);
-  });
 }

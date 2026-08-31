@@ -12,5 +12,4 @@ export {
   parsePullRequestHTML,
   parseRepositoryNodeIDHTML,
 } from "./github-html-embedded";
-export { parseReleaseHTML } from "./github-html-releases";
 export { parseWorkflowListHTML, parseWorkflowPageCount } from "./github-html-workflows";

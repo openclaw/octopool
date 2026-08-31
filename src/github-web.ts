@@ -4,7 +4,7 @@ import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./githu
 import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
-import { releasePageRequest, summaryPageRequest } from "./github-public-pages";
+import { summaryPageRequest } from "./github-public-pages";
 import { githubResponseHeaders } from "./github-response";
 import type { WebRequest } from "./github-web-types";
 import { fetchWebResponse, readWebBody } from "./github-web-transport";
@@ -138,10 +138,6 @@ function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteIn
   const actions = actionsPageRequest(env, request, route);
   if (actions !== undefined) {
     out.push(actions);
-  }
-  const releasePage = releasePageRequest(env, request, route);
-  if (releasePage !== undefined) {
-    out.push(releasePage);
   }
   const rawContent = rawContentRequest(env, request, route);
   if (rawContent !== undefined) {

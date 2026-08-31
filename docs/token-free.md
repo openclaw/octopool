@@ -68,7 +68,8 @@ documented public shape.
 
 Current shape IDs are `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summary-v1`,
 `issue-list-v1`, `label-list-v1`, `workflow-list-v1`, `workflow-view-v1`,
-`actions-summary-v1`, `actions-jobs-v1`, and `release-summary-v1`.
+`actions-summary-v1`, and `actions-jobs-v1`. The `release-summary-v1` wire shape uses
+the exact anonymous API as described below.
 
 | Relay request                                                         | Public source                                                                                                       | Shape/limits                                                       |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -83,8 +84,6 @@ Current shape IDs are `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summa
 | `GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs`         | `https://github.com/{owner}/{repo}/actions/workflows/{workflow}`                                                    | Up to 25 unfiltered runs; shared per-workflow public-page superset |
 | `GET /repos/{owner}/{repo}/actions/runs/{id}`                         | `https://github.com/{owner}/{repo}/actions/runs/{id}`                                                               | Run summary; no query                                              |
 | `GET /repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}/jobs` | `https://github.com/{owner}/{repo}/actions/runs/{id}/job_groups_batch?attempt={attempt}`, then each public job page | Exact attempt; up to 25 job pages                                  |
-| `GET /repos/{owner}/{repo}/releases/latest`                           | `https://github.com/{owner}/{repo}/releases/latest`                                                                 | Release summary used by `gh release view`; anonymous API fallback  |
-| `GET /repos/{owner}/{repo}/releases/tags/{tag}`                       | `https://github.com/{owner}/{repo}/releases/tag/{tag}`                                                              | Release summary used by `gh release view`; anonymous API fallback  |
 
 Supported field sets:
 
@@ -105,8 +104,6 @@ Supported field sets:
   `headBranch`, `headSha`, `event`, `createdAt`, `updatedAt`, `displayTitle`, `number`,
   and `attempt` for run views.
 - Run jobs add `jobs` with bounded job and step metadata.
-- Release summary: `tagName`, `name`, `url`, `isDraft`, `isPrerelease`, `createdAt`,
-  `publishedAt`, `body`.
 
 Workflow pagination uses
 `https://github.com/{owner}/{repo}/actions/workflows_partial?query=&page={page}`. Actions
@@ -129,6 +126,22 @@ a reduced public-page response shape.
 Every path below maps directly to `GET https://api.github.com{path}` without an
 `Authorization` header. Query parameters accepted by the corresponding relay route are
 preserved. Repository responses are cached only after the public-repo guard succeeds.
+
+### Exact release bodies
+
+`gh release view [tag] --json` uses the exact anonymous API for both latest and tagged
+releases, including metadata-only projections. Its `release-summary-v1` shape supports
+`tagName`, `name`, `url`, `isDraft`, `isPrerelease`, `createdAt`, `publishedAt`, and `body`.
+The decoded `body` string preserves the API's raw Markdown byte for byte, including
+headings, tight lists, reference links, code fences, whitespace, line endings, and an
+explicitly empty string. Cache reads preserve that same source string.
+
+Rendered release HTML does not prove the original Markdown. Octopool does not reconstruct
+it or substitute a changelog. Release cache misses therefore consume anonymous API quota
+instead of using the public release page. If the API is unavailable, only an eligible
+exact cached response may be served through the existing bounded stale policy; otherwise
+the existing guarded local-`gh` fallback applies. Releases never use pooled credentials,
+and draft filtering remains in place.
 
 ### Generated route catalog
 

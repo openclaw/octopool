@@ -79,6 +79,10 @@ export async function githubCacheKey(
     ["run_view", "run_list", "workflow_run_list"].includes(route.kind)
       ? { representation: "actions-summary-owned-v2" }
       : {}),
+    ...(request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.releaseSummary &&
+    ["release_view", "release_latest"].includes(route.kind)
+      ? { representation: "release-summary-raw-v2" }
+      : {}),
     ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),
   };
   return hashToken(JSON.stringify(stable));

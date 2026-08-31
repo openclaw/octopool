@@ -336,7 +336,7 @@ describe("Worker end-to-end relay backends", () => {
     ).toBe(true);
   });
 
-  it("serves and caches a release from anonymous API after its public page fails", async () => {
+  it("serves and caches a release directly from anonymous API", async () => {
     await seedPool();
     const requests: Request[] = [];
     vi.stubGlobal(
@@ -344,9 +344,9 @@ describe("Worker end-to-end relay backends", () => {
       vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
         requests.push(request);
-        if (new URL(request.url).hostname === "github.com") {
-          return jsonResponse({ message: "page unavailable" }, 404);
-        }
+        expect(request.url).toBe(
+          "https://api.github.com/repos/openclaw/octopool/releases/tags/v0.5.5",
+        );
         expect(bearer(request)).toBeUndefined();
         return jsonResponse(
           { id: 55, tag_name: "v0.5.5", name: "Octopool 0.5.5", draft: false },
@@ -364,7 +364,7 @@ describe("Worker end-to-end relay backends", () => {
     });
     const second = await relay("/repos/openclaw/octopool/releases/tags/v0.5.5", undefined, options);
     expect((await second.json<RelayEnvelope>()).relay.cache).toBe("hit");
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(1);
     expect(
       await env.DB.prepare(
         "SELECT backend FROM audit_events WHERE route_kind = 'release_view' AND cache_status = 'miss'",

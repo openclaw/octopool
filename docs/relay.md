@@ -82,9 +82,11 @@ and patch hosts.
 - `body_encoding` is `json`, `text`, or `base64`. Binary responses are base64-encoded.
 - `repo_view` returns a fixed public metadata subset before caching so token-specific
   repository fields such as identity permissions are not shared.
-- Release list/latest/tag/id reads use unauthenticated public GitHub API reads; supported
-  top-level `gh release view` summaries prefer public GitHub release HTML and fall back to the
-  anonymous API. Raw API requests retain exact REST response semantics.
+- Release list/latest/tag/id reads and top-level `gh release view` summaries use the
+  anonymous GitHub API, preserving exact raw Markdown in `body` through cache and JSON
+  projection. Rendered HTML is not a source of release bodies. Cache misses consume
+  anonymous API quota; unavailable reads retain bounded exact stale-cache and guarded
+  local-`gh` fallback. Raw API requests retain exact REST response semantics.
   Octopool does not use pooled credentials for releases, so draft/private release visibility
   is not shared.
 - Supported top-level `gh run view --json jobs` reads prefer job and step metadata composed

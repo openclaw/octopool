@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -80,6 +82,61 @@ func TestRunGHReleaseViewRelaysTag(t *testing.T) {
 	}
 	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) {
 		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHReleaseViewPreservesRawBody(t *testing.T) {
+	const source = "\r\n## Notes\r\n\r\n### Fixes\r\n\r\n- Keep `code`.\r\n- See [docs][ref].  \r\n\r\n```go\r\n\tfmt.Println(\"café 🦞\")  \r\n```\r\n\r\n[ref]: https://example.test \"Docs\"\r\n\r\n"
+	for _, tag := range []string{"v0.8.0", ""} {
+		for _, body := range []string{source, ""} {
+			for _, projection := range []string{"body", "tagName,body", "jq"} {
+				t.Run(tag+"/"+projection+"/empty="+fmt.Sprint(body == ""), func(t *testing.T) {
+					path := "/repos/openclaw/octopool/releases/latest"
+					args := []string{"view"}
+					if tag != "" {
+						path = "/repos/openclaw/octopool/releases/tags/" + tag
+						args = append(args, tag)
+					}
+					relayTestServer(t, func(request map[string]any) any {
+						if request["path"] != path {
+							t.Fatalf("path = %v, want %s", request["path"], path)
+						}
+						return map[string]any{"tag_name": "v0.8.0", "body": body, "draft": false}
+					})
+					args = append(args, "-R", "openclaw/octopool", "--json")
+					if projection == "jq" {
+						args = append(args, "tagName,body", "--jq", ".body | @json")
+					} else {
+						args = append(args, projection)
+					}
+					var out bytes.Buffer
+					result := handleGHRelease(t.Context(), args, &out)
+					if result.err != nil || result.action != ghComplete {
+						t.Fatalf("action=%v err=%v", result.action, result.err)
+					}
+					var got string
+					if projection == "jq" {
+						if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						var fields map[string]json.RawMessage
+						if err := json.Unmarshal(out.Bytes(), &fields); err != nil {
+							t.Fatal(err)
+						}
+						if err := json.Unmarshal(fields["body"], &got); err != nil {
+							t.Fatal(err)
+						}
+						if len(fields) != len(strings.Split(projection, ",")) {
+							t.Fatalf("unexpected fields: %s", out.Bytes())
+						}
+					}
+					if got != body {
+						t.Fatalf("body = %q, want %q", got, body)
+					}
+				})
+			}
+		}
 	}
 }
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { callGitHubWeb } from "../src/github-web";
+import { releaseHTML, releaseMarkdown } from "./fixtures/release-summary";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 
@@ -681,80 +682,67 @@ describe("github web provider", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("prefers release HTML for shaped release summaries", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(
-      new Response(`
-          <nav><li class="breadcrumb-item-selected">v0.8.0</li></nav>
-          <h1>0.8.0</h1>
-          released this <relative-time datetime="2026-06-10T07:55:39Z"></relative-time>
-          <div data-test-selector="body-content" class="markdown-body"><h2>Fixed</h2><ul><li>Use public HTML.</li></ul><p><a href="https://example.test">Docs<script</a></p><p>Before<script</p></div>
-          </div>
-          <div class="Box-footer"></div>
-        `),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    const request = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool/releases/tags/v0.8.0",
-      headers: { "x-octopool-public-shape": "release-summary-v1" },
-    });
+  describe.each(["tags/v0.8.0", "latest"])("release %s raw Markdown", (suffix) => {
+    it.each([
+      ["rendered body", releaseHTML, releaseMarkdown],
+      [
+        "missing rendered body",
+        releaseHTML.replace(/<div data-test-selector=[\s\S]*$/, ""),
+        releaseMarkdown,
+      ],
+      ["empty source", releaseHTML.replace(/<div data-test-selector=[\s\S]*$/, ""), ""],
+    ])("preserves exact anonymous API source with %s", async (_, html, body) => {
+      const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+        const upstream = new Request(input, init);
+        expect(upstream.headers.has("authorization")).toBe(false);
+        if (new URL(upstream.url).hostname === "github.com") {
+          if (upstream.url.endsWith("/latest")) {
+            return new Response(null, {
+              status: 302,
+              headers: { location: "/openclaw/octopool/releases/tag/v0.8.0" },
+            });
+          }
+          return new Response(html);
+        }
+        return Response.json({ tag_name: "v0.8.0", draft: false, body });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: `/repos/openclaw/octopool/releases/${suffix}`,
+        headers: { "x-octopool-public-shape": "release-summary-v1" },
+      });
 
-    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+      const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
 
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://github.com/openclaw/octopool/releases/tag/v0.8.0",
-      expect.any(Object),
-    );
-    expect(response?.body).toMatchObject({
-      tag_name: "v0.8.0",
-      name: "0.8.0",
-      draft: false,
-      prerelease: false,
-      published_at: "2026-06-10T07:55:39Z",
-      body: "Fixed\n\n- Use public HTML.\n\n[Docs](https://example.test)\n\nBefore",
-    });
-  });
-
-  it("follows relative latest-release redirects for summary HTML", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(null, {
-          status: 302,
-          headers: { location: "/openclaw/octopool/releases/tag/v0.8.0" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(`
-          <nav><li class="breadcrumb-item-selected">v0.8.0</li></nav>
-          <h1>0.8.0</h1>
-          released this <relative-time datetime="2026-06-10T07:55:39Z"></relative-time>
-          <div data-test-selector="body-content" class="markdown-body"></div>
-          </div>
-          <div class="Box-footer"></div>
-        `),
+      expect(response?.body).toEqual({ tag_name: "v0.8.0", draft: false, body });
+      expect(response?.backend).toBe("github");
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledWith(
+        `https://api.github.com${request.path}`,
+        expect.any(Object),
       );
-    vi.stubGlobal("fetch", fetchMock);
-    const request = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool/releases/latest",
-      headers: { "x-octopool-public-shape": "release-summary-v1" },
     });
 
-    await expect(
-      callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({
-      body: { tag_name: "v0.8.0" },
+    it("returns no reconstructed body when the anonymous API is unavailable", async () => {
+      const fetchMock = vi.fn<typeof fetch>(async (input) =>
+        new URL(String(input)).hostname === "github.com"
+          ? new Response(releaseHTML)
+          : new Response("rate limited", { status: 403 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: `/repos/openclaw/octopool/releases/${suffix}`,
+        headers: { "x-octopool-public-shape": "release-summary-v1" },
+      });
+      await expect(
+        callGitHubWeb(env(), request, classifyRoute(request, policy)),
+      ).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledOnce();
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "https://github.com/openclaw/octopool/releases/tag/v0.8.0",
-      expect.any(Object),
-    );
   });
 
   it("prefers embedded issue data for shaped issue views", async () => {
