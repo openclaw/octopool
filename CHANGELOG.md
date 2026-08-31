@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Keep `--jq` expressions literal, preserve native `gh` output bytes with native jq 1.7+ on Windows, and recognize `octopool.exe` when resolving the shim target without requiring Unix execute bits.
 - Reject malformed stored pool policies before cache reuse or pooled GitHub access with a typed configuration-unavailable error, preserving valid partial-policy defaults.
 - Reject extra or malformed repository qualifiers and negated scope in issue, code, and commit searches before relay dispatch or cache reuse, preserving typed local fallback for unsupported queries.
 - Make active caller enrollment and named-client token rotation atomic across CLI, admin, and browser login, preserving existing access and history while refusing ambiguous upgrades.

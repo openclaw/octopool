@@ -29,6 +29,10 @@ jobs:
           cache: false
       - name: Test native Windows staging and filesystem protection
         run: go test -v ./cmd/octopool -run '^TestReleaseAssets(Windows.*|Filename(Validation|SourceDirectories)|StagingFilesystemSyntax|LimitsAndIdentity|BoundedCopyFailures|SnapshotWriteCloseAndCancellationCleanup|ExactBasenameAndTextBudget)$' -count=1
+      - name: Verify native Windows jq output support
+        run: |
+          jq --version
+          jq --binary --null-input empty
       - name: Test full native Windows Go suite
         run: go test ./... -count=1
       - name: Vet native Windows Go code
@@ -63,6 +67,9 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Verify jq test dependency
+        run: jq --version
 
       - name: Check Go module tidiness
         run: |

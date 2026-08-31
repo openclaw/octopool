@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -167,14 +168,18 @@ func stableOctopoolPath() (string, error) {
 
 func executableNamedOctopool(path string) bool {
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 		return false
 	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		resolved = path
 	}
-	return strings.EqualFold(filepath.Base(resolved), "octopool")
+	base := filepath.Base(resolved)
+	return strings.EqualFold(base, "octopool") || (runtime.GOOS == "windows" && strings.EqualFold(base, "octopool.exe"))
 }
 
 func writableStartupPath(path string) (string, error) {

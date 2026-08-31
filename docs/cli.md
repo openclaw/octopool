@@ -49,6 +49,11 @@ block is preserved. `--dry-run` validates the plan and prints its paths without 
 Only zsh is currently supported because it has a startup file that every interactive
 and non-interactive invocation reads.
 
+Executable discovery follows symlinks and accepts regular `octopool` files, requiring
+execute bits on Unix. On Windows it also recognizes `octopool.exe` case-insensitively
+without requiring Unix execute bits. This recognition does not establish support for
+the full zsh installer on native Windows.
+
 ```sh
 octopool install-shim --dry-run
 octopool install-shim
@@ -120,7 +125,11 @@ Use `--json` for scripts.
 ### `octopool gh api <GET path> [--paginate] [--slurp] [--jq <expr>]`
 
 Relays a read-only `gh api` call through Octopool's cache and pool. Prints the GitHub
-response body exactly like `gh api`, optionally piping it through `jq -r <expr>`.
+response body exactly like `gh api`, optionally piping it through `jq -r -- <expr>`.
+The expression is always a filter, never a jq command-line option.
+On Windows, relay-backed `--jq` requires native jq 1.7 or newer and adds `--binary`
+to retain native `gh` LF output terminators and preserve literal string bytes,
+including embedded LF, CRLF, lone CR, and Unicode. Other platforms omit the Windows option.
 GET reads using `--paginate` and `--slurp` stay relay-cached for up to 10 pages.
 When present, GitHub's Link header authoritatively selects the next page; header-less
 web-synthesized and legacy-cached responses fall back to array-length and `total_count`

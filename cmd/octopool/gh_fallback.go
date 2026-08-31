@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -76,7 +77,13 @@ func execRealGHAfterLocalFallback(
 func runJQ(ctx context.Context, stdout io.Writer, input []byte, expr string) error {
 	child, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(child, "jq", "-r", expr)
+	args := []string{"-r"}
+	if runtime.GOOS == "windows" {
+		// Native jq otherwise expands every LF, including raw string payloads.
+		args = append(args, "--binary")
+	}
+	// A filter that resembles a jq option is still a filter.
+	cmd := exec.CommandContext(child, "jq", append(args, "--", expr)...)
 	cmd.Stdin = bytes.NewReader(input)
 	cmd.Stdout = stdout
 	cmd.Stderr = io.Discard
