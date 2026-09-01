@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { callGitHubWeb } from "../src/github-web";
 import { releaseHTML, releaseMarkdown } from "./fixtures/release-summary";
+import { contentsLinks } from "./fixtures/contents-links";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 
@@ -97,6 +98,122 @@ describe("github web provider", () => {
       path: "README.md",
       content: "aGVsbG8K",
     });
+  });
+
+  it.each(contentsLinks)("encodes successful raw $label links exactly once", async (fixture) => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([0, 255, 65])));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest(fixture.request);
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+    expect(response).toMatchObject({ status: 200, body_encoding: "json", backend: "web" });
+    expect(response?.body).toEqual(fixture.body);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      fixture.body.download_url,
+      expect.objectContaining({
+        headers: expect.not.objectContaining({ authorization: expect.any(String) }),
+      }),
+    );
+    const body = response!.body as typeof fixture.body;
+    const self = new URL(body.url);
+    expect(body._links.self).toBe(body.url);
+    expect(self.hash).toBe("");
+    expect(decodeURIComponent(self.pathname)).toBe(
+      `/repos/openclaw/octopool/contents/${fixture.body.path}`,
+    );
+    expect([...self.searchParams]).toEqual([["ref", fixture.request.query.ref]]);
+    expect(Array.from(atob(body.content), (char) => char.charCodeAt(0))).toEqual([0, 255, 65]);
+  });
+
+  it.each([
+    { label: "empty ref", path: "README.md", query: { ref: "" }, suffix: "README.md?ref=" },
+    {
+      label: "ambiguous ref",
+      path: "README.md",
+      query: { ref: ["main", "topic"] },
+      suffix: "README.md?ref=main&ref=topic",
+    },
+    {
+      label: "empty ref segment",
+      path: "README.md",
+      query: { ref: "feature//topic" },
+      suffix: "README.md?ref=feature%2F%2Ftopic",
+    },
+    {
+      label: "malformed escape",
+      path: "bad%GG.txt",
+      query: { ref: "main" },
+      suffix: "bad%GG.txt?ref=main",
+    },
+    {
+      label: "empty path segment",
+      path: "docs//file.txt",
+      query: { ref: "main" },
+      suffix: "docs//file.txt?ref=main",
+    },
+    { label: "directory path", path: "docs/", query: { ref: "main" }, suffix: "docs/?ref=main" },
+    {
+      label: "encoded leading slash",
+      path: "%2Ffile.txt",
+      query: { ref: "main" },
+      suffix: "%2Ffile.txt?ref=main",
+    },
+  ])("retains exact anonymous API fallback for $label", async ({ path, query, suffix }) => {
+    const body = { name: "exact API fallback" };
+    const fetchMock = vi.fn(async () => Response.json(body));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: `/repos/openclaw/octopool/contents/${path}`,
+      query,
+    });
+    expect(await callGitHubWeb(env(), request, classifyRoute(request, policy))).toMatchObject({
+      body,
+      backend: "github",
+    });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      `https://api.github.com/repos/openclaw/octopool/contents/${suffix}`,
+      expect.any(Object),
+    );
+  });
+
+  it("falls back to exact API JSON after a capped raw response", async () => {
+    const cancel = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream(
+            {
+              pull(controller) {
+                controller.enqueue(new Uint8Array(1025));
+              },
+              cancel,
+            },
+            { highWaterMark: 0 },
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ name: "exact API fallback" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contents/README.md",
+      query: { ref: "main" },
+    });
+    expect(
+      await callGitHubWeb(
+        env({ MAX_RESPONSE_BYTES: "1024" }),
+        request,
+        classifyRoute(request, policy),
+      ),
+    ).toMatchObject({ body: { name: "exact API fallback" }, backend: "github" });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://raw.githubusercontent.com/openclaw/octopool/main/README.md",
+      "https://api.github.com/repos/openclaw/octopool/contents/README.md?ref=main",
+    ]);
   });
 
   it("falls back to the anonymous contents API when raw content is unavailable", async () => {

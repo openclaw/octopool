@@ -14,6 +14,7 @@ import {
 import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { defaultGitHubJSONAccept } from "./github-response";
+import { scalarQuery } from "./github-public-utils";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
@@ -97,6 +98,12 @@ export async function githubCacheKey(
     // Old raw event bodies may contain privileged references, even after a 304
     // republished an identity entry as anonymous. Retire every variant together.
     ...(isIssueEventRoute(route.kind) ? { representation: "issue-events-public-v2" } : {}),
+    // Old JSON file objects contain unescaped self-links, even for raw-origin fills.
+    ...(route.kind === "contents" &&
+    scalarQuery(request.query, "ref") !== undefined &&
+    varyHeaders.accept === undefined
+      ? { representation: "contents-self-links-v1" }
+      : {}),
     ...(varyHeaders.accept === undefined ? {} : { body_codec: "lossless-v1" }),
     ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),
   };

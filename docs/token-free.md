@@ -56,6 +56,15 @@ that known patch host.
 | `GET /repos/{owner}/{repo}/git/ref/tags/{tag}`               | Same Git smart HTTP advertisement                                         | Annotated tags only                                                         |
 | `GET /repos/{owner}/{repo}/git/matching-refs/tags/{prefix}`  | Same Git smart HTTP advertisement                                         | Only when every matched tag is annotated                                    |
 
+Successful raw contents reads preserve the decoded file `path` and `name`, binary
+content/base64, byte size, and Git blob SHA. The generated API `url` and `_links.self`
+match and encode each path segment once, retaining directory separators and literal
+`#`, `?`, `%`, spaces, and Unicode. A literal filename `%23` arrives as `%2523` and
+stays literal; `ref` is one encoded query value. Raw/download, HTML, and Git object
+links retain their existing semantics. Missing or unsafe refs, ambiguous query values,
+ineligible file paths, raw misses, and oversized raw bodies retain the existing exact
+anonymous API fallback; traversal and route restrictions are unchanged.
+
 Git ref responses also read
 `https://github.com/{owner}/{repo}/issues?q=is%3Aissue` to recover the repository node
 ID needed for exact REST-compatible ref node IDs. Lightweight tags remain anonymous

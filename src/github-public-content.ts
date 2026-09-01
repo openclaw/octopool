@@ -95,7 +95,7 @@ export function rawContentRequest(
     usesApiQuota: false,
     payload: (body, headers, status) => {
       const sha = gitBlobSHA(body);
-      const apiPath = `/repos/${route.owner}/${route.repo}/contents/${contentPath}`;
+      const apiPath = `/${encodedPathSegments(["repos", route.owner!, route.repo!, "contents", contentPath])}`;
       const apiURL = `https://api.github.com${apiPath}?ref=${encodeURIComponent(ref)}`;
       const htmlURL = `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "blob", ref, contentPath])}`;
       return publicJSONResponse(headers, status, {

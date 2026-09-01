@@ -47,6 +47,15 @@ media retirement, not a purge of hypothetical malformed non-JSON responses previ
 returned to default-JSON requests. Future opaque decoding is lossless regardless of
 the request's negotiation.
 
+Default-JSON contents reads with a nonempty scalar `ref` carry
+`contents-self-links-v1`. This retires old generated file objects whose API self-links
+did not escape filename characters, across shared and identity keys, edge/D1 hits,
+validators, stale fallback, and late old fills. The predicate covers plain filenames
+too; it does not infer safety from filename characters or duplicate raw-adapter validation.
+Contents without a scalar ref, custom media (including their `body_codec`), blobs,
+README routes, and unrelated representations retain their keys. No publication epoch,
+public-repository proof, or R2 generation changes or cache purge are required.
+
 Actions summaries also include a server-controlled representation generation
 (`actions-summary-metadata-v3`) in this common key. Run views, attempt-qualified views,
 and repository/workflow run lists, including canonical supersets and identity-specific
