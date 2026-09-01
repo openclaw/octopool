@@ -183,10 +183,9 @@ The main transport classes are:
   patch `Accept` header) via `github.com/{owner}/{repo}/pull/{number}.diff|patch`
 - commit diff/patch media requests via `github.com/{owner}/{repo}/commit/{sha}.diff|patch`
 - compare diff/patch media requests via `github.com/{owner}/{repo}/compare/{base...head}.diff|patch`
-- supported top-level `gh run list/view` summaries (up to 25 results, with branch/status or
-  workflow filters) and bounded `gh run view --json jobs` job/step metadata prefer public
-  GitHub pages; raw API requests retain exact REST semantics, and log bodies remain
-  authenticated
+- human `gh run list/view` summaries (up to 25 results, with branch/status or workflow
+  filters) and human/watch job/step metadata prefer public GitHub pages; machine run JSON
+  and raw API requests use exact REST semantics, and log bodies remain authenticated
 - exact public GitHub API reads without caller credentials for repo metadata, commits,
   compare JSON, contents, README, PRs, issues, checks/statuses, Actions run/workflow
   metadata, branches, tags, labels, milestones, topics, community profiles, forks,
@@ -334,6 +333,11 @@ all R2 reads and writes, preserving the normal conditional-request bypass path.
 
 ## Actions run-list superset
 
+Machine run JSON does not request this shaped superset. It uses existing unshaped REST
+cache keys and validates the returned page against the effective CLI limit before any
+lazy workflow-name hydration. This increases API/cache cost in exchange for native field
+semantics; it does not change cache generations or the human/watch page adapters.
+
 Repo- and workflow-level run-list requests carrying
 `x-octopool-public-shape: actions-summary-v1` can share one canonical cache entry per pool
 and exact route path. Common requests for at most 25 runs use an unfiltered
@@ -365,7 +369,7 @@ therefore go directly to the exact anonymous API/pool fallback chain.
 
 ## Actions attempt job-list superset
 
-Shaped `gh run view` and `gh run watch` reads resolve the run's current positive
+Shaped human `gh run view` and `gh run watch` reads resolve the run's current positive
 `run_attempt`, then request `/actions/runs/{id}/attempts/{attempt}/jobs`. That attempt-qualified
 path is immutable after all returned jobs complete, while the base run and base jobs endpoints
 remain short-lived because a rerun can change both after they previously appeared terminal.
@@ -386,6 +390,12 @@ caching it, inventing jobs, or treating a short page as a complete summary. Supp
 `gh run watch` stops with an explicit error on that refusal and never starts real `gh`;
 ordinary run-view fallback remains available. `filter=all`, later pages, unshaped REST
 requests, and unsupported query variants retain exact upstream semantics.
+
+Machine run-view jobs use one unshaped canonical returned-attempt page of 100, with their
+own completeness/identity validation before output. Watch's 10×100 collection and the
+Worker's 3×100 shaped superset remain separate. Requested attempts qualify machine output
+URLs while returned attempts own jobs acquisition; [CLI documentation](cli.md) describes
+the native defaults, explicit safe-integer boundary, lazy names and whole-command fallback.
 
 ## Cache-hit integrity
 

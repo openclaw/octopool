@@ -283,8 +283,40 @@ Upgrade note: scripts relying on earlier Octopool boolean/null output must use e
 enum comparisons. Replace `.mergeable == true` with `.mergeable == "MERGEABLE"` and
 `.mergeable == false` with `.mergeable == "CONFLICTING"`; handle `"UNKNOWN"` separately.
 Do not rely on truthiness: all three enum strings are truthy in `jq`.
-Run views also support the nested `jobs` field; Octopool composes its job/step metadata from
-the cache, exact API responses, or bounded public GitHub pages.
+Machine `gh run list/view --json` exports use canonical, unshaped REST reads through the
+shared cache, not public-page reconstructions. Human run lists/views and watch retain their
+page-backed paths. The existing 13 list and 15 view fields are unchanged. Run `name` is the
+REST run name; `workflowName` comes only from real workflow metadata, never from `name`.
+Missing/null ordinary strings become empty strings, and timestamps use native parsed time
+defaults. Jobs always have eight keys and steps six, with non-null arrays in acquisition
+order. Only job/step completion times normalize zero instants; other timestamp offsets
+and fractional seconds retain native `time.Time` behavior.
+
+Run views also support `jobs`: one canonical returned-attempt page of 100, requiring a
+present valid total, exact cardinality, positive unique IDs, and no remaining next link.
+More than 100 jobs requires guarded whole-command fallback, not truncation. Requested
+nonzero `--attempt` qualifies the output URL; returned `run_attempt` owns JSON `attempt`
+and the canonical jobs route, including reused successes from older attempts. Historical
+run identity/head evidence is checked without fetching today's branch head.
+
+Only selected `workflowName` triggers metadata. View uses one verified workflow-ID lookup;
+filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists use
+the existing complete catalogue (at most 10 pages of 100), then one memoized direct lookup
+per missing workflow ID. Only a genuine upstream 404 on that last list-specific lookup
+produces an empty name. Disabled workflows remain valid. Empty lists and unselected names
+do not fetch metadata. Logical data-operation bounds are 1 for scalar view, 2 with name,
+3 with jobs and name, 2 for filtered list with name, and 111 for unfiltered list with name.
+These exclude policy/transport retries. List responses may not exceed their effective
+requested limit (default 20, maximum 100); every read retains relay policy and freshness.
+
+Observed native integers outside ±(2^53−1), or unproved identity/collection shapes, use
+typed `unsupported_run_export` fallback before JSON or jq output, respecting `NO_FALLBACK`.
+The JS service may already have erased numeric or duplicate-key distinctions: this is not
+a lossless upstream transport guarantee. Malformed native fields and contradictory
+identities remain terminal errors, even for unselected modeled fields. Existing attempt,
+job-total, pagination and catalogue refusal reasons remain distinct. Exports buffer all
+validation/hydration before output; successful JSON commands return success independently
+of run conclusion. Downstream writer/jq errors still fail and cannot be rolled back.
 `gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request
 for the common plain-term `-R owner/repo --state ... --json ...` shape. Cache hits cost
 zero GitHub Search quota. All supported search fields use the anonymous GitHub Search API;

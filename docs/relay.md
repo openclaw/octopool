@@ -102,9 +102,11 @@ and patch hosts.
   public stale data or `424 fallback_local` (`web_only_unavailable`); pooled credentials and
   legacy event cache entries cannot widen visibility. Public JSON and response validators
   are preserved, and native fallback uses the caller's own credentials.
-- Supported top-level `gh run view --json jobs` reads prefer job and step metadata composed
-  from public GitHub pages. Raw `/actions/runs/{id}/jobs` requests retain exact REST response
-  semantics, and log bodies still require authenticated API access.
+- Machine `gh run list/view --json`, including jobs, uses unshaped exact REST through the
+  shared cache, with lazy verified workflow-name metadata. Human run views and watch retain
+  bounded public-page job/step metadata. Raw `/actions/runs/{id}/jobs` requests retain exact
+  REST response semantics, and log bodies still require authenticated API access. See the
+  [CLI export contract](cli.md) for native defaults, safe-integer limits and acquisition bounds.
 - Public org repository/member/event reads, user/gist collection reads, global metadata reads,
   and public repository metadata collections can be served from unauthenticated GitHub API
   responses before spending pooled identity quota.

@@ -85,8 +85,11 @@ generations cover these eligible blanks while preserving distinct blank-header k
 
 ### Bounded CLI shapes
 
-These mappings are used only when the requested top-level `gh --json` fields fit the
-documented public shape.
+These mappings are used when a supported CLI owner requests the documented public shape.
+Machine `gh run list/view --json` deliberately omits Actions shape headers and uses shared
+exact REST instead, including jobs and lazy workflow-name metadata. Human run output and
+watch still use the bounded Actions page shapes below. See the [CLI export contract](cli.md)
+for native defaults, requested/returned attempt ownership, safe-integer limits and bounds.
 
 Current shape IDs are `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summary-v1`,
 `issue-list-v1`, `label-list-v1`, `workflow-list-v1`, `workflow-view-v1`,
@@ -122,10 +125,9 @@ Supported field sets:
   `closedAt`, `labels`.
 - Labels and workflows: `id`, `name`, `description`, `color`, `url` for labels;
   `id`, `name`, `path`, `state` for workflows.
-- Run summary: `databaseId`, `name`, `workflowName`, `status`, `conclusion`, `url`,
-  `headBranch`, `headSha`, `event`, `createdAt`, `updatedAt`, `displayTitle`, `number`,
-  and `attempt` for run views.
-- Run jobs add `jobs` with bounded job and step metadata.
+- Actions summary shapes supply human/watch run metadata; their reconstructed names and
+  timestamps are not native machine-export evidence.
+- Actions jobs shapes add bounded job and step metadata for human/watch output, not run JSON.
 
 Workflow pagination uses
 `https://github.com/{owner}/{repo}/actions/workflows_partial?query=&page={page}`. Actions

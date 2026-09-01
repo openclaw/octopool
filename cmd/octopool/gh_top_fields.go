@@ -23,19 +23,6 @@ var fieldMapIssue = map[string][]string{
 	"closedAt":  {"closed_at"},
 }
 
-var fieldMapRun = map[string][]string{
-	"databaseId":   {"id"},
-	"displayTitle": {"display_title"},
-	"workflowName": {"name"},
-	"number":       {"run_number"},
-	"url":          {"html_url"},
-	"headBranch":   {"head_branch"},
-	"headSha":      {"head_sha"},
-	"createdAt":    {"created_at"},
-	"updatedAt":    {"updated_at"},
-	"attempt":      {"run_attempt"},
-}
-
 var fieldMapRepo = map[string][]string{
 	"nameWithOwner":    {"full_name"},
 	"url":              {"html_url"},

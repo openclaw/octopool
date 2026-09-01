@@ -13,6 +13,8 @@ type relayTestResponse struct {
 	Body    any
 	Headers map[string]string
 	Status  int
+	// GitHubStatus is the upstream status inside a successful relay envelope.
+	GitHubStatus int
 }
 
 func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
@@ -56,6 +58,9 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 			}
 			fixture = response.Body
 			envelope.Headers = response.Headers
+			if response.GitHubStatus != 0 {
+				envelope.Status = response.GitHubStatus
+			}
 		}
 		raw, err := json.Marshal(fixture)
 		if err != nil {
@@ -100,14 +105,16 @@ func nativeOptionsResponse(t *testing.T, request map[string]any) any {
 	t.Helper()
 	item := map[string]any{"number": 7, "title": "synthetic", "state": "open", "id": 42, "name": "synthetic", "run_attempt": 3, "status": "completed", "conclusion": "success"}
 	switch request["path"] {
-	case "/repos/acme/repo/pulls/7", "/repos/acme/repo/issues/7", "/repos/acme/repo/actions/runs/42", "/repos/acme/repo/actions/runs/42/attempts/2", "/repos/acme/repo", "/gists/abc123", "/repos/acme/repo/actions/workflows/ci.yml":
+	case "/repos/acme/repo/pulls/7", "/repos/acme/repo/issues/7", "/repos/acme/repo", "/gists/abc123", "/repos/acme/repo/actions/workflows/ci.yml":
 		return item
+	case "/repos/acme/repo/actions/runs/42", "/repos/acme/repo/actions/runs/42/attempts/2":
+		return newRunExportFixture().run
 	case "/repos/acme/repo/pulls/7/reviews", "/repos/acme/repo/issues/7/comments":
 		return []any{}
 	case "/repos/acme/repo/pulls", "/repos/acme/repo/issues", "/repos/acme/repo/releases", "/repos/acme/repo/labels":
 		return []any{item}
 	case "/repos/acme/repo/actions/runs":
-		return map[string]any{"total_count": 1, "workflow_runs": []any{item}}
+		return map[string]any{"total_count": 1, "workflow_runs": newRunExportFixture().runs}
 	case "/repos/acme/repo/actions/workflows":
 		return map[string]any{"total_count": 1, "workflows": []any{map[string]any{"id": 42, "name": "synthetic", "state": "active"}}}
 	case "/repos/acme/repo/actions/runs/42/attempts/3/jobs":
@@ -254,4 +261,92 @@ func prDetailExportResponse(t *testing.T, checks *prChecksFixture, request map[s
 	default:
 		return checks.response(t, request)
 	}
+}
+
+// Complete REST data for run export tests, independent of the sparse option-parser fixture.
+type runExportFixture struct {
+	run       map[string]any
+	runs      []any
+	jobs      any
+	workflows []any
+	catalogue any
+	lookups   map[string]any
+	requests  []map[string]any
+}
+
+const runExportHead = "224a80eeebec678db6646ef888f5bbc89caf63c4"
+
+func newRunExportFixture() *runExportFixture {
+	run := map[string]any{
+		"id": 42, "workflow_id": 9, "run_attempt": 3, "run_number": 17,
+		"head_sha": runExportHead, "head_branch": "feature", "event": "pull_request",
+		"name": "source run label", "display_title": "source display title",
+		"status": "completed", "conclusion": "failure",
+		"html_url":   "https://github.com/acme/repo/actions/runs/42",
+		"created_at": "2026-01-02T03:04:05Z", "updated_at": "2026-01-02T03:06:05Z",
+		"run_started_at": "2026-01-02T03:04:06Z",
+	}
+	workflow := map[string]any{"id": 9, "name": "Real CI", "path": ".github/workflows/ci.yml", "state": "disabled_manually"}
+	return &runExportFixture{
+		run: run, runs: []any{run}, jobs: map[string]any{"total_count": 0, "jobs": []any{}},
+		workflows: []any{workflow}, lookups: map[string]any{"9": workflow, "ci.yml": workflow},
+	}
+}
+
+func runExportJob(id int) map[string]any {
+	return map[string]any{
+		"id": id, "run_id": 42, "head_sha": runExportHead, "run_attempt": 1,
+		"name": "build", "status": "completed", "conclusion": "success",
+		"started_at": "2026-01-02T03:04:06Z", "completed_at": "2026-01-02T03:05:06Z",
+		"html_url": "https://github.com/acme/repo/actions/runs/42/job/" + strconv.Itoa(id), "steps": []any{},
+	}
+}
+
+func (f *runExportFixture) response(t *testing.T, req map[string]any) any {
+	t.Helper()
+	f.requests = append(f.requests, req)
+	path, _ := req["path"].(string)
+	if req["method"] != "GET" {
+		t.Errorf("run export used non-GET request: %v", req["method"])
+	}
+	switch {
+	case strings.HasPrefix(path, "/repos/acme/repo/actions/runs/") && strings.HasSuffix(path, "/jobs"):
+		q, _ := req["query"].(map[string]any)
+		if q["per_page"] != "100" || len(q) != 1 {
+			t.Errorf("ordinary jobs must use one canonical page100: %v", q)
+		}
+		return f.jobs
+	case strings.HasPrefix(path, "/repos/acme/repo/actions/runs/"):
+		return f.run
+	case path == "/repos/acme/repo/actions/runs" || strings.HasSuffix(path, "/runs"):
+		return map[string]any{"total_count": len(f.runs), "workflow_runs": f.runs}
+	case path == "/repos/acme/repo/actions/workflows":
+		if f.catalogue != nil {
+			return f.catalogue
+		}
+		q, _ := req["query"].(map[string]any)
+		pageText, _ := q["page"].(string)
+		page, err := strconv.Atoi(pageText)
+		if err != nil || page < 1 || page > 10 || q["per_page"] != "100" {
+			t.Errorf("workflow catalogue must use existing complete collector: %v", q)
+			return nil
+		}
+		start := min((page-1)*100, len(f.workflows))
+		return map[string]any{"total_count": len(f.workflows), "workflows": f.workflows[start:min(start+100, len(f.workflows))]}
+	case strings.HasPrefix(path, "/repos/acme/repo/actions/workflows/"):
+		selector := strings.TrimPrefix(path, "/repos/acme/repo/actions/workflows/")
+		if body, ok := f.lookups[selector]; ok {
+			return body
+		}
+	}
+	t.Errorf("unexpected run-export data route: %s", path)
+	return nil
+}
+
+func (f *runExportFixture) paths() []string {
+	paths := make([]string, 0, len(f.requests))
+	for _, req := range f.requests {
+		paths = append(paths, req["path"].(string))
+	}
+	return paths
 }

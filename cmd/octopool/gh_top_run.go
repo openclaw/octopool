@@ -54,7 +54,8 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunListFields) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, request, opts, fieldMapRun))
+		request.headers = nil
+		return ghCompleted(relayMachineRunList(ctx, stdout, request, repo, opts))
 	case "view":
 		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasRunViewModifiers(opts) {
 			return ghDelegated()
@@ -66,19 +67,21 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedRunViewFields)) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayRunView(ctx, stdout, repo, opts.positionals[0], opts))
+		if nativeHumanFormat(opts) {
+			return ghCompleted(relayHumanRunView(ctx, stdout, repo, opts.positionals[0], opts))
+		}
+		return ghCompleted(relayMachineRunView(ctx, stdout, repo, opts.positionals[0], opts))
 	default:
 		return ghDelegated()
 	}
 }
 
-func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string, opts ghTopOptions) error {
+func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id string, opts ghTopOptions) error {
 	client, err := newGHRelayClient()
 	if err != nil {
 		return err
 	}
 	run := map[string]any{}
-	human := len(opts.json) == 0
 	runPath := repoPath(repo, "actions", "runs", id)
 	if opts.attemptSet && opts.attempt != 0 {
 		runPath = repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(opts.attempt))
@@ -98,43 +101,29 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 	if err := json.Unmarshal(body, &run); err != nil {
 		return err
 	}
-	if human || hasJSONField(opts.json, "jobs") {
-		attempt, ok := positiveJSONInt(run["run_attempt"])
-		if !ok {
-			return localFallbackError{Reason: "workflow run response did not include run_attempt"}
-		}
-		// per_page=100 with runJobs' incomplete-total fallback: >100-job runs
-		// delegate to real gh rather than truncating.
-		envelope, err := client.do(ctx, ghAPIRequest{
-			method: "GET",
-			path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(attempt), "jobs"),
-			query:  map[string]any{"per_page": "100"},
-			headers: map[string]string{
-				"x-octopool-public-shape": publicShapeActionsJobs,
-			},
-		})
-		if err != nil {
-			return err
-		}
-		jobs, err := runJobs(envelope)
-		if err != nil {
-			return err
-		}
-		run["jobs"] = jobs
+	attempt, ok := positiveJSONInt(run["run_attempt"])
+	if !ok {
+		return localFallbackError{Reason: "workflow run response did not include run_attempt"}
 	}
-	if human {
-		jobs, _ := run["jobs"].([]any)
-		return renderHumanRunView(stdout, run, jobs)
-	}
-	raw, err := json.Marshal(run)
+	// per_page=100 with runJobs' incomplete-total fallback: >100-job runs
+	// delegate to real gh rather than truncating.
+	envelope, err = client.do(ctx, ghAPIRequest{
+		method: "GET",
+		path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(attempt), "jobs"),
+		query:  map[string]any{"per_page": "100"},
+		headers: map[string]string{
+			"x-octopool-public-shape": publicShapeActionsJobs,
+		},
+	})
 	if err != nil {
 		return err
 	}
-	filtered, err := filterJSONFields(raw, opts.json, fieldMapRun)
+	jobs, err := runJobs(envelope)
 	if err != nil {
 		return err
 	}
-	return writeBytes(ctx, stdout, filtered, opts.jq)
+	run["jobs"] = jobs
+	return renderHumanRunView(stdout, run, jobs)
 }
 
 func positiveJSONInt(value any) (int, bool) {
