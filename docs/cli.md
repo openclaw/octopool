@@ -367,6 +367,7 @@ Every limit or interval assignment must pass native signed base-0 integer syntax
 including prefixes, signs, underscores, and overflow checks. Only the final limit
 gets the command range check: at least 1 for lists, and 1–1000 for search. Values
 above the relay's 100-item bound delegate rather than being clamped into eligibility.
+A final limit outside the platform's native integer representation delegates before conversion or command-range checks.
 Enum assignments are checked individually, case-insensitively; PR/issue list state
 is normalized, but run status spelling is preserved and unsupported spellings
 delegate. Run-view attempts use unsigned 64-bit syntax without signs: zero selects

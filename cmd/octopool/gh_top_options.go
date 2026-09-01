@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -114,7 +115,11 @@ func parseGHTopOptions(args []string, specs map[string]readOptionSpec) (ghTopOpt
 	opts.patch = parsed.values["--patch"].boolean
 	opts.limitSet = parsed.has("--limit")
 	if opts.limitSet {
-		opts.limit = int(parsed.values["--limit"].integer)
+		limit := parsed.values["--limit"].integer
+		if limit < math.MinInt || limit > math.MaxInt {
+			return opts, true, nil
+		}
+		opts.limit = int(limit)
 	}
 	opts.state = parsed.values["--state"].raw
 	opts.branch = parsed.values["--branch"].raw
@@ -123,7 +128,7 @@ func parseGHTopOptions(args []string, specs map[string]readOptionSpec) (ghTopOpt
 	opts.attemptSet = parsed.has("--attempt")
 	if opts.attemptSet {
 		attempt := parsed.values["--attempt"].uint
-		if attempt > uint64(^uint(0)>>1) {
+		if attempt > math.MaxInt {
 			return opts, true, nil
 		}
 		opts.attempt = int(attempt)

@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -100,6 +102,12 @@ func TestGHTopReadOptionDispatch(t *testing.T) {
 }
 
 func TestGHTopListLimitDispatch(t *testing.T) {
+	type limitCase struct {
+		name   string
+		flags  []string
+		limit  string
+		action ghAction
+	}
 	for _, command := range []struct {
 		name         string
 		args         []string
@@ -115,21 +123,37 @@ func TestGHTopListLimitDispatch(t *testing.T) {
 		{"search_prs", []string{"search", "prs", "bug", "--json", "number"}, "30"},
 		{"search_repos", []string{"search", "repos", "bug", "--json", "name"}, "30"},
 	} {
-		for _, test := range []struct {
-			name  string
-			flags []string
-			limit string
-		}{
-			{"control_default", nil, command.defaultLimit},
-			{"regression_zero", []string{"--limit=0"}, ""},
-			{"regression_negative", []string{"--limit=-1"}, ""},
-			{"regression_octal", []string{"--limit=010"}, "8"},
-			{"regression_hex", []string{"--limit=0x10"}, "16"},
-			{"regression_invalid_earlier", []string{"--limit=08", "--limit=2"}, ""},
-			{"control_final_range", []string{"--limit=0", "--limit=2"}, "2"},
-			{"control_search_range_override", []string{"--limit=1001", "--limit=2"}, "2"},
-			{"control_relay_cap", []string{"--limit=101"}, ""},
-		} {
+		cases := []limitCase{
+			{"control_default", nil, command.defaultLimit, ghComplete},
+			{"regression_zero", []string{"--limit=0"}, "", ghFail},
+			{"regression_negative", []string{"--limit=-1"}, "", ghFail},
+			{"regression_octal", []string{"--limit=010"}, "8", ghComplete},
+			{"regression_hex", []string{"--limit=0x10"}, "16", ghComplete},
+			{"regression_invalid_earlier", []string{"--limit=08", "--limit=2"}, "", ghFail},
+			{"control_final_range", []string{"--limit=0", "--limit=2"}, "2", ghComplete},
+			{"control_search_range_override", []string{"--limit=1001", "--limit=2"}, "2", ghComplete},
+			{"control_relay_cap", []string{"--limit=101"}, "", ghDelegate},
+		}
+		if command.name == "pr" || command.name == "search_issues" {
+			positive, negative := ghDelegate, ghFail
+			if math.MaxInt == math.MaxInt32 {
+				negative = ghDelegate
+			} else if command.name == "search_issues" {
+				positive = ghFail
+			}
+			cases = append(cases,
+				limitCase{"control_positive_wrap_to_one", []string{"--limit=4294967297"}, "", positive},
+				limitCase{"control_negative_wrap_to_one", []string{"--limit=-4294967295"}, "", negative},
+				limitCase{"control_relay_endpoint", []string{"--limit=100"}, "100", ghComplete},
+			)
+		}
+		if command.name == "search_issues" {
+			cases = append(cases,
+				limitCase{"control_search_endpoint", []string{"--limit=1000"}, "", ghDelegate},
+				limitCase{"control_search_above_endpoint", []string{"--limit=1001"}, "", ghFail},
+			)
+		}
+		for _, test := range cases {
 			t.Run(command.name+"/"+test.name, func(t *testing.T) {
 				var requests []map[string]any
 				relayTestServer(t, func(req map[string]any) any { requests = append(requests, req); return nativeOptionsResponse(t, req) })
@@ -139,12 +163,12 @@ func TestGHTopListLimitDispatch(t *testing.T) {
 				}
 				var out bytes.Buffer
 				result := runGHTopLevel(t.Context(), args, &out)
+				if result.action != test.action || (result.err != nil) != (test.action == ghFail) {
+					t.Fatalf("action=%v want=%v err=%v", result.action, test.action, result.err)
+				}
 				if test.limit == "" {
-					if len(requests) != 0 || out.Len() != 0 || (result.action != ghDelegate && result.action != ghFail) {
+					if len(requests) != 0 || out.Len() != 0 {
 						t.Fatalf("invalid/unrepresentable limit relayed: action=%v err=%v data=%d output=%q", result.action, result.err, len(requests), out.String())
-					}
-					if test.name == "control_relay_cap" && result.action != ghDelegate {
-						t.Fatalf("native-valid cap must directly delegate: %+v", result)
 					}
 					return
 				}
@@ -352,19 +376,29 @@ func TestParseGHTopOptionsJSONOccurrences(t *testing.T) {
 }
 
 func TestParseGHTopOptionsLimitOccurrences(t *testing.T) {
-	for _, test := range []struct {
+	type limitCase struct {
 		raw  string
-		want int
-	}{
+		want int64
+	}
+	cases := []limitCase{
 		{"0", 0}, {"+0", 0}, {"-0", 0}, {"+16", 16}, {"-16", -16},
 		{"010", 8}, {"0o10", 8}, {"0O10", 8}, {"0b10", 2}, {"0B10", 2},
 		{"0x10", 16}, {"0X10", 16}, {"1_0", 10}, {"0x_F", 15},
 		{"-9223372036854775808", -9223372036854775808}, {"9223372036854775807", 9223372036854775807},
-	} {
+		{"4294967297", 4294967297}, {"-4294967295", -4294967295},
+	}
+	if math.MaxInt != math.MaxInt64 {
+		cases = append(cases,
+			limitCase{strconv.FormatInt(int64(math.MinInt), 10), math.MinInt},
+			limitCase{strconv.FormatInt(int64(math.MaxInt), 10), math.MaxInt},
+		)
+	}
+	for _, test := range cases {
 		t.Run("syntax/"+test.raw, func(t *testing.T) {
 			opts, fallback, err := parseGHTopOptions([]string{"--limit", test.raw}, topReadSpecs("issue list"))
-			if err != nil || fallback || opts.limit != test.want {
-				t.Fatalf("limit=%d want=%d fallback=%v err=%v", opts.limit, test.want, fallback, err)
+			wantFallback := test.want < math.MinInt || test.want > math.MaxInt
+			if err != nil || fallback != wantFallback || !opts.limitSet || (!wantFallback && int64(opts.limit) != test.want) {
+				t.Fatalf("limit=%d want=%d fallback=%v wantFallback=%v err=%v", opts.limit, test.want, fallback, wantFallback, err)
 			}
 		})
 	}
@@ -376,7 +410,7 @@ func TestParseGHTopOptionsLimitOccurrences(t *testing.T) {
 			}
 		})
 	}
-	for _, raw := range []string{"0", "-1", "1001", "9223372036854775807"} {
+	for _, raw := range []string{"0", "-1", "1001", "9223372036854775807", "4294967297", "-4294967295"} {
 		t.Run("control_final_range/"+raw, func(t *testing.T) {
 			opts, fallback, err := parseGHTopOptions([]string{"--limit", raw, "--limit=2"}, topReadSpecs("issue list"))
 			if err != nil || fallback || opts.limit != 2 {

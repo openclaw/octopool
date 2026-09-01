@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestRunGHRunViewAttemptOccurrences(t *testing.T) {
+	maxAttempt := strconv.FormatUint(uint64(math.MaxInt), 10)
+	aboveMaxAttempt := strconv.FormatUint(uint64(math.MaxInt)+1, 10)
 	for _, test := range []struct {
 		name       string
 		flags      []string
@@ -23,12 +27,17 @@ func TestRunGHRunViewAttemptOccurrences(t *testing.T) {
 		{"regression_earlier_overflow", []string{"--attempt=18446744073709551616", "--attempt=2"}, "reject", ""},
 		{"regression_unsigned_max", []string{"--attempt=18446744073709551615"}, "delegate", ""},
 		{"regression_above_signed", []string{"--attempt=9223372036854775808"}, "delegate", ""},
+		{"control_platform_max", []string{"--attempt=" + maxAttempt}, "relay", "/repos/acme/repo/actions/runs/42/attempts/" + maxAttempt},
+		{"control_above_platform_max", []string{"--attempt=" + aboveMaxAttempt}, "delegate", ""},
 		{"control_overridden_large_uint64", []string{"--attempt=18446744073709551615", "--attempt=2"}, "relay", "/repos/acme/repo/actions/runs/42/attempts/2"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var paths []string
 			relayTestServer(t, func(req map[string]any) any {
 				paths = append(paths, req["path"].(string))
+				if req["path"] == "/repos/acme/repo/actions/runs/42/attempts/"+maxAttempt {
+					return map[string]any{"id": 42, "run_attempt": 3}
+				}
 				return nativeOptionsResponse(t, req)
 			})
 			args := append([]string{"run", "view", "42", "-R", "acme/repo", "--json", "databaseId,jobs"}, test.flags...)
