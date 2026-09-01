@@ -2069,7 +2069,7 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 	}
 	policy.Store(`{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"a*","replacement":"b"}]}`)
 	capture := captureRewriteGH(t)
-	if err := execRealGH(t.Context(), []string{"alias", "list"}, io.Discard, io.Discard); err != errRewritePolicy {
+	if err := execRealGH(t.Context(), []string{"alias", "list"}, io.Discard, io.Discard); !errors.Is(err, errRewritePolicy) {
 		t.Fatalf("invalid policy: %v", err)
 	}
 	if _, err := os.Stat(capture); !os.IsNotExist(err) {

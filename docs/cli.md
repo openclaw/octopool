@@ -638,6 +638,49 @@ an explicitly configured missing or unreadable file fails closed. The local file
 uploaded. Server rules run first, then local rules; identical entries are deduplicated,
 conflicting replacements are rejected, and combined limits still apply.
 
+Policy-load failures keep the existing message prefix and add bounded diagnostics to the
+normal stderr error line. There is no success diagnostic, stdout change, persistent log,
+automatic policy retry, or cached-policy fallback. A synthetic example:
+
+```text
+error: string rewrite policy unavailable or invalid (class=http_status attempt_utc=2026-09-01T12:34:56.123Z elapsed_ms=42 http_status=403 cf_ray=0123456789abcdef-SJC)
+```
+
+The fixed `class` identifies the failing check, not its underlying cause:
+
+| Class                  | Meaning                                                                                                                                                                     |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setup`                | Caller client setup failed, including saved-auth loading, missing login, or saved-token URL binding. No policy request occurred.                                            |
+| `request`              | Policy URL, blank token, or HTTP request construction failed validation.                                                                                                    |
+| `transport`            | HTTP execution failed without a response, including DNS/network errors not classified below.                                                                                |
+| `timeout` / `canceled` | HTTP execution reported a deadline/network timeout or context cancellation, respectively.                                                                                   |
+| `http_status`          | The policy HTTP response was not exactly 200; redirects, including same-origin redirects, are refused.                                                                      |
+| `response_read`        | Reading the 200 response body failed (including a timeout/cancellation while reading it).                                                                                   |
+| `response_size`        | The 200 response exceeded the 65,536-byte document limit.                                                                                                                   |
+| `server_validation`    | The 200 document failed JSON/schema/rule validation.                                                                                                                        |
+| `local_read`           | Local path resolution or bounded file reading failed, including an explicit missing, unreadable, nonregular, or oversized file. An absent optional default remains allowed. |
+| `local_validation`     | Local JSON/schema/rule validation failed.                                                                                                                                   |
+| `merge`                | Combining individually valid server/local policies failed conflict or combined-limit checks.                                                                                |
+
+`attempt_utc` is the client clock's UTC start time, before policy HTTP validation.
+`elapsed_ms` is monotonic elapsed time from that start to failure construction, truncated
+to whole milliseconds. It includes GET/body reading and any subsequent server/local/merge
+checks reached, but excludes caller client setup and final stderr formatting. For `setup`
+only, both fields instead cover client setup. They do not measure a whole `gh` invocation;
+each guarded boundary reloads policy and starts another attempt. The existing five-second
+context and HTTP-client deadlines are unchanged, and do not bound later local/merge work.
+
+`http_status` is omitted without an observed response. For `server_validation`, `local_read`,
+`local_validation`, or `merge`, `http_status=200` belongs to the preceding policy **GET**,
+not to local validation. Its correlation metadata survives those later failures. Optional
+`cf_ray` accepts only one value with exactly 16 ASCII hex digits, optionally followed by
+`-` and three uppercase ASCII POP letters. Missing, malformed, overlong, or multiple values
+are dropped, never truncated. It is an unauthenticated correlation hint, not proof of origin.
+No raw error strings, URLs, paths, bodies, arbitrary headers, tokens, or rule content are
+included. Admin HTTP 409 remains a revision conflict; guarded caller GET 409 is a terminal
+policy failure. See [policy-failure correlation](operations.md#correlating-policy-load-failures)
+before drawing conclusions from a later successful probe.
+
 Rules use a portable RE2 subset: literal Unicode, captures/noncapturing groups, alternation,
 greedy/lazy repetition, bracket classes, dot, anchors, ASCII `\b`, `\w`, `\d`, `\s`
 and their uppercase complements, escaped punctuation, and `\n`, `\r`, `\t`, `\f`,

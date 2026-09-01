@@ -3,16 +3,20 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCLIEndToEndRelayProtocol(t *testing.T) {
@@ -332,4 +336,75 @@ func fakeGHWithExit(t *testing.T, code int) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestGHShimProtocolRewritePolicyDiagnostics(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and executes the CLI binary")
+	}
+	bin := buildCLIBinary(t)
+	wrapper := filepath.Join(t.TempDir(), executableName("gh"))
+	binary, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wrapper, binary, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, local := range []bool{false, true} {
+		name, class, code := "HTTP403", "http_status", 403
+		if local {
+			name, class, code = "local validation", "local_validation", 200
+		}
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Path != "/v1/pools/maintainers/string-rewrites" || r.Method != "GET" || r.Header.Get("Authorization") != "Bearer synthetic-token-secret" {
+					t.Error("unexpected dispatch")
+				}
+				w.Header().Set("CF-Ray", "0123456789abcdef-SJC")
+				w.Header().Set("X-Private", "synthetic-header-secret")
+				w.WriteHeader(code)
+				if local {
+					_, _ = io.WriteString(w, rewriteEmptyTestPolicy)
+				} else {
+					_, _ = io.WriteString(w, "synthetic-response-secret")
+				}
+			}))
+			t.Cleanup(server.Close)
+			extra := map[string]string{"OCTOPOOL_TOKEN": "synthetic-token-secret", "OCTOPOOL_RELAY_RETRIES": "2"}
+			path := filepath.Join(t.TempDir(), "synthetic-path-secret.json")
+			if local {
+				if err := os.WriteFile(path, []byte(`{"schema_version":1,"rules":[{"pattern":"[synthetic-pattern-secret","replacement":"synthetic-value-secret"}]}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				extra["OCTOPOOL_STRING_REWRITE_FILE"] = path
+			}
+			capture := captureRewriteGH(t)
+			started := time.Now()
+			result := runCLI(t, wrapper, server.URL, extra, "pr", "view", "7", "-R", "acme/repo", "--json=number")
+			var exit *exec.ExitError
+			if !errors.As(result.err, &exit) || exit.ExitCode() != 1 || result.stdout != "" || calls.Load() != 1 {
+				t.Fatalf("policy error protocol: %+v calls=%d", result, calls.Load())
+			}
+			pattern := `\Aerror: string rewrite policy unavailable or invalid \(class=` + class + ` attempt_utc=([^ ]+Z) elapsed_ms=([0-9]+) http_status=` + strconv.Itoa(code) + ` cf_ray=0123456789abcdef-SJC\)\n\z`
+			matches := regexp.MustCompile(pattern).FindStringSubmatch(result.stderr)
+			if matches == nil {
+				t.Fatalf("unexpected stderr: %q", result.stderr)
+			}
+			attempt, err := time.Parse(time.RFC3339Nano, matches[1])
+			if err != nil || attempt.Before(started) || attempt.After(time.Now()) {
+				t.Fatal("invalid UTC attempt")
+			}
+			for _, secret := range []string{path, server.URL, "synthetic-token-secret", "synthetic-header-secret", "synthetic-response-secret", "synthetic-pattern-secret", "synthetic-value-secret"} {
+				if strings.Contains(result.stderr, secret) {
+					t.Fatal("shim exposed sensitive fixture")
+				}
+			}
+			if _, err := os.Stat(capture); !os.IsNotExist(err) {
+				t.Fatal("policy failure reached native gh")
+			}
+		})
+	}
 }

@@ -409,6 +409,12 @@ and do not log patterns, matched text, or backend exception messages. API respon
 including errors, are `no-store`. Protect policy GET access and D1 backups: rules can
 contain private names even though error responses and normal import output do not.
 
+CLI policy-load failures return only bounded metadata on the existing stderr error line;
+they do not change protection, retry policy, or stdout. The [CLI diagnostic contract](cli.md#outbound-string-rewrite-protection)
+defines every class, timestamp, elapsed scope, HTTP status, and validated CF-Ray field.
+Use the [correlation procedure](#correlating-policy-load-failures) below to investigate the
+exact failed attempt without exposing policy material or changing authentication.
+
 If policy storage is missing or corrupt, restore the migration/schema and last reviewed
 valid singleton row through the operator's controlled D1 recovery process. PUT cannot
 repair an unreadable current policy, and a deleted row is not a supported way to clear
@@ -560,11 +566,50 @@ Override the host/resolver with `OCTOPOOL_E2E_HOST` / `OCTOPOOL_E2E_RESOLVER`.
 
 ## Observability
 
-Observability is enabled at full sampling. Every validated request from an authenticated
+Both authoritative and public-proxy Worker source configurations enable observability at
+full sampling (`head_sampling_rate: 1`). Every validated relay request from an authenticated
 caller to an existing pool writes an `audit_events` row (caller, client, pool, route key/kind,
 identity, status, error/fallback classification, duration, cache hit/miss/bypass status,
 and coalesced-fill marker); parse, authentication, string-protection, and pool-lookup
 failures occur before that boundary. Secrets and request bodies are never recorded.
+
+### Correlating policy-load failures
+
+Preserve the exact safe failure line, its `attempt_utc` and `elapsed_ms`, and the binary
+version/revision in the external incident record. The CLI does not persist them. The
+timestamp uses the client's clock; allow for known clock skew when bounding the search
+window from start through elapsed time. `setup` and `request` failures do not establish
+any HTTP response. A local/merge failure with `http_status=200` describes a successful
+GET followed by a failing client check, not an HTTP outage.
+
+In authorized Cloudflare edge/Worker observability, filter by method `GET`, the expected
+`/v1/pools/<pool>/string-rewrites` path, that UTC window, and observed status. Add `cf_ray`
+when present and supported by the deployed log fields; it is only a strictly validated,
+unauthenticated correlation hint. Inspect each relevant layer separately: the public
+proxy's edge/security events, the public-proxy Worker invocation/upstream outcome, the
+authoritative Worker invocation/authentication/policy outcome, and authorized D1 health
+or query-failure telemetry. Direct authoritative URLs skip the public-proxy hop. A 403
+alone does not identify which layer refused the request; a 503 alone does not identify
+D1 as the cause. Correlate observed events before assigning a source.
+
+Full-sampling settings in source do not prove deployed log availability or reliable Ray-ID
+joins across proxy and authoritative hops. Verify those deployed fields and joins before
+using them for attribution. Missing logs or IDs are not proof of where a failure arose:
+an edge rejection can occur before Worker execution, expected policy errors do not emit
+the unexpected-exception console event, and retention/access/field coverage may differ.
+Policy GETs and authentication/protection failures bypass relay `audit_events` and stats;
+their absence there is expected, not evidence that no request occurred.
+
+`whoami` reads saved metadata, `health` uses another caller endpoint, and admin
+`string-rewrites status` uses separate admin authentication and does not merge local rules.
+They test different boundaries. A later unchanged guarded invocation can succeed because
+each attempt reloads policy and failures are not cached; that recovery does not establish
+the historical failure's cause. A separate Cloudflare-shaped 403 likewise cannot attribute
+an earlier generic failure. These diagnostics improve evidence, not resolve an outage.
+Never dump policy files, error response bodies, arbitrary headers, tokens, or debug traces,
+and never reconfigure authentication as a diagnostic shortcut.
+
+### Relay retention and stats
 
 The main Worker has an hourly cron trigger at minute 17. It deletes bounded batches of
 cache entries after each entry's route-specific stale deadline and audit rows older than

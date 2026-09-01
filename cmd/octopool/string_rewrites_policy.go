@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -49,22 +50,28 @@ func readRewriteFile(path string, stdin io.Reader, limit int) ([]byte, error) {
 	return boundedRewriteRead(file, limit)
 }
 
-func rewritePolicyHTTP(ctx context.Context, baseURL, path, token, method string, body []byte) ([]byte, error) {
+type rewritePolicyHTTPResult struct {
+	data    []byte
+	attempt rewritePolicyAttempt
+}
+
+func rewritePolicyHTTP(ctx context.Context, baseURL, path, token, method string, body []byte) (rewritePolicyHTTPResult, error) {
+	result := rewritePolicyHTTPResult{attempt: rewritePolicyAttempt{started: time.Now()}}
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return nil, errRewritePolicy
+		return result, result.attempt.failure(rewritePolicyRequest)
 	}
 	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1")) {
-		return nil, errRewritePolicy
+		return result, result.attempt.failure(rewritePolicyRequest)
 	}
 	if strings.TrimSpace(token) == "" {
-		return nil, errRewritePolicy
+		return result, result.attempt.failure(rewritePolicyRequest)
 	}
 	child, cancel := context.WithTimeout(ctx, rewritePolicyTimeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(child, method, apiURL(baseURL, path), bytes.NewReader(body))
 	if err != nil {
-		return nil, errRewritePolicy
+		return result, result.attempt.failure(rewritePolicyRequest)
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Cache-Control", "no-cache, no-store")
@@ -75,29 +82,35 @@ func rewritePolicyHTTP(ctx context.Context, baseURL, path, token, method string,
 	client := &http.Client{Timeout: rewritePolicyTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, errRewritePolicy
+		return result, result.attempt.failure(rewritePolicyTransportClass(err))
 	}
 	defer response.Body.Close()
+	result.attempt.status = response.StatusCode
+	result.attempt.ray = safeRewritePolicyRay(response.Header)
 	if response.StatusCode == http.StatusConflict {
-		return nil, errRewriteConflict
+		return result, errRewriteConflict
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, errRewritePolicy
+		return result, result.attempt.failure(rewritePolicyHTTPStatus)
 	}
-	data, err := boundedRewriteRead(response.Body, rewriteMaxDocument)
+	data, err := io.ReadAll(io.LimitReader(response.Body, rewriteMaxDocument+1))
 	if err != nil {
-		return nil, errRewritePolicy
+		return result, result.attempt.failure(rewritePolicyResponseRead)
 	}
-	return data, nil
+	if len(data) > rewriteMaxDocument {
+		return result, result.attempt.failure(rewritePolicyResponseSize)
+	}
+	result.data = data
+	return result, nil
 }
 
-func loadLocalStringRewritePolicy() (stringRewritePolicy, error) {
+func loadLocalStringRewritePolicy(attempt rewritePolicyAttempt) (stringRewritePolicy, error) {
 	path := os.Getenv("OCTOPOOL_STRING_REWRITE_FILE")
 	explicit := path != ""
 	if !explicit {
 		auth, err := authPath()
 		if err != nil {
-			return stringRewritePolicy{}, errRewritePolicy
+			return stringRewritePolicy{}, attempt.failure(rewritePolicyLocalRead)
 		}
 		path = filepath.Join(filepath.Dir(auth), "string-rewrites.json")
 		if _, err := os.Lstat(path); os.IsNotExist(err) {
@@ -106,30 +119,42 @@ func loadLocalStringRewritePolicy() (stringRewritePolicy, error) {
 	}
 	data, err := readRewriteFile(path, nil, rewriteMaxDocument)
 	if err != nil {
-		return stringRewritePolicy{}, errRewritePolicy
+		return stringRewritePolicy{}, attempt.failure(rewritePolicyLocalRead)
 	}
-	return parseStringRewritePolicy(data, false)
+	policy, err := parseStringRewritePolicy(data, false)
+	if err != nil {
+		return stringRewritePolicy{}, attempt.failure(rewritePolicyLocalValidation)
+	}
+	return policy, nil
 }
 
 func (client ghRelayClient) stringRewritePolicy(ctx context.Context) (stringRewritePolicy, error) {
-	data, err := rewritePolicyHTTP(ctx, client.baseURL, "/v1/pools/"+url.PathEscape(client.pool)+"/string-rewrites", client.token, http.MethodGet, nil)
-	if err != nil {
-		return stringRewritePolicy{}, errRewritePolicy
+	result, err := rewritePolicyHTTP(ctx, client.baseURL, "/v1/pools/"+url.PathEscape(client.pool)+"/string-rewrites", client.token, http.MethodGet, nil)
+	if errors.Is(err, errRewriteConflict) {
+		return stringRewritePolicy{}, result.attempt.failure(rewritePolicyHTTPStatus)
 	}
-	server, err := parseStringRewritePolicy(data, true)
-	if err != nil {
-		return stringRewritePolicy{}, err
-	}
-	local, err := loadLocalStringRewritePolicy()
 	if err != nil {
 		return stringRewritePolicy{}, err
 	}
-	return mergeStringRewritePolicies(server, local)
+	server, err := parseStringRewritePolicy(result.data, true)
+	if err != nil {
+		return stringRewritePolicy{}, result.attempt.failure(rewritePolicyServerValidation)
+	}
+	local, err := loadLocalStringRewritePolicy(result.attempt)
+	if err != nil {
+		return stringRewritePolicy{}, err
+	}
+	merged, err := mergeStringRewritePolicies(server, local)
+	if err != nil {
+		return stringRewritePolicy{}, result.attempt.failure(rewritePolicyMerge)
+	}
+	return merged, nil
 }
 func currentStringRewritePolicy(ctx context.Context) (stringRewritePolicy, error) {
+	attempt := rewritePolicyAttempt{started: time.Now()}
 	client, err := newGHRelayClient()
 	if err != nil {
-		return stringRewritePolicy{}, errRewritePolicy
+		return stringRewritePolicy{}, attempt.failure(rewritePolicySetup)
 	}
 	return client.stringRewritePolicy(ctx)
 }

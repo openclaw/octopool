@@ -302,7 +302,7 @@ func TestProtectionReadsFreshPolicyBeforeFallback(t *testing.T) {
 			if err == nil || relays.Load() != 1 {
 				t.Fatalf("err=%v relay=%d", err, relays.Load())
 			}
-			if (scenario == "changed" && err != errRewriteBlocked) || (scenario == "missing" && err != errRewritePolicy) {
+			if (scenario == "changed" && err != errRewriteBlocked) || (scenario == "missing" && !errors.Is(err, errRewritePolicy)) {
 				t.Fatalf("wrong final policy failure: %v", err)
 			}
 			wantPolicies := int64(2)

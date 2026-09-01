@@ -67,11 +67,11 @@ func runAdminStringRewrites(ctx context.Context, args []string, stdout io.Writer
 	if err != nil {
 		return errRewritePolicy
 	}
-	data, err := rewritePolicyHTTP(ctx, *baseURL, "/v1/admin/string-rewrites", token, http.MethodGet, nil)
+	result, err := rewritePolicyHTTP(ctx, *baseURL, "/v1/admin/string-rewrites", token, http.MethodGet, nil)
 	if err != nil {
 		return err
 	}
-	current, err := parseStringRewritePolicy(data, true)
+	current, err := parseStringRewritePolicy(result.data, true)
 	if err != nil {
 		return err
 	}
@@ -87,11 +87,11 @@ func runAdminStringRewrites(ctx context.Context, args []string, stdout io.Writer
 		rules = append(rules, rule.stringRewriteRule)
 	}
 	body, _ := json.Marshal(map[string]any{"schema_version": 1, "expected_revision": current.Revision, "rules": rules})
-	data, err = rewritePolicyHTTP(ctx, *baseURL, "/v1/admin/string-rewrites", token, http.MethodPut, body)
+	result, err = rewritePolicyHTTP(ctx, *baseURL, "/v1/admin/string-rewrites", token, http.MethodPut, body)
 	if err != nil {
 		return err
 	}
-	value, err := strictRewriteJSON(data, rewriteMaxDocument)
+	value, err := strictRewriteJSON(result.data, rewriteMaxDocument)
 	if err != nil {
 		return err
 	}
