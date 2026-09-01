@@ -178,7 +178,7 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	switch command {
 	case "pr create":
 		valueSpec += " --title,-t --body,-b --body-file,-F --head,-H --base,-B --label,-l --assignee,-a"
-		booleanSpec = "--draft,-d --no-maintainer-edit"
+		booleanSpec = "--draft,-d --no-maintainer-edit --dry-run"
 	case "pr edit":
 		valueSpec += " --title,-t --body,-b --body-file,-F --add-assignee --remove-assignee --add-label --remove-label"
 	case "issue edit":
@@ -277,8 +277,21 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 		return errRewriteBlocked
 	}
 	if command == "pr create" {
-		// gh explicitly skips all pushing/forking when --head is present.
-		if !flags.has("--head") || !rewriteRefPattern.MatchString(flags.values["--head"]) || !flags.has("--base") || !rewriteRefPattern.MatchString(flags.values["--base"]) {
+		// gh explicitly skips all pushing/forking when --head is present, so a
+		// missing head is pinned to the current branch instead of blocking the
+		// default invocation shape; an unpushed head fails at GitHub, not by push.
+		if !flags.has("--head") {
+			head, ok := rewriteCurrentBranch()
+			if !ok {
+				return errRewriteBlocked
+			}
+			flags.values["--head"] = head
+			flags.ordered = append(flags.ordered, rewriteFlag{name: "--head", value: head})
+		}
+		if !rewriteRefPattern.MatchString(flags.values["--head"]) {
+			return errRewriteBlocked
+		}
+		if flags.has("--base") && !rewriteRefPattern.MatchString(flags.values["--base"]) {
 			return errRewriteBlocked
 		}
 	}

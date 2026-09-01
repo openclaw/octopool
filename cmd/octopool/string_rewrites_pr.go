@@ -31,9 +31,8 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		return errRewriteBlocked
 	}
 	if command == "pr ready" && len(flags.positionals) == 0 {
-		branch, err := exec.Command("git", "symbolic-ref", "--quiet", "--short", "HEAD").Output()
-		selector := strings.TrimSpace(string(branch))
-		if err != nil || !validRewriteReadyBranch(selector) {
+		selector, ok := rewriteCurrentBranch()
+		if !ok {
 			return errRewriteBlocked
 		}
 		flags.positionals = []string{selector}
@@ -92,6 +91,17 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 	}
 	prepared.stdin = strings.NewReader("")
 	return nil
+}
+
+// Current checkout branch, validated as a plain branch name. Detached HEAD,
+// non-git directories, and unusual ref shapes fail closed.
+func rewriteCurrentBranch() (string, bool) {
+	branch, err := exec.Command("git", "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	selector := strings.TrimSpace(string(branch))
+	if err != nil || !validRewriteReadyBranch(selector) {
+		return "", false
+	}
+	return selector, true
 }
 
 func validRewriteReadyBranch(selector string) bool {

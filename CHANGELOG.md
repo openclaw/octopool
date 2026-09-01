@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Unblock the standard `gh pr create` shape under active rewrite rules: pin a missing `--head` to the current branch (fail closed on detached HEAD or non-git directories), make `--base` optional, and accept `--dry-run`.
 - Allow typed attachments on protected `gh issue edit` and `gh issue comment` through existing strict snapshots and inline-reference rewriting, requiring explicit complete bodies for attachment edits.
 - Fence cache bodies and public-repository proofs with committed D1 ownership, isolate old writers across upgrades, and reclaim abandoned owners without adding authority calls to hot cache hits.
 - Honor native input declarations and reject malformed nonempty declared JSON before dispatch, preserving explicit UTF-8 text, zero-byte best-effort compatibility, and existing interactive-input limits.

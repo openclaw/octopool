@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -177,7 +179,7 @@ func TestStringRewriteFileReadBounded(t *testing.T) {
 func TestStringRewritePreparationRejectsUnknownShapes(t *testing.T) {
 	policy := testRewritePolicy(t, stringRewriteRule{"internal-model", "public"})
 	tests := [][]string{
-		{"pr", "create", "--title", "safe", "--body", "safe", "--repo", "acme/repo"},
+		{"pr", "create", "--title", "safe", "--body", "safe", "--repo", "acme/repo", "--head", "main", "--base", "bad base"},
 		{"pr", "create", "--title", "safe", "--body", "safe", "--repo", "acme/repo", "--head", "main", "--base", "main", "--fill"},
 		{"issue", "create", "--title", "safe", "--body", "safe", "--template", "x", "--repo", "acme/repo"},
 		{"pr", "edit", "--body", "safe", "--repo", "acme/repo"},
@@ -204,6 +206,47 @@ func TestStringRewritePreparationRejectsUnknownShapes(t *testing.T) {
 		})
 	}
 }
+func TestStringRewritePRCreateDerivesCurrentBranchHead(t *testing.T) {
+	policy := testRewritePolicy(t, stringRewriteRule{"internal-model", "public"})
+	repo := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet", "--initial-branch", "feature/derive-head", repo},
+		{"-C", repo, "remote", "add", "origin", "https://github.com/acme/repo"},
+	} {
+		if out, err := exec.CommandContext(t.Context(), "git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("synthetic repo: %v %s", err, out)
+		}
+	}
+	t.Chdir(repo)
+	body := filepath.Join(repo, "body.md")
+	if err := os.WriteFile(body, []byte("hello world\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &rewritePreparation{}
+	defer p.cleanup()
+	args := []string{"pr", "create", "--dry-run", "--draft", "--title", "t", "--body-file", body, "--repo", "acme/repo"}
+	if err := prepareRewriteContent(policy, args, nil, p); err != nil {
+		t.Fatalf("standard pr create blocked: %v", err)
+	}
+	if !slices.Contains(p.args, "--head=feature/derive-head") {
+		t.Fatalf("derived head missing: %v", p.args)
+	}
+	if !slices.Contains(p.args, "--dry-run=true") || !slices.Contains(p.args, "--draft=true") {
+		t.Fatalf("boolean flags dropped: %v", p.args)
+	}
+}
+
+func TestStringRewritePRCreateWithoutBranchBlocked(t *testing.T) {
+	policy := testRewritePolicy(t, stringRewriteRule{"internal-model", "public"})
+	t.Chdir(t.TempDir()) // not a git repository, so no branch can pin --head
+	p := &rewritePreparation{}
+	defer p.cleanup()
+	args := []string{"pr", "create", "--title", "safe", "--body", "safe", "--repo", "acme/repo"}
+	if err := prepareRewriteContent(policy, args, nil, p); err == nil {
+		t.Fatal("accepted pr create without a derivable head")
+	}
+}
+
 func TestStringRewriteLiteralReplacementAndFlags(t *testing.T) {
 	policy := testRewritePolicy(t, stringRewriteRule{"internal-model", "--web=$1"})
 	p := &rewritePreparation{}

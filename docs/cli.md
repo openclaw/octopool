@@ -505,9 +505,12 @@ materialized/intermediate/final content. Match iteration is also bounded.
 With active rules, the initial local publication vocabulary is deliberately conservative:
 
 - PR/issue `create`, `edit`, `comment`, and PR `review`: explicit title/body flags, body
-  files, or stdin; numeric PR/issue selectors for existing items. PR creation requires
-  explicit `--head` and `--base`; the head must already be pushed. `--head` prevents gh
-  from implicitly pushing or forking. Reviews require one explicit review action. PR/issue creation
+  files, or stdin; numeric PR/issue selectors for existing items. PR creation pins
+  `--head` to the current branch when the flag is omitted (detached HEAD and non-git
+  directories are blocked); the head must already be pushed, since a pinned `--head`
+  prevents gh from implicitly pushing or forking. `--base` is optional and defaults to
+  the repository's default branch. `--dry-run` is accepted. Reviews require one
+  explicit review action. PR/issue creation
   accepts one `--label`/`-l` and one `--assignee`/`-a` value (use comma-separated lists),
   while PR/issue edits accept metadata-only add/remove label and assignee flags. Assignees may
   include native `@me` or `@copilot`. PR/issue create/edit/comment also accept repeated
