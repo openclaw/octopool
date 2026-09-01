@@ -628,6 +628,32 @@ func floorGHWatchDelegateArgs(args []string) []string {
 	return append(out, args[2+parsed.delimiter:]...)
 }
 
+func nativeWatchArgumentRoles(parsed readOptions) []string {
+	var roles []string
+	occurrenceIndex := 0
+	for i := 0; i < len(parsed.argv); {
+		if occurrenceIndex < len(parsed.ordered) && parsed.ordered[occurrenceIndex].start == i {
+			occurrence := parsed.ordered[occurrenceIndex]
+			if occurrence.name != "--repo" {
+				roles = append(roles, occurrence.name)
+				if occurrence.valueIndex != occurrence.start {
+					roles = append(roles, "value:"+occurrence.name)
+				}
+			}
+			i = occurrence.end
+			occurrenceIndex++
+			continue
+		}
+		if i == parsed.delimiter {
+			roles = append(roles, "delimiter")
+		} else {
+			roles = append(roles, "positional")
+		}
+		i++
+	}
+	return roles
+}
+
 func isGHWatchShape(args []string) bool {
 	if len(args) < 2 {
 		return false

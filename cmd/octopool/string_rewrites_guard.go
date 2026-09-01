@@ -436,6 +436,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 		return nil, err
 	}
 	if len(policy.Rules) == 0 {
+		prepared.args = floorGHWatchDelegateArgs(args)
 		return prepared, nil
 	}
 	prepared.forceGitHubHost = true
@@ -464,9 +465,68 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 			err = prepareRewriteBestEffort(policy, args, stdin, prepared)
 		}
 	}
+	if err == nil {
+		err = prepared.finalizeNativeWatch(policy, args)
+	}
 	if err != nil {
 		prepared.cleanup()
 		return nil, errRewriteBlocked
 	}
 	return prepared, nil
+}
+
+func (prepared *rewritePreparation) finalizeNativeWatch(policy stringRewritePolicy, original []string) error {
+	// Original material has already passed this final policy. Only corresponding,
+	// recognized watch grammar may acquire a floor; checked repo pins may differ.
+	if !isGHWatchShape(original) || !isGHWatchShape(prepared.args) ||
+		original[0] != prepared.args[0] || original[1] != prepared.args[1] {
+		return nil
+	}
+	specs := nativeWatchReadSpecs(original[0] + " " + original[1])
+	before, unsupported, err := parseReadOptions(original[2:], specs)
+	if err != nil || unsupported {
+		return nil
+	}
+	if _, ok := readWatchInterval(before); !ok {
+		return nil
+	}
+	after, unsupported, err := parseReadOptions(prepared.args[2:], specs)
+	if err != nil || unsupported || !slices.Equal(nativeWatchArgumentRoles(before), nativeWatchArgumentRoles(after)) {
+		return nil
+	}
+	floored := floorGHWatchDelegateArgs(prepared.args)
+	if slices.Equal(floored, prepared.args) {
+		return nil
+	}
+	// Check both the semantic value and emitted spelling: attached aliases must
+	// not hide a forbidden 30. Generated material is never rewritten below floor.
+	if err := policy.checkStructural("30"); err != nil {
+		return err
+	}
+	if len(floored) == len(prepared.args) {
+		for i, arg := range floored {
+			if arg != prepared.args[i] {
+				if err := policy.checkStructural(arg); err != nil {
+					return err
+				}
+			}
+		}
+	} else if err := policy.checkStructural("--interval"); err != nil {
+		return err
+	}
+	oldBytes, newBytes := 0, 0
+	for _, arg := range prepared.args {
+		oldBytes += len(arg)
+	}
+	for _, arg := range floored {
+		newBytes += len(arg)
+	}
+	// Charge only generated growth, without replaying original content or sources.
+	growth := max(0, newBytes-oldBytes)
+	if newBytes > rewriteMaxContent || prepared.outputBytes+growth > rewriteMaxContent {
+		return errRewriteBlocked
+	}
+	prepared.outputBytes += growth
+	prepared.args = floored
+	return nil
 }

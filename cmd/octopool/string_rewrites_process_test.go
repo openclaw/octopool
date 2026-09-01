@@ -183,6 +183,14 @@ func rewriteTestServer(t *testing.T, policyBody string, relay http.HandlerFunc) 
 	t.Helper()
 	body := &atomic.Value{}
 	body.Store(policyBody)
+	calls := rewriteTestServerPolicySequence(t, func(int64) (string, int) {
+		return body.Load().(string), http.StatusOK
+	}, relay)
+	return body, calls
+}
+
+func rewriteTestServerPolicySequence(t *testing.T, policy func(int64) (string, int), relay http.HandlerFunc) *atomic.Int64 {
+	t.Helper()
 	calls := &atomic.Int64{}
 	isolateTestConfig(t)
 	t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
@@ -193,13 +201,14 @@ func rewriteTestServer(t *testing.T, policyBody string, relay http.HandlerFunc) 
 			return
 		}
 		if r.URL.Path == "/v1/pools/maintainers/string-rewrites" {
-			calls.Add(1)
+			body, code := policy(calls.Add(1))
 			if r.Method != "GET" || r.Header.Get("Cache-Control") != "no-cache, no-store" {
 				t.Error("incorrect policy method/cache")
 			}
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, body.Load().(string))
+			w.WriteHeader(code)
+			_, _ = io.WriteString(w, body)
 			return
 		}
 		if r.URL.Path != "/v1/github/request" || r.Method != "POST" || relay == nil {
@@ -214,7 +223,7 @@ func rewriteTestServer(t *testing.T, policyBody string, relay http.HandlerFunc) 
 	t.Setenv("OCTOPOOL_TOKEN", "test-token")
 	t.Setenv("OCTOPOOL_POOL", "maintainers")
 	t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
-	return body, calls
+	return calls
 }
 
 const rewriteActiveTestPolicy = `{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"internal-model","replacement":"public"}]}`
@@ -2491,31 +2500,323 @@ func TestStringRewriteOptionStrictControls(t *testing.T) {
 	}
 }
 
+func TestStringRewritePRWatchPolicyFloor(t *testing.T) {
+	const active = `{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"watch-policy-canary","replacement":"safe"}]}`
+	const residualFive = `{"schema_version":1,"revision":2,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^5$","replacement":"5"}]}`
+	const forbiddenThirty = `{"schema_version":1,"revision":2,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^30$","replacement":"5"}]}`
+	const material = `{"pattern":"watch-policy-canary","replacement":"safe"}`
+	for _, test := range []struct {
+		name       string
+		flags      []string
+		want       []string
+		first      string
+		final      string
+		finalCode  int
+		wantErr    error
+		noFallback bool
+	}{
+		{
+			name:  "active_nonmatching_floor",
+			flags: []string{"--watch", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "30"},
+		},
+		{
+			name: "direct_no_fallback_still_floors", noFallback: true,
+			flags: []string{"--watch", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "30"},
+		},
+		{
+			name:  "default_interval",
+			flags: []string{"--watch"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "30"},
+		},
+		{
+			name:  "default_before_real_terminator",
+			flags: []string{"--watch", "--", "-i5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "30", "--", "-i5"},
+		},
+		{
+			name:  "only_final_interval_changes",
+			flags: []string{"--watch", "--interval", "5", "-i6"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "5", "-i30"},
+		},
+		{
+			name:  "native_only_short_web_false",
+			flags: []string{"--watch", "-w=false", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "-w=false", "--interval", "30"},
+		},
+		{
+			name: "original_residual_blocks", first: residualFive, final: residualFive, wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "--interval", "5"},
+		},
+		{
+			name: "fresh_final_residual_blocks", final: residualFive, wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "--interval", "5"},
+		},
+		{
+			name: "final_policy_unavailable", finalCode: http.StatusServiceUnavailable, wantErr: errRewritePolicy,
+			flags: []string{"--watch", "--interval", "5"},
+		},
+		{
+			name: "overwritten_original_residual_blocks", first: residualFive, final: residualFive, wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "--interval", "5", "-i6"},
+		},
+		{
+			name: "original_owned_rule_material_blocks", wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "--interval", "5", "--template", material},
+		},
+		{
+			name: "generated_floor_policy_conflict", final: forbiddenThirty, wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "--interval", "5"},
+		},
+		{
+			name: "generated_attached_short_floor_policy_conflict", final: forbiddenThirty, wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "-i5"},
+		},
+		{
+			name: "generated_attached_long_floor_policy_conflict", final: forbiddenThirty, wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "--interval=5"},
+		},
+		{
+			name:    "generated_default_flag_policy_conflict",
+			final:   `{"schema_version":1,"revision":2,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^--interval$","replacement":"--template"}]}`,
+			wantErr: errRewriteBlocked,
+			flags:   []string{"--watch"},
+		},
+		{
+			name:  "rewritten_valid_interval_stays_above_floor",
+			final: `{"schema_version":1,"revision":2,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^5$","replacement":"40"}]}`,
+			flags: []string{"--watch", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "40"},
+		},
+		{
+			name:  "rewritten_interval_option_does_not_gain_default",
+			final: `{"schema_version":1,"revision":2,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^--interval$","replacement":"--template"}]}`,
+			flags: []string{"--watch", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--template", "5"},
+		},
+		{
+			// Empty P1 reaches ghDelegate; final P2 must still see the original 5.
+			name: "lower_handoff_fresh_final_residual", first: rewriteEmptyTestPolicy, final: residualFive, wantErr: errRewriteBlocked,
+			flags: []string{"--watch", "--required", "--interval", "5"},
+		},
+		{
+			name: "lower_handoff_nonmatching_control", first: rewriteEmptyTestPolicy,
+			flags: []string{"--watch", "--required", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--required", "--interval", "30"},
+		},
+		{
+			name: "empty_policy_control", first: rewriteEmptyTestPolicy, final: rewriteEmptyTestPolicy,
+			flags: []string{"--watch", "--required", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "acme/repo", "--watch", "--required", "--interval", "30"},
+		},
+		{
+			name:  "invalid_earlier_integer_not_repaired",
+			flags: []string{"--watch", "--interval", "08", "-i5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "08", "-i5"},
+		},
+		{
+			name:  "final_duration_overflow_not_repaired",
+			flags: []string{"--watch", "--interval", "9223372037"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "9223372037"},
+		},
+		{
+			name:  "unknown_grammar_not_repaired",
+			flags: []string{"--watch", "--future", "-i5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--future", "-i5"},
+		},
+		{
+			name:  "short_cluster_not_repaired",
+			flags: []string{"--watch", "-wf", "-i5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "-wf", "-i5"},
+		},
+		{
+			name:  "false_watch_not_repaired",
+			flags: []string{"--watch=false", "-i5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch=false", "-i5"},
+		},
+		{
+			name:  "owned_watch_value_not_repaired",
+			flags: []string{"--template", "--watch", "--interval", "5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--template", "--watch", "--interval", "5"},
+		},
+		{
+			name:  "terminator_watch_text_not_repaired",
+			flags: []string{"--watch=false", "--", "--watch", "-i5"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch=false", "--", "--watch", "-i5"},
+		},
+		{
+			name:  "rewritten_invalid_original_does_not_gain_floor",
+			final: `{"schema_version":1,"revision":2,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^08$","replacement":"5"}]}`,
+			flags: []string{"--watch", "--interval", "08"},
+			want:  []string{"pr", "checks", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "5"},
+		},
+		{
+			name:  "rewritten_command_does_not_gain_floor",
+			final: `{"schema_version":1,"revision":2,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"^checks$","replacement":"view"}]}`,
+			flags: []string{"--watch", "--interval", "5"},
+			want:  []string{"pr", "view", "7", "-R", "github.com/acme/repo", "--watch", "--interval", "5"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			first, final := test.first, test.final
+			if first == "" {
+				first = active
+			}
+			if final == "" {
+				final = active
+			}
+			var data atomic.Int64
+			policies := rewriteTestServerPolicySequence(t, func(ordinal int64) (string, int) {
+				if ordinal == 1 {
+					return first, http.StatusOK
+				}
+				if ordinal != 2 {
+					t.Error("unexpected extra policy read")
+					return "", http.StatusServiceUnavailable
+				}
+				if test.finalCode != 0 {
+					return "", test.finalCode
+				}
+				return final, http.StatusOK
+			}, func(w http.ResponseWriter, r *http.Request) {
+				data.Add(1)
+				t.Error("native watch unexpectedly dispatched relay data")
+				w.WriteHeader(http.StatusBadRequest)
+			})
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			if test.noFallback {
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			}
+			t.Setenv("GH_HOST", "github.com")
+			t.Setenv("GH_REPO", "acme/inherited")
+			capturePath := captureRewriteGH(t)
+			input, err := os.Open(os.DevNull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved := os.Stdin
+			os.Stdin = input
+			defer func() { os.Stdin = saved; input.Close() }()
+			args := append([]string{"pr", "checks", "7", "-R", "acme/repo"}, test.flags...)
+			original := append([]string(nil), args...)
+			var stdout, stderr bytes.Buffer
+			err = runGH(t.Context(), args, &stdout, &stderr)
+			_, childErr := os.Stat(capturePath)
+			childCount := strings.Count(stdout.String(), "child stdout\n")
+			t.Logf("boundary: policies=%d data=%d child=%d err=%v stdout=%q stderr=%q", policies.Load(), data.Load(), childCount, err, stdout.String(), stderr.String())
+			if !slices.Equal(args, original) {
+				t.Error("caller argv mutated")
+			}
+			if policies.Load() != 2 || data.Load() != 0 {
+				t.Errorf("policy/data counts=%d/%d, want 2/0", policies.Load(), data.Load())
+			}
+			if test.wantErr != nil {
+				if childErr == nil {
+					t.Logf("unexpected child argv=%q", readRewriteCapture(t, capturePath).Args)
+				}
+				if !errors.Is(err, test.wantErr) || !os.IsNotExist(childErr) || stdout.Len() != 0 || stderr.Len() != 0 {
+					t.Errorf("policy must stop native child: want err=%v and no child/output", test.wantErr)
+				}
+				if strings.Contains(stdout.String()+stderr.String(), material) || (err != nil && strings.Contains(err.Error(), material)) {
+					t.Error("rejected policy material echoed")
+				}
+				return
+			}
+			if err != nil || childCount != 1 || stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+				t.Fatalf("native child markers/result changed: err=%v", err)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			wantRepo := ""
+			if final == rewriteEmptyTestPolicy {
+				wantRepo = "acme/inherited"
+			}
+			if capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != wantRepo || capture.Stdin != "" || len(capture.Files) != 0 || len(capture.FileData) != 0 {
+				t.Errorf("native environment/stdin/snapshots changed: %+v", capture)
+			}
+			if !slices.Equal(capture.Args, test.want) {
+				t.Errorf("watch floor/value ownership: native argv=%q, want=%q", capture.Args, test.want)
+			}
+		})
+	}
+}
+
 func TestStringRewritePrivateRunWatchFallback(t *testing.T) {
-	recordWatchSleeps(t)
-	relayCalls := 0
-	rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
-		relayCalls++
-		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-		}
-		if request["path"] != "/repos/acme/repo/actions/runs/42" {
-			t.Error("unexpected watch path")
-		}
-		writeCLIFallback(t, w, "repo_not_public")
-	})
-	capture := captureRewriteGH(t)
-	args := []string{"run", "watch", "42", "-Racme/repo", "-i5", "--exit-status"}
-	if err := runGH(t.Context(), args, io.Discard, io.Discard); err != nil {
-		t.Fatalf("private watch fallback failed: %v", err)
-	}
-	if relayCalls != 1 {
-		t.Fatalf("relay calls=%d, want initial lookup before private fallback", relayCalls)
-	}
-	want := []string{"run", "watch", "42", "--repo=acme/repo", "-i30", "--exit-status"}
-	if got := readRewriteCapture(t, capture); !slices.Equal(got.Args, want) || got.Env["GH_HOST"] != "github.com" {
-		t.Fatalf("native watch args=%v env=%v", got.Args, got.Env)
+	for _, test := range []struct {
+		name, reason string
+		noFallback   bool
+		inferredRepo bool
+	}{
+		{name: "private_repo_handoff", reason: "repo_not_public"},
+		{name: "typed_no_fallback", reason: "repo_not_public", noFallback: true},
+		{name: "other_refusal_stays_on_relay", reason: "pagination_exhausted"},
+		{name: "inferred_repo_survives_context_change", reason: "repo_not_public", inferredRepo: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sleeps := recordWatchSleeps(t)
+			relayCalls := 0
+			_, policies := rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				relayCalls++
+				request := decodeCLIRequest(t, w, r)
+				if request["path"] != "/repos/acme/repo/actions/runs/42" {
+					t.Error("unexpected watch path")
+				}
+				if test.inferredRepo {
+					// The initial t.Setenv owns cleanup of this synthetic context.
+					if err := os.Setenv("GH_REPO", "acme/changed"); err != nil {
+						t.Error(err)
+					}
+				}
+				writeCLIFallback(t, w, test.reason)
+			})
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			if test.noFallback {
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			}
+			t.Setenv("GH_HOST", "github.com")
+			t.Setenv("GH_REPO", "acme/inherited")
+			capture := captureRewriteGH(t)
+			input, err := os.Open(os.DevNull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved := os.Stdin
+			os.Stdin = input
+			defer func() { os.Stdin = saved; input.Close() }()
+			args := []string{"run", "watch", "42", "-Racme/repo", "-i5", "--exit-status"}
+			if test.inferredRepo {
+				t.Setenv("GH_REPO", "acme/repo")
+				args = []string{"run", "watch", "42", "-i5", "--exit-status"}
+			}
+			original := append([]string(nil), args...)
+			var stdout, stderr bytes.Buffer
+			err = runGH(t.Context(), args, &stdout, &stderr)
+			t.Logf("boundary: policies=%d data=%d child=%d err=%v stdout=%q stderr=%q", policies.Load(), relayCalls, strings.Count(stdout.String(), "child stdout\n"), err, stdout.String(), stderr.String())
+			if relayCalls != 1 || len(*sleeps) != 0 || !slices.Equal(args, original) {
+				t.Fatalf("initial lookup ownership changed: data=%d sleeps=%v caller=%q", relayCalls, *sleeps, args)
+			}
+			if test.noFallback || test.reason != "repo_not_public" {
+				_, childErr := os.Stat(capture)
+				if err == nil || isLocalFallback(err) != test.noFallback || policies.Load() != 2 || !os.IsNotExist(childErr) || stdout.Len() != 0 || stderr.Len() != 0 {
+					t.Fatalf("run-watch refusal ownership changed: err=%v policies=%d child=%v stdout=%q stderr=%q", err, policies.Load(), childErr, stdout.String(), stderr.String())
+				}
+				return
+			}
+			if err != nil || policies.Load() != 3 || stdout.String() != "child stdout\n" || stderr.String() != "octopool: octopool requested local gh fallback: repo_not_public; falling back to real gh\nchild stderr\n" {
+				t.Fatalf("private watch handoff changed: err=%v policies=%d stdout=%q stderr=%q", err, policies.Load(), stdout.String(), stderr.String())
+			}
+			want := []string{"run", "watch", "42", "--repo=acme/repo", "-i30", "--exit-status"}
+			if test.inferredRepo {
+				want = []string{"run", "watch", "42", "-i30", "--exit-status", "--repo=acme/repo"}
+				if os.Getenv("GH_REPO") != "acme/changed" {
+					t.Error("synthetic repository context did not change")
+				}
+			}
+			got := readRewriteCapture(t, capture)
+			if !slices.Equal(got.Args, want) || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" || got.Stdin != "" || len(got.Files) != 0 {
+				t.Fatalf("native watch args=%q env=%v stdin=%q files=%v", got.Args, got.Env, got.Stdin, got.Files)
+			}
+		})
 	}
 }
 

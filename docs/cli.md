@@ -384,6 +384,17 @@ With no active rewrite rules, native PR-checks watch handoff recognizes `-w=fals
 and `-w=0` as disabled web mode and keeps the watch floor. The `-w` spelling remains
 native-only; short clusters and invalid Boolean assignments are left intact.
 
+Protected native watches apply that floor only after fresh final-policy preparation
+has inspected the original interval occurrences, retaining any repository already
+pinned before a relay handoff. Active-policy PR checks-watch still delegates before
+the handler. Both the input and prepared command must be recognized watches with
+corresponding option/value, positional, and terminator ownership, apart from checked
+repository pins. A valid policy rewrite from interval 5 to 40 stays 40; invalid
+input rewritten into valid grammar, changed commands or option ownership, and unknown
+grammar retain their policy-prepared argv without a guessed floor. Generated interval
+values and emitted tokens must also satisfy that final policy; a conflict blocks the
+child rather than bypassing policy or rewriting the floor below 30 seconds.
+
 These parsers run after the existing policy check. Active rules still inspect
 original occurrences and structural material, even overwritten scalars or CSV
 records ignored by decoding. Native argv retains spelling and order except for

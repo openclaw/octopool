@@ -79,11 +79,11 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 				return exitCodeError{Code: 1}
 			}
 			if shouldRunRealGH(result.err) {
-				return execRealGHAfterLocalFallback(ctx, floorGHWatchDelegateArgs(args), stdout, stderr, result.err)
+				return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, result.err)
 			}
 			return result.err
 		case ghDelegate:
-			return execRealGH(ctx, floorGHWatchDelegateArgs(args), stdout, stderr)
+			return execRealGH(ctx, args, stdout, stderr)
 		case ghHandoffAfterOutput:
 			var handoff watchFallbackHandoffError
 			if !errors.As(result.err, &handoff) {
@@ -97,7 +97,7 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 				"octopool: relay requested local fallback (%s); continuing watch with real gh\n",
 				watchSafeText(handoff.fallback.Reason),
 			)
-			return execRealGH(ctx, floorGHWatchDelegateArgs(args), stdout, stderr)
+			return execRealGH(ctx, args, stdout, stderr)
 		default:
 			return errors.New("invalid gh dispatch outcome")
 		}
