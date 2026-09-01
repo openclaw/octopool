@@ -182,7 +182,7 @@ safe relay routes:
 
 ```sh
 octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
-octopool gh pr view 85341 -R openclaw/openclaw --json number,files,commits,comments,reviews
+octopool gh pr view 85341 -R openclaw/openclaw --json number,files
 octopool gh pr list -R openclaw/openclaw --state open --limit 20 --json number,title,url
 octopool gh pr diff 85341 -R openclaw/openclaw --patch
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket,link,workflow
@@ -255,8 +255,22 @@ or incomplete collections emit no partial JSON and follow the existing typed nat
 fallback, including fresh policy checks and host pinning under active rewrite rules.
 `OCTOPOOL_NO_FALLBACK=1` keeps these cases as failures. Repeated JSON fields are accepted
 and hydrated once.
-PR-view `author`, `labels`, and `files` use native JSON projections regardless of the
-other requested fields. User authors export `id` (node ID), `is_bot`, `login`, and
+Otherwise eligible machine-readable `gh pr view` requests selecting any of `commits`,
+`comments`, or `reviews` hand the entire command to guarded native `gh` before any relay
+data read. Native GraphQL export fields cannot be proven from REST projections of these
+records. This includes mixed selections such as `--json number,files,commits`: native
+`gh` owns the complete export, the literal JSON and jq arguments, and stdout/stderr;
+Octopool does not hydrate a subset or run jq locally. The initial policy check and a
+fresh final native-dispatch policy check still apply. `OCTOPOOL_NO_FALLBACK=1` blocks
+this typed handoff with `unsupported_pr_detail_export`. Earlier direct-delegation cases
+(such as unknown fields or flags, empty JSON selection, missing jq, or an unmodeled
+selector) retain their existing guarded native behavior; this setting does not block
+all unsupported grammar. Raw REST `gh api` reads of `/repos/OWNER/REPO/pulls/N/commits`,
+`/repos/OWNER/REPO/issues/N/comments`, and `/repos/OWNER/REPO/pulls/N/reviews` remain
+supported shared reads with unprojected REST shapes. Human PR review rendering is
+unchanged. This boundary does not establish native parity for other nested exports.
+For relayed PR-view exports, `author`, `labels`, and `files` use native JSON projections.
+User authors export `id` (node ID), `is_bot`, `login`, and
 `name`; bot authors use native `is_bot` and `app/…` login keys. Labels export node IDs,
 names, descriptions (null becomes an empty string), and colors in upstream order.
 Files export only `path`, `additions`, `deletions`, and `changeType`, including renames.

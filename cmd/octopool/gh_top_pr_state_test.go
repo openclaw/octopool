@@ -99,17 +99,28 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 						"state,updatedAt", "state,headRefOid,updatedAt", "state,isDraft,updatedAt",
 						"state,headRefOid,isDraft,updatedAt", "isDraft,state,headRefOid",
 						"isDraft", "headRefOid", "headRefOid,isDraft",
-						"state,comments", "state,headRefOid,comments", "state,isDraft,comments",
-						"state,headRefOid,isDraft,comments",
+						"state,headRefOid,files", "state,headRefOid,isDraft,files",
 					} {
 						t.Run(fields, func(t *testing.T) {
 							// REST may also serve a public shape after a page parser misses.
 							wantShape := !strings.Contains(fields, "isDraft") && !strings.Contains(fields, "updatedAt")
-							prCalls, commentCalls := 0, 0
+							wantFiles := strings.Contains(fields, "files")
+							prCalls, fileCalls := 0, 0
 							relayTestServer(t, func(request map[string]any) any {
-								if request["path"] == "/repos/openclaw/clawsweeper/issues/1025/comments" {
-									commentCalls++
-									return []any{}
+								if request["path"] == "/repos/openclaw/clawsweeper/pulls/1025/files" {
+									if !wantFiles || prCalls != 1 || fileCalls != 0 {
+										t.Fatalf("unexpected file read: PR=%d files=%d", prCalls, fileCalls)
+									}
+									fileCalls++
+									headers, _ := request["headers"].(map[string]any)
+									hint, _ := request["route_hint"].(map[string]any)
+									query, _ := request["query"].(map[string]any)
+									if headers["x-octopool-public-shape"] != "pr-files-v1" || hint["pr_head_sha"] != prStateTestHead || query["page"] != "1" || query["per_page"] != "100" {
+										t.Fatalf("file request: headers=%#v hint=%#v query=%#v", headers, hint, query)
+									}
+									return []any{map[string]any{
+										"filename": "src/feature.go", "status": "modified", "additions": 7, "deletions": 2,
+									}}
 								}
 								if request["path"] != "/repos/openclaw/clawsweeper/pulls/1025" {
 									t.Fatalf("unexpected path: %v", request["path"])
@@ -117,8 +128,20 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 								prCalls++
 								headers, _ := request["headers"].(map[string]any)
 								shape, _ := headers["x-octopool-public-shape"].(string)
+								if prCalls == 2 && wantFiles {
+									if fileCalls != 1 || shape != "pr-summary-v1" || headers["cache-control"] != "max-age=0" {
+										t.Fatalf("final head read: files=%d headers=%#v", fileCalls, headers)
+									}
+									return map[string]any{"head": map[string]any{"sha": prStateTestHead}}
+								}
+								if prCalls != 1 || fileCalls != 0 {
+									t.Fatalf("unexpected PR read: PR=%d files=%d", prCalls, fileCalls)
+								}
 								if (wantShape && shape != "pr-summary-v1") || (!wantShape && shape != "") {
 									t.Fatalf("shape = %q, want public shape = %v", shape, wantShape)
+								}
+								if wantFiles && headers["cache-control"] != "max-age=0" {
+									t.Fatalf("initial file-hydration PR headers = %#v", headers)
 								}
 								pr := map[string]any{
 									"state": lifecycle.restState, "draft": lifecycle.draft, "merged": lifecycle.merged,
@@ -152,7 +175,10 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 							}
 							all := map[string]any{
 								"state": lifecycle.wantState, "isDraft": lifecycle.draft,
-								"headRefOid": prStateTestHead, "updatedAt": prStateTestTime, "comments": []any{},
+								"headRefOid": prStateTestHead, "updatedAt": prStateTestTime,
+								"files": []any{map[string]any{
+									"path": "src/feature.go", "changeType": "MODIFIED", "additions": float64(7), "deletions": float64(2),
+								}},
 							}
 							want := map[string]any{}
 							for _, field := range strings.Split(fields, ",") {
@@ -161,12 +187,12 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 							if !reflect.DeepEqual(got, want) {
 								t.Errorf("projection = %#v, want %#v", got, want)
 							}
-							wantComments := 0
-							if strings.Contains(fields, "comments") {
-								wantComments = 1
+							wantPRCalls, wantFileCalls := 1, 0
+							if wantFiles {
+								wantPRCalls, wantFileCalls = 2, 1
 							}
-							if prCalls != 1 || commentCalls != wantComments {
-								t.Errorf("requests: PR=%d comments=%d, want 1/%d", prCalls, commentCalls, wantComments)
+							if prCalls != wantPRCalls || fileCalls != wantFileCalls {
+								t.Errorf("requests: PR=%d files=%d, want %d/%d", prCalls, fileCalls, wantPRCalls, wantFileCalls)
 							}
 						})
 					}

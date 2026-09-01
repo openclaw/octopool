@@ -211,3 +211,47 @@ func (f *prChecksFixture) calls(suffix string) int {
 	}
 	return n
 }
+
+// These REST records exercise acquisition, not fabricated native GraphQL output.
+func prDetailRESTFixture(field string) []any {
+	user := map[string]any{"id": 12, "node_id": "U_alice", "login": "alice", "type": "User"}
+	switch field {
+	case "commits":
+		return []any{map[string]any{
+			"sha": metadataHead, "html_url": "https://github.com/acme/repo/commit/" + metadataHead, "author": user,
+			"commit": map[string]any{"message": "Subject\n\nBody", "author": map[string]any{"name": "Display name", "email": "alice@example.test", "date": "2026-09-01T00:00:00Z"}, "committer": map[string]any{"date": "2026-09-01T00:00:00Z"}},
+		}}
+	case "comments":
+		return []any{map[string]any{
+			"id": 31, "node_id": "IC_comment", "user": user, "author_association": "MEMBER", "body": "Comment body",
+			"created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T01:00:00Z", "html_url": "https://github.com/acme/repo/pull/7#issuecomment-31",
+		}}
+	case "reviews":
+		return []any{map[string]any{
+			"id": 41, "node_id": "PRR_review", "user": user, "author_association": "MEMBER", "body": "Review body", "state": "APPROVED",
+			"submitted_at": "2026-09-01T00:00:00Z", "commit_id": metadataHead, "html_url": "https://github.com/acme/repo/pull/7#pullrequestreview-41",
+		}}
+	default:
+		panic("unknown PR detail fixture")
+	}
+}
+
+func prDetailExportResponse(t *testing.T, checks *prChecksFixture, request map[string]any) any {
+	t.Helper()
+	switch request["path"] {
+	case "/repos/acme/repo/pulls/7":
+		return map[string]any{"number": 7, "title": "Detail fixture", "head": checks.head, "user": map[string]any{"id": 12, "node_id": "U_alice", "login": "alice", "type": "User"}}
+	case "/users/alice":
+		return map[string]any{"id": 12, "node_id": "U_alice", "login": "alice", "type": "User", "name": "Alice"}
+	case "/repos/acme/repo/pulls/7/files":
+		return []any{map[string]any{"filename": "proof.go", "status": "added", "additions": 1, "deletions": 0}}
+	case "/repos/acme/repo/pulls/7/commits":
+		return prDetailRESTFixture("commits")
+	case "/repos/acme/repo/issues/7/comments":
+		return prDetailRESTFixture("comments")
+	case "/repos/acme/repo/pulls/7/reviews":
+		return prDetailRESTFixture("reviews")
+	default:
+		return checks.response(t, request)
+	}
+}

@@ -10,12 +10,15 @@ import (
 	"testing"
 )
 
-func TestRunGHPRViewHydratesDetails(t *testing.T) {
-	prCalls := 0
+func TestRunGHPRViewHydratesFiles(t *testing.T) {
+	prCalls, fileCalls := 0, 0
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
 			prCalls++
+			if prCalls == 1 && fileCalls != 0 || prCalls == 2 && fileCalls != 1 {
+				t.Fatalf("head read order: PR calls=%d file calls=%d", prCalls, fileCalls)
+			}
 			headers := body["headers"].(map[string]any)
 			if headers["x-octopool-public-shape"] != "pr-summary-v1" || headers["cache-control"] != "max-age=0" {
 				t.Fatalf("PR headers = %#v", headers)
@@ -27,6 +30,10 @@ func TestRunGHPRViewHydratesDetails(t *testing.T) {
 				"head":     map[string]any{"sha": "0123456789abcdef0123456789abcdef01234567"},
 			}
 		case "/repos/openclaw/octopool/pulls/7/files":
+			fileCalls++
+			if prCalls != 1 {
+				t.Fatalf("files read before initial head or after final head: PR calls=%d", prCalls)
+			}
 			headers := body["headers"].(map[string]any)
 			if headers["x-octopool-public-shape"] != "pr-files-v1" {
 				t.Fatalf("files headers = %#v", headers)
@@ -36,12 +43,6 @@ func TestRunGHPRViewHydratesDetails(t *testing.T) {
 				t.Fatalf("route hint = %#v", hint)
 			}
 			return []map[string]any{{"filename": "cmd/octopool/gh.go", "status": "modified", "additions": 2, "deletions": 1}}
-		case "/repos/openclaw/octopool/pulls/7/commits":
-			return []map[string]any{{"sha": "abc1234"}}
-		case "/repos/openclaw/octopool/issues/7/comments":
-			return []map[string]any{{"body": "looks good"}}
-		case "/repos/openclaw/octopool/pulls/7/reviews":
-			return []map[string]any{{"state": "APPROVED"}}
 		default:
 			t.Fatalf("path = %v", body["path"])
 			return nil
@@ -52,19 +53,26 @@ func TestRunGHPRViewHydratesDetails(t *testing.T) {
 		"view",
 		"7",
 		"-R", "openclaw/octopool",
-		"--json", "number,files,commits,comments,reviews",
+		"--json", "number,files",
 	}, &out)
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
-	if prCalls != 2 {
-		t.Fatalf("PR calls = %d, want initial and final head reads", prCalls)
+	if prCalls != 2 || fileCalls != 1 {
+		t.Fatalf("PR calls=%d file calls=%d, want initial head, files, final head", prCalls, fileCalls)
 	}
-	got := out.String()
-	for _, want := range []string{"cmd/octopool/gh.go", "abc1234", "looks good", "APPROVED"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("out missing %q: %s", want, got)
-		}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"number": float64(7),
+		"files": []any{map[string]any{
+			"path": "cmd/octopool/gh.go", "additions": float64(2), "deletions": float64(1), "changeType": "MODIFIED",
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("file projection = %#v, want %#v", got, want)
 	}
 }
 

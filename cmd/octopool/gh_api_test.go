@@ -2,10 +2,49 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestRunGHAPIPRDetailRESTControls(t *testing.T) {
+	for _, test := range []struct{ field, path string }{
+		{"commits", "/repos/acme/repo/pulls/7/commits"},
+		{"comments", "/repos/acme/repo/issues/7/comments"},
+		{"reviews", "/repos/acme/repo/pulls/7/reviews"},
+	} {
+		t.Run(test.field, func(t *testing.T) {
+			body := prDetailRESTFixture(test.field)
+			data := 0
+			_, policies := rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				data++
+				req := decodeCLIRequest(t, w, r)
+				headers, _ := req["headers"].(map[string]any)
+				if req["method"] != "GET" || req["path"] != test.path || req["route_hint"] != nil || headers["x-octopool-public-shape"] != nil {
+					t.Errorf("raw REST must use existing unprojected route: %v", req)
+				}
+				writeCLIEnvelope(t, w, body)
+			})
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			capture := captureRewriteGH(t)
+			var out, stderr bytes.Buffer
+			err := runGH(t.Context(), []string{"api", strings.TrimPrefix(test.path, "/")}, &out, &stderr)
+			want, marshalErr := json.Marshal(body)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			if err != nil || !bytes.Equal(bytes.TrimSpace(out.Bytes()), want) || stderr.Len() != 0 || data != 1 || policies.Load() != 2 {
+				t.Fatalf("raw REST changed: err=%v data=%d policies=%d out=%q want=%q stderr=%q", err, data, policies.Load(), out.String(), want, stderr.String())
+			}
+			if _, err := os.Stat(capture); !os.IsNotExist(err) {
+				t.Fatal("raw detail GET must still relay, not use native GraphQL export")
+			}
+		})
+	}
+}
 
 func TestParseGHAPIArgs(t *testing.T) {
 	request, fallback, err := parseGHAPIArgs([]string{

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -696,18 +697,32 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	}
 }
 
-func TestRunGHPRViewFallsBackWhenDetailPaginationIsExhausted(t *testing.T) {
-	files := make([]map[string]any, relayPageSize)
-	for index := range files {
-		files[index] = map[string]any{"filename": "file-" + strconv.Itoa(index)}
-	}
+func TestRunGHPRViewFallsBackWhenFilePaginationIsExhausted(t *testing.T) {
+	prCalls, fileCalls := 0, 0
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"number": 7}
+			prCalls++
+			if prCalls != 1 || fileCalls != 0 {
+				t.Fatalf("unexpected head read: PR calls=%d file calls=%d", prCalls, fileCalls)
+			}
+			return map[string]any{"number": 7, "head": map[string]any{"sha": "0123456789abcdef0123456789abcdef01234567"}}
 		case "/repos/openclaw/octopool/pulls/7/files":
+			fileCalls++
+			query := body["query"].(map[string]any)
+			if prCalls != 1 || query["page"] != strconv.Itoa(fileCalls) || query["per_page"] != "100" {
+				t.Fatalf("file call %d: PR calls=%d query=%#v", fileCalls, prCalls, query)
+			}
+			files := make([]map[string]any, relayPageSize)
+			for index := range files {
+				files[index] = map[string]any{
+					"filename": "file-" + strconv.Itoa((fileCalls-1)*relayPageSize+index),
+					"status":   "modified", "additions": 2, "deletions": 1,
+				}
+			}
 			return files
 		default:
+			t.Fatalf("path = %v", body["path"])
 			return nil
 		}
 	})
@@ -716,8 +731,12 @@ func TestRunGHPRViewFallsBackWhenDetailPaginationIsExhausted(t *testing.T) {
 	result := handleGHPR(t.Context(), []string{
 		"view", "7", "-R", "openclaw/octopool", "--json", "number,files",
 	}, &out)
-	if result.action != ghFail || !isLocalFallback(result.err) {
+	var fallback localFallbackError
+	if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "pagination_exhausted" || fallback.Relay != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if fileCalls != 10 || prCalls != 1 || out.Len() != 0 {
+		t.Fatalf("pagination refusal: file calls=%d PR calls=%d output=%q", fileCalls, prCalls, out.String())
 	}
 }
 

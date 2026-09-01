@@ -146,6 +146,9 @@ func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, op
 }
 
 func relayPRView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
+	if hasJSONField(opts.json, "commits") || hasJSONField(opts.json, "comments") || hasJSONField(opts.json, "reviews") {
+		return localFallbackError{Reason: "unsupported_pr_detail_export"}
+	}
 	headers := prViewHeaders(opts)
 	if hasJSONField(opts.json, "files") || needsLivePRRead(opts.json) || freshReadRequested() {
 		if headers == nil {
@@ -278,24 +281,6 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			}
 			hydratedHeadSHA = sha
 			pr["files"] = mapped
-		case "commits":
-			commits, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "commits"), nil)
-			if err != nil {
-				return err
-			}
-			pr["commits"] = mapPRCommits(commits)
-		case "comments":
-			comments, err := relayPagedArray(ctx, client, repoPath(repo, "issues", number, "comments"), nil)
-			if err != nil {
-				return err
-			}
-			pr["comments"] = mapPRComments(comments)
-		case "reviews":
-			reviews, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "reviews"), nil)
-			if err != nil {
-				return err
-			}
-			pr["reviews"] = mapPRReviews(reviews)
 		}
 	}
 	if hydratedHeadSHA != "" {
@@ -354,7 +339,7 @@ func normalizePRViewMergeable(pr map[string]any) {
 func prViewHeaders(opts ghTopOptions) map[string]string {
 	for _, field := range opts.json {
 		switch field {
-		case "files", "commits", "comments", "reviews", "statusCheckRollup":
+		case "files", "statusCheckRollup":
 			continue
 		}
 		if !supportedPublicPRViewFields[field] {
@@ -430,71 +415,4 @@ func mapPRFiles(items []any) ([]any, error) {
 		})
 	}
 	return out, nil
-}
-
-func mapPRCommits(items []any) []any {
-	return mapObjects(items, func(item map[string]any) map[string]any {
-		commit, _ := item["commit"].(map[string]any)
-		message := firstString(commit, "message")
-		headline, body, _ := strings.Cut(message, "\n\n")
-		if headline == "" {
-			headline = message
-		}
-		return map[string]any{
-			"oid":             firstString(item, "sha"),
-			"messageHeadline": headline,
-			"messageBody":     body,
-			"committedDate":   nestedStringValue(item, "commit", "committer", "date"),
-			"authoredDate":    nestedStringValue(item, "commit", "author", "date"),
-			"url":             firstString(item, "html_url"),
-			"authors":         commitAuthors(item),
-		}
-	})
-}
-
-func mapPRComments(items []any) []any {
-	return mapObjects(items, func(item map[string]any) map[string]any {
-		return map[string]any{
-			"author":    item["user"],
-			"body":      item["body"],
-			"createdAt": item["created_at"],
-			"updatedAt": item["updated_at"],
-			"url":       item["html_url"],
-		}
-	})
-}
-
-func mapPRReviews(items []any) []any {
-	return mapObjects(items, func(item map[string]any) map[string]any {
-		return map[string]any{
-			"author":      item["user"],
-			"body":        item["body"],
-			"state":       item["state"],
-			"submittedAt": item["submitted_at"],
-			"url":         item["html_url"],
-		}
-	})
-}
-
-func mapObjects(items []any, mapper func(map[string]any) map[string]any) []any {
-	out := make([]any, 0, len(items))
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		out = append(out, mapper(item))
-	}
-	return out
-}
-
-func commitAuthors(item map[string]any) []any {
-	login := nestedStringValue(item, "author", "login")
-	if login == "" {
-		login = nestedStringValue(item, "commit", "author", "name")
-	}
-	if login == "" {
-		return []any{}
-	}
-	return []any{map[string]any{"login": login}}
 }

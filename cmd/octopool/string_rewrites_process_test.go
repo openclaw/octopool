@@ -87,6 +87,17 @@ func TestRewriteCaptureProcess(t *testing.T) {
 	if err := os.WriteFile(capturePath, data, 0600); err != nil {
 		os.Exit(81)
 	}
+	if path := os.Getenv("OCTOPOOL_TEST_REWRITE_CALLS"); path != "" {
+		file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			os.Exit(84)
+		}
+		_, err = file.WriteString("child\n")
+		closeErr := file.Close()
+		if err != nil || closeErr != nil {
+			os.Exit(84)
+		}
+	}
 	if os.Getenv("OCTOPOOL_TEST_REWRITE_WAIT") == "1" {
 		interrupt := make(chan os.Signal, 1)
 		signal.Notify(interrupt, os.Interrupt)
