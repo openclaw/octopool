@@ -240,7 +240,8 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			if conclusion == "" {
 				return errors.New("workflow run confirmation did not include conclusion")
 			}
-			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, opts.id, attempt, &backoff)
+			owner := runJobOwner{id: opts.id, headSHA: firstString(confirmed, "head_sha")}
+			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, owner, attempt, &backoff)
 			if err != nil {
 				return runWatchError(err, true)
 			}
@@ -289,15 +290,16 @@ func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id st
 	return run, nil
 }
 
-func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, id string, attempt int, backoff *watchBackoff) ([]any, error) {
+func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, backoff *watchBackoff) ([]any, error) {
 	var jobs []any
 	err := retryWatchTick(ctx, backoff, func() error {
 		jobs = jobs[:0]
+		seen := map[int64]bool{}
 		total := 0
 		for page := 1; page <= maxRelayPages; page++ {
 			envelope, err := client.do(ctx, ghAPIRequest{
 				method: "GET",
-				path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(attempt), "jobs"),
+				path:   repoPath(repo, "actions", "runs", owner.id, "attempts", strconv.Itoa(attempt), "jobs"),
 				query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
 				headers: map[string]string{
 					"x-octopool-public-shape": publicShapeActionsJobs,
@@ -309,7 +311,7 @@ func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, i
 			if err != nil {
 				return err
 			}
-			pageJobs, pageTotal, err := runJobsPage(envelope)
+			pageJobs, pageTotal, err := runJobsPage(envelope, owner, seen)
 			if err != nil {
 				return err
 			}

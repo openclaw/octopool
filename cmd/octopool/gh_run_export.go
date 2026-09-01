@@ -44,34 +44,14 @@ type machineRun struct {
 	jobs         []machineJobExport
 }
 
-// Null is a no-op for native primitive fields, including after a duplicate
-// non-null assignment. A pointer would incorrectly erase association evidence.
-type runAssociation[T int64 | string] struct {
-	value   T
-	present bool
-}
-
-func (a *runAssociation[T]) UnmarshalJSON(raw []byte) error {
-	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return nil
-	}
-	if err := json.Unmarshal(raw, &a.value); err != nil {
-		return err
-	}
-	a.present = true
-	return nil
-}
-
 type machineJob struct {
-	ID          int64
+	runJobIdentity
 	Name        string
 	Status      string
 	Conclusion  string
-	StartedAt   time.Time              `json:"started_at"`
-	CompletedAt time.Time              `json:"completed_at"`
-	URL         string                 `json:"html_url"`
-	RunID       runAssociation[int64]  `json:"run_id"`
-	HeadSha     runAssociation[string] `json:"head_sha"`
+	StartedAt   time.Time `json:"started_at"`
+	CompletedAt time.Time `json:"completed_at"`
+	URL         string    `json:"html_url"`
 	Steps       []machineStep
 }
 
@@ -280,6 +260,7 @@ func machineRunJobs(envelope relayEnvelope, run machineRun) ([]machineJobExport,
 	}
 	jobs := make([]machineJobExport, 0, len(records))
 	seen := map[int64]bool{}
+	owner := runJobOwner{id: strconv.FormatInt(run.ID, 10), headSHA: run.HeadSha}
 	for _, record := range records {
 		if bytes.TrimSpace(record)[0] != '{' {
 			return nil, unsupportedRunExport()
@@ -288,20 +269,11 @@ func machineRunJobs(envelope relayEnvelope, run machineRun) ([]machineJobExport,
 		if err := json.Unmarshal(record, &job); err != nil {
 			return nil, err
 		}
-		if job.ID <= 0 || !safeRunExportInteger(job.ID) || seen[job.ID] || !safeRunExportInteger(job.RunID.value) {
-			return nil, unsupportedRunExport()
-		}
-		seen[job.ID] = true
-		if job.RunID.present && job.RunID.value != run.ID {
-			return nil, errors.New("workflow job did not match owned run")
-		}
-		if job.HeadSha.present && job.HeadSha.value != "" {
-			if run.HeadSha == "" {
+		if err := job.runJobIdentity.validate(owner, seen); err != nil {
+			if errors.Is(err, errInvalidRunJobIdentity) || errors.Is(err, errUnprovedRunJobHead) {
 				return nil, unsupportedRunExport()
 			}
-			if job.HeadSha.value != run.HeadSha {
-				return nil, errors.New("workflow job did not match historical run head")
-			}
+			return nil, err
 		}
 		steps := make([]machineStepExport, 0, len(job.Steps))
 		for _, step := range job.Steps {

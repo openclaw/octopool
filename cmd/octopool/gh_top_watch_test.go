@@ -37,7 +37,7 @@ func TestGHRunWatchPrintsTransitionsAndFetchesJobsOnce(t *testing.T) {
 			return map[string]any{
 				"total_count": 1,
 				"jobs": []map[string]any{{
-					"name": "Test", "status": "completed", "conclusion": "failure",
+					"id": 7, "name": "Test", "status": "completed", "conclusion": "failure",
 					"steps": []map[string]any{
 						{"name": "Compile", "status": "completed", "conclusion": "success"},
 						{"name": "Unit tests", "status": "completed", "conclusion": "failure"},
@@ -732,8 +732,8 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/actions/runs/42":
-			return map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 1}
-		case "/repos/openclaw/octopool/actions/runs/42/attempts/1/jobs":
+			return map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "owned-head"}
+		case "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs":
 			page := body["query"].(map[string]any)["page"].(string)
 			jobsRequests = append(jobsRequests, page)
 			jobs := []map[string]any{}
@@ -744,7 +744,7 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 				offset = relayPageSize
 			}
 			for index := 0; index < count; index++ {
-				jobs = append(jobs, map[string]any{"id": offset + index, "name": "job", "status": "completed", "conclusion": "success"})
+				jobs = append(jobs, map[string]any{"id": offset + index + 1, "name": "job", "status": "completed", "conclusion": "success", "run_id": 42, "head_sha": "owned-head", "run_attempt": 1})
 			}
 			return map[string]any{"total_count": 150, "jobs": jobs}
 		default:

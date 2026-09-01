@@ -118,7 +118,7 @@ func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id st
 	if err != nil {
 		return err
 	}
-	jobs, err := runJobs(envelope)
+	jobs, err := runJobs(envelope, runJobOwner{id: id, headSHA: firstString(run, "head_sha")})
 	if err != nil {
 		return err
 	}
@@ -134,43 +134,56 @@ func positiveJSONInt(value any) (int, bool) {
 	return int(parsed), true
 }
 
-func runJobs(envelope relayEnvelope) ([]any, error) {
-	jobs, total, err := runJobsPage(envelope)
+func runJobs(envelope relayEnvelope, owner runJobOwner) ([]any, error) {
+	jobs, total, err := runJobsPage(envelope, owner, map[int64]bool{})
 	if err != nil {
 		return nil, err
 	}
-	if total > len(jobs) {
+	link, _ := relayResponseHeader(envelope.Headers, "link")
+	_, next := relayNextLink(link)
+	if total > len(jobs) || next {
 		return nil, localFallbackError{Reason: "workflow jobs response requires pagination"}
 	}
 	return jobs, nil
 }
 
-func runJobsPage(envelope relayEnvelope) ([]any, int, error) {
+func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool) ([]any, int, error) {
 	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
 		return nil, 0, err
 	}
-	var response map[string]any
+	var response struct {
+		Total any               `json:"total_count"`
+		Jobs  []json.RawMessage `json:"jobs"`
+	}
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, 0, err
 	}
-	rawJobs, ok := response["jobs"].([]any)
-	if !ok {
+	if response.Jobs == nil {
 		return nil, 0, errors.New("workflow jobs response did not include jobs")
 	}
-	total, ok := jsonNumericInt(response["total_count"])
+	total, ok := jsonNumericInt(response.Total)
 	if !ok {
 		return nil, 0, localFallbackError{Reason: "workflow jobs response did not include a valid total_count"}
 	}
-	jobs := make([]any, 0, len(rawJobs))
-	for _, rawJob := range rawJobs {
-		job, ok := rawJob.(map[string]any)
-		if !ok {
-			return nil, 0, errors.New("workflow jobs response included an invalid job")
+	if len(response.Jobs) > relayPageSize || len(response.Jobs) > total {
+		return nil, 0, localFallbackError{Reason: "workflow jobs pagination contradicts total_count or page size"}
+	}
+	jobs := make([]any, 0, len(response.Jobs))
+	for _, rawJob := range response.Jobs {
+		var identity runJobIdentity
+		if err := json.Unmarshal(rawJob, &identity); err != nil {
+			return nil, 0, localFallbackError{Reason: "workflow jobs response included invalid identity metadata"}
 		}
-		mapped := map[string]any{}
+		if err := identity.validate(owner, seen); err != nil {
+			return nil, 0, localFallbackError{Reason: err.Error()}
+		}
+		var job map[string]any
+		if err := json.Unmarshal(rawJob, &job); err != nil {
+			return nil, 0, err
+		}
+		mapped := map[string]any{"databaseId": float64(identity.ID)}
 		for field, path := range map[string][]string{
-			"databaseId":  {"id"},
 			"name":        {"name"},
 			"status":      {"status"},
 			"conclusion":  {"conclusion"},

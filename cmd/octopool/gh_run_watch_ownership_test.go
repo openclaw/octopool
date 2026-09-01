@@ -2,12 +2,75 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGHRunWatchRejectsInvalidJobIdentity(t *testing.T) {
+	for _, variant := range []string{"duplicate within page", "duplicate across pages", "foreign run", "foreign head", "missing id", "null id", "zero id", "negative id", "fractional id", "string id", "unsafe id", "overflow id"} {
+		t.Run(variant, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			recordWatchSleeps(t)
+			jobCalls := 0
+			relayTestServer(t, func(body map[string]any) any {
+				if !strings.HasSuffix(body["path"].(string), "/jobs") {
+					return map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "owned-head"}
+				}
+				jobCalls++
+				job := map[string]any{"id": 7, "name": "Check", "conclusion": "success", "run_id": 42, "head_sha": "owned-head"}
+				jobs, total := []map[string]any{job}, 1
+				switch variant {
+				case "duplicate within page":
+					jobs, total = append(jobs, job), 2
+				case "duplicate across pages":
+					total = relayPageSize + 1
+					if body["query"].(map[string]any)["page"] == "1" {
+						jobs = nil
+						for id := 1; id <= relayPageSize; id++ {
+							jobs = append(jobs, map[string]any{"id": id, "name": "Check", "conclusion": "success"})
+						}
+					}
+				case "foreign run":
+					job["run_id"] = 43
+				case "foreign head":
+					job["head_sha"] = "foreign-head"
+				case "missing id":
+					delete(job, "id")
+				case "null id":
+					job["id"] = nil
+				case "zero id":
+					job["id"] = 0
+				case "negative id":
+					job["id"] = -7
+				case "fractional id":
+					job["id"] = 7.5
+				case "string id":
+					job["id"] = "7"
+				case "unsafe id":
+					job["id"] = json.RawMessage(`9007199254740993`)
+				case "overflow id":
+					job["id"] = json.RawMessage(`9223372036854775808`)
+				}
+				return map[string]any{"total_count": total, "jobs": jobs}
+			})
+			var stdout, stderr bytes.Buffer
+			err := runGH(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo"}, &stdout, &stderr)
+			wantCalls := 1
+			if variant == "duplicate across pages" {
+				wantCalls = 2
+			}
+			if err == nil || jobCalls != wantCalls || shouldRunRealGH(err) || strings.Contains(stdout.String(), fakeGHArgvPrefix) ||
+				strings.Contains(stdout.String(), "job ") || strings.Contains(stdout.String(), "completed with") {
+				t.Fatalf("job calls=%d err=%v stdout=%q stderr=%q", jobCalls, err, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
 
 func TestGHRunWatchKeepsRelayOwnership(t *testing.T) {
 	for _, phase := range []string{"initial", "poll", "confirmation", "jobs"} {
@@ -66,7 +129,7 @@ func TestGHRunWatchKeepsRelayOwnership(t *testing.T) {
 }
 
 func TestGHRunWatchRejectsIncompleteJobs(t *testing.T) {
-	for _, variant := range []string{"rerun count mismatch", "missing count", "fractional count", "changed count", "next link", "short next page", "cap"} {
+	for _, variant := range []string{"rerun count mismatch", "missing count", "fractional count", "changed count", "next link", "short next page", "oversized page", "cap"} {
 		t.Run(variant, func(t *testing.T) {
 			t.Setenv("OCTOPOOL_GH_PATH", fakeGHExit(t, 0))
 			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
@@ -97,6 +160,8 @@ func TestGHRunWatchRejectsIncompleteJobs(t *testing.T) {
 					if jobCalls == 2 {
 						count = 1
 					}
+				case "oversized page":
+					count, total = relayPageSize+1, relayPageSize+1
 				case "cap":
 					count, total = relayPageSize, maxRelayPages*relayPageSize+1
 				}
@@ -124,6 +189,36 @@ func TestGHRunWatchRejectsIncompleteJobs(t *testing.T) {
 	}
 }
 
+func TestGHRunWatchJobsRetryClearsCollection(t *testing.T) {
+	var pages []string
+	sleeps := recordWatchSleeps(t)
+	relayTestServer(t, func(request map[string]any) any {
+		page := request["query"].(map[string]any)["page"].(string)
+		pages = append(pages, page)
+		if len(pages) == 2 {
+			return "invalid jobs response" // Synthetic decode failure after a valid page.
+		}
+		count, offset := relayPageSize, 0
+		if page == "2" {
+			count, offset = 1, relayPageSize
+		}
+		jobs := make([]map[string]any, count)
+		for index := range jobs {
+			jobs[index] = map[string]any{"id": offset + index + 1, "run_id": 42}
+		}
+		return map[string]any{"total_count": relayPageSize + 1, "jobs": jobs}
+	})
+	client, err := newGHRelayClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backoff := newWatchBackoff(watchMinInterval)
+	jobs, err := relayWatchRunJobs(t.Context(), client, "acme/repo", runJobOwner{id: "42"}, 2, &backoff)
+	if err != nil || len(jobs) != relayPageSize+1 || strings.Join(pages, ",") != "1,2,1,2" || len(*sleeps) != 1 {
+		t.Fatalf("err=%v jobs=%d pages=%v sleeps=%v", err, len(jobs), pages, *sleeps)
+	}
+}
+
 func TestGHRunWatchRerunAttemptAndExitStatus(t *testing.T) {
 	for _, conclusion := range []string{"success", "failure", "cancelled", "timed_out"} {
 		for _, exitStatus := range []bool{false, true} {
@@ -135,18 +230,18 @@ func TestGHRunWatchRerunAttemptAndExitStatus(t *testing.T) {
 					case "/repos/openclaw/octopool/actions/runs/42":
 						runCalls++
 						if runCalls == 1 {
-							return map[string]any{"status": "completed", "conclusion": "failure", "run_attempt": 1}
+							return map[string]any{"status": "completed", "conclusion": "failure", "run_attempt": 1, "head_sha": "old-head"}
 						}
 						if body["headers"].(map[string]any)["cache-control"] != "max-age=0" {
 							t.Error("confirmation must be fresh")
 						}
-						return map[string]any{"status": "completed", "conclusion": conclusion, "run_attempt": 2}
+						return map[string]any{"status": "completed", "conclusion": conclusion, "run_attempt": 2, "head_sha": "confirmed-head"}
 					case "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs":
 						jobCalls++
 						// Preserve reused successes if the attempt endpoint returns them;
 						// never fetch attempt 1 to reconstruct or replace this snapshot.
 						return map[string]any{"total_count": 3, "jobs": []map[string]any{
-							{"id": 1, "name": "actions", "run_attempt": 1, "conclusion": "success"},
+							{"id": 1, "name": "actions", "run_attempt": 1, "conclusion": "success", "run_id": 42, "head_sha": "confirmed-head"},
 							{"id": 2, "name": "JavaScript", "run_attempt": 1, "conclusion": "success"},
 							{"id": 3, "name": "Swift", "run_attempt": 2, "conclusion": conclusion},
 						}}
@@ -199,6 +294,60 @@ func TestCLIRunWatchPaginationFailureDoesNotLaunchNative(t *testing.T) {
 				t.Fatalf("calls=%d err=%v stdout=%q stderr=%q", calls, result.err, result.stdout, result.stderr)
 			}
 		})
+	}
+}
+
+func TestCLIRunWatchInvalidJobsDoesNotLaunchNative(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and executes the CLI binary")
+	}
+	bin := buildCLIBinary(t)
+	for _, variant := range []string{"duplicate", "foreign run", "foreign head"} {
+		for _, exitStatus := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/exit-status=%t", variant, exitStatus), func(t *testing.T) {
+				calls := 0
+				server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {
+					request := decodeCLIRequest(t, w, r)
+					calls++
+					if calls <= 2 {
+						if request["path"] != "/repos/acme/repo/actions/runs/42" {
+							t.Errorf("unexpected run path: %v", request["path"])
+						}
+						if calls == 2 && request["headers"].(map[string]any)["cache-control"] != "max-age=0" {
+							t.Error("completion confirmation must be fresh")
+						}
+						writeCLIEnvelope(t, w, map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "owned"})
+						return
+					}
+					if request["path"] != "/repos/acme/repo/actions/runs/42/attempts/2/jobs" || request["headers"].(map[string]any)["cache-control"] != "max-age=0" {
+						t.Error("jobs must belong to the confirmed attempt and be fresh")
+					}
+					job := map[string]any{"id": 7, "name": "Check", "conclusion": "success"}
+					jobs := []map[string]any{job}
+					switch variant {
+					case "duplicate":
+						jobs = append(jobs, job)
+					case "foreign run":
+						job["run_id"] = 43
+					case "foreign head":
+						job["head_sha"] = "foreign"
+					}
+					writeCLIEnvelope(t, w, map[string]any{"total_count": len(jobs), "jobs": jobs})
+				})
+				args := []string{"gh", "run", "watch", "42", "-R", "acme/repo"}
+				if exitStatus {
+					args = append(args, "--exit-status")
+				}
+				result := runCLI(t, bin, server.URL, map[string]string{
+					"OCTOPOOL_GH_PATH": fakeGHExit(t, 0), "OCTOPOOL_NO_FALLBACK": "", "OCTOPOOL_RELAY_RETRIES": "0",
+				}, args...)
+				if result.err == nil || calls != 3 || strings.Contains(result.stdout, fakeGHArgvPrefix) ||
+					strings.Contains(result.stdout, "job ") || strings.Contains(result.stdout, "completed with") ||
+					!strings.Contains(result.stdout, "Watching run 42") || !strings.Contains(result.stderr, "run watch stopped without local gh fallback") {
+					t.Fatalf("calls=%d err=%v stdout=%q stderr=%q", calls, result.err, result.stdout, result.stderr)
+				}
+			})
+		}
 	}
 }
 

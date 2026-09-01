@@ -358,6 +358,10 @@ they never start a personal-token watcher. This applies to the initial read, lat
 fresh completion confirmation, and final job hydration. Jobs are fetched only after a fresh
 completed run response, using its exact `run_attempt`. Missing or inconsistent job metadata
 fails explicitly without printing a partial job summary or a successful completion message.
+Job IDs must be positive, unique across all pages, and within the relay's safe-integer
+range. Supplied `run_id` and nonempty `head_sha` must match the owning run; optional
+ownership fields may be absent from public-page-derived jobs. Human run views validate
+the same job identities before rendering, retaining their guarded fallback on invalid data.
 Octopool preserves the job set returned for that attempt, including reused successes when
 present, and does not reconstruct missing jobs from earlier attempts. With complete data,
 `--exit-status` returns 1 for a non-successful run; without it, a completed run returns 0.

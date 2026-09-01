@@ -220,13 +220,110 @@ func TestRunGHRunListMapsDisplayTitle(t *testing.T) {
 }
 
 func TestRunJobsFallsBackWhenPaginationIsRequired(t *testing.T) {
-	_, err := runJobs(relayEnvelope{
-		Status:       200,
-		BodyEncoding: "json",
-		Body:         []byte(`{"total_count":101,"jobs":[{"id":1}]}`),
-	})
-	if !isLocalFallback(err) {
-		t.Fatalf("err = %v", err)
+	for _, variant := range []string{"missing jobs", "excess jobs", "next link", "oversized page"} {
+		t.Run(variant, func(t *testing.T) {
+			body := `{"total_count":101,"jobs":[{"id":1}]}`
+			headers := map[string]string{}
+			switch variant {
+			case "excess jobs":
+				body = `{"total_count":0,"jobs":[{"id":1}]}`
+			case "next link":
+				body = `{"total_count":1,"jobs":[{"id":1}]}`
+				headers["Link"] = `<https://api.github.com/repos/acme/repo/actions/runs/42/attempts/2/jobs?page=2>; rel="next"`
+			case "oversized page":
+				var jobs []string
+				for id := 1; id <= relayPageSize+1; id++ {
+					jobs = append(jobs, fmt.Sprintf(`{"id":%d}`, id))
+				}
+				body = fmt.Sprintf(`{"total_count":%d,"jobs":[%s]}`, len(jobs), strings.Join(jobs, ","))
+			}
+			jobs, err := runJobs(relayEnvelope{Status: 200, BodyEncoding: "json", Body: []byte(body), Headers: headers}, runJobOwner{id: "42"})
+			if !isLocalFallback(err) || jobs != nil {
+				t.Fatalf("err=%v jobs=%v", err, jobs)
+			}
+		})
+	}
+}
+
+func TestRunJobsIdentityAndOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name, jobs, head string
+		valid            bool
+	}{
+		{"optional metadata", `[{"id":7}]`, "", true},
+		{"null metadata", `[{"id":7,"run_id":null,"head_sha":null}]`, "", true},
+		{"empty head", `[{"id":7,"run_id":42,"head_sha":""}]`, "", true},
+		{"reused job", `[{"id":7,"run_id":42,"head_sha":"owned","run_attempt":1}]`, "owned", true},
+		{"safe id", `[{"id":9007199254740991}]`, "", true},
+		{"id then null", `[{"id":7,"id":null}]`, "", true},
+		{"duplicate ids", `[{"id":7},{"id":7}]`, "", false},
+		{"missing id", `[{}]`, "", false},
+		{"null id", `[{"id":null}]`, "", false},
+		{"zero id", `[{"id":0}]`, "", false},
+		{"negative id", `[{"id":-7}]`, "", false},
+		{"fractional id", `[{"id":7.5}]`, "", false},
+		{"string id", `[{"id":"7"}]`, "", false},
+		{"bool id", `[{"id":true}]`, "", false},
+		{"unsafe id", `[{"id":9007199254740992}]`, "", false},
+		{"overflow id", `[{"id":9223372036854775808}]`, "", false},
+		{"foreign run", `[{"id":7,"run_id":43}]`, "", false},
+		{"foreign head", `[{"id":7,"head_sha":"foreign"}]`, "owned", false},
+		{"unproved head", `[{"id":7,"head_sha":"foreign"}]`, "", false},
+		{"malformed run", `[{"id":7,"run_id":"42"}]`, "", false},
+		{"unsafe run", `[{"id":7,"run_id":9007199254740993}]`, "", false},
+		{"nonpositive run", `[{"id":7,"run_id":0}]`, "", false},
+		{"malformed head", `[{"id":7,"head_sha":42}]`, "owned", false},
+		{"run then null", `[{"id":7,"run_id":43,"run_id":null}]`, "", false},
+		{"head then null", `[{"id":7,"head_sha":"foreign","head_sha":null}]`, "owned", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var records []json.RawMessage
+			if err := json.Unmarshal([]byte(test.jobs), &records); err != nil {
+				t.Fatal(err)
+			}
+			envelope := relayEnvelope{BodyEncoding: "json", Body: []byte(fmt.Sprintf(`{"total_count":%d,"jobs":%s}`, len(records), test.jobs))}
+			jobs, humanErr := runJobs(envelope, runJobOwner{id: "00042", headSHA: test.head})
+			machineJobs, machineErr := machineRunJobs(envelope, machineRun{ID: 42, HeadSha: test.head, Attempt: 2})
+			if (humanErr == nil) != test.valid || (machineErr == nil) != test.valid {
+				t.Fatalf("valid=%t human=%v machine=%v", test.valid, humanErr, machineErr)
+			}
+			if !test.valid {
+				if jobs != nil || machineJobs != nil {
+					t.Fatal("invalid identity returned a partial collection")
+				}
+				return
+			}
+			if len(jobs) != len(machineJobs) || len(jobs) != len(records) {
+				t.Fatal("valid collection lost jobs")
+			}
+			for index, job := range jobs {
+				if job.(map[string]any)["databaseId"] != float64(machineJobs[index].DatabaseID) {
+					t.Fatal("human and machine identity projections disagree")
+				}
+			}
+		})
+	}
+}
+
+func TestHumanRunViewRejectsContradictoryJobs(t *testing.T) {
+	for _, jobs := range []string{`[{"id":7},{"id":7}]`, `[{"id":7,"run_id":43}]`, `[{"id":7,"head_sha":"foreign"}]`} {
+		t.Run(jobs, func(t *testing.T) {
+			relayTestServer(t, func(request map[string]any) any {
+				if strings.HasSuffix(request["path"].(string), "/jobs") {
+					var records []json.RawMessage
+					if err := json.Unmarshal([]byte(jobs), &records); err != nil {
+						t.Fatal(err)
+					}
+					return map[string]any{"total_count": len(records), "jobs": records}
+				}
+				return map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "owned"}
+			})
+			var out bytes.Buffer
+			result := handleGHRun(t.Context(), []string{"view", "42", "-R", "acme/repo"}, &out)
+			if !isLocalFallback(result.err) || out.Len() != 0 {
+				t.Fatalf("human view must fail before output with ordinary fallback available: err=%v stdout=%q", result.err, out.String())
+			}
+		})
 	}
 }
 
