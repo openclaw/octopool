@@ -549,7 +549,11 @@ describe("identity routing lifecycle boundaries", () => {
       const createdAt = new Date(Date.now() - 3_700_000).toISOString();
       await env.ACTIONS_LOGS.put(key, "old synthetic log", {
         httpMetadata: { contentType: "text/plain" },
-        customMetadata: { "created-at": createdAt, "body-encoding": "text" },
+        customMetadata: {
+          "created-at": createdAt,
+          "body-encoding": "text",
+          "body-codec": "lossless-v1",
+        },
       });
       let probes = 0;
       const upstream = vi.fn<typeof fetch>(async (input, init) => {

@@ -5,14 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
-import {
-  terminalLogCacheKey,
-  terminalLogCacheProof,
-  terminalLogRunCompleted,
-} from "../../src/terminal-log-cache";
+import { terminalLogCacheKey, terminalLogCacheProof } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } from "./harness";
 import { historicalHead, runCard } from "../fixtures/actions-ownership";
+import { envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
 
 type RelayEnvelope = {
   status: number;
@@ -25,6 +22,114 @@ type RelayEnvelope = {
 const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
 describe("terminal Actions log cache", () => {
   beforeEach(seedPool);
+
+  it.each([opaqueBytes[0], opaqueBytes[2], opaqueBytes[5], opaqueBytes[6]])(
+    "stores literal $name bytes in native R2 and reuses them after fresh completion",
+    async (fixture) => {
+      const upstream = terminalLogUpstream("completed", new Uint8Array(fixture.bytes));
+      vi.stubGlobal("fetch", upstream);
+      const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+      for (const cache of ["miss", "hit"]) {
+        const response = await relay(LOG_PATH);
+        expect(response.status).toBe(200);
+        const wire = await response.json<RelayEnvelope>();
+        expect.soft(envelopeBytes(wire)).toEqual(fixture.bytes);
+        expect.soft(wire).toMatchObject({
+          status: 200,
+          body_encoding: fixture.encoding,
+          headers: { "content-type": "text/plain" },
+          relay: { cache },
+        });
+        const object = await env.ACTIONS_LOGS.get(key);
+        expect(object).not.toBeNull();
+        expect.soft([...new Uint8Array(await object!.arrayBuffer())]).toEqual(fixture.bytes);
+        expect.soft(object!.customMetadata).toMatchObject({
+          "body-codec": "lossless-v1",
+          "body-encoding": fixture.encoding,
+          "created-at": expect.any(String),
+        });
+      }
+      expect(jobMetadataCalls(upstream)).toBe(2);
+      expect(logBackendCalls(upstream)).toBe(1);
+      expect(downloadCalls(upstream)).toBe(1);
+    },
+  );
+
+  it.each([
+    { marker: undefined, age: "-10 minutes", encoding: "text", body: "�A" },
+    { marker: undefined, age: "-2 hours", encoding: "text", body: "�A" },
+    { marker: "lossless-v0", age: "-2 hours", encoding: "text", body: "�A" },
+    { marker: "lossless-v1-extra", age: "-10 minutes", encoding: "text", body: "�A" },
+    {
+      marker: undefined,
+      age: "-10 minutes",
+      encoding: "base64",
+      body: new Uint8Array([0xff, 0x41]),
+    },
+  ])(
+    "redownloads legacy R2 $encoding / $marker / $age before serving or renewing",
+    async (fixture) => {
+      const original = [0xff, 0x41];
+      const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+      await seedLegacyLog(key, fixture);
+      const rejected = await env.ACTIONS_LOGS.get(key);
+      expect(rejected).not.toBeNull();
+      const cancel = vi.spyOn(rejected!.body, "cancel");
+      vi.spyOn(env.ACTIONS_LOGS, "get").mockResolvedValueOnce(rejected);
+      const upstream = terminalLogUpstream("completed", new Uint8Array(original));
+      vi.stubGlobal("fetch", upstream);
+      const remove = vi.spyOn(env.ACTIONS_LOGS, "delete");
+      const wire = await (await relay(LOG_PATH)).json<RelayEnvelope>();
+      expect.soft(envelopeBytes(wire)).toEqual(original);
+      expect.soft(wire.relay.cache).toBe("miss");
+      expect.soft(downloadCalls(upstream)).toBe(1);
+      expect(remove).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledOnce();
+      const object = await env.ACTIONS_LOGS.get(key);
+      expect.soft([...new Uint8Array(await object!.arrayBuffer())]).toEqual(original);
+      expect
+        .soft(object!.customMetadata)
+        .toMatchObject({ "body-codec": "lossless-v1", "body-encoding": "base64" });
+    },
+  );
+
+  it("keeps a rejected object's bytes until a download and replacement succeed, including a late old writer", async () => {
+    const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+    await seedLegacyLog(key, { age: "-2 hours", encoding: "text", body: "�A" });
+    const before = await env.ACTIONS_LOGS.get(key);
+    const oldBytes = [...new Uint8Array(await before!.arrayBuffer())];
+    const base = terminalLogUpstream("completed", new Uint8Array([0xff, 0x41]));
+    const failed = vi.fn<typeof fetch>(async (input, init) =>
+      new URL(new Request(input, init).url).hostname ===
+      "results-receiver.actions.githubusercontent.com"
+        ? new Response("download unavailable", { status: 503 })
+        : base(input, init),
+    );
+    vi.stubGlobal("fetch", failed);
+    const remove = vi.spyOn(env.ACTIONS_LOGS, "delete");
+    const failedWire = await (await relay(LOG_PATH)).json<RelayEnvelope>();
+    expect.soft(failedWire.status).toBe(503);
+    const retained = await env.ACTIONS_LOGS.get(key);
+    expect.soft([...new Uint8Array(await retained!.arrayBuffer())]).toEqual(oldBytes);
+    expect.soft(retained!.customMetadata).toEqual(before!.customMetadata);
+    vi.stubGlobal("fetch", base);
+    const put = vi
+      .spyOn(env.ACTIONS_LOGS, "put")
+      .mockRejectedValueOnce(new Error("synthetic replacement failure"));
+    const goodWire = await (await relay(LOG_PATH)).json<RelayEnvelope>();
+    expect.soft(envelopeBytes(goodWire)).toEqual([0xff, 0x41]);
+    put.mockRestore();
+    const afterFailure = await env.ACTIONS_LOGS.get(key);
+    expect.soft([...new Uint8Array(await afterFailure!.arrayBuffer())]).toEqual(oldBytes);
+    expect.soft(afterFailure!.customMetadata).toEqual(before!.customMetadata);
+    expect.soft((await (await relay(LOG_PATH)).json<RelayEnvelope>()).relay.cache).toBe("miss");
+    await seedLegacyLog(key, { age: "-10 minutes", encoding: "text", body: "�A" });
+    const afterOldWriter = await (await relay(LOG_PATH)).json<RelayEnvelope>();
+    expect.soft(envelopeBytes(afterOldWriter)).toEqual([0xff, 0x41]);
+    expect.soft(afterOldWriter.relay.cache).toBe("miss");
+    expect.soft(downloadCalls(base)).toBe(3);
+    expect(remove).not.toHaveBeenCalled();
+  });
 
   it.each(["in_progress", "unavailable"])(
     "keeps fresh %s job metadata authoritative over misleading summaries and stored logs",
@@ -210,7 +315,7 @@ describe("terminal Actions log cache", () => {
 
     await expect(
       runWithContext((ctx) =>
-        terminalLogRunCompleted(
+        terminalLogCacheProof(
           withGitHubEgress(env, []),
           ctx,
           request,
@@ -218,72 +323,29 @@ describe("terminal Actions log cache", () => {
           policy,
         ),
       ),
-    ).resolves.toBe(false);
+    ).resolves.toBeUndefined();
     expect(
       await env.DB.prepare("SELECT COUNT(*) AS count FROM github_public_repo_proofs").first(),
     ).toEqual({ count: 0 });
   });
 
-  it.each([
-    ["in_progress", 2, false],
-    ["completed", undefined, false],
-    ["completed", 2, true],
-  ] as const)(
-    "uses fresh whole-run status %s attempt %s instead of cached completion",
-    async (status, runAttempt, cacheable) => {
-      const policy = defaultPolicy("openclaw");
-      const runRequest: RelayRequest = {
-        pool: "maintainers",
-        method: "GET",
-        path: "/repos/openclaw/octopool/actions/runs/99",
-      };
-      const runRoute = classifyRoute(runRequest, policy);
-      await writeGitHubCache(
-        env,
-        await githubCacheKey(runRequest.pool, runRequest, runRoute),
-        runRequest,
-        runRoute,
-        {
-          status: 200,
-          headers: { "content-type": "application/json" },
-          body: { id: 99, status: "completed", run_attempt: 1 },
-          body_encoding: "json",
-        },
-      );
-      const upstream = vi.fn<typeof fetch>(async (input, init) => {
-        const request = new Request(input, init);
-        if (new URL(request.url).pathname === runRequest.path) {
-          return jsonResponse({
-            id: 99,
-            status,
-            ...(runAttempt === undefined ? {} : { run_attempt: runAttempt }),
-          });
-        }
-        return jsonResponse({ message: "unavailable" }, 503);
-      });
+  it.each(["/actions/runs/99/logs", "/actions/runs/99/attempts/2/logs"])(
+    "denies whole-run %s at the Worker without upstream or R2 access",
+    async (suffix) => {
+      const upstream = vi.fn<typeof fetch>();
       vi.stubGlobal("fetch", upstream);
-      const logRequest: RelayRequest = {
-        pool: "maintainers",
-        method: "GET",
-        path: "/repos/openclaw/octopool/actions/runs/99/logs",
-      };
-      const logRoute = classifyRoute(
-        { pool: "maintainers", method: "GET", path: LOG_PATH },
-        policy,
-      );
-
-      const proof = await runWithContext((ctx) =>
-        terminalLogCacheProof(withGitHubEgress(env, []), ctx, logRequest, logRoute, policy),
-      );
-      expect(proof).toEqual(
-        cacheable ? { key: terminalLogCacheKey(logRequest, runAttempt) } : undefined,
-      );
-      expect(
-        upstream.mock.calls.filter(([input, init]) => {
-          const request = new Request(input, init);
-          return new URL(request.url).pathname === runRequest.path;
-        }),
-      ).toHaveLength(1);
+      const get = vi.spyOn(env.ACTIONS_LOGS, "get");
+      const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+      const remove = vi.spyOn(env.ACTIONS_LOGS, "delete");
+      const response = await relay(`/repos/openclaw/octopool${suffix}`);
+      expect(response.status).toBe(424);
+      expect(await response.json()).toMatchObject({
+        error: { code: "fallback_local", details: { reason: "route_denied" } },
+      });
+      expect(upstream).not.toHaveBeenCalled();
+      expect(get).not.toHaveBeenCalled();
+      expect(put).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
     },
   );
 
@@ -468,7 +530,7 @@ describe("terminal Actions log cache", () => {
   });
 });
 
-function terminalLogUpstream(status: "completed" | "in_progress") {
+function terminalLogUpstream(status: "completed" | "in_progress", bytes?: Uint8Array) {
   return vi.fn<typeof fetch>(async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -487,7 +549,8 @@ function terminalLogUpstream(status: "completed" | "in_progress") {
       });
     }
     if (url.hostname === "results-receiver.actions.githubusercontent.com") {
-      return new Response("build log\n", {
+      expect(request.headers.has("authorization")).toBe(false);
+      return new Response(bytes === undefined ? "build log\n" : new Uint8Array(bytes), {
         headers: { "content-type": "text/plain" },
       });
     }
@@ -499,6 +562,40 @@ function terminalLogUpstream(status: "completed" | "in_progress") {
     }
     return jsonResponse({ message: "not found" }, 404);
   });
+}
+
+function downloadCalls(upstream: ReturnType<typeof vi.fn<typeof fetch>>): number {
+  return upstream.mock.calls.filter(
+    ([input, init]) =>
+      new URL(new Request(input, init).url).hostname ===
+      "results-receiver.actions.githubusercontent.com",
+  ).length;
+}
+
+async function seedLegacyLog(
+  key: string,
+  fixture: {
+    age: string;
+    encoding: string;
+    body: string | Uint8Array;
+    marker?: string | undefined;
+  },
+) {
+  const row = await env.DB.prepare("SELECT datetime('now', ?) AS created_at")
+    .bind(fixture.age)
+    .first<{ created_at: string }>();
+  await env.ACTIONS_LOGS.put(
+    key,
+    typeof fixture.body === "string" ? fixture.body : new Uint8Array(fixture.body),
+    {
+      httpMetadata: { contentType: "text/plain" },
+      customMetadata: {
+        "created-at": row!.created_at,
+        "body-encoding": fixture.encoding,
+        ...(fixture.marker === undefined ? {} : { "body-codec": fixture.marker }),
+      },
+    },
+  );
 }
 function logBackendCalls(upstream: ReturnType<typeof vi.fn<typeof fetch>>): number {
   return upstream.mock.calls.filter(([input, init]) => {

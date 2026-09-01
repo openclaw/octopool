@@ -79,7 +79,14 @@ and patch hosts.
 
 - `headers` are filtered to a safe allowlist (content negotiation, caching,
   rate-limit, request id). Authorization and cookies never leave the Worker.
-- `body_encoding` is `json`, `text`, or `base64`. Binary responses are base64-encoded.
+- `body_encoding` is `json`, `text`, or `base64`. Opaque API and public diff/patch
+  responses preserve bytes: invalid UTF-8, a leading UTF-8 BOM, or NUL in the first
+  1,024 bytes selects base64. Other valid UTF-8 stays text, including literal U+FFFD,
+  CRLF, and later NUL bytes. Empty API responses remain null/text; empty public
+  diff/patch responses remain empty-string/text. Successful `application/json`
+  parsing retains existing JSON value semantics, without promising original JSON
+  bytes or whitespace; malformed JSON falls back to lossless opaque encoding.
+  The response cap applies to upstream bytes before base64 or envelope expansion.
 - `repo_view` returns a fixed public metadata subset before caching so token-specific
   repository fields such as identity permissions are not shared.
 - Release list/latest/tag/id reads and top-level `gh release view` summaries use the

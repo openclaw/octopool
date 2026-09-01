@@ -1,4 +1,4 @@
-import { bytesToBase64 } from "./encoding";
+import { encodeOpaqueBytes } from "./encoding";
 import type { GitHubEgressEnv } from "./github-egress";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
@@ -206,25 +206,13 @@ function decodeBody(
   if (bytes.length === 0) {
     return { body: null, encoding: "text" };
   }
-  const text = new TextDecoder().decode(bytes);
   if (contentType.includes("application/json")) {
     try {
+      const text = new TextDecoder().decode(bytes);
       return { body: JSON.parse(text) as unknown, encoding: "json" };
     } catch {
-      return { body: text, encoding: "text" };
+      // Malformed JSON falls back to the same lossless opaque representation.
     }
   }
-  if (isMostlyText(bytes)) {
-    return { body: text, encoding: "text" };
-  }
-  return { body: bytesToBase64(bytes), encoding: "base64" };
-}
-
-function isMostlyText(bytes: Uint8Array): boolean {
-  for (const byte of bytes.slice(0, 1024)) {
-    if (byte === 0) {
-      return false;
-    }
-  }
-  return true;
+  return encodeOpaqueBytes(bytes);
 }

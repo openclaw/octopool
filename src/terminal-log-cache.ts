@@ -13,6 +13,8 @@ const LOG_REVALIDATE_SECONDS = 60 * 60;
 const LOG_KEY_PREFIX = "github-actions-logs/v1/";
 const CREATED_AT_METADATA = "created-at";
 const BODY_ENCODING_METADATA = "body-encoding";
+const BODY_CODEC_METADATA = "body-codec";
+const BODY_CODEC = "lossless-v1";
 
 export type CachedTerminalLog = GitHubRelayResponse & {
   created_at: string;
@@ -21,9 +23,8 @@ export type CachedTerminalLog = GitHubRelayResponse & {
 
 export type TerminalLogCacheProof = { key: string };
 
-export function terminalLogCacheKey(request: RelayRequest, runAttempt?: number): string {
-  const base = `${LOG_KEY_PREFIX}${encodeURIComponent(request.pool)}${request.path}`;
-  return runAttempt === undefined ? base : `${base}/attempt-${String(runAttempt)}`;
+export function terminalLogCacheKey(request: RelayRequest): string {
+  return `${LOG_KEY_PREFIX}${encodeURIComponent(request.pool)}${request.path}`;
 }
 
 export async function terminalLogCacheProof(
@@ -38,40 +39,20 @@ export async function terminalLogCacheProof(
       return undefined;
     }
     const jobID = /\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
-    if (jobID !== undefined) {
-      const job = await fetchFreshMetadata(
-        env,
-        metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
-        policy,
-      );
-      return metadataProvesCompleted(job) ? { key: terminalLogCacheKey(request) } : undefined;
-    }
-    const runID = /\/actions\/runs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
-    if (runID === undefined) {
+    if (jobID === undefined) {
       return undefined;
     }
-    const run = await fetchFreshMetadata(
+    const job = await fetchFreshMetadata(
       env,
-      metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/runs/${runID}`),
+      metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
       policy,
     );
-    const runAttempt = completedRunAttempt(run);
-    return runAttempt === undefined ? undefined : { key: terminalLogCacheKey(request, runAttempt) };
+    return metadataProvesCompleted(job) ? { key: terminalLogCacheKey(request) } : undefined;
   } catch (error) {
     rethrowStringRewriteDenial(error);
     console.error("actions log completion preflight failed", error);
     return undefined;
   }
-}
-
-export async function terminalLogRunCompleted(
-  env: GitHubEgressEnv,
-  ctx: ExecutionContext,
-  request: RelayRequest,
-  route: RouteInfo,
-  policy: PoolPolicy,
-): Promise<boolean> {
-  return (await terminalLogCacheProof(env, ctx, request, route, policy)) !== undefined;
 }
 
 export function terminalLogNeedsRevalidation(cached: CachedTerminalLog): boolean {
@@ -103,11 +84,17 @@ export async function readTerminalLogCache(
       !Number.isFinite(createdAtMs) ||
       Date.now() - createdAtMs >= LOG_TTL_SECONDS * 1000
     ) {
+      await object.body.cancel();
       try {
         await env.ACTIONS_LOGS.delete(key);
       } catch (error) {
         console.error("expired actions log deletion failed", error);
       }
+      return undefined;
+    }
+    if (object.customMetadata?.[BODY_CODEC_METADATA] !== BODY_CODEC) {
+      // Reject legacy bytes before serving or existence-only renewal; replace only after download.
+      await object.body.cancel();
       return undefined;
     }
     const bytes = new Uint8Array(await object.arrayBuffer());
@@ -144,6 +131,7 @@ export async function writeTerminalLogCache(
     customMetadata: {
       [CREATED_AT_METADATA]: createdAt,
       [BODY_ENCODING_METADATA]: encoding,
+      [BODY_CODEC_METADATA]: BODY_CODEC,
     },
   });
 }
@@ -169,16 +157,6 @@ function metadataProvesCompleted(response: GitHubRelayResponse | undefined): boo
     isRecord(response.body) &&
     response.body.status === "completed"
   );
-}
-
-function completedRunAttempt(response: GitHubRelayResponse | undefined): number | undefined {
-  if (response === undefined || !metadataProvesCompleted(response) || !isRecord(response.body)) {
-    return undefined;
-  }
-  const attempt = response.body.run_attempt;
-  return typeof attempt === "number" && Number.isSafeInteger(attempt) && attempt > 0
-    ? attempt
-    : undefined;
 }
 
 function metadataRequest(request: RelayRequest, path: string): RelayRequest {

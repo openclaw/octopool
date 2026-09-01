@@ -75,13 +75,14 @@ export async function githubCacheKey(
   route: RouteInfo,
   identity?: Pick<Identity, "id" | "kind">,
 ): Promise<string> {
+  const varyHeaders = cacheVaryHeaders(request.headers);
   const stable = {
     protocol_epoch: CACHE_PUBLICATION_EPOCH,
     pool,
     method: request.method,
     path: request.path,
     query: normalizedCacheQuery(request.query ?? {}),
-    headers: stableRecord(cacheVaryHeaders(request.headers)),
+    headers: stableRecord(varyHeaders),
     route_key: route.routeKey,
     state: cacheStateDiscriminator(route),
     // Retire contaminated page shapes for existing clients in every cache/fill path.
@@ -96,6 +97,7 @@ export async function githubCacheKey(
     // Old raw event bodies may contain privileged references, even after a 304
     // republished an identity entry as anonymous. Retire every variant together.
     ...(isIssueEventRoute(route.kind) ? { representation: "issue-events-public-v2" } : {}),
+    ...(varyHeaders.accept === undefined ? {} : { body_codec: "lossless-v1" }),
     ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),
   };
   return hashToken(JSON.stringify(stable));

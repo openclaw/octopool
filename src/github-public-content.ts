@@ -1,4 +1,4 @@
-import { bytesToBase64 } from "./encoding";
+import { bytesToBase64, encodeOpaqueBytes } from "./encoding";
 import { responseCapBytes } from "./github-limits";
 import { encodedPathSegments, safeRelativePath } from "./github-path";
 import {
@@ -52,13 +52,16 @@ export function mediaWebRequest(
     headers: { accept: `${contentType}, text/plain, */*`, "user-agent": "octopool" },
     capBytes: responseCapBytes(env),
     usesApiQuota: false,
-    payload: (body, headers, status) => ({
-      status,
-      headers: publicResponseHeaders(headers, contentType),
-      body: new TextDecoder().decode(body),
-      body_encoding: "text",
-      backend: "web",
-    }),
+    payload: (bytes, headers, status) => {
+      const { body, encoding } = encodeOpaqueBytes(bytes);
+      return {
+        status,
+        headers: publicResponseHeaders(headers, contentType),
+        body,
+        body_encoding: encoding,
+        backend: "web",
+      };
+    },
   };
 }
 

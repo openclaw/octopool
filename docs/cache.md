@@ -38,6 +38,15 @@ Default pagination
 media types and non-default query values still produce distinct entries. The key is
 pool-scoped, so pools never share cache entries.
 
+Non-default JSON `Accept` variants also carry `body_codec: lossless-v1`, using the
+same normalization as the vary headers. Raw blob/contents/README, octet-stream,
+diff/patch, and other custom media cannot reuse old opaque bodies or validators in
+edge, D1, identity caches, stale fallback, or fill coalescing. This field composes with
+the representation generations below. Default JSON keys stay warm: this is bounded
+media retirement, not a purge of hypothetical malformed non-JSON responses previously
+returned to default-JSON requests. Future opaque decoding is lossless regardless of
+the request's negotiation.
+
 Actions summaries also include a server-controlled representation generation
 (`actions-summary-metadata-v3`) in this common key. Run views, attempt-qualified views,
 and repository/workflow run lists, including canonical supersets and identity-specific
@@ -239,16 +248,24 @@ classification preserves cached bodies and raw response states.
 
 `job_logs` requests fetch the job endpoint without using edge or D1 metadata cache and
 require that fresh job payload's own `status` to be `completed`. A cached completed run can
-therefore never make an active job from a re-run terminal. Whole-run log routes likewise
-require a fresh uncached run payload whose current status is `completed`, plus a positive
-`run_attempt`; the attempt becomes part of the R2 key so a completed re-run cannot receive
-an earlier attempt's archive. Active, unknown, attempt-less, or failed metadata probes keep
+therefore never make an active job from a re-run terminal. Whole-run log archives are
+not admitted by the relay route manifest and remain native GitHub CLI fallback; only
+job-log routes use this cache. Active, unknown, or failed job metadata probes keep
 the previous large-payload bypass behavior. Only a successful 2xx anonymous metadata
 response records a public-repository proof. A proven-terminal log uses the dedicated
-`ACTIONS_LOGS` R2 bucket, keyed by pool, exact route path, and whole-run attempt when
-applicable, so immutable log downloads are shared without putting their large payloads in D1.
+`ACTIONS_LOGS` R2 bucket, keyed by pool and exact job route path, so immutable log
+downloads are shared without putting their large payloads in D1. Jobs from separate
+run attempts retain their distinct job IDs.
 
 R2 stores the raw log bytes, content type, original body encoding, and a retention timestamp.
+Corrected writers also set the exact `body-codec: lossless-v1` object metadata marker.
+Objects with a missing or different marker are misses before serving or existence-only
+renewal. The Worker downloads the original bytes after fresh completion proof, then
+replaces the object; a failed download or write leaves the previous object intact.
+Legacy base64 objects were already reversible but also miss once under this format
+contract. A late old writer produces another marker miss. The bucket prefix and
+seven-day lifecycle are unchanged; no purge or bucket migration is required.
+
 After the fresh terminal-status proof, an object younger than one hour can be served without
 contacting the log endpoint. Older objects also make an authenticated log request without
 following its redirect: a validated `302 Location` confirms existence and refreshes the
