@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -92,4 +94,96 @@ func serveEmptyRewritePolicy(t *testing.T, w http.ResponseWriter, r *http.Reques
 func emptyRewriteTestServer(t *testing.T) {
 	t.Helper()
 	relayTestServer(t, func(map[string]any) any { t.Error("unexpected relay request"); return nil })
+}
+
+// REST fixtures for the shared checks/rollup owners; no production hooks.
+type prChecksFixture struct {
+	checks, statuses, runs, workflows []any
+	requests                          []map[string]any
+	head                              map[string]any
+}
+
+func newPRChecksFixture() *prChecksFixture {
+	return &prChecksFixture{
+		head:     map[string]any{"sha": metadataHead, "ref": "feature"},
+		checks:   []any{prChecksCheck(1, "unit", "completed", "success")},
+		statuses: []any{},
+		runs: []any{map[string]any{
+			"id": 301, "head_sha": metadataHead, "check_suite_id": 201, "workflow_id": 401,
+			"name": "misleading run title", "display_title": "Not the workflow", "event": "pull_request",
+			"head_repository": map[string]any{"id": 12, "full_name": "contributor/repo"},
+			"repository":      map[string]any{"id": 11, "full_name": "acme/repo"},
+		}},
+		workflows: []any{map[string]any{"id": 401, "name": "CI", "path": ".github/workflows/ci.yml", "state": "disabled_manually"}},
+	}
+}
+
+func prChecksCheck(id int64, name, status, conclusion string) map[string]any {
+	var result any = conclusion
+	if conclusion == "" {
+		result = nil
+	}
+	item := map[string]any{
+		"id": id, "name": name, "status": status, "conclusion": result, "head_sha": metadataHead,
+		"app": map[string]any{"id": 15368, "slug": "github-actions"}, "check_suite": map[string]any{"id": 201},
+		"started_at": "2026-09-01T01:00:00Z", "completed_at": "2026-09-01T01:01:00Z",
+		"details_url": "https://github.com/acme/repo/actions/runs/301/job/1",
+	}
+	if status != "completed" {
+		item["completed_at"] = nil
+	}
+	return item
+}
+
+func (f *prChecksFixture) response(t *testing.T, request map[string]any) any {
+	t.Helper()
+	f.requests = append(f.requests, request)
+	path, _ := request["path"].(string)
+	if path == "/repos/acme/repo/pulls/7" {
+		return map[string]any{"number": 7, "head": f.head}
+	}
+	var key string
+	var items []any
+	switch path {
+	case "/repos/acme/repo/commits/" + metadataHead + "/check-runs":
+		key, items = "check_runs", f.checks
+	case "/repos/acme/repo/commits/" + metadataHead + "/status":
+		key, items = "statuses", f.statuses
+	case "/repos/acme/repo/actions/runs":
+		key, items = "workflow_runs", f.runs
+		query, _ := request["query"].(map[string]any)
+		if query["head_sha"] != metadataHead {
+			t.Errorf("runs must be head-filtered: %v", query)
+		}
+	case "/repos/acme/repo/actions/workflows":
+		key, items = "workflows", f.workflows
+	default:
+		t.Errorf("unexpected data route (no per-check/suite/detail fanout): %s", path)
+		return nil
+	}
+	query, _ := request["query"].(map[string]any)
+	pageText, _ := query["page"].(string)
+	page, err := strconv.Atoi(pageText)
+	if err != nil || page < 1 || page > 10 || query["per_page"] != "100" {
+		t.Errorf("invalid bounded collection query: %v", query)
+		return nil
+	}
+	if strings.Contains(path, "/actions/") {
+		headers, _ := request["headers"].(map[string]any)
+		if headers["x-octopool-public-shape"] != nil {
+			t.Error("metadata must use raw REST collections")
+		}
+	}
+	start := min((page-1)*100, len(items))
+	return map[string]any{"total_count": len(items), key: items[start:min(start+100, len(items))]}
+}
+
+func (f *prChecksFixture) calls(suffix string) int {
+	n := 0
+	for _, request := range f.requests {
+		if strings.HasSuffix(request["path"].(string), suffix) {
+			n++
+		}
+	}
+	return n
 }

@@ -436,11 +436,11 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 	previousCounts := ""
 	progressPrinted := false
 	for {
-		var items []any
-		var sha string
+		var items []prCheckRow
+		var head prCheckHead
 		err := retryWatchTick(ctx, &backoff, func() error {
 			var pollErr error
-			items, sha, pollErr = relayPRCheckItemsWithSHA(ctx, client, opts.repo, opts.number)
+			items, head, pollErr = relayPRCheckItemsWithHead(ctx, client, opts.repo, opts.number)
 			return pollErr
 		})
 		if err != nil {
@@ -451,22 +451,22 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		// fresh sweep first; genuinely empty results error like real gh.
 		if len(items) == 0 {
 			err := retryWatchTick(ctx, &backoff, func() error {
-				current, freshErr := relayPRHeadSHA(ctx, client, opts.repo, opts.number, 0)
+				current, freshErr := relayPRChecksHead(ctx, client, opts.repo, opts.number, 0)
 				if freshErr != nil {
 					return freshErr
 				}
-				freshItems, freshErr := prCheckItemsForSHAFresh(ctx, client, opts.repo, current)
+				freshItems, freshErr := prCheckItemsForSHAFresh(ctx, client, opts.repo, current.SHA)
 				if freshErr != nil {
 					return freshErr
 				}
-				items, sha = freshItems, current
+				items, head = freshItems, current
 				return nil
 			})
 			if err != nil {
 				return watchError(err, progressPrinted)
 			}
 			if len(items) == 0 {
-				return fmt.Errorf("no checks reported on pull request #%s", opts.number)
+				return prChecksEmptyError{head: head}
 			}
 		}
 		pending, passing, failing, cancelled := checkWatchCounts(items)
@@ -485,11 +485,11 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 			// before the watch (new head SHA) or a check rerun (same SHA, cached
 			// terminal payloads) could otherwise finalize on obsolete results.
 			// One fresh sweep per exit attempt.
-			var final []any
+			var final []prCheckRow
 			var confirmed bool
 			err := retryWatchTick(ctx, &backoff, func() error {
 				var confirmErr error
-				final, confirmed, confirmErr = confirmPRChecksTerminal(ctx, client, opts, sha)
+				final, confirmed, confirmErr = confirmPRChecksTerminal(ctx, client, opts, head.SHA)
 				return confirmErr
 			})
 			if err != nil {
@@ -513,37 +513,42 @@ func confirmPRChecksTerminal(
 	client ghRelayClient,
 	opts ghPRChecksWatchOptions,
 	sha string,
-) ([]any, bool, error) {
-	current, err := relayPRHeadSHA(ctx, client, opts.repo, opts.number, 0)
+) ([]prCheckRow, bool, error) {
+	current, err := relayPRChecksHead(ctx, client, opts.repo, opts.number, 0)
 	if err != nil {
 		return nil, false, err
 	}
-	if current != sha {
+	if current.SHA != sha {
 		return nil, false, nil
 	}
-	items, err := prCheckItemsForSHAFresh(ctx, client, opts.repo, current)
+	items, err := prCheckItemsForSHAFresh(ctx, client, opts.repo, current.SHA)
 	if err != nil {
 		return nil, false, err
 	}
 	// A fresh empty set after a terminal-looking cached snapshot is an
 	// anomaly (rerun re-registration, data lag) — never confirm it as green.
 	if len(items) == 0 {
-		return nil, false, fmt.Errorf("no checks reported on pull request #%s", opts.number)
+		return nil, false, prChecksEmptyError{head: current}
 	}
 	pending, _, failing, _ := checkWatchCounts(items)
-	if pending == 0 || opts.failFast && failing > 0 {
-		return items, true, nil
+	if pending != 0 && !(opts.failFast && failing > 0) {
+		return nil, false, nil
 	}
-	return nil, false, nil
+	// The head can move while context or workflow pages are being hydrated.
+	// A matching head closes that window, not same-commit status races.
+	finalHead, err := relayPRChecksHead(ctx, client, opts.repo, opts.number, 0)
+	if err != nil {
+		return nil, false, err
+	}
+	if finalHead.SHA != current.SHA {
+		return nil, false, nil
+	}
+	return items, true, nil
 }
 
-func checkWatchCounts(items []any) (pending int, passing int, failing int, cancelled int) {
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		switch watchCheckBucket(item) {
+func checkWatchCounts(items []prCheckRow) (pending int, passing int, failing int, cancelled int) {
+	for _, item := range items {
+		switch item.Bucket {
 		case "pass", "skipping":
 			passing++
 		case "fail":
@@ -557,25 +562,9 @@ func checkWatchCounts(items []any) (pending int, passing int, failing int, cance
 	return pending, passing, failing, cancelled
 }
 
-func watchCheckBucket(item map[string]any) string {
-	bucket := strings.ToLower(firstString(item, "bucket"))
-	if bucket != "" {
-		return bucket
-	}
-	state := strings.ToLower(firstString(item, "state"))
-	if state == "success" || state == "neutral" {
-		return "pass"
-	}
-	return "pending"
-}
-
-func printPRChecksWatchFinal(stdout io.Writer, items []any) error {
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", watchSafeText(firstString(item, "name")), firstString(item, "bucket"), watchSafeText(firstString(item, "state")), watchSafeText(firstString(item, "link"))); err != nil {
+func printPRChecksWatchFinal(stdout io.Writer, items []prCheckRow) error {
+	for _, item := range items {
+		if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", watchSafeText(item.Name), item.Bucket, watchSafeText(item.State), watchSafeText(item.Link)); err != nil {
 			return err
 		}
 	}

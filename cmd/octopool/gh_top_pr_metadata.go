@@ -50,39 +50,26 @@ func relayPRStatusCheckRollup(ctx context.Context, client ghRelayClient, repo, s
 	if err != nil {
 		return nil, err
 	}
-	workflows := map[json.Number]string{}
-	for _, raw := range items {
-		item, _ := raw.(map[string]any)
-		if nestedStringValue(item, "app", "slug") == "github-actions" {
-			if err := hydratePRCheckWorkflows(ctx, client, repo, sha, headers, workflows); err != nil {
-				return nil, err
-			}
-			break
-		}
+	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, items)
+	if err != nil {
+		return nil, err
 	}
 	rollup := make([]any, 0, len(items))
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			return nil, errors.New("invalid check context")
-		}
-		if _, status := item["context"]; status {
+	for _, context := range items {
+		item := context.raw
+		if context.isStatus {
 			rollup = append(rollup, map[string]any{
 				"__typename": "StatusContext", "context": firstString(item, "context"),
-				"state":     strings.ToUpper(firstString(item, "conclusion")),
-				"targetUrl": firstString(item, "details_url"), "startedAt": ghCheckTimestamp(item, "started_at"),
+				"state":     strings.ToUpper(firstString(item, "state")),
+				"targetUrl": firstString(item, "target_url"), "startedAt": ghCheckTimestamp(item, "created_at"),
 			})
 			continue
 		}
 		workflow := ""
 		if nestedStringValue(item, "app", "slug") == "github-actions" {
 			suite, _ := valueAtPath(item, "check_suite", "id")
-			id, _ := suite.(json.Number)
-			var found bool
-			workflow, found = workflows[id]
-			if !found {
-				return nil, errors.New("workflow run response did not include GitHub Actions check suite")
-			}
+			id, _ := prCheckID(suite)
+			workflow = metadata[id].workflowName
 		}
 		rollup = append(rollup, map[string]any{
 			"__typename": "CheckRun", "name": firstString(item, "name"), "workflowName": workflow,
@@ -101,36 +88,4 @@ func ghCheckTimestamp(item map[string]any, field string) string {
 		return value
 	}
 	return time.Time{}.Format(time.RFC3339)
-}
-
-func hydratePRCheckWorkflows(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string, workflows map[json.Number]string) error {
-	request := ghAPIRequest{
-		method: "GET", path: repoPath(repo, "actions", "runs"), headers: headers,
-		query: map[string]any{"head_sha": sha},
-	}
-	if !safeRelayRequest(request) {
-		return errors.New("unsupported workflow run lookup")
-	}
-	// Filtered workflow queries and the shared collector are bounded to 1,000
-	// items. Never fabricate an empty name from an incomplete workflow lookup.
-	items, err := relayCompleteCollection(ctx, client, request, "workflow_runs")
-	if err != nil {
-		return err
-	}
-	for _, raw := range items {
-		run := raw.(map[string]any)
-		if firstString(run, "head_sha") != sha {
-			return errors.New("workflow run response did not match pull request head")
-		}
-		id, ok := run["check_suite_id"].(json.Number)
-		if !ok {
-			return errors.New("workflow run response did not include check_suite_id")
-		}
-		name, ok := run["name"].(string)
-		if !ok {
-			return errors.New("workflow run response did not include name")
-		}
-		workflows[id] = name
-	}
-	return nil
 }

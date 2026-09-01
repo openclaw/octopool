@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -132,18 +133,34 @@ func relayHumanPRList(ctx context.Context, stdout io.Writer, request ghAPIReques
 	return nil
 }
 
-func renderHumanPRChecks(stdout io.Writer, items []any) error {
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
+func renderHumanPRChecks(stdout io.Writer, items []prCheckRow) error {
+	items = append([]prCheckRow(nil), items...)
+	// Keep gh's literal comparator, including "success" (not "pass"). This
+	// presentation sort must never reorder the JSON aggregation result.
+	sort.Slice(items, func(i, j int) bool {
+		a, b := items[i], items[j]
+		if a.Bucket == b.Bucket {
+			if a.Name == b.Name {
+				return a.Link < b.Link
+			}
+			return a.Name < b.Name
+		}
+		return a.Bucket == "fail" || (a.Bucket == "pending" && b.Bucket == "success")
+	})
+	for _, item := range items {
+		bucket := item.Bucket
+		if bucket == "cancel" {
+			bucket = "fail"
+		}
+		elapsed := "0"
+		if !item.StartedAt.IsZero() && !item.CompletedAt.IsZero() {
+			if duration := item.CompletedAt.Sub(item.StartedAt); duration > 0 {
+				elapsed = duration.String()
+			}
 		}
 		if _, err := fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\t%s\n",
-			watchSafeText(firstString(item, "name")),
-			watchSafeText(firstString(item, "bucket")),
-			humanDuration(firstString(item, "startedAt"), firstString(item, "completedAt")),
-			watchSafeText(firstString(item, "link")),
-			watchSafeText(firstString(item, "description")),
+			watchSafeText(item.Name), bucket, elapsed,
+			watchSafeText(item.Link), watchSafeText(item.Description),
 		); err != nil {
 			return err
 		}

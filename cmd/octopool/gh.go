@@ -71,6 +71,13 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		case ghComplete:
 			return nil
 		case ghFail:
+			var empty prChecksEmptyError
+			if errors.As(result.err, &empty) {
+				if _, err := fmt.Fprintln(stderr, empty.Error()); err != nil {
+					return err
+				}
+				return exitCodeError{Code: 1}
+			}
 			if shouldRunRealGH(result.err) {
 				return execRealGHAfterLocalFallback(ctx, floorGHWatchDelegateArgs(args), stdout, stderr, result.err)
 			}

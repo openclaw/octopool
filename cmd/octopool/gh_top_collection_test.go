@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ func TestRelayCompleteCollection(t *testing.T) {
 		{"commits/" + metadataHead + "/check-runs", "check_runs"},
 		{"commits/" + metadataHead + "/status", "statuses"},
 		{"actions/runs", "workflow_runs"},
+		{"actions/workflows", "workflows"},
 	} {
 		for _, scenario := range []string{
 			"empty", "full", "boundary", "large-identities", "growing", "shrinking",
@@ -130,7 +132,7 @@ func TestPRChecksGrowingCollectionsUseGuardedFallback(t *testing.T) {
 						request := decodeCLIRequest(t, w, r)
 						path := request["path"].(string)
 						if strings.HasSuffix(path, "/pulls/1") {
-							writeCLIEnvelope(t, w, map[string]any{"head": map[string]any{"sha": metadataHead}})
+							writeCLIEnvelope(t, w, map[string]any{"head": map[string]any{"sha": metadataHead, "ref": "feature"}})
 							return
 						}
 						collection := "check_runs"
@@ -207,7 +209,7 @@ func TestGHPRChecksWatchRejectsRepeatedCollectionIDs(t *testing.T) {
 	relayTestServer(t, func(request map[string]any) any {
 		path := request["path"].(string)
 		if strings.HasSuffix(path, "/pulls/1") {
-			return map[string]any{"head": map[string]any{"sha": metadataHead}}
+			return map[string]any{"head": map[string]any{"sha": metadataHead, "ref": "feature"}}
 		}
 		if !strings.HasSuffix(path, "/check-runs") {
 			t.Fatalf("unexpected path %s", path)
@@ -227,5 +229,203 @@ func TestGHPRChecksWatchRejectsRepeatedCollectionIDs(t *testing.T) {
 	result := handleGHPR(t.Context(), []string{"checks", "1", "-R", "acme/repo", "--watch"}, &out)
 	if result.action != ghFail || !isLocalFallback(result.err) || out.Len() != 0 || calls != 2 {
 		t.Fatalf("watch accepted incomplete snapshot: result=%+v output=%q calls=%d", result, out.String(), calls)
+	}
+}
+
+func TestPRChecksMetadataCollectionBudgets(t *testing.T) {
+	for _, scenario := range []string{"match-page-2", "match-page-10", "41-operations", "21-without-actions", "1001-workflows", "1001-runs", "late-duplicate", "late-short", "late-total-change"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newPRChecksFixture()
+			count := 101
+			if scenario == "match-page-10" || scenario == "41-operations" || scenario == "21-without-actions" {
+				count = 1000
+			}
+			if scenario == "1001-workflows" || scenario == "1001-runs" {
+				count = 1001
+			}
+			f.runs, f.workflows = []any{}, []any{}
+			for i := 0; i < count; i++ {
+				suite := 10000 + i
+				if i == count-1 {
+					suite = 201
+				}
+				f.runs = append(f.runs, map[string]any{"id": 3000 + i, "head_sha": metadataHead, "check_suite_id": suite, "workflow_id": 4000 + count - 1, "event": "pull_request", "name": "not CI"})
+				f.workflows = append(f.workflows, map[string]any{"id": 4000 + i, "name": "CI", "state": "disabled_manually", "path": fmt.Sprintf(".github/workflows/%d.yml", i)})
+			}
+			if scenario == "1001-workflows" {
+				f.runs = f.runs[count-1:]
+			}
+			if scenario == "41-operations" || scenario == "21-without-actions" {
+				f.checks, f.statuses = []any{}, []any{}
+				for i := 0; i < 1000; i++ {
+					c := prChecksCheck(int64(i+1), fmt.Sprintf("job-%04d", i), "completed", "success")
+					if scenario == "21-without-actions" {
+						c["app"] = map[string]any{"id": 999, "slug": "third-party"}
+					}
+					f.checks = append(f.checks, c)
+					f.statuses = append(f.statuses, map[string]any{"id": i + 1, "context": fmt.Sprintf("status-%04d", i), "state": "success", "target_url": "https://example.test/status", "description": "external", "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z"})
+				}
+			}
+			if strings.HasPrefix(scenario, "late-") {
+				// The needed match is already on page 1. Completeness still requires page 2.
+				f.runs[0].(map[string]any)["check_suite_id"] = 201
+				f.runs[count-1].(map[string]any)["check_suite_id"] = 99999
+				for _, r := range f.runs {
+					r.(map[string]any)["workflow_id"] = 4000
+				}
+			}
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				req := decodeCLIRequest(t, w, r)
+				body := f.response(t, req)
+				if req["path"] == "/repos/acme/repo/actions/workflows" && f.calls("/actions/workflows") == 2 {
+					page := body.(map[string]any)
+					switch scenario {
+					case "late-duplicate":
+						page["workflows"] = []any{f.workflows[0]}
+					case "late-short":
+						page["workflows"] = []any{}
+					case "late-total-change":
+						page["total_count"] = 102
+					}
+				}
+				writeCLIEnvelope(t, w, body)
+			})
+			var out bytes.Buffer
+			err := relayPRChecks(t.Context(), &out, "acme/repo", "7", ghTopOptions{json: []string{"name", "workflow", "event"}})
+			invalid := strings.HasPrefix(scenario, "late-") || strings.HasPrefix(scenario, "1001-")
+			if invalid {
+				if !isLocalFallback(err) || out.Len() != 0 {
+					t.Errorf("incomplete metadata escaped before output: err=%v bytes=%d", err, out.Len())
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				var rows []map[string]any
+				if e := json.Unmarshal(out.Bytes(), &rows); e != nil {
+					t.Fatal(e)
+				}
+				if len(rows) != len(f.checks)+len(f.statuses) {
+					t.Errorf("complete output rows=%d", len(rows))
+				}
+				if scenario != "21-without-actions" && rows[0]["workflow"] != "CI" {
+					t.Errorf("late-page association missing: %v", rows[0])
+				}
+			}
+			wantRuns, wantCatalogue := (count+99)/100, (count+99)/100
+			if scenario == "1001-runs" {
+				wantRuns, wantCatalogue = 1, 0
+			}
+			if scenario == "1001-workflows" {
+				wantRuns, wantCatalogue = 1, 1
+			}
+			if scenario == "21-without-actions" {
+				wantRuns, wantCatalogue = 0, 0
+			}
+			if f.calls("/actions/runs") != wantRuns || f.calls("/actions/workflows") != wantCatalogue {
+				t.Errorf("complete bounded joins: runs=%d want=%d catalogue=%d want=%d", f.calls("/actions/runs"), wantRuns, f.calls("/actions/workflows"), wantCatalogue)
+			}
+			if policies.Load() != int64(len(f.requests)) {
+				t.Errorf("policy/data split: policies=%d data=%d", policies.Load(), len(f.requests))
+			}
+			if scenario == "41-operations" && len(f.requests) != 41 || scenario == "21-without-actions" && len(f.requests) != 21 {
+				t.Errorf("logical data budget=%d", len(f.requests))
+			}
+		})
+	}
+}
+
+func TestPRChecksLogicalDedupAcrossPages(t *testing.T) {
+	for _, mode := range []string{"json", "human", "watch"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newPRChecksFixture()
+			f.checks = []any{}
+			for i := 0; i < 100; i++ {
+				c := prChecksCheck(int64(i+1), "unit", "completed", "failure")
+				c["started_at"] = "2026-09-01T00:00:00Z"
+				f.checks = append(f.checks, c)
+			}
+			f.checks = append(f.checks, prChecksCheck(101, "unit", "completed", "success"))
+			relayTestServer(t, func(r map[string]any) any { return f.response(t, r) })
+			sleeps := recordWatchSleeps(t)
+			var out bytes.Buffer
+			args := []string{"checks", "7", "-R", "acme/repo"}
+			if mode == "json" {
+				args = append(args, "--json", "name,state")
+			}
+			if mode == "watch" {
+				args = append(args, "--watch")
+			}
+			result := handleGHPR(t.Context(), args, &out)
+			if result.err != nil || result.action != ghComplete {
+				t.Errorf("obsolete failure survived logical dedup: action=%v err=%v", result.action, result.err)
+			}
+			if mode == "json" {
+				if out.String() != "[{\"name\":\"unit\",\"state\":\"SUCCESS\"}]\n" {
+					t.Errorf("expected only newest successful check, bytes=%d", out.Len())
+				}
+			} else {
+				if strings.Count(out.String(), "unit\t") != 1 {
+					t.Errorf("obsolete rows printed: %d", strings.Count(out.String(), "unit\t"))
+				}
+				if mode == "watch" && !strings.Contains(out.String(), "checks: 0 pending, 1 pass, 0 fail, 0 cancel\n") {
+					t.Errorf("watch counts not deduped")
+				}
+			}
+			if len(*sleeps) != 0 {
+				t.Errorf("terminal checks slept: %v", *sleeps)
+			}
+		})
+	}
+}
+
+func TestPRChecksDedupNamespacesAndLiteralKey(t *testing.T) {
+	for _, scenario := range []string{"workflow-event-status", "slash-key", "equal-start-no-invented-winner"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newPRChecksFixture()
+			f.checks, f.runs, f.workflows = []any{}, []any{}, []any{}
+			for i := 0; i < 3; i++ {
+				c := prChecksCheck(int64(i+1), "unit", "completed", "success")
+				c["check_suite"] = map[string]any{"id": 201 + i}
+				c["started_at"] = fmt.Sprintf("2026-09-01T0%d:00:00Z", i)
+				workflow, event := "CI", "push"
+				if i == 1 {
+					workflow = "Other"
+				}
+				if i == 2 {
+					event = "pull_request"
+				}
+				if scenario == "slash-key" {
+					if i == 0 {
+						c["name"], workflow, event = "a/b", "c", "push"
+					} else if i == 1 {
+						c["name"], workflow, event = "a", "b/c", "push"
+					}
+				}
+				if scenario == "equal-start-no-invented-winner" {
+					workflow, event = "CI", "push"
+					c["started_at"] = "2026-09-01T00:00:00Z"
+				}
+				f.checks = append(f.checks, c)
+				f.runs = append(f.runs, map[string]any{"id": 301 + i, "head_sha": metadataHead, "check_suite_id": 201 + i, "workflow_id": 401 + i, "name": "wrong", "event": event})
+				f.workflows = append(f.workflows, map[string]any{"id": 401 + i, "name": workflow, "state": "active", "path": fmt.Sprintf(".github/workflows/%d.yml", i)})
+			}
+			if scenario == "workflow-event-status" {
+				f.statuses = []any{map[string]any{"id": 10, "context": "unit", "state": "success", "created_at": "2026-09-01T00:00:00Z"}, map[string]any{"id": 11, "context": "unit", "state": "success", "created_at": "2026-09-01T01:00:00Z"}}
+			}
+			relayTestServer(t, func(r map[string]any) any { return f.response(t, r) })
+			var out bytes.Buffer
+			if err := relayPRChecks(t.Context(), &out, "acme/repo", "7", ghTopOptions{json: []string{"name", "state"}}); err != nil {
+				t.Fatal(err)
+			}
+			var got []map[string]any
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]int{"workflow-event-status": 4, "slash-key": 2, "equal-start-no-invented-winner": 1}[scenario]
+			if len(got) != want {
+				t.Fatalf("native logical namespaces/key rows=%d want=%d output=%s", len(got), want, out.String())
+			}
+		})
 	}
 }

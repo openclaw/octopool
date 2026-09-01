@@ -241,12 +241,16 @@ eligible caching, including under active string rewrite protection. Fork metadat
 uses GitHub node IDs; a deleted head repository is `null`. Requested author, owner, and assignee
 names use a shared per-command profile lookup. The rollup preserves native `gh`
 `CheckRun` and `StatusContext` fields and resolves workflow names by check-suite ID
-from head-filtered Actions runs, without guessing from job names or URLs. Check/status
+through head-filtered Actions runs and the complete raw workflow catalogue, including
+inactive workflows. It shares this verified association with `pr checks`, without using
+run names, display titles, or body-supplied URLs. Check/status
 pages and workflow lookups read live; after all hydration, a final live PR head check
 rejects a moving head before any JSON is printed. A matching SHA is not an atomic
 snapshot: checks can change on the same commit. Both `pr checks` and the rollup require
 consistent page totals, unique upstream IDs, and complete pages, bounded to 1,000 items
-per collection. The workflow lookup uses the same completeness checks. Inconsistent
+per collection, including both Actions runs and the workflow catalogue. Missing or
+ambiguous workflow associations and mismatched check/run heads also refuse projection.
+Fork head repositories are supported. Inconsistent
 or incomplete collections emit no partial JSON and follow the existing typed native
 fallback, including fresh policy checks and host pinning under active rewrite rules.
 `OCTOPOOL_NO_FALLBACK=1` keeps these cases as failures. Repeated JSON fields are accepted
@@ -276,10 +280,29 @@ such as `author:` or custom sort/match flags falls through to the real `gh`. PR 
 supports the issue-like fields returned by GitHub Search; PR-list-only fields such as
 `headRefName` fall through. Hydrated `gh pr view --json files,...` requests send the
 verified PR head SHA, allowing file pages to share a five-minute state-scoped cache.
-`gh pr checks` uses the shared cache throughout: its PR
+`gh pr checks` uses the shared cache throughout ordinary acquisition: its PR
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share
 one upstream PR read at most 60 seconds old, and the check/status reads for that SHA use
-the normal cache TTLs. Native `gh run watch` and `gh pr checks --watch` polling also stays
+the normal cache TTLs, as do its raw Actions metadata reads. Each collection is bounded
+to 10 pages of 100 entries. Ordinary acquisition uses at most 41 logical data operations,
+or 21 without Actions associations; an actual empty result takes 3. These are not limits
+on policy reads, transport attempts, retries, or an entire watch session. Every data
+operation retains authoritative policy checks through the relay client.
+
+Successful nonempty `pr checks --json` / `--jq` exports return 0 regardless of check
+outcomes; export or writer errors still fail. An empty result fails before any JSON or
+jq output, with `no checks reported on the '<head branch>' branch` on stderr and exit 1.
+Human and watch output instead return 1 for failed checks, otherwise 8 for pending
+checks, otherwise 0; cancellation and skipping alone do not fail. `NEUTRAL` maps to
+`skipping`. Legacy status descriptions are preserved; check summaries are not descriptions.
+Legacy statuses and missing/null check timestamps export zero times. Malformed nonempty
+check timestamps use guarded fallback before output.
+
+Checks are deduplicated before field selection by descending start time, using the native
+slash-joined check name/workflow/event key and a separate status-context namespace.
+Equal starts have no promised winner; creation time and numeric ID are not tiebreakers.
+JSON retains that aggregation order, not human-table presentation order.
+Native `gh run watch` and `gh pr checks --watch` polling also stays
 on the relay, floors intervals at 30 seconds, and backs off to 120 seconds.
 
 Supported `gh run watch` commands keep polling on the relay, including under active rewrite
@@ -300,7 +323,13 @@ For `gh pr checks --watch`, an explicit relay `fallback_local` after progress st
 handoff boundary and continues the command with real `gh`, which owns output and exit status.
 Its first snapshot may repeat the last relay-rendered state. Client-side incompleteness,
 auth, transport/decode failures, and ordinary relay service errors remain terminal after
-progress and do not spend local GitHub quota. Ask for raw `gh api`
+progress and do not spend local GitHub quota. Cached empty checks are revalidated live.
+Terminal confirmation reacquires every check, status, run, and workflow page with
+`max-age=0`, builds fresh associations, then reads the PR head live again after hydration.
+A changed head cannot confirm completion; a matching head still does not make same-commit
+check changes atomic. This extra live read is part of each terminal confirmation attempt,
+not the ordinary 41-operation bound. Active rewrite policy retains the existing
+pre-handler delegation of checks-watch commands. Ask for raw `gh api`
 conditional requests only when instant freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
@@ -334,6 +363,11 @@ differences:
 All relay-controlled single-line text has terminal control characters removed. PR and
 issue bodies preserve newlines and tabs while removing other control characters and
 invalid UTF-8.
+
+Non-TTY `pr checks` uses the native checks-only table comparator, separately from JSON.
+Cancellation displays as `fail` while retaining its successful cancellation-only exit.
+Elapsed values display `0` when absent or nonpositive, and Go durations (including
+fractional seconds) otherwise. Watch retains Octopool's terse transition/final output.
 
 After successfully fetching an explicit empty string rewrite policy (and finding no
 local rules), the command retains its existing real-`gh` delegation when any of these hold:

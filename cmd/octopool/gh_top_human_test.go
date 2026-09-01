@@ -132,10 +132,10 @@ func TestHumanPRChecksExactOutputAndSanitizesName(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/25":
-			return map[string]any{"head": map[string]any{"sha": "abc123"}}
+			return map[string]any{"head": map[string]any{"sha": "abc123", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc123/check-runs":
 			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{
-				"id": 1, "name": "Check\x1b[31m", "status": "completed", "conclusion": "success",
+				"id": 1, "head_sha": "abc123", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "Check\x1b[31m", "status": "completed", "conclusion": "success",
 				"started_at": "2026-07-17T21:00:00Z", "completed_at": "2026-07-17T21:03:12Z",
 				"details_url": "https://github.com/openclaw/octopool/actions/runs/29614118703/job/87995297404",
 			}}}
@@ -353,10 +353,10 @@ func TestHumanPRChecksPendingExitsEight(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/25":
-			return map[string]any{"head": map[string]any{"sha": "abc123"}}
+			return map[string]any{"head": map[string]any{"sha": "abc123", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc123/check-runs":
 			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{
-				"id": 1, "name": "Check", "status": "in_progress", "started_at": "2026-07-17T21:00:00Z",
+				"id": 1, "head_sha": "abc123", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "Check", "status": "in_progress", "started_at": "2026-07-17T21:00:00Z",
 			}}}
 		case "/repos/openclaw/octopool/commits/abc123/status":
 			return map[string]any{"total_count": 0, "statuses": []map[string]any{}}
@@ -371,7 +371,7 @@ func TestHumanPRChecksPendingExitsEight(t *testing.T) {
 	if result.action != ghFail || !errors.As(result.err, &exitErr) || exitErr.Code != 8 {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
-	if got, want := out.String(), "Check\tpending\t\t\t\n"; got != want {
+	if got, want := out.String(), "Check\tpending\t0\t\t\n"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
@@ -535,5 +535,83 @@ func assertGHComplete(t *testing.T, result ghResult) {
 	t.Helper()
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+}
+
+func TestPRChecksNativeHumanPresentation(t *testing.T) {
+	for _, row := range []struct {
+		name, conclusion string
+		start, end       any
+		elapsed, bucket  string
+	}{
+		{"cancelled", "cancelled", nil, nil, "0", "fail"},
+		{"missing", "success", nil, nil, "0", "pass"},
+		{"equal", "success", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00Z", "0", "pass"},
+		{"negative", "success", "2026-09-01T00:00:01Z", "2026-09-01T00:00:00Z", "0", "pass"},
+		{"fractional", "success", "2026-09-01T00:00:00.12+02:30", "2026-09-01T00:00:01.62+02:30", "1.5s", "pass"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			f := newPRChecksFixture()
+			c := f.checks[0].(map[string]any)
+			c["conclusion"], c["started_at"], c["completed_at"] = row.conclusion, row.start, row.end
+			c["name"], c["details_url"] = "unit\x1b[31m", "https://example.test/job"
+			relayTestServer(t, func(r map[string]any) any { return f.response(t, r) })
+			var out bytes.Buffer
+			err := relayPRChecks(t.Context(), &out, "acme/repo", "7", ghTopOptions{})
+			want := "unit[31m\t" + row.bucket + "\t" + row.elapsed + "\thttps://example.test/job\t\n"
+			if err != nil || out.String() != want {
+				t.Fatalf("checks-local native row: err=%v got=%q want=%q", err, out.String(), want)
+			}
+		})
+	}
+}
+
+func TestPRChecksHumanSortSeparateFromJSON(t *testing.T) {
+	for _, mode := range []string{"human", "json"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newPRChecksFixture()
+			f.checks = []any{}
+			// Native comparator leaves pass before pending (it tests "success", not "pass").
+			for i, row := range []struct{ name, status, conclusion, link string }{
+				{"z", "completed", "success", "https://example.test/z"},
+				{"a", "completed", "success", "https://example.test/b"},
+				{"a", "completed", "success", "https://example.test/a"},
+				{"pending", "queued", "", "https://example.test/p"},
+				{"failed", "completed", "failure", "https://example.test/f"},
+			} {
+				c := prChecksCheck(int64(i+1), row.name, row.status, row.conclusion)
+				c["details_url"] = row.link
+				c["started_at"] = time.Date(2026, 9, 1, 5-i, 0, 0, 0, time.UTC).Format(time.RFC3339)
+				c["completed_at"] = nil
+				c["check_suite"] = map[string]any{"id": 201 + i}
+				f.checks = append(f.checks, c)
+				if i > 0 {
+					f.runs = append(f.runs, map[string]any{"id": 301 + i, "head_sha": metadataHead, "check_suite_id": 201 + i, "workflow_id": 401 + i, "name": "wrong", "event": "push"})
+					f.workflows = append(f.workflows, map[string]any{"id": 401 + i, "name": row.link, "state": "active", "path": ".github/workflows/other.yml"})
+				}
+			}
+			relayTestServer(t, func(r map[string]any) any { return f.response(t, r) })
+			var out bytes.Buffer
+			opts := ghTopOptions{}
+			if mode == "json" {
+				opts.json = []string{"name", "link"}
+			}
+			err := relayPRChecks(t.Context(), &out, "acme/repo", "7", opts)
+			if mode == "human" {
+				assertExitCode(t, err, 1)
+				want := "failed\tfail\t0\thttps://example.test/f\t\na\tpass\t0\thttps://example.test/a\t\na\tpass\t0\thttps://example.test/b\t\nz\tpass\t0\thttps://example.test/z\t\npending\tpending\t0\thttps://example.test/p\t\n"
+				if out.String() != want {
+					t.Fatalf("literal native presentation comparator: got=%q want=%q", out.String(), want)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("export exit=%v", err)
+				}
+				want := "[{\"link\":\"https://example.test/z\",\"name\":\"z\"},{\"link\":\"https://example.test/b\",\"name\":\"a\"},{\"link\":\"https://example.test/a\",\"name\":\"a\"},{\"link\":\"https://example.test/p\",\"name\":\"pending\"},{\"link\":\"https://example.test/f\",\"name\":\"failed\"}]\n"
+				if out.String() != want {
+					t.Fatalf("JSON must retain aggregation rather than presentation order: %s", out.String())
+				}
+			}
+		})
 	}
 }

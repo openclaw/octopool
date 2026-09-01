@@ -663,6 +663,7 @@ func paginationItems(start int, count int) []int {
 }
 
 func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
+	checkCalls := 0
 	checkRuns := make([]map[string]any, relayPageSize)
 	for index := range checkRuns {
 		checkRuns[index] = map[string]any{
@@ -674,8 +675,9 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
+			checkCalls++
 			return map[string]any{"total_count": maxRelayPages*relayPageSize + 1, "check_runs": checkRuns}
 		default:
 			return nil
@@ -688,6 +690,9 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	}, &out)
 	if result.action != ghFail || !isLocalFallback(result.err) {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+	if checkCalls != 1 || out.Len() != 0 {
+		t.Fatalf("pagination guard was not reached before output: calls=%d output=%q", checkCalls, out.String())
 	}
 }
 

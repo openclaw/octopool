@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -138,7 +139,7 @@ func TestGHPRChecksWatchPendingToDone(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
 			checkCalls++
 			status := "in_progress"
@@ -150,8 +151,8 @@ func TestGHPRChecksWatchPendingToDone(t *testing.T) {
 			return map[string]any{
 				"total_count": 2,
 				"check_runs": []map[string]any{
-					{"id": 1, "name": "CI", "status": status, "conclusion": conclusion, "details_url": "https://example.test/ci"},
-					{"id": 2, "name": "Lint", "status": "completed", "conclusion": "success", "details_url": "https://example.test/lint"},
+					{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": status, "conclusion": conclusion, "details_url": "https://example.test/ci"},
+					{"id": 2, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 202}, "name": "Lint", "status": "completed", "conclusion": "success", "details_url": "https://example.test/lint"},
 				},
 			}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
@@ -186,12 +187,12 @@ func TestGHPRChecksWatchFailFast(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
 			checkCalls++
 			return map[string]any{"total_count": 2, "check_runs": []map[string]any{
-				{"id": 1, "name": "CI", "status": "completed", "conclusion": "failure"},
-				{"id": 2, "name": "Integration", "status": "queued"},
+				{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "failure"},
+				{"id": 2, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 202}, "name": "Integration", "status": "queued"},
 			}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
 			return map[string]any{"total_count": 0, "statuses": []any{}}
@@ -218,7 +219,7 @@ func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
 			checkCalls++
 			pendingStatus := "queued"
@@ -227,8 +228,8 @@ func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
 				pendingStatus, pendingConclusion = "completed", "success"
 			}
 			return map[string]any{"total_count": 2, "check_runs": []map[string]any{
-				{"id": 1, "name": "CI", "status": "completed", "conclusion": "cancelled"},
-				{"id": 2, "name": "Integration", "status": pendingStatus, "conclusion": pendingConclusion},
+				{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "cancelled"},
+				{"id": 2, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 202}, "name": "Integration", "status": pendingStatus, "conclusion": pendingConclusion},
 			}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
 			return map[string]any{"total_count": 0, "statuses": []any{}}
@@ -255,7 +256,7 @@ func TestGHPRChecksWatchErrorsOnNoChecks(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
 			return map[string]any{"total_count": 0, "check_runs": []any{}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
@@ -277,14 +278,14 @@ func TestGHPRChecksWatchCachedEmptyRevalidatesFresh(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch path := body["path"].(string); {
 		case path == "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case strings.HasSuffix(path, "/check-runs"):
 			h, _ := body["headers"].(map[string]any)
 			if h["cache-control"] != "max-age=0" {
 				// Stale shared-cache entry from before checks registered.
 				return map[string]any{"total_count": 0, "check_runs": []any{}}
 			}
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -307,14 +308,14 @@ func TestGHPRChecksWatchFreshEmptyTerminalIsNotGreen(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch path := body["path"].(string); {
 		case path == "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case strings.HasSuffix(path, "/check-runs"):
 			h, _ := body["headers"].(map[string]any)
 			if h["cache-control"] == "max-age=0" {
 				// Terminal confirmation sees the checks vanish (rerun lag).
 				return map[string]any{"total_count": 0, "check_runs": []any{}}
 			}
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -361,9 +362,9 @@ func TestGHPRChecksWatchEqualsTrueSpelling(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch body["path"] {
 		case "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case "/repos/openclaw/octopool/commits/abc1234/check-runs":
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case "/repos/openclaw/octopool/commits/abc1234/status":
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -415,17 +416,17 @@ func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
 		case path == "/repos/openclaw/octopool/pulls/7":
 			headers, _ := body["headers"].(map[string]any)
 			if headers["cache-control"] == "max-age=0" {
-				return map[string]any{"head": map[string]any{"sha": "newsha"}}
+				return map[string]any{"head": map[string]any{"sha": "newsha", "ref": "feature"}}
 			}
 			sha := "oldsha"
 			if len(checkFetches) > 0 {
 				sha = "newsha"
 			}
-			return map[string]any{"head": map[string]any{"sha": sha}}
+			return map[string]any{"head": map[string]any{"sha": sha, "ref": "feature"}}
 		case strings.HasSuffix(path, "/check-runs"):
 			sha := strings.Split(path, "/")[5]
 			checkFetches = append(checkFetches, sha)
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": sha, "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -493,16 +494,16 @@ func TestGHPRChecksWatchConfirmsRerunSameHead(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		switch path := body["path"].(string); {
 		case path == "/repos/openclaw/octopool/pulls/7":
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case strings.HasSuffix(path, "/check-runs"):
 			if h, _ := body["headers"].(map[string]any); h["cache-control"] == "max-age=0" {
 				freshCheckReads++
 				if freshCheckReads == 1 {
 					// Rerun in flight: same head SHA, cached payload obsolete.
-					return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "in_progress"}}}
+					return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "in_progress"}}}
 				}
 			}
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -775,9 +776,9 @@ func TestGHPRChecksWatchAuthFailureDoesNotHandoff(t *testing.T) {
 					Code: "invalid_auth", Message: "Invalid caller token",
 				})
 			}
-			return map[string]any{"head": map[string]any{"sha": "abc1234"}}
+			return map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
 		case strings.HasSuffix(path, "/check-runs"):
-			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"}}}
+			return map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "success"}}}
 		case strings.HasSuffix(path, "/status"):
 			return map[string]any{"total_count": 0, "statuses": []any{}}
 		default:
@@ -822,5 +823,170 @@ func assertExitCode(t *testing.T, err error, code int) {
 	var exit exitCodeError
 	if !errors.As(err, &exit) || exit.Code != code {
 		t.Fatalf("err=%v, want exit code %d", err, code)
+	}
+}
+
+func TestPRChecksFreshMetadataPagesAndMaps(t *testing.T) {
+	f := newPRChecksFixture()
+	for i := 0; i < 100; i++ {
+		f.runs = append(f.runs, map[string]any{"id": 1000 + i, "head_sha": metadataHead, "check_suite_id": 1000 + i, "workflow_id": 401, "name": "wrong", "event": "push"})
+		f.workflows = append(f.workflows, map[string]any{"id": 1000 + i, "name": "unrelated", "state": "active", "path": ".github/workflows/other.yml"})
+	}
+	generation := 0
+	relayTestServer(t, func(r map[string]any) any {
+		headers, _ := r["headers"].(map[string]any)
+		if headers["cache-control"] != "max-age=0" {
+			t.Errorf("fresh acquisition page must bypass cache: %v", r)
+		}
+		f.runs[0].(map[string]any)["event"] = []string{"push", "pull_request"}[generation]
+		f.workflows[0].(map[string]any)["name"] = []string{"Old CI", "New CI"}[generation]
+		return f.response(t, r)
+	})
+	client, err := newGHRelayClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for generation = 0; generation < 2; generation++ {
+		items, err := prCheckItemsForSHAFresh(t.Context(), client, "acme/repo", metadataHead)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := items[0]
+		if row.Workflow != []string{"Old CI", "New CI"}[generation] || row.Event != []string{"push", "pull_request"}[generation] {
+			t.Errorf("fresh maps must be acquisition-owned: %v", row)
+		}
+	}
+	if f.calls("/actions/runs") != 4 || f.calls("/actions/workflows") != 4 {
+		t.Errorf("all metadata pages must be reacquired: runs=%d catalogue=%d", f.calls("/actions/runs"), f.calls("/actions/workflows"))
+	}
+}
+
+func TestPRChecksWatchHeadChangesDuringHydration(t *testing.T) {
+	for _, stage := range []string{"contexts", "catalogue"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newPRChecksFixture()
+			relayTestServer(t, func(r map[string]any) any {
+				body := f.response(t, r)
+				path := r["path"].(string)
+				if stage == "contexts" && strings.HasSuffix(path, "/status") || stage == "catalogue" && strings.HasSuffix(path, "/actions/workflows") {
+					f.head = map[string]any{"sha": strings.Repeat("f", 40), "ref": "feature"}
+				}
+				return body
+			})
+			client, err := newGHRelayClient()
+			if err != nil {
+				t.Fatal(err)
+			}
+			items, confirmed, err := confirmPRChecksTerminal(t.Context(), client, ghPRChecksWatchOptions{repo: "acme/repo", number: "7"}, metadataHead)
+			if err != nil || confirmed || len(items) != 0 {
+				t.Errorf("head moved during terminal hydration: confirmed=%v items=%d err=%v", confirmed, len(items), err)
+			}
+			if f.calls("/pulls/7") != 2 || f.requests[len(f.requests)-1]["path"] != "/repos/acme/repo/pulls/7" {
+				t.Errorf("terminal hydration needs final live head read: %v", f.requests)
+			}
+			for _, r := range f.requests {
+				h, _ := r["headers"].(map[string]any)
+				if h["cache-control"] != "max-age=0" {
+					t.Errorf("non-fresh confirmation read: %v", r)
+				}
+			}
+		})
+	}
+}
+
+func TestPRChecksWatchMetadataFailureOwnership(t *testing.T) {
+	for _, scenario := range []string{"typed-before", "typed-after", "relay-before", "relay-after", "no-fallback-before", "no-fallback-after"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newPRChecksFixture()
+			after := strings.HasSuffix(scenario, "after")
+			rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				req := decodeCLIRequest(t, w, r)
+				body := f.response(t, req)
+				headers, _ := req["headers"].(map[string]any)
+				if req["path"] == "/repos/acme/repo/actions/workflows" && (!after || headers["cache-control"] == "max-age=0") {
+					if strings.HasPrefix(scenario, "typed") {
+						body = map[string]any{"total_count": 0, "workflows": []any{}}
+					} else {
+						writeCLIFallback(t, w, "repo_not_public")
+						return
+					}
+				}
+				writeCLIEnvelope(t, w, body)
+			})
+			capture := captureRewriteGH(t)
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			if strings.HasPrefix(scenario, "no-fallback") {
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			}
+			var out, stderr bytes.Buffer
+			err := runGH(t.Context(), []string{"pr", "checks", "7", "-R", "acme/repo", "--watch"}, &out, &stderr)
+			childAllowed := scenario == "typed-before" || strings.HasPrefix(scenario, "relay")
+			if childAllowed {
+				if err != nil || strings.Count(out.String(), "child stdout\n") != 1 {
+					t.Fatalf("one guarded child expected: err=%v out=%q stderr=%q", err, out.String(), stderr.String())
+				}
+				if _, e := os.Stat(capture); e != nil {
+					t.Error("missing child capture")
+				}
+				boundary := "falling back to real gh"
+				if after {
+					boundary = "continuing watch with real gh"
+				}
+				if strings.Count(stderr.String(), boundary) != 1 {
+					t.Errorf("one fallback boundary: %q", stderr.String())
+				}
+			} else {
+				if err == nil || strings.Contains(out.String(), "child stdout") || strings.Contains(out.String(), "unit\t") || strings.Contains(stderr.String(), "real gh") {
+					t.Errorf("no final output/handoff after client failure or NO_FALLBACK: err=%v out=%q stderr=%q", err, out.String(), stderr.String())
+				}
+				if _, e := os.Stat(capture); !os.IsNotExist(e) {
+					t.Error("forbidden native child ran")
+				}
+				if after && isLocalFallback(err) && !strings.HasPrefix(scenario, "no-fallback") {
+					t.Errorf("client failure after progress retained fallback type: %v", err)
+				}
+			}
+			if after != strings.Contains(out.String(), "checks:") {
+				t.Errorf("progress ownership: after=%v out=%q", after, out.String())
+			}
+		})
+	}
+}
+
+func TestPRChecksWatchActivePolicyDelegatesBeforeHandler(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("active-policy watch must retain pre-handler delegation")
+		w.WriteHeader(400)
+	})
+	capture := captureRewriteGH(t)
+	var out, stderr bytes.Buffer
+	if err := runGH(t.Context(), []string{"pr", "checks", "7", "-R", "acme/repo", "--watch", "--interval", "1"}, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "child stdout\n" {
+		t.Fatalf("output=%q", out.String())
+	}
+	if _, err := os.Stat(capture); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPRChecksWatchStaleRemainsPending(t *testing.T) {
+	f := newPRChecksFixture()
+	relayTestServer(t, func(r map[string]any) any {
+		if r["path"] == "/repos/acme/repo/commits/"+metadataHead+"/check-runs" {
+			conclusion := "success"
+			if f.calls("/check-runs") == 0 {
+				conclusion = "stale"
+			}
+			f.checks[0].(map[string]any)["conclusion"] = conclusion
+		}
+		return f.response(t, r)
+	})
+	sleeps := recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "acme/repo", "--watch"}, &out)
+	if result.err != nil || result.action != ghComplete || !reflect.DeepEqual(*sleeps, []time.Duration{30 * time.Second}) || !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 0 fail, 0 cancel") || !strings.Contains(out.String(), "unit\tpass\tSUCCESS") {
+		t.Fatalf("stale must remain pending until next completion: result=%+v sleeps=%v out=%q", result, *sleeps, out.String())
 	}
 }

@@ -4,119 +4,174 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// prChecksMaxPRAgeSeconds bounds how old a relay-cached PR record may be when
-// resolving the head SHA for `gh pr checks`.
+// prChecksMaxPRAgeSeconds bounds the shared PR head lookup's staleness.
 const prChecksMaxPRAgeSeconds = 60
 
-func relayPRChecks(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
+type prCheckHead struct {
+	SHA string `json:"sha"`
+	Ref string `json:"ref"`
+}
+
+type prChecksEmptyError struct{ head prCheckHead }
+
+func (err prChecksEmptyError) Error() string {
+	return fmt.Sprintf("no checks reported on the '%s' branch", watchSafeText(err.head.Ref))
+}
+
+// Keep the REST source discriminator until each consumer projects its own shape.
+// In particular, status created_at is not a check's startedAt.
+type prCheckContext struct {
+	raw      map[string]any
+	isStatus bool
+}
+
+type prCheckRow struct {
+	Name, State, Link, Bucket, Event, Workflow, Description string
+	StartedAt, CompletedAt                                  time.Time
+	isStatus                                                bool
+}
+
+func relayPRChecks(ctx context.Context, stdout io.Writer, repo, number string, opts ghTopOptions) error {
 	client, err := newGHRelayClient()
 	if err != nil {
 		return err
 	}
-	items, err := relayPRCheckItems(ctx, client, repo, number)
+	items, head, err := relayPRCheckItemsWithHead(ctx, client, repo, number)
 	if err != nil {
 		return err
+	}
+	if len(items) == 0 {
+		return prChecksEmptyError{head: head}
 	}
 	if len(opts.json) == 0 {
 		if err := renderHumanPRChecks(stdout, items); err != nil {
 			return err
 		}
-	} else {
-		raw, err := json.Marshal(items)
-		if err != nil {
-			return err
-		}
-		raw, err = filterJSONFields(raw, opts.json, fieldMapCheckRun)
-		if err != nil {
-			return err
-		}
-		if err := writeBytes(ctx, stdout, raw, opts.jq); err != nil {
-			return err
-		}
+		return checkExitCode(items)
 	}
-	return checkExitCode(items)
+	rows := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, item.export(opts.json))
+	}
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	// Export success is independent of check outcomes. Include the terminator in
+	// the write so a writer failure cannot be lost on a second newline write.
+	return writeBytes(ctx, stdout, append(raw, '\n'), opts.jq)
 }
 
-func relayPRCheckItems(ctx context.Context, client ghRelayClient, repo string, number string) ([]any, error) {
-	items, _, err := relayPRCheckItemsWithSHA(ctx, client, repo, number)
-	return items, err
+func (row prCheckRow) export(fields []string) map[string]any {
+	values := map[string]any{
+		"name": row.Name, "state": row.State, "link": row.Link, "bucket": row.Bucket,
+		"event": row.Event, "workflow": row.Workflow, "description": row.Description,
+		"startedAt": row.StartedAt, "completedAt": row.CompletedAt,
+	}
+	out := make(map[string]any, len(fields))
+	for _, field := range fields {
+		out[field] = values[field]
+	}
+	return out
 }
 
-func relayPRHeadSHA(ctx context.Context, client ghRelayClient, repo string, number string, maxAgeSeconds int) (string, error) {
-	prEnvelope, err := client.do(ctx, ghAPIRequest{
-		method: "GET",
-		path:   repoPath(repo, "pulls", number),
+func relayPRHead(ctx context.Context, client ghRelayClient, repo, number string, maxAgeSeconds int) (prCheckHead, error) {
+	envelope, err := client.do(ctx, ghAPIRequest{
+		method: "GET", path: repoPath(repo, "pulls", number),
 		headers: map[string]string{
 			"cache-control":           "max-age=" + strconv.Itoa(maxAgeSeconds),
 			"x-octopool-public-shape": publicShapePullRequestSummary,
 		},
 	})
 	if err != nil {
-		return "", err
+		return prCheckHead{}, err
 	}
-	prBody, err := envelopeBodyBytes(prEnvelope)
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return prCheckHead{}, err
+	}
+	var pr struct {
+		Head map[string]json.RawMessage `json:"head"`
+	}
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return prCheckHead{}, err
+	}
+	var head prCheckHead
+	// Each caller validates the identity it needs; an unrelated PR-view SHA
+	// verification must not acquire the checks-only branch requirement.
+	_ = json.Unmarshal(pr.Head["sha"], &head.SHA)
+	_ = json.Unmarshal(pr.Head["ref"], &head.Ref)
+	return head, nil
+}
+
+// PR-view's final SHA verification does not need checks' branch diagnostic.
+func relayPRHeadSHA(ctx context.Context, client ghRelayClient, repo, number string, maxAgeSeconds int) (string, error) {
+	head, err := relayPRHead(ctx, client, repo, number, maxAgeSeconds)
 	if err != nil {
 		return "", err
 	}
-	var pr map[string]any
-	if err := json.Unmarshal(prBody, &pr); err != nil {
-		return "", err
-	}
-	sha, ok := nestedString(pr, "head", "sha")
-	if !ok || sha == "" {
+	if head.SHA == "" {
 		return "", errors.New("pull request response did not include head.sha")
 	}
-	return sha, nil
+	return head.SHA, nil
 }
 
-func relayPRCheckItemsWithSHA(ctx context.Context, client ghRelayClient, repo string, number string) ([]any, string, error) {
-	// Bound the PR lookup's staleness instead of forcing a live read: concurrent
-	// CI-polling sessions coalesce onto one shared-cache fill while the head SHA
-	// stays at most a few seconds behind a push.
-	sha, err := relayPRHeadSHA(ctx, client, repo, number, prChecksMaxPRAgeSeconds)
+func relayPRChecksHead(ctx context.Context, client ghRelayClient, repo, number string, maxAgeSeconds int) (prCheckHead, error) {
+	head, err := relayPRHead(ctx, client, repo, number, maxAgeSeconds)
 	if err != nil {
-		return nil, "", err
+		return prCheckHead{}, err
 	}
-	items, err := prCheckItemsForSHA(ctx, client, repo, sha)
+	if head.SHA == "" || head.Ref == "" {
+		return prCheckHead{}, localFallbackError{Reason: "pull request response did not include checks head identity"}
+	}
+	return head, nil
+}
+
+func relayPRCheckItemsWithHead(ctx context.Context, client ghRelayClient, repo, number string) ([]prCheckRow, prCheckHead, error) {
+	head, err := relayPRChecksHead(ctx, client, repo, number, prChecksMaxPRAgeSeconds)
 	if err != nil {
-		return nil, "", err
+		return nil, prCheckHead{}, err
 	}
-	return items, sha, nil
+	items, err := prCheckItemsForSHAWithHeaders(ctx, client, repo, head.SHA, nil)
+	return items, head, err
 }
 
-func prCheckItemsForSHA(ctx context.Context, client ghRelayClient, repo string, sha string) ([]any, error) {
-	return prCheckItemsForSHAWithHeaders(ctx, client, repo, sha, nil)
+// Every page, including Actions metadata, bypasses cached staleness in a fresh
+// sweep. Each acquisition builds its own associations, including same-SHA reruns.
+func prCheckItemsForSHAFresh(ctx context.Context, client ghRelayClient, repo, sha string) ([]prCheckRow, error) {
+	return prCheckItemsForSHAWithHeaders(ctx, client, repo, sha, watchFreshHeaders())
 }
 
-// prCheckItemsForSHAFresh bypasses cached staleness so a terminal watch
-// snapshot cannot be confirmed by an obsolete cached payload after a rerun.
-func prCheckItemsForSHAFresh(ctx context.Context, client ghRelayClient, repo string, sha string) ([]any, error) {
-	return prCheckItemsForSHAWithHeaders(ctx, client, repo, sha, map[string]string{"cache-control": "max-age=0"})
-}
-
-func prCheckItemsForSHAWithHeaders(
-	ctx context.Context,
-	client ghRelayClient,
-	repo string,
-	sha string,
-	headers map[string]string,
-) ([]any, error) {
-	items, err := prCheckContextsForSHA(ctx, client, repo, sha, headers)
+func prCheckItemsForSHAWithHeaders(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string) ([]prCheckRow, error) {
+	contexts, err := prCheckContextsForSHA(ctx, client, repo, sha, headers)
 	if err != nil {
 		return nil, err
 	}
-	return ghCheckItems(items), nil
+	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, contexts)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]prCheckRow, 0, len(contexts))
+	for _, item := range contexts {
+		row, err := normalizePRCheck(item, metadata)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
+	}
+	return deduplicatePRChecks(rows), nil
 }
 
-// Preserve the context discriminator and source fields until each gh export
-// projects them; pr checks and pr view expose different public JSON contracts.
-func prCheckContextsForSHA(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string) ([]any, error) {
-	checkRuns, err := relayCompleteCollection(ctx, client, ghAPIRequest{
+func prCheckContextsForSHA(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string) ([]prCheckContext, error) {
+	checks, err := relayCompleteCollection(ctx, client, ghAPIRequest{
 		method: "GET", path: repoPath(repo, "commits", sha, "check-runs"), headers: headers,
 	}, "check_runs")
 	if err != nil {
@@ -128,125 +183,114 @@ func prCheckContextsForSHA(ctx context.Context, client ghRelayClient, repo, sha 
 	if err != nil {
 		return nil, err
 	}
-	return append(checkRuns, statusItems(statuses)...), nil
-}
-
-func statusItems(rawItems []any) []any {
-	items := make([]any, 0, len(rawItems))
-	for _, raw := range rawItems {
-		status, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		state, _ := status["state"].(string)
-		displayStatus := "completed"
-		if strings.EqualFold(state, "pending") {
-			displayStatus = "pending"
-		}
-		item := map[string]any{
-			"name":         status["context"],
-			"context":      status["context"],
-			"status":       displayStatus,
-			"conclusion":   status["state"],
-			"details_url":  status["target_url"],
-			"started_at":   status["created_at"],
-			"completed_at": status["updated_at"],
-		}
-		items = append(items, item)
+	items := make([]prCheckContext, 0, len(checks)+len(statuses))
+	for _, raw := range checks {
+		items = append(items, prCheckContext{raw: raw.(map[string]any)})
 	}
-	return items
+	return append(items, statusItems(statuses)...), nil
 }
 
-func ghCheckItems(items []any) []any {
-	out := make([]any, 0, len(items))
+func statusItems(items []any) []prCheckContext {
+	out := make([]prCheckContext, 0, len(items))
 	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		state := ghCheckState(item)
-		out = append(out, map[string]any{
-			"bucket":      ghCheckBucket(state),
-			"completedAt": firstString(item, "completed_at", "completedAt"),
-			"description": ghCheckDescription(item),
-			"event":       nestedStringValue(item, "check_suite", "event"),
-			"link":        firstString(item, "details_url", "target_url", "link"),
-			"name":        firstString(item, "name", "context"),
-			"startedAt":   firstString(item, "started_at", "created_at", "startedAt"),
-			"state":       state,
-			"workflow":    ghCheckWorkflow(item),
-		})
+		out = append(out, prCheckContext{raw: raw.(map[string]any), isStatus: true})
 	}
 	return out
 }
 
-func ghCheckState(item map[string]any) string {
-	status := strings.ToLower(firstString(item, "status"))
-	conclusion := strings.ToLower(firstString(item, "conclusion"))
-	if status != "" && status != "completed" {
-		return strings.ToUpper(status)
+func normalizePRCheck(context prCheckContext, metadata map[int64]prCheckMetadata) (prCheckRow, error) {
+	item := context.raw
+	row := prCheckRow{isStatus: context.isStatus}
+	if context.isStatus {
+		row.Name = firstString(item, "context")
+		row.State = strings.ToUpper(firstString(item, "state"))
+		row.Link = firstString(item, "target_url")
+		row.Description = firstString(item, "description")
+	} else {
+		row.Name = firstString(item, "name")
+		row.State = strings.ToUpper(firstString(item, "status"))
+		if row.State == "COMPLETED" {
+			row.State = strings.ToUpper(firstString(item, "conclusion"))
+		}
+		row.Link = firstString(item, "details_url")
+		var err error
+		row.StartedAt, err = prCheckTime(item["started_at"])
+		if err != nil {
+			return prCheckRow{}, err
+		}
+		row.CompletedAt, err = prCheckTime(item["completed_at"])
+		if err != nil {
+			return prCheckRow{}, err
+		}
+		if nestedStringValue(item, "app", "slug") == "github-actions" {
+			suite, _ := valueAtPath(item, "check_suite", "id")
+			id, _ := prCheckID(suite)
+			association := metadata[id]
+			row.Workflow, row.Event = association.workflowName, association.event
+		}
 	}
-	if conclusion == "" {
-		return strings.ToUpper(status)
+	row.Bucket = ghCheckBucket(row.State)
+	return row, nil
+}
+
+func prCheckTime(raw any) (time.Time, error) {
+	if raw == nil || raw == "" {
+		return time.Time{}, nil
 	}
-	return strings.ToUpper(conclusion)
+	if value, ok := raw.(string); ok {
+		if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, localFallbackError{Reason: "invalid check timestamp"}
+}
+
+func deduplicatePRChecks(rows []prCheckRow) []prCheckRow {
+	// Literal native aggregation: unstable descending start time, with no
+	// created_at/ID tiebreaker and separate status and slash-joined check keys.
+	sort.Slice(rows, func(i, j int) bool { return rows[i].StartedAt.After(rows[j].StartedAt) })
+	checks, statuses := map[string]bool{}, map[string]bool{}
+	out := make([]prCheckRow, 0, len(rows))
+	for _, row := range rows {
+		seen, key := checks, row.Name+"/"+row.Workflow+"/"+row.Event
+		if row.isStatus {
+			seen, key = statuses, row.Name
+		}
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 func ghCheckBucket(state string) string {
 	switch strings.ToLower(state) {
-	case "success", "neutral":
+	case "success":
 		return "pass"
 	case "failure", "error", "timed_out", "action_required":
 		return "fail"
 	case "cancelled":
 		return "cancel"
-	case "skipped":
+	case "skipped", "neutral":
 		return "skipping"
 	default:
 		return "pending"
 	}
 }
 
-func ghCheckDescription(item map[string]any) string {
-	if description := firstString(item, "description"); description != "" {
-		return description
-	}
-	return nestedStringValue(item, "output", "summary")
-}
-
-func ghCheckWorkflow(item map[string]any) string {
-	if workflow := firstString(item, "workflow"); workflow != "" {
-		return workflow
-	}
-	return nestedStringValue(item, "check_suite", "workflow_name")
-}
-
-func checkExitCode(items []any) error {
-	exitCode := 0
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		bucket, _ := item["bucket"].(string)
-		state, _ := item["state"].(string)
-		switch strings.ToLower(bucket) {
+func checkExitCode(items []prCheckRow) error {
+	code := 0
+	for _, item := range items {
+		switch item.Bucket {
 		case "fail":
-			exitCode = 1
-		case "cancel":
-			// real gh exits by Failed then Pending counts only; cancelled
-			// checks are terminal and do not fail the command.
+			return exitCodeError{Code: 1}
 		case "pending":
-			if exitCode == 0 {
-				exitCode = 8
-			}
-		}
-		if bucket == "" && strings.ToLower(state) != "success" && strings.ToLower(state) != "neutral" && exitCode == 0 {
-			exitCode = 8
+			code = 8
 		}
 	}
-	if exitCode != 0 {
-		return exitCodeError{Code: exitCode}
+	if code != 0 {
+		return exitCodeError{Code: code}
 	}
 	return nil
 }

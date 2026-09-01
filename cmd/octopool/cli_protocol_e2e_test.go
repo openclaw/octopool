@@ -121,36 +121,99 @@ func TestCLIEndToEndCheckExitCodes(t *testing.T) {
 	}{
 		{name: "failed", status: "completed", conclusion: "failure", wantExit: 1},
 		{name: "pending", status: "in_progress", conclusion: nil, wantExit: 8},
+		{name: "mixed", status: "completed", conclusion: "failure", wantExit: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			fixture := newPRChecksFixture()
+			fixture.checks[0].(map[string]any)["status"] = test.status
+			fixture.checks[0].(map[string]any)["conclusion"] = test.conclusion
+			if test.name == "mixed" {
+				pending := prChecksCheck(2, "pending", "queued", "")
+				pending["started_at"] = "2026-09-01T00:00:00Z"
+				fixture.checks = append(fixture.checks, pending)
+			}
 			server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {
 				body := decodeCLIRequest(t, w, r)
 				if body == nil {
 					return
 				}
-				switch body["path"] {
-				case "/repos/openclaw/octopool/pulls/7":
-					writeCLIEnvelope(t, w, map[string]any{"head": map[string]any{"sha": "abc123"}})
-				case "/repos/openclaw/octopool/commits/abc123/check-runs":
-					writeCLIEnvelope(t, w, map[string]any{"total_count": 1, "check_runs": []map[string]any{{
-						"id": 1, "name": "CI", "status": test.status, "conclusion": test.conclusion,
-					}}})
-				case "/repos/openclaw/octopool/commits/abc123/status":
-					writeCLIEnvelope(t, w, map[string]any{"total_count": 0, "statuses": []any{}})
-				default:
-					http.Error(w, "unexpected checks path", http.StatusBadRequest)
-				}
+				writeCLIEnvelope(t, w, fixture.response(t, body))
 			})
-			result := runCLI(t, bin, server.URL, nil,
-				"gh", "pr", "checks", "7", "-R", "openclaw/octopool", "--json", "name,state,bucket",
-			)
-			var exitErr *exec.ExitError
-			if !errors.As(result.err, &exitErr) || exitErr.ExitCode() != test.wantExit {
-				t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+			for _, mode := range []struct{ name, filter, want string }{
+				{"json", "", ""}, {"jq-string", ".[0].name", "unit\n"},
+				{"jq-false", "false", "false\n"}, {"jq-null", "null", "null\n"},
+				{"jq-empty", "empty", ""}, {"jq-error", ".[", ""}, {"human", "", ""},
+			} {
+				t.Run(mode.name, func(t *testing.T) {
+					args := []string{"gh", "pr", "checks", "7", "-R", "acme/repo"}
+					if mode.name != "human" {
+						args = append(args, "--json", "name,state,bucket")
+					}
+					if mode.filter != "" {
+						if !jqAvailable() {
+							t.Fatal("focused proof requires jq")
+						}
+						args = append(args, "--jq", mode.filter)
+					}
+					result := runCLI(t, bin, server.URL, map[string]string{"OCTOPOOL_NO_FALLBACK": "1", "OCTOPOOL_RELAY_RETRIES": "0"}, args...)
+					if mode.name == "human" {
+						var exitErr *exec.ExitError
+						if !errors.As(result.err, &exitErr) || exitErr.ExitCode() != test.wantExit || result.stderr != "" || !strings.Contains(result.stdout, "unit\t") {
+							t.Fatalf("human outcome exit: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+						}
+						return
+					}
+					if mode.name == "jq-error" {
+						if result.err == nil || result.stdout != "" {
+							t.Fatalf("jq error lost: %+v", result)
+						}
+						return
+					}
+					if result.err != nil || result.stderr != "" {
+						t.Errorf("successful export must exit 0 regardless of outcome: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+					}
+					if mode.name == "json" {
+						if !strings.Contains(result.stdout, `"name":"unit"`) {
+							t.Errorf("stdout=%q", result.stdout)
+						}
+					} else if result.stdout != mode.want {
+						t.Errorf("stdout=%q want=%q", result.stdout, mode.want)
+					}
+				})
 			}
-			if !strings.Contains(result.stdout, `"name":"CI"`) {
-				t.Fatalf("stdout=%q", result.stdout)
+		})
+	}
+}
+
+func TestCLIEndToEndChecksEmptyBeforeExport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and executes the CLI binary")
+	}
+	bin := buildCLIBinary(t)
+	for _, mode := range []string{"human", "json", "jq-sentinel", "watch"} {
+		t.Run(mode, func(t *testing.T) {
+			fixture := newPRChecksFixture()
+			fixture.checks = []any{}
+			server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {
+				writeCLIEnvelope(t, w, fixture.response(t, decodeCLIRequest(t, w, r)))
+			})
+			args := []string{"gh", "pr", "checks", "7", "-R", "acme/repo"}
+			switch mode {
+			case "json":
+				args = append(args, "--json", "name")
+			case "jq-sentinel":
+				args = append(args, "--json", "name", "--jq", `"should-not-export"`)
+			case "watch":
+				args = append(args, "--watch")
+			}
+			result := runCLI(t, bin, server.URL, map[string]string{"OCTOPOOL_NO_FALLBACK": "1", "OCTOPOOL_RELAY_RETRIES": "0"}, args...)
+			if mode != "watch" && len(fixture.requests) != 3 {
+				t.Errorf("actual empty acquisition must use exactly 3 data operations: %d", len(fixture.requests))
+			}
+			var exitErr *exec.ExitError
+			if !errors.As(result.err, &exitErr) || exitErr.ExitCode() != 1 || result.stdout != "" || result.stderr != "no checks reported on the 'feature' branch\n" {
+				t.Fatalf("empty must fail before output with exact branch diagnostic once: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
 			}
 		})
 	}
