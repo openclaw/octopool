@@ -12,6 +12,7 @@ import {
 } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } from "./harness";
+import { historicalHead, runCard } from "../fixtures/actions-ownership";
 
 type RelayEnvelope = {
   status: number;
@@ -24,6 +25,74 @@ type RelayEnvelope = {
 const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
 describe("terminal Actions log cache", () => {
   beforeEach(seedPool);
+
+  it.each(["in_progress", "unavailable"])(
+    "keeps fresh %s job metadata authoritative over misleading summaries and stored logs",
+    async (metadata) => {
+      vi.stubGlobal("fetch", terminalLogUpstream("completed"));
+      expect((await (await relay(LOG_PATH)).json<RelayEnvelope>()).relay.cache).toBe("miss");
+      const download = terminalLogUpstream("in_progress");
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (url.hostname === "github.com" && url.pathname === "/openclaw/octopool/actions") {
+          return new Response(
+            `<strong>1 workflow run</strong>${runCard(99, historicalHead, { state: "in progress", title: "Fix failed test Handle pushed commits" })}`.replaceAll(
+              "openclaw/Peekaboo",
+              "openclaw/octopool",
+            ),
+          );
+        }
+        if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
+          expect(bearer(request)).toBeUndefined();
+          expect(request.headers.has("x-octopool-public-shape")).toBe(false);
+          expect(request.headers.has("if-none-match")).toBe(false);
+          if (metadata === "unavailable") return jsonResponse({ message: "unavailable" }, 503);
+        }
+        return download(input, init);
+      });
+      vi.stubGlobal("fetch", upstream);
+      const list = await relay("/repos/openclaw/octopool/actions/runs", undefined, {
+        query: { limit: "1" },
+        headers: { "x-octopool-public-shape": "actions-summary-v1" },
+      });
+      expect((await list.json<RelayEnvelope>()).relay.cache).toBe("miss");
+      for (const suffix of ["runs/99", "jobs/42"]) {
+        for (const shape of [undefined, "actions-summary-v1"]) {
+          const request: RelayRequest = {
+            pool: "maintainers",
+            method: "GET",
+            path: `/repos/openclaw/octopool/actions/${suffix}`,
+            ...(shape === undefined ? {} : { headers: { "x-octopool-public-shape": shape } }),
+          };
+          const route = classifyRoute(request, defaultPolicy("openclaw"));
+          const key = await githubCacheKey(request.pool, request, route);
+          await writeGitHubCache(env, key, request, route, {
+            status: 200,
+            headers: {},
+            body: { id: 42, run_id: 99, status: "completed", run_attempt: 1 },
+            body_encoding: "json",
+          });
+          expect(await readGitHubCache(env, key)).toMatchObject({ body: { status: "completed" } });
+        }
+      }
+      const get = vi.spyOn(env.ACTIONS_LOGS, "get");
+      const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+      try {
+        expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+          body: "build log\n",
+          relay: { cache: "bypass" },
+        });
+        expect(jobMetadataCalls(upstream)).toBe(1);
+        expect(logBackendCalls(upstream)).toBe(1);
+        expect(get).not.toHaveBeenCalled();
+        expect(put).not.toHaveBeenCalled();
+      } finally {
+        get.mockRestore();
+        put.mockRestore();
+      }
+    },
+  );
 
   it("caches a fresh completed job and reuses its log after another fresh proof", async () => {
     const upstream = terminalLogUpstream("completed");

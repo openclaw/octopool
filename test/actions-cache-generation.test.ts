@@ -3,8 +3,26 @@ import { githubCacheKey } from "../src/cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import { runListSupersetView } from "../src/run-list-superset";
 import { legacyActionsKey } from "./fixtures/actions-legacy-cache";
+import { currentV2ActionsKeys } from "./fixtures/actions-current-v2-cache";
 
 describe("Actions summary cache generation", () => {
+  it.each(currentV2ActionsKeys)(
+    "retires current-v2 $name shared and identity keys",
+    async (fixture) => {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: fixture.path,
+        query: fixture.query,
+        headers: { "x-octopool-public-shape": "actions-summary-v1" },
+      });
+      const route = classifyRoute(request, defaultPolicy("openclaw"));
+      expect(await githubCacheKey(request.pool, request, route)).not.toBe(fixture.shared);
+      expect(
+        await githubCacheKey(request.pool, request, route, { kind: "pat", id: "primary" }),
+      ).not.toBe(fixture.identity);
+    },
+  );
   it.each([
     ["actions/runs/33167365292", {}],
     ["actions/runs/33167365221/attempts/1", {}],

@@ -87,7 +87,7 @@ export async function githubCacheKey(
     // Retire contaminated page shapes for existing clients in every cache/fill path.
     ...(request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.actionsSummary &&
     ["run_view", "run_list", "workflow_run_list"].includes(route.kind)
-      ? { representation: "actions-summary-owned-v2" }
+      ? { representation: "actions-summary-metadata-v3" }
       : {}),
     ...(request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.releaseSummary &&
     ["release_view", "release_latest"].includes(route.kind)

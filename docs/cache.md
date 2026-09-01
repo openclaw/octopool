@@ -39,13 +39,18 @@ media types and non-default query values still produce distinct entries. The key
 pool-scoped, so pools never share cache entries.
 
 Actions summaries also include a server-controlled representation generation
-(`actions-summary-owned-v2`) in this common key. Run views, attempt-qualified views,
+(`actions-summary-metadata-v3`) in this common key. Run views, attempt-qualified views,
 and repository/workflow run lists, including canonical supersets and identity-specific
-entries, cannot reuse summaries cached before the ownership fix. Existing
+entries, cannot reuse summaries from `actions-summary-owned-v2` or earlier generations. Existing
 `actions-summary-v1` clients keep the same wire format but miss those old entries in
 edge, D1, stale fallback, fill coalescing, and conditional revalidation. Raw REST and
 unrelated shapes have no Actions representation discriminator; the common publication
 epoch still applies. No cache purge is needed.
+
+The generation also isolates late old writers and their validators; new readers never
+join old summary fills or revive old bodies through `304` revalidation. Actions jobs,
+raw REST, public-repository proofs, and terminal-log R2 keys retain their existing
+representations.
 
 Release views and latest-release reads with `release-summary-v1` similarly include
 `release-summary-raw-v2`. Existing clients cannot reuse the old HTML-derived bodies
@@ -176,6 +181,17 @@ elsewhere cannot supply it. List cards end at their own closing element, so a fo
 card or region cannot lend its SHA. Missing or conflicting ownership falls back to exact
 anonymous REST, then the existing pool path. In particular, title-only pages use REST's
 historical top-level `head_sha`, never the mutable `pull_requests[].head.sha`.
+
+Run status comes only from the recognized status prefix before the first colon on the
+owned run link (or the owned status icon on a run page). Workflow names, display titles,
+and branch prose cannot supply status or conclusion. A list card's trigger belongs only
+to the interval between its unique workflow span and sibling timestamp. The supported
+forms are `#N: pull request`, `#N: schedule`/`scheduled`, `#N: workflow dispatch`, and
+`#N: Commit <owned commit link> pushed`; commit-link text cannot supply an event.
+Missing, conflicting, unknown, or differently structured metadata falls back to REST.
+This deliberately bounded markup contract can cost more API reads when GitHub changes
+its layout. Valid known cards retain the existing wire fields, filters, and state-based
+TTLs; fresh job/attempt metadata still independently governs terminal caching.
 
 These ownership regions use parse5's HTML DOM and source locations, not markup
 stripping or regular-expression boundaries. Scripts, comments, styles, templates,

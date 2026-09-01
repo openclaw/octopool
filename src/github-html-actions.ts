@@ -56,15 +56,15 @@ export function parseActionsRunListHTML(
     const workflow = onlyElement(
       contents.filter((element) => element.tagName === "span" && hasClass(element, "text-bold")),
     );
-    const runNumber = /^#([0-9]+):/.exec(actionsText(adjacentNode(workflow, 1)))?.[1];
-    const createdAt = attribute(
-      onlyElement(contents.filter((element) => element.tagName === "relative-time")),
-      "datetime",
+    const timestamp = onlyElement(
+      contents.filter((element) => element.tagName === "relative-time"),
     );
+    const trigger = actionsListTrigger(workflow, timestamp, owner, repo);
+    const createdAt = attribute(timestamp, "datetime");
     if (
       title === undefined ||
       workflow === undefined ||
-      runNumber === undefined ||
+      trigger === undefined ||
       createdAt === undefined
     ) {
       return undefined;
@@ -89,13 +89,13 @@ export function parseActionsRunListHTML(
       id,
       name: actionsText(workflow),
       display_title: actionsText(title),
-      run_number: Number(runNumber),
+      run_number: trigger.runNumber,
       status: state.status,
       conclusion: state.conclusion,
       html_url: `https://github.com/${owner}/${repo}/actions/runs/${id}`,
       head_branch: branch.name ?? null,
       head_sha: commit.sha ?? null,
-      event: runEvent(actionsText(card)),
+      event: trigger.event,
       created_at: createdAt,
       updated_at: addDuration(createdAt, duration) ?? createdAt,
     });
@@ -636,8 +636,9 @@ function firstTimestamp(items: Record<string, unknown>[], field: string): string
 }
 
 function runState(label: string): RunState | undefined {
-  const normalized = label.trim().toLowerCase();
-  if (normalized.includes("completed successfully")) {
+  // The suffix contains arbitrary workflow/title prose, not status evidence.
+  const normalized = /^([^:]+):/.exec(label)?.[1]?.trim().toLowerCase().replace(/\s+/g, " ");
+  if (normalized === "completed successfully") {
     return { status: "completed", conclusion: "success" };
   }
   for (const [needle, conclusion] of [
@@ -650,32 +651,83 @@ function runState(label: string): RunState | undefined {
     ["stale", "stale"],
     ["startup failure", "startup_failure"],
   ] as const) {
-    if (normalized.includes(needle)) {
+    if (normalized === needle) {
       return { status: "completed", conclusion };
     }
   }
   for (const status of ["in progress", "queued", "waiting", "pending"] as const) {
-    if (normalized.includes(status)) {
+    if (normalized === status) {
       return { status: status.replace(" ", "_"), conclusion: null };
     }
   }
   return undefined;
 }
 
-function runEvent(card: string): string | null {
-  if (/\bpushed\b/i.test(card)) {
-    return "push";
+function actionsListTrigger(
+  workflow: ActionsElement | undefined,
+  timestamp: ActionsElement | undefined,
+  owner: string,
+  repo: string,
+): { runNumber: number; event: string } | undefined {
+  const siblings = workflow?.parentNode?.childNodes;
+  if (
+    workflow === undefined ||
+    timestamp === undefined ||
+    siblings === undefined ||
+    workflow.parentNode !== timestamp.parentNode
+  )
+    return undefined;
+  const start = siblings.indexOf(workflow);
+  const end = siblings.indexOf(timestamp);
+  if (end <= start) return undefined;
+  // Only the retained workflow-to-time interval owns the trigger. Other markup
+  // costs a REST fallback rather than letting branch/title/link prose supply it.
+  const interval = siblings.slice(start + 1, end).filter((node) => node.nodeName !== "#comment");
+  const elements = interval.filter((node): node is ActionsElement => "tagName" in node);
+  if (interval.some((node) => !("value" in node) && !("tagName" in node))) return undefined;
+  let match: RegExpExecArray | null;
+  let event: string;
+  if (elements.length === 0) {
+    match = /^#([1-9][0-9]*):\s*(pull request|schedule|scheduled|workflow dispatch)$/i.exec(
+      interval
+        .map((node) => actionsText(node))
+        .join(" ")
+        .trim(),
+    );
+    const trigger = match?.[2]?.toLowerCase();
+    if (trigger === undefined) return undefined;
+    event = trigger === "scheduled" ? "schedule" : trigger.replace(" ", "_");
+  } else {
+    const commit = onlyElement(elements);
+    if (
+      commit === undefined ||
+      !isHTMLAnchor(commit) ||
+      actionsCommitSHA([commit], owner, repo)?.sha === undefined
+    )
+      return undefined;
+    const index = interval.indexOf(commit);
+    match = /^#([1-9][0-9]*):\s*Commit$/i.exec(
+      interval
+        .slice(0, index)
+        .map((node) => actionsText(node))
+        .join(" ")
+        .trim(),
+    );
+    if (
+      !/^pushed$/i.test(
+        interval
+          .slice(index + 1)
+          .map((node) => actionsText(node))
+          .join(" ")
+          .trim(),
+      )
+    ) {
+      return undefined;
+    }
+    event = "push";
   }
-  if (/\bpull request\b/i.test(card)) {
-    return "pull_request";
-  }
-  if (/\bschedule(?:d)?\b/i.test(card)) {
-    return "schedule";
-  }
-  if (/\bworkflow dispatch\b/i.test(card)) {
-    return "workflow_dispatch";
-  }
-  return null;
+  const runNumber = Number(match?.[1]);
+  return Number.isSafeInteger(runNumber) && runNumber > 0 ? { runNumber, event } : undefined;
 }
 
 function addDuration(date: string, duration: string | undefined): string | undefined {

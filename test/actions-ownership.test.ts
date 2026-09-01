@@ -21,6 +21,142 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Actions run ownership", () => {
+  it.each([
+    ["completed successfully", "completed", "success"],
+    ["cancelled", "completed", "cancelled"],
+    ["failed", "completed", "failure"],
+    ["timed out", "completed", "timed_out"],
+    ["action required", "completed", "action_required"],
+    ["neutral", "completed", "neutral"],
+    ["skipped", "completed", "skipped"],
+    ["stale", "completed", "stale"],
+    ["startup failure", "completed", "startup_failure"],
+    ["in progress", "in_progress", null],
+    ["queued", "queued", null],
+    ["waiting", "waiting", null],
+    ["pending", "pending", null],
+  ])(
+    "owns the %s prefix independently of title and workflow prose",
+    async (state, status, conclusion) => {
+      const upstream = vi.fn(
+        async () =>
+          new Response(
+            `<strong>1 workflow run</strong>${runCard(runIDs[0]!, historicalHead, {
+              state,
+              title: "completed successfully: cancelled failed pushed",
+              workflow: "in progress scheduled workflow dispatch",
+              branch: "pending pushed pull request",
+            })}`,
+          ),
+      );
+      vi.stubGlobal("fetch", upstream);
+      expect(await readList()).toMatchObject({
+        backend: "web",
+        body: {
+          workflow_runs: [{ status, conclusion, event: "pull_request", head_sha: historicalHead }],
+        },
+      });
+      expect(upstream).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    ["pull request", "pull_request"],
+    ["schedule", "schedule"],
+    ["scheduled", "schedule"],
+    ["workflow dispatch", "workflow_dispatch"],
+    [
+      `Commit <a href="/openclaw/Peekaboo/commit/${historicalHead}">failed workflow dispatch</a> pushed`,
+      "push",
+    ],
+  ])("owns the bounded trigger %s", async (trigger, event) => {
+    const upstream = vi.fn(
+      async () =>
+        new Response(
+          `<strong>1 workflow run</strong>${runCard(
+            runIDs[0]!,
+            event === "push" ? undefined : historicalHead,
+            {
+              state: " IN   PROGRESS ",
+              title: "failed pushed scheduled",
+              workflow: "pull request workflow dispatch",
+              trigger,
+            },
+          )}`,
+        ),
+    );
+    vi.stubGlobal("fetch", upstream);
+    expect(await readList()).toMatchObject({
+      backend: "web",
+      body: { workflow_runs: [{ status: "in_progress", conclusion: null, event }] },
+    });
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["missing status delimiter", (html: string) => html.replace("failed: Run", "failed Run")],
+    [
+      "missing status label",
+      (html: string) => html.replace('aria-label="failed:', 'aria-label=":'),
+    ],
+    ["missing trigger", (html: string) => html.replace("#651: pull request", "#651:")],
+    [
+      "conflicting trigger",
+      (html: string) => html.replace("#651: pull request", "#651: pull request scheduled"),
+    ],
+    ["missing workflow", (html: string) => html.replace('<span class="text-bold">CI</span>', "")],
+    [
+      "different timestamp parent",
+      (html: string) =>
+        html
+          .replace("<relative-time", "<span><relative-time")
+          .replace("</relative-time>", "</relative-time></span>"),
+    ],
+    [
+      "reversed interval",
+      (html: string) =>
+        html
+          .replace('<span class="text-bold">CI</span>', "")
+          .replace("</relative-time>", '</relative-time><span class="text-bold">CI</span>'),
+    ],
+    [
+      "duplicate timestamp",
+      (html: string) =>
+        html.replace(
+          "</relative-time>",
+          '</relative-time><relative-time datetime="2026-08-28T11:29:48Z"></relative-time>',
+        ),
+    ],
+    ["invalid run number", (html: string) => html.replace("#651:", "#0:")],
+    ["unsafe run number", (html: string) => html.replace("#651:", "#99999999999999999999:")],
+    [
+      "branch in trigger",
+      (html: string) =>
+        html.replace(
+          "#651: pull request",
+          '#651: <a href="/openclaw/Peekaboo/tree/refs/heads/pull-request">pull request</a>',
+        ),
+    ],
+    [
+      "title in trigger",
+      (html: string) => html.replace("#651: pull request", "#651: <span>pull request</span>"),
+    ],
+  ])("falls through to exact REST for %s", async (_name, transform) => {
+    const body = { total_count: 1, workflow_runs: [exactRun(runIDs[0]!)] };
+    const upstream = vi.fn(async (input: string) =>
+      input.startsWith("https://github.com/")
+        ? new Response(
+            `<strong>1 workflow run</strong>${transform(runCard(runIDs[0]!, historicalHead))}`,
+          )
+        : Response.json(body),
+    );
+    vi.stubGlobal("fetch", upstream);
+    expect(await readList()).toMatchObject({ backend: "github", body });
+    expect(upstream.mock.calls.map(([url]) => url)).toEqual([
+      "https://github.com/openclaw/Peekaboo/actions",
+      "https://api.github.com/repos/openclaw/Peekaboo/actions/runs?per_page=25",
+    ]);
+  });
   it.each(runIDs)("uses historical REST ownership for saved run %i", async (id) => {
     const fetched: string[] = [];
     vi.stubGlobal(
@@ -520,6 +656,21 @@ describe("Actions run ownership", () => {
     },
   );
 });
+
+async function readList() {
+  const request = validateRelayRequest({
+    pool: "maintainers",
+    method: "GET",
+    path: "/repos/openclaw/Peekaboo/actions/runs",
+    query: { per_page: "25" },
+    headers: { "x-octopool-public-shape": "actions-summary-v1" },
+  });
+  return callGitHubWeb(
+    withGitHubEgress({} as Env, []),
+    request,
+    classifyRoute(request, defaultPolicy("openclaw")),
+  );
+}
 
 describe("commit patch ownership", () => {
   it("expands a single matching commit", () => {

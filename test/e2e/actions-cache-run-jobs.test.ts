@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { historicalHead, runPage } from "../fixtures/actions-ownership";
 
 type RelayEnvelope = {
   status: number;
@@ -62,10 +63,23 @@ describe("Actions attempt job-list cache", () => {
   });
 
   it("keeps completed-looking jobs short-lived until the owning attempt is terminal", async () => {
+    const urls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input) => {
         const url = new URL(new Request(input).url);
+        urls.push(url.toString());
+        if (url.hostname === "github.com" && url.pathname.endsWith("/attempts/2")) {
+          return new Response(
+            runPage(42, historicalHead, 2)
+              .replaceAll("openclaw/Peekaboo", "openclaw/octopool")
+              .replace('aria-label="failed: "', 'aria-label="in progress: "')
+              .replace(
+                '<span class="markdown-title">fixture</span>',
+                '<span class="markdown-title">completed successfully: failed pushed workflow dispatch</span>',
+              ),
+          );
+        }
         if (url.hostname === "github.com") {
           return jsonResponse({ message: "public parser unavailable" }, 404);
         }
@@ -94,6 +108,10 @@ describe("Actions attempt job-list cache", () => {
          FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
       ).first(),
     ).toEqual({ ttl: 60 });
+    expect(urls).toContain("https://github.com/openclaw/octopool/actions/runs/42/attempts/2");
+    expect(urls).not.toContain(
+      "https://api.github.com/repos/openclaw/octopool/actions/runs/42/attempts/2",
+    );
   });
 
   it("merges and caches all API pages for a 250-job run", async () => {

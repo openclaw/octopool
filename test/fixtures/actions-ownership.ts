@@ -63,11 +63,29 @@ export const mergePatch = [
   )
   .join("\n");
 
-export function runCard(id: number, sha?: string): string {
+export function runCard(
+  id: number,
+  sha?: string,
+  metadata: {
+    state?: string;
+    title?: string;
+    workflow?: string;
+    trigger?: string;
+    branch?: string;
+  } = {},
+): string {
+  const {
+    state = "failed",
+    title = "fixture",
+    workflow = "CI",
+    trigger = "pull request",
+    branch,
+  } = metadata;
   return `<div class="Box-row js-socket-channel js-updatable-content">
-    <a href="/openclaw/Peekaboo/actions/runs/${id}" aria-label="failed: Run 651 of CI. fixture"><span class="h4 markdown-title">fixture</span></a>
-    <div><span class="text-bold">CI</span> #651: pull request
+    <a href="/openclaw/Peekaboo/actions/runs/${id}" aria-label="${state}: Run 651 of ${workflow}. ${title}"><span class="h4 markdown-title">${title}</span></a>
+    <div><span class="text-bold">${workflow}</span> #651: ${trigger}
     <relative-time datetime="2026-08-28T11:29:48Z"></relative-time>
+    ${branch === undefined ? "" : `<a class="branch-name" href="/openclaw/Peekaboo/tree/refs/heads/${branch}">${branch}</a>`}
     ${sha === undefined ? "" : `<a href="/openclaw/Peekaboo/commit/${sha}">${sha}</a>`}</div>
   </div>`;
 }

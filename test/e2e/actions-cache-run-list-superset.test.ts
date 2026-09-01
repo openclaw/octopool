@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { historicalHead, runCard } from "../fixtures/actions-ownership";
 
 type RelayEnvelope = {
   status: number;
@@ -14,6 +15,143 @@ const RUNS_PATH = "/repos/openclaw/octopool/actions/runs";
 
 describe("Actions run-list superset", () => {
   beforeEach(seedPool);
+
+  it("owns misleading metadata through canonical fill, filtering, hits, and active TTL", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        expect(bearer(request)).toBeUndefined();
+        urls.push(request.url);
+        if (new URL(request.url).hostname === "api.github.com") {
+          return jsonResponse({
+            total_count: 1,
+            workflow_runs: [run(103, "main", "completed", "failure")],
+          });
+        }
+        return new Response(
+          `<strong>2 workflow runs</strong>${
+            runCard(101, historicalHead, {
+              state: "in progress",
+              title: "Fix failed test: Handle pushed commits",
+              workflow: "scheduled workflow dispatch",
+              branch: "completed successfully pushed",
+            }) + runCard(102, historicalHead, { state: "queued", title: "cancelled pull request" })
+          }`.replaceAll("openclaw/Peekaboo", "openclaw/octopool"),
+        );
+      }),
+    );
+    const first = await shapedRunList({ limit: "2" });
+    expect(first.body).toMatchObject({
+      total_count: 2,
+      workflow_runs: [
+        {
+          id: 101,
+          status: "in_progress",
+          conclusion: null,
+          event: "pull_request",
+          head_sha: historicalHead,
+        },
+        { id: 102, status: "queued", conclusion: null, event: "pull_request" },
+      ],
+    });
+    expect(first.relay.cache).toBe("miss");
+    expect(
+      await env.DB.prepare(
+        "SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl FROM github_cache_entries WHERE route_kind = 'run_list'",
+      ).first(),
+    ).toEqual({ ttl: 60 });
+    const active = await shapedRunList({ status: "in_progress", limit: "1" });
+    expect(runIDs(active.body)).toEqual([101]);
+    expect(active.relay.cache).toBe("hit");
+    const completed = await shapedRunList({ status: "completed", limit: "1" });
+    expect(runIDs(completed.body)).toEqual([103]);
+    expect(runIDs((await shapedRunList({ status: "completed", limit: "1" })).body)).toEqual([103]);
+    expect(urls.map((url) => new URL(url).origin + new URL(url).pathname)).toEqual([
+      "https://github.com/openclaw/octopool/actions",
+      "https://api.github.com/repos/openclaw/octopool/actions/runs",
+    ]);
+    expect(Object.fromEntries(new URL(urls[1]!).searchParams)).toEqual({
+      status: "completed",
+      per_page: "1",
+    });
+    const repeated = await shapedRunList({ limit: "2" });
+    expect(repeated.body).toEqual(first.body);
+    expect(repeated.relay.cache).toBe("hit");
+  });
+
+  it.each([
+    ["completed successfully", "success"],
+    ["failed", "failure"],
+    ["timed out", "timed_out"],
+    ["startup failure", "startup_failure"],
+  ])("keeps owned terminal %s metadata and the completed list TTL", async (state, conclusion) => {
+    const upstream = vi.fn<typeof fetch>(
+      async () =>
+        new Response(
+          `<strong>1 workflow run</strong>${runCard(101, historicalHead, {
+            state,
+            title: "queued cancelled failed pushed",
+            workflow: "pending scheduled",
+            branch: "in progress",
+          })}`.replaceAll("openclaw/Peekaboo", "openclaw/octopool"),
+        ),
+    );
+    vi.stubGlobal("fetch", upstream);
+    const first = await shapedRunList({ limit: "1" });
+    expect(first.body).toMatchObject({
+      workflow_runs: [{ id: 101, status: "completed", conclusion, event: "pull_request" }],
+    });
+    expect(
+      await env.DB.prepare(
+        "SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl FROM github_cache_entries WHERE route_kind = 'run_list'",
+      ).first(),
+    ).toEqual({ ttl: 120 });
+    expect((await shapedRunList({ status: "completed", limit: "1" })).relay.cache).toBe("hit");
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["unknown status", "not failed", "pull request"],
+    ["conflicting status", "queued failed", "pull request"],
+    ["missing trigger", "in progress", ""],
+    ["conflicting trigger", "in progress", "pull request pushed"],
+    ["unknown trigger", "in progress", "repository dispatch"],
+    [
+      "linked prose",
+      "in progress",
+      '<a href="/openclaw/octopool/tree/refs/heads/pull-request">pull request</a>',
+    ],
+  ])("uses exact REST and caches its metadata for %s", async (_name, state, trigger) => {
+    const urls: string[] = [];
+    const body = {
+      total_count: 1,
+      workflow_runs: [{ ...run(301, "main", "queued", null), event: "workflow_dispatch" }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        expect(bearer(request)).toBeUndefined();
+        urls.push(request.url);
+        return new URL(request.url).hostname === "github.com"
+          ? new Response(
+              `<strong>1 workflow run</strong>${runCard(101, historicalHead, { state, trigger, title: "completed successfully pushed" })}`.replaceAll(
+                "openclaw/Peekaboo",
+                "openclaw/octopool",
+              ),
+            )
+          : jsonResponse(body);
+      }),
+    );
+    expect((await shapedRunList({ limit: "1" })).body).toEqual(body);
+    expect((await shapedRunList({ limit: "1" })).relay.cache).toBe("hit");
+    expect(urls).toEqual([
+      "https://github.com/openclaw/octopool/actions",
+      "https://api.github.com/repos/openclaw/octopool/actions/runs?page=1&per_page=25",
+    ]);
+  });
 
   it("serves branch, status, and limit variants from one canonical fill", async () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
