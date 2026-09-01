@@ -10,7 +10,7 @@ export const conditional = { headers: { "if-none-match": '"identity-routing"' } 
 export function requestWithEnv(
   overrides: Record<string, unknown> = {},
   path = PATH,
-  options: Pick<RelayRequest, "headers" | "query"> = conditional,
+  options: Pick<RelayRequest, "headers" | "query" | "route_hint"> = conditional,
 ): Promise<Response> {
   clearConfigCache();
   return requestWithWarmEnv(overrides, path, options);
@@ -19,7 +19,7 @@ export function requestWithEnv(
 export function requestWithWarmEnv(
   overrides: Record<string, unknown> = {},
   path = PATH,
-  options: Pick<RelayRequest, "headers" | "query"> = conditional,
+  options: Pick<RelayRequest, "headers" | "query" | "route_hint"> = conditional,
 ): Promise<Response> {
   return runWithContext((ctx) =>
     worker.fetch(

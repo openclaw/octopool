@@ -106,6 +106,19 @@ that already know the current PR state can use that to avoid mixing entries acro
 SHAs while letting Octopool keep `files` warm longer. Hints are first checked against
 GitHub and then cached briefly in `github_pr_state_proofs`, so repeated cache hits do not
 need to re-contact GitHub just to validate the hint.
+
+PR-state metadata uses the same `MAX_RESPONSE_BYTES` cap as response bodies: exactly the
+cap is accepted, and the first chunk crossing it cancels the read before JSON parsing or
+proof storage. Failed metadata reads, parsing, or matching do not insert or refresh a
+proof; the request continues with the ordinary unhinted files cache key. Proofs last
+300 seconds. If a fresh proof's keyed body is missing, live verification is required
+before filling it. A failed live check ignores that discriminator for the current request,
+including stale-cache selection, while leaving the stored proof intact. A failed proof
+storage attempt also returns no newly trusted hint; an unknown write acknowledgment does
+not establish whether the write committed. These metadata failures preserve the unhinted
+route fallback; an oversized actual files response still uses the existing
+`424 fallback_local` / `github_response_too_large` handoff.
+
 The `gh pr view --json files` shim resolves the head with `max-age=0`, sends a dedicated
 `pr-files-v1` shape plus the verified head on every bounded page, and resolves the head
 again after all hydration. If the head moved, the entire command falls back to real `gh`

@@ -1,7 +1,9 @@
 import { isStateAwarePRRoute } from "./cache-policy";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { queries } from "./generated/sql";
-import { requestTimeoutMs } from "./github-limits";
+import { requestTimeoutMs, responseCapBytes } from "./github-limits";
+import { HttpError } from "./http";
+import { readBodyCapped } from "./response-body";
 import type { RelayRequest, RouteInfo } from "./types";
 
 type PullResponse = {
@@ -65,7 +67,12 @@ async function verifyPRStateHintInternal(
     if (!response.ok) {
       return route;
     }
-    const body = (await response.json()) as PullResponse;
+    const bytes = await readBodyCapped(
+      response,
+      responseCapBytes(env),
+      () => new HttpError(502, "github_response_too_large", "GitHub response exceeded relay cap"),
+    );
+    const body = JSON.parse(new TextDecoder().decode(bytes)) as PullResponse;
     if (hintMatchesPR(stateHint, body)) {
       await upsertPRStateProof(env, route, number, stateHint);
       return { ...route, state_hint: stateHint, state_hint_source: "live" };

@@ -77,20 +77,26 @@ describe("shared GitHub primitives", () => {
     expect(defaultGitHubJSONAccept("text/html")).toBe(false);
   });
 
-  it("combines streamed chunks within the cap", async () => {
-    const response = new Response(
-      new ReadableStream({
-        start(controller) {
-          controller.enqueue(new Uint8Array([1, 2]));
-          controller.enqueue(new Uint8Array([3]));
-          controller.close();
+  it.each(["success", "read error"])("releases the reader after exact-cap %s", async (outcome) => {
+    let pulls = 0;
+    const failure = new Error("read failed");
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulls++;
+          if (pulls === 1) controller.enqueue(new Uint8Array([1, 2]));
+          else if (pulls === 2) controller.enqueue(new Uint8Array([3]));
+          else if (outcome === "read error") controller.error(failure);
+          else controller.close();
         },
-      }),
+      },
+      { highWaterMark: 0 },
     );
-
-    await expect(readBodyCapped(response, 3, () => new Error("too large"))).resolves.toEqual(
-      new Uint8Array([1, 2, 3]),
-    );
+    const read = readBodyCapped(new Response(stream), 3, () => new Error("too large"));
+    if (outcome === "read error") await expect(read).rejects.toBe(failure);
+    else await expect(read).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    expect(pulls).toBe(3);
+    expect(stream.locked).toBe(false);
   });
 
   it("cancels an oversized stream and preserves the configured error", async () => {
@@ -109,4 +115,29 @@ describe("shared GitHub primitives", () => {
     );
     expect(cancel).toHaveBeenCalledOnce();
   });
+
+  it.each([false, true])(
+    "releases the crossing-chunk reader when cancellation throws: %s",
+    async (throws) => {
+      let pulls = 0;
+      const cancel = vi.fn(() => {
+        if (throws) throw new Error("cancel failed");
+      });
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulls++;
+            controller.enqueue(new Uint8Array([1, 2]));
+          },
+          cancel,
+        },
+        { highWaterMark: 0 },
+      );
+      const failure = new Error("configured cap error");
+      await expect(readBodyCapped(new Response(stream), 4, () => failure)).rejects.toBe(failure);
+      expect(pulls).toBe(3);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(stream.locked).toBe(false);
+    },
+  );
 });
