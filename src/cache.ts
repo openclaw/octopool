@@ -98,11 +98,17 @@ export async function githubCacheKey(
     // Old raw event bodies may contain privileged references, even after a 304
     // republished an identity entry as anonymous. Retire every variant together.
     ...(isIssueEventRoute(route.kind) ? { representation: "issue-events-public-v2" } : {}),
+    // Adapter JSON eligibility includes blanks that intentionally remain in vary headers.
     // Old JSON file objects contain unescaped self-links, even for raw-origin fills.
     ...(route.kind === "contents" &&
     scalarQuery(request.query, "ref") !== undefined &&
-    varyHeaders.accept === undefined
+    defaultGitHubJSONAccept(request.headers?.accept)
       ? { representation: "contents-self-links-v1" }
+      : {}),
+    // Retire partial advertisements across every body, validator, and fill owner.
+    ...((route.kind === "git_ref" || route.kind === "git_matching_refs") &&
+    defaultGitHubJSONAccept(request.headers?.accept)
+      ? { representation: "git-refs-framing-v1" }
       : {}),
     ...(varyHeaders.accept === undefined ? {} : { body_codec: "lossless-v1" }),
     ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),

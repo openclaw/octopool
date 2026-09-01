@@ -71,20 +71,27 @@ async function rows() {
     })),
   );
 }
-async function backlog(count: number) {
-  for (let i = 0; i < count; i++) {
-    const input = contents(`old-${i}`);
-    expect((await select(input)).kind).toBe("selected");
-    await ownedWork.track(
-      coordinator().recordResult({
-        identityId: "a",
-        routeKey: input.routeKey,
-        resource: input.resource,
-        status: 403,
-        rate: { remaining: 100, resetAt: NOW / 1000 + 60 },
-      }),
-    );
-  }
+function seedContents(count: number, prefix: "old" | "live") {
+  return ownedWork.track(
+    runInDurableObject(coordinator(), (instance) => {
+      const feedback =
+        prefix === "old"
+          ? { identityId: "a", rate: { remaining: 100, resetAt: NOW / 1000 + 60 } }
+          : { identityId: "b" };
+      // Keep real selection/feedback order while avoiding per-entry setup RPCs.
+      for (let i = 0; i < count; i++) {
+        const input = contents(`${prefix}-${i}`, feedback.identityId);
+        expect(instance.selectIdentity(input).kind).toBe("selected");
+        instance.recordResult({
+          ...feedback,
+          routeKey: input.routeKey,
+          resource: input.resource,
+          status: 403,
+        });
+      }
+      return count;
+    }),
+  );
 }
 
 beforeEach(() => {
@@ -103,7 +110,7 @@ describe("native coordinator expiry retention", () => {
       expect((await select(input)).kind).toBe("selected");
     }
     expect(runKeys.size).toBe(1);
-    await backlog(40);
+    await seedContents(40, "old");
     const before = await rows();
     expect(before.leases).toHaveLength(41);
     expect(before.cooldowns).toHaveLength(40);
@@ -136,20 +143,9 @@ describe("native coordinator expiry retention", () => {
   it.each([40, 160])(
     "measures indexed native work with %s expired routes and a live tail",
     async (size) => {
-      await backlog(size);
+      await seedContents(size, "old");
       vi.setSystemTime(NOW + 9_999);
-      for (let i = 0; i < size; i++) {
-        const input = contents(`live-${i}`, "b");
-        await select(input);
-        await ownedWork.track(
-          coordinator().recordResult({
-            identityId: "b",
-            routeKey: input.routeKey,
-            resource: input.resource,
-            status: 403,
-          }),
-        );
-      }
+      await seedContents(size, "live");
       vi.setSystemTime(NOW + 10_000);
       const leaseBoundary = await observedSelection(contents("lease-cost", "c"));
       expect(leaseBoundary.calls[0]).toMatchObject({
@@ -162,6 +158,15 @@ describe("native coordinator expiry retention", () => {
       const before = await rows();
       expect(before.leases).toHaveLength(size * 2 - 30);
       expect(before.cooldowns).toHaveLength(size * 2);
+      expect(before.rates).toEqual([
+        {
+          identity_id: "a",
+          resource: "core",
+          limit_count: 5000,
+          remaining: 100,
+          reset_at: NOW + 60_000,
+        },
+      ]);
       vi.setSystemTime(NOW + 120_000);
       const observed = await observedSelection(contents("cost", "c"));
       expect(observed.clockCalls).toBe(1);
@@ -295,7 +300,7 @@ describe("native coordinator expiry retention", () => {
   );
 
   it("retains live independent cooldown scopes, credential health and rate history through cleanup", async () => {
-    await backlog(20);
+    await seedContents(20, "old");
     vi.setSystemTime(NOW + 120_000);
     const route = contents("live-scopes");
     for (const [identityId, status, resource] of [
@@ -349,7 +354,7 @@ describe("native coordinator expiry retention", () => {
   });
 
   it("retains persisted state and idempotent indexes through graceful eviction and a following request", async () => {
-    await backlog(20);
+    await seedContents(20, "old");
     const before = await rows();
     const indexes = () =>
       ownedWork.track(
@@ -386,7 +391,7 @@ describe("native coordinator expiry retention", () => {
   it.each([40, 160])(
     "measures additive expiry index construction over %s retained rows without deleting state",
     async (size) => {
-      await backlog(size);
+      await seedContents(size, "old");
       const before = await rows();
       const costs = await ownedWork.track(
         runInDurableObject(coordinator(), (_instance, state) => {

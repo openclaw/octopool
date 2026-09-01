@@ -1,7 +1,79 @@
 import { describe, expect, it } from "vitest";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "../src/github-git";
+import {
+  completeGitAdvertisement,
+  gitMain,
+  gitPacket,
+  gitService,
+  gitSHA,
+  malformedGitAdvertisements,
+} from "./fixtures/git-advertisement";
 
 describe("Git smart HTTP refs", () => {
+  it.each(malformedGitAdvertisements)("rejects %s without exposing partial refs", (_name, wire) => {
+    expect(parseGitUploadPackAdvertisement(new TextEncoder().encode(wire))).toBeUndefined();
+  });
+
+  it("rejects every proper byte prefix of a canonical advertisement", () => {
+    const bytes = new TextEncoder().encode(completeGitAdvertisement);
+    expect(parseGitUploadPackAdvertisement(bytes)?.size).toBe(2);
+    for (let cut = 0; cut < bytes.length; cut++) {
+      expect
+        .soft(parseGitUploadPackAdvertisement(bytes.slice(0, cut)), `cut ${cut}`)
+        .toBeUndefined();
+    }
+  });
+
+  it("accepts optional LF, byte-counted UTF8, 64-hex IDs, HEAD, and deterministic matching", () => {
+    const sha = "ABCDEF01".repeat(8);
+    const wire =
+      gitPacket("# service=git-upload-pack") +
+      "0000" +
+      gitPacket(`${sha} HEAD\0multi_ack symref=HEAD:refs/heads/🦞`) +
+      gitPacket(`${sha} refs/heads/🦞`) +
+      gitMain +
+      "0000";
+    const refs = parseGitUploadPackAdvertisement(new TextEncoder().encode(wire));
+    expect([...refs!]).toEqual([
+      ["refs/heads/🦞", sha.toLowerCase()],
+      ["refs/heads/main", gitSHA],
+    ]);
+    expect(
+      gitRefResponse(refs!, "R_kgDOSoyMqw", "owner space", "repo#name", "heads", true),
+    ).toMatchObject([
+      { ref: "refs/heads/main", object: { type: "commit" } },
+      {
+        ref: "refs/heads/🦞",
+        url: "https://api.github.com/repos/owner%20space/repo%23name/git/refs/heads/%F0%9F%A6%9E",
+        object: { sha: sha.toLowerCase() },
+      },
+    ]);
+  });
+
+  it("enforces the 65520-byte total packet bound", () => {
+    const prefix = `${gitSHA} refs/heads/`;
+    const payload = prefix + "a".repeat(65516 - prefix.length);
+    expect(
+      parseGitUploadPackAdvertisement(
+        new TextEncoder().encode(gitService + gitPacket(payload) + "0000"),
+      )?.size,
+    ).toBe(1);
+    expect(
+      parseGitUploadPackAdvertisement(
+        new TextEncoder().encode(gitService + gitPacket(payload + "a") + "0000"),
+      ),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    ["duplicate refs", gitService + gitMain + gitMain + "0000"],
+    ["HEAD only", gitService + gitPacket(`${gitSHA} HEAD\n`) + "0000"],
+    ["nonhex length", gitService + "003g" + gitMain.slice(4) + "0000"],
+    ["empty listing", gitService + "0000"],
+  ])("rejects %s", (_name, wire) => {
+    expect(parseGitUploadPackAdvertisement(new TextEncoder().encode(wire!))).toBeUndefined();
+  });
+
   it("reconstructs exact new-style branch ref responses", () => {
     const refs = parseGitUploadPackAdvertisement(
       advertisement([

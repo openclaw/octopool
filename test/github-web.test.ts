@@ -4,6 +4,15 @@ import { releaseHTML, releaseMarkdown } from "./fixtures/release-summary";
 import { contentsLinks } from "./fixtures/contents-links";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import {
+  completeGitAdvertisement,
+  exactGitRefs,
+  gitAdvertisementURL,
+  gitMIME,
+  gitNodeHTML,
+  gitNodeURL,
+  malformedGitAdvertisements,
+} from "./fixtures/git-advertisement";
 
 describe("github web provider", () => {
   const policy = defaultPolicy("openclaw");
@@ -1267,43 +1276,123 @@ describe("github web provider", () => {
     });
   });
 
-  it("prefers exact branch refs from Git smart HTTP", async () => {
-    const sha = "e05a16c766609e722571a448f606f6820a0bf249";
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(gitAdvertisement([[sha, "refs/heads/main"]]), {
-          headers: { "content-type": "application/x-git-upload-pack-advertisement" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(embeddedPage("IssueIndexPageQuery", { id: "R_kgDOSoyMqw" })),
-      );
-    vi.stubGlobal("fetch", fetchMock);
+  it.each([
+    ...malformedGitAdvertisements.map(([name, wire]) => ({ name, wire, mime: gitMIME })),
+    ...[
+      undefined,
+      "text/plain",
+      "application/x-git-receive-pack-advertisement",
+      "application/x-git-upload-pack-advertisement-extra",
+    ].map((mime) => ({ name: `MIME ${mime}`, wire: completeGitAdvertisement, mime })),
+  ])("falls back exactly without a node-page fetch for $name", async ({ wire, mime }) => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/repos/openclaw/octopool/git/ref/heads/main",
+      path: "/repos/openclaw/octopool/git/matching-refs/heads/ma",
     });
-
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const fetched = new Request(input, init);
+      if (fetched.url === gitAdvertisementURL)
+        return new Response(new TextEncoder().encode(wire), {
+          headers: {
+            ...(mime === undefined ? {} : { "content-type": mime }),
+            "content-length": String(new TextEncoder().encode(wire).byteLength),
+          },
+        });
+      if (fetched.url === gitNodeURL) return new Response(gitNodeHTML);
+      return Response.json(exactGitRefs);
+    });
+    vi.stubGlobal("fetch", fetchMock);
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "https://github.com/openclaw/octopool.git/info/refs?service=git-upload-pack",
-      expect.any(Object),
-    );
-    expect(response?.body).toEqual({
-      ref: "refs/heads/main",
-      node_id: "REF_kwDOSoyMq69yZWZzL2hlYWRzL21haW4",
-      url: "https://api.github.com/repos/openclaw/octopool/git/refs/heads/main",
-      object: {
-        sha,
-        type: "commit",
-        url: `https://api.github.com/repos/openclaw/octopool/git/commits/${sha}`,
-      },
-    });
+    expect.soft(response).toMatchObject({ body: exactGitRefs, backend: "github" });
+    const requests = fetchMock.mock.calls.map(([input, init]) => new Request(input, init));
+    expect(requests.map((fetched) => fetched.url)).toEqual([
+      gitAdvertisementURL,
+      `https://api.github.com${request.path}`,
+    ]);
+    expect(requests.every((fetched) => !fetched.headers.has("authorization"))).toBe(true);
   });
+
+  it("cancels an over-cap Git body and uses the exact anonymous API", async () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/git/matching-refs/heads/ma",
+    });
+    const cancel = vi.fn();
+    let pulls = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (new Request(input, init).url !== gitAdvertisementURL) return Response.json(exactGitRefs);
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              pulls++;
+              controller.enqueue(new Uint8Array(1025));
+            },
+            cancel,
+          },
+          { highWaterMark: 0 },
+        ),
+        { headers: { "content-type": gitMIME, "content-length": "1" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(
+      await callGitHubWeb(
+        env({ MAX_RESPONSE_BYTES: "1024" }),
+        request,
+        classifyRoute(request, policy),
+      ),
+    ).toMatchObject({ body: exactGitRefs, backend: "github" });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(pulls).toBe(1);
+    expect(fetchMock.mock.calls.map(([input, init]) => new Request(input, init).url)).toEqual([
+      gitAdvertisementURL,
+      `https://api.github.com${request.path}`,
+    ]);
+  });
+
+  it.each([gitMIME, "Application/X-Git-Upload-Pack-Advertisement; charset=UTF-8"])(
+    "prefers exact branch refs from Git smart HTTP with %s",
+    async (mime) => {
+      const sha = "e05a16c766609e722571a448f606f6820a0bf249";
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(gitAdvertisement([[sha, "refs/heads/main"]]), {
+            headers: { "content-type": mime },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(embeddedPage("IssueIndexPageQuery", { id: "R_kgDOSoyMqw" })),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/git/ref/heads/main",
+      });
+
+      const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        "https://github.com/openclaw/octopool.git/info/refs?service=git-upload-pack",
+        expect.any(Object),
+      );
+      expect(response?.body).toEqual({
+        ref: "refs/heads/main",
+        node_id: "REF_kwDOSoyMq69yZWZzL2hlYWRzL21haW4",
+        url: "https://api.github.com/repos/openclaw/octopool/git/refs/heads/main",
+        object: {
+          sha,
+          type: "commit",
+          url: `https://api.github.com/repos/openclaw/octopool/git/commits/${sha}`,
+        },
+      });
+    },
+  );
 
   it("falls back to the exact API response for ambiguous lightweight tags", async () => {
     const apiBody = {
@@ -1351,6 +1440,43 @@ describe("github web provider", () => {
       "https://api.github.com/repos/openclaw/octopool/git/ref/tags/v1.0.0",
       expect.any(Object),
     );
+  });
+
+  it("retains annotated tags and old repository node IDs through the adapter", async () => {
+    const sha = "0123456789012345678901234567890123456789";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          gitAdvertisement([
+            [sha, "refs/tags/v1.0.0"],
+            ["abcdefabcdefabcdefabcdefabcdefabcdefabcd", "refs/tags/v1.0.0^{}"],
+          ]),
+          { headers: { "content-type": gitMIME } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          embeddedPage("IssueIndexPageQuery", { id: "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk=" }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/git/matching-refs/tags/v1",
+    });
+    expect(await callGitHubWeb(env(), request, classifyRoute(request, policy))).toMatchObject({
+      backend: "web",
+      body: [
+        {
+          ref: "refs/tags/v1.0.0",
+          node_id: "MDM6UmVmMjEyNjEzMDQ5OnJlZnMvdGFncy92MS4wLjA=",
+          object: { sha, type: "tag" },
+        },
+      ],
+    });
+    expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([gitAdvertisementURL, gitNodeURL]);
   });
 
   it("rejects workflow HTML without pagination completeness proof", async () => {

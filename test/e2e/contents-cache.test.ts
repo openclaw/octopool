@@ -10,6 +10,10 @@ import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
 const frozen = contentsCacheKeys[0];
+const blankFixtures = contentsCacheKeys.filter(
+  (fixture) =>
+    fixture.name === "blank nested contents" || fixture.name === "whitespace nested contents",
+);
 const expected = contentsLinks[5].body;
 const oldURL =
   "https://api.github.com/repos/openclaw/octopool/contents/docs/a#b?c% name🦞.txt?ref=feature%2Ftopic%26mode%3Dfast%23part";
@@ -22,18 +26,24 @@ const identity: Identity = {
   installation_id: null,
   weight: 200,
 };
-const request = validateRelayRequest(frozen.request);
-const route = classifyRoute(request, defaultPolicy("openclaw"));
 type Envelope = { body: unknown; relay: { cache: string } };
 
 describe("contents cache retirement at the Worker", () => {
   beforeEach(seedPool);
 
-  it.each(["edge", "shared", "identity"])(
-    "ignores fresh old %s objects and late old writers",
-    async (layer) => {
-      await seedOld(layer !== "identity");
-      if (layer !== "edge") await deleteEdgeJSON("github-publication-v1", frozen.shared);
+  it.each([
+    ...["edge", "shared", "identity"].map((layer) => ({ layer, fixture: frozen })),
+    ...blankFixtures.map((fixture, index) => ({
+      layer: index === 0 ? "shared" : "identity",
+      fixture,
+    })),
+  ])(
+    "ignores fresh old $layer objects and late old writers ($fixture.name)",
+    async ({ layer, fixture }) => {
+      const request = validateRelayRequest(fixture.request);
+      const route = classifyRoute(request, defaultPolicy("openclaw"));
+      await seedOld(layer !== "identity", fixture);
+      if (layer !== "edge") await deleteEdgeJSON("github-publication-v1", fixture.shared);
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const fetched = new Request(input, init);
         if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
@@ -56,7 +66,14 @@ describe("contents cache retirement at the Worker", () => {
       expect
         .soft(await response.json())
         .toMatchObject({ body: expected, relay: { cache: "miss" } });
-      await seedOld();
+      expect
+        .soft(
+          upstream.mock.calls.map(([input, init]) =>
+            new Request(input, init).headers.get("if-none-match"),
+          ),
+        )
+        .not.toContain('"old-links"');
+      await seedOld(true, fixture);
       const calls = upstream.mock.calls.length;
       expect
         .soft(await (await relay(request.path, undefined, request)).json())
@@ -80,96 +97,105 @@ describe("contents cache retirement at the Worker", () => {
         await env.DB.prepare(
           "SELECT count(*) AS n FROM github_cache_entries WHERE cache_key IN (?, ?) AND body_json = ?",
         )
-          .bind(frozen.shared, frozen.identity, JSON.stringify(oldBody))
+          .bind(fixture.shared, fixture.identity, JSON.stringify(oldBody))
           .first(),
       ).toEqual({ n: 2 });
-      expect.soft(await githubCacheKey(request.pool, request, route)).not.toBe(frozen.shared);
+      expect.soft(await githubCacheKey(request.pool, request, route)).not.toBe(fixture.shared);
       expect
         .soft(await githubCacheKey(request.pool, request, route, identity))
-        .not.toBe(frozen.identity);
+        .not.toBe(fixture.identity);
     },
   );
 
-  it("retires old validators and preserves new API 304 and stale semantics", async () => {
-    await seedOld();
-    await expire(frozen.shared);
-    await expire(frozen.identity);
-    let outage = false;
-    const upstream = vi.fn<typeof fetch>(async (input, init) => {
-      const fetched = new Request(input, init);
-      if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
-        return jsonResponse({ private: false });
-      if (fetched.url === expected.download_url) return new Response(null, { status: 404 });
-      expect(fetched.url).toBe(expected.url);
-      if (outage)
+  it.each([frozen, ...blankFixtures])(
+    "retires old validators and preserves new API 304 and stale semantics ($name)",
+    async (fixture) => {
+      const request = validateRelayRequest(fixture.request);
+      const route = classifyRoute(request, defaultPolicy("openclaw"));
+      await seedOld(true, fixture);
+      await expire(fixture.shared);
+      await expire(fixture.identity);
+      let outage = false;
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const fetched = new Request(input, init);
+        if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
+          return jsonResponse({ private: false });
+        if (fetched.url === expected.download_url) return new Response(null, { status: 404 });
+        expect(fetched.url).toBe(expected.url);
+        if (outage)
+          return jsonResponse(
+            { message: "rate limited" },
+            429,
+            rateHeaders({ remaining: 0, retryAfter: 60 }),
+          );
+        const validator = fetched.headers.get("if-none-match");
+        if (validator !== null)
+          return new Response(null, {
+            status: 304,
+            headers: { etag: validator, ...rateHeaders({ remaining: 4998 }) },
+          });
+        return jsonResponse(expected, 200, {
+          etag: '"new-links"',
+          ...rateHeaders({ remaining: 4998 }),
+        });
+      });
+      vi.stubGlobal("fetch", upstream);
+      const filled = await (await relay(request.path, undefined, request)).json<Envelope>();
+      expect.soft(filled).toMatchObject({ body: expected, relay: { cache: "miss" } });
+      expect
+        .soft(
+          upstream.mock.calls.map(([input, init]) =>
+            new Request(input, init).headers.get("if-none-match"),
+          ),
+        )
+        .not.toContain('"old-links"');
+      const key = await githubCacheKey(request.pool, request, route);
+      await expire(key);
+      expect
+        .soft(await (await relay(request.path, undefined, request)).json())
+        .toMatchObject({ body: expected, relay: { cache: "hit" } });
+      expect
+        .soft(
+          upstream.mock.calls.map(([input, init]) =>
+            new Request(input, init).headers.get("if-none-match"),
+          ),
+        )
+        .toContain('"new-links"');
+      await expire(key);
+      outage = true;
+      expect
+        .soft(await (await relay(request.path, undefined, request)).json())
+        .toMatchObject({ body: expected, relay: { cache: "stale" } });
+    },
+  );
+
+  it.each([frozen, ...blankFixtures])(
+    "never serves old shared or identity stale links during an outage ($name)",
+    async (fixture) => {
+      const request = validateRelayRequest(fixture.request);
+      await seedOld(true, fixture);
+      await expire(fixture.shared);
+      await expire(fixture.identity);
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const fetched = new Request(input, init);
+        if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
+          return jsonResponse({ private: false });
+        expect([expected.url, expected.download_url]).toContain(fetched.url);
         return jsonResponse(
           { message: "rate limited" },
           429,
           rateHeaders({ remaining: 0, retryAfter: 60 }),
         );
-      const validator = fetched.headers.get("if-none-match");
-      if (validator !== null)
-        return new Response(null, {
-          status: 304,
-          headers: { etag: validator, ...rateHeaders({ remaining: 4998 }) },
-        });
-      return jsonResponse(expected, 200, {
-        etag: '"new-links"',
-        ...rateHeaders({ remaining: 4998 }),
       });
-    });
-    vi.stubGlobal("fetch", upstream);
-    const filled = await (await relay(request.path, undefined, request)).json<Envelope>();
-    expect.soft(filled).toMatchObject({ body: expected, relay: { cache: "miss" } });
-    expect
-      .soft(
-        upstream.mock.calls.map(([input, init]) =>
-          new Request(input, init).headers.get("if-none-match"),
-        ),
-      )
-      .not.toContain('"old-links"');
-    const key = await githubCacheKey(request.pool, request, route);
-    await expire(key);
-    expect
-      .soft(await (await relay(request.path, undefined, request)).json())
-      .toMatchObject({ body: expected, relay: { cache: "hit" } });
-    expect
-      .soft(
-        upstream.mock.calls.map(([input, init]) =>
-          new Request(input, init).headers.get("if-none-match"),
-        ),
-      )
-      .toContain('"new-links"');
-    await expire(key);
-    outage = true;
-    expect
-      .soft(await (await relay(request.path, undefined, request)).json())
-      .toMatchObject({ body: expected, relay: { cache: "stale" } });
-  });
-
-  it("never serves old shared or identity stale links during an outage", async () => {
-    await seedOld();
-    await expire(frozen.shared);
-    await expire(frozen.identity);
-    const upstream = vi.fn<typeof fetch>(async (input, init) => {
-      const fetched = new Request(input, init);
-      if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
-        return jsonResponse({ private: false });
-      expect([expected.url, expected.download_url]).toContain(fetched.url);
-      return jsonResponse(
-        { message: "rate limited" },
-        429,
-        rateHeaders({ remaining: 0, retryAfter: 60 }),
-      );
-    });
-    vi.stubGlobal("fetch", upstream);
-    const response = await relay(request.path, undefined, request);
-    expect.soft(response.status).toBe(424);
-    const wire = await response.json();
-    expect.soft(wire).toMatchObject({ error: { code: "fallback_local" } });
-    expect.soft(JSON.stringify(wire)).not.toContain(oldURL);
-    expect.soft(JSON.stringify(wire)).not.toContain('"cache":"stale"');
-  });
+      vi.stubGlobal("fetch", upstream);
+      const response = await relay(request.path, undefined, request);
+      expect.soft(response.status).toBe(424);
+      const wire = await response.json();
+      expect.soft(wire).toMatchObject({ error: { code: "fallback_local" } });
+      expect.soft(JSON.stringify(wire)).not.toContain(oldURL);
+      expect.soft(JSON.stringify(wire)).not.toContain('"cache":"stale"');
+    },
+  );
 
   it("keeps a frozen no-ref JSON contents body warm", async () => {
     const fixture = contentsCacheKeys[4];
@@ -192,14 +218,19 @@ describe("contents cache retirement at the Worker", () => {
   });
 });
 
-async function seedOld(shared = true) {
+async function seedOld(
+  shared = true,
+  fixture: { request: unknown; shared: string; identity: string } = frozen,
+) {
+  const request = validateRelayRequest(fixture.request);
+  const route = classifyRoute(request, defaultPolicy("openclaw"));
   await seedPublicRepoProof(env, route);
   for (const owner of [undefined, identity]) {
     if (!shared && owner === undefined) continue;
     expect(
       await writeOwnedGitHubCache(
         env,
-        owner === undefined ? frozen.shared : frozen.identity,
+        owner === undefined ? fixture.shared : fixture.identity,
         request,
         route,
         {

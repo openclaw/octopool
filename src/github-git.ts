@@ -5,8 +5,10 @@ export type AdvertisedGitRefs = Map<string, string>;
 
 export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGitRefs | undefined {
   const refs = new Map<string, string>();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
   let offset = 0;
+  let phase: "service" | "header-flush" | "refs" = "service";
+  let firstRef = true;
   while (offset < body.byteLength) {
     if (offset + 4 > body.byteLength) {
       return undefined;
@@ -17,18 +19,38 @@ export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGit
     }
     const length = Number.parseInt(lengthText, 16);
     offset += 4;
-    if (length === 0 || length === 1 || length === 2) {
-      continue;
+    if (length === 0) {
+      if (phase === "header-flush") {
+        phase = "refs";
+        continue;
+      }
+      // Only the separate terminal flush at exact EOF commits the whole listing.
+      return phase === "refs" && refs.size > 0 && offset === body.byteLength ? refs : undefined;
     }
-    if (length < 4 || offset + length - 4 > body.byteLength) {
+    if (
+      phase === "header-flush" ||
+      length < 4 ||
+      length > 65_520 ||
+      offset + length - 4 > body.byteLength
+    ) {
       return undefined;
     }
     const payload = decoder.decode(body.slice(offset, offset + length - 4));
     offset += length - 4;
-    if (payload.startsWith("# service=")) {
+    if (phase === "service") {
+      if (payload !== "# service=git-upload-pack" && payload !== "# service=git-upload-pack\n") {
+        return undefined;
+      }
+      phase = "header-flush";
       continue;
     }
-    const line = payload.replace(/\n$/, "").split("\0", 1)[0]!;
+    const record = payload.replace(/\n$/, "");
+    const capabilities = record.indexOf("\0");
+    if (capabilities !== -1 && !firstRef) {
+      return undefined;
+    }
+    firstRef = false;
+    const line = capabilities === -1 ? record : record.slice(0, capabilities);
     const match = /^([0-9a-fA-F]{40}|[0-9a-fA-F]{64}) (HEAD|refs\/[^\s]+)$/.exec(line);
     if (match === null) {
       return undefined;
@@ -41,7 +63,7 @@ export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGit
     }
     refs.set(match[2]!, match[1]!.toLowerCase());
   }
-  return refs.size === 0 ? undefined : refs;
+  return undefined;
 }
 
 export function gitRefResponse(

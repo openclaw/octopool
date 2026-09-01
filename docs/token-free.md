@@ -65,10 +65,23 @@ links retain their existing semantics. Missing or unsafe refs, ambiguous query v
 ineligible file paths, raw misses, and oversized raw bodies retain the existing exact
 anonymous API fallback; traversal and route restrictions are unchanged.
 
-Git ref responses also read
+Git refs require an `application/x-git-upload-pack-advertisement` response and a
+complete bounded v0 envelope: the upload-pack service packet, its header flush,
+nonempty supported ref records, and a separate terminal flush at exact end of body.
+Packets use byte lengths and are limited to 65,520 bytes including the four-byte
+prefix. Truncation, reserved records, empty ref records, trailing bytes, and unsupported
+version/shallow/metadata forms fall back to the existing exact anonymous API. The
+streamed response cap still applies; `Content-Length` is not completion evidence.
+This is a conservative adapter subset, not a full Git protocol implementation.
+
+Only after accepting the whole advertisement do Git ref responses read
 `https://github.com/{owner}/{repo}/issues?q=is%3Aissue` to recover the repository node
 ID needed for exact REST-compatible ref node IDs. Lightweight tags remain anonymous
 API-only because the advertisement cannot prove their target object type.
+
+Contents and Git-ref JSON adapters accept missing, empty, and whitespace-only
+`Accept` as well as the supported JSON media types. Their cache representation
+generations cover these eligible blanks while preserving distinct blank-header keys.
 
 ### Bounded CLI shapes
 

@@ -115,7 +115,7 @@ export const contentsCacheKeys = [
   },
   {
     name: "blank accept contents",
-    retire: false,
+    retire: true,
     request: {
       pool: "maintainers",
       method: "GET",
@@ -255,5 +255,104 @@ export const contentsCacheKeys = [
     },
     shared: "zMFcT0oAupjrxbyrsp_CLTOK48QTtmMSq1DdQp41Ml0",
     identity: "DHOyLYkFddGF_akosOvg154AIXNvf6RSf3rwSi8nuvw",
+  },
+  {
+    name: "blank nested contents",
+    retire: true,
+    request: {
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contents/docs/a%23b%3Fc%25%20name%F0%9F%A6%9E.txt",
+      query: {
+        ref: "feature/topic&mode=fast#part",
+      },
+      headers: {
+        accept: "",
+      },
+    },
+    shared: "5LZxwUE6vuajKMsNFk9dKxhGp3Hjcfw9datJAlwhhjQ",
+    identity: "sQw_8Va3HLseJXYJHG6kUUnneNOkQQ_5RccNbTurK4Q",
+  },
+  {
+    name: "whitespace nested contents",
+    retire: true,
+    request: {
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contents/docs/a%23b%3Fc%25%20name%F0%9F%A6%9E.txt",
+      query: {
+        ref: "feature/topic&mode=fast#part",
+      },
+      headers: {
+        accept: " \t ",
+      },
+    },
+    shared: "yfYli2DCLDbcHKWPHmSTURIoCEDPl3ETL2P3YEaheU8",
+    identity: "fp-SLWJ7SN-qmNqSDv3cs8qIAcNqWK671jWfbpcQrMc",
+  },
+  {
+    name: "whitespace plain contents",
+    retire: true,
+    request: {
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contents/README.md",
+      query: {
+        ref: "main",
+      },
+      headers: {
+        accept: " \t ",
+      },
+    },
+    shared: "bZ9Oc3s_qMGYWY_QAppK2b02vItKP93Zi2aw6oKz_fE",
+    identity: "KNSZSNeXWc3nPNe44Iuyk3ZVUd8yo7GhP28uGQ2BPDM",
+  },
+  {
+    name: "whitespace no-ref contents",
+    retire: false,
+    request: {
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contents/README.md",
+      headers: {
+        accept: " \t ",
+      },
+    },
+    shared: "H4hwp_zAlqTfxKHv0-om5QbscdbZ0twur743326anbA",
+    identity: "8nkP3qGQGmSKBEVjzJBcuI0RR1SnIZbTIE_AS7oIY1I",
+  },
+  {
+    name: "whitespace empty-ref contents",
+    retire: false,
+    request: {
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contents/README.md",
+      query: {
+        ref: "",
+      },
+      headers: {
+        accept: " \t ",
+      },
+    },
+    shared: "5psxSOpTQ5SZ3zdnM6Q_S0mDTq-bZNh5b34o9GjB7zM",
+    identity: "vCPg8yZL10uXg-ylAF_Kc-dMBmNRNErf8uqbLgEXofM",
+  },
+  {
+    name: "whitespace array-ref contents",
+    retire: false,
+    request: {
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/contents/README.md",
+      query: {
+        ref: ["main", "topic"],
+      },
+      headers: {
+        accept: " \t ",
+      },
+    },
+    shared: "uO1GruEM6bcg5aBcr7aK2jNXMq1FVIQhwrk4D26rKx4",
+    identity: "wrt_1ckeAG4RGMH7DUC398htBOONyoFCzTC402qVpb0",
   },
 ] as const;

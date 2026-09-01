@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { githubCacheKey } from "../src/cache";
-import { rawContentRequest } from "../src/github-public-content";
+import { gitRefRequest } from "../src/github-public-git";
+import { withGitHubEgress } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
-import { contentsCacheKeys } from "./fixtures/contents-cache-keys";
+import { gitCacheKeys } from "./fixtures/git-cache-keys";
 
-describe("contents self-link cache generation", () => {
-  it.each(contentsCacheKeys)("bounds shared and identity retirement for $name", async (fixture) => {
+describe("Git framing cache generation", () => {
+  it.each(gitCacheKeys)("bounds shared and identity retirement for $name", async (fixture) => {
     const request = validateRelayRequest(fixture.request);
     const route = classifyRoute(request, defaultPolicy("openclaw"));
     const shared = await githubCacheKey(request.pool, request, route);
@@ -23,7 +24,7 @@ describe("contents self-link cache generation", () => {
         kind: "pat",
       });
       if (request.headers?.accept?.trim() === "") {
-        expect(rawContentRequest({} as Env, request, route)).toBeDefined();
+        expect(gitRefRequest(withGitHubEgress({} as Env, []), request, route)).toBeDefined();
         expect(shared).not.toBe(canonicalShared);
         expect(identity).not.toBe(canonicalIdentity);
         const otherBlank = {

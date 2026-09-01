@@ -56,6 +56,21 @@ Contents without a scalar ref, custom media (including their `body_codec`), blob
 README routes, and unrelated representations retain their keys. No publication epoch,
 public-repository proof, or R2 generation changes or cache purge are required.
 
+Default JSON `git_ref` and `git_matching_refs` keys include `git-refs-framing-v1`.
+This retires older potentially incomplete ref objects and arrays for exact and matching
+heads/tags across shared and identity entries, edge/D1 hits, stale fallback, validators,
+and fill coalescing. Complete API-origin entries may also miss once; stored provenance
+is not guessed. Branch lists/views, Git objects, custom media, contents, Actions, R2,
+and public-repository proof keys retain their existing generations. No purge or schema
+change is needed.
+
+The contents and Git-ref representation predicates follow their adapters' JSON
+eligibility, including missing, empty, and whitespace-only `Accept`. Explicit blank
+values keep their existing distinct vary-header keys and `body_codec: lossless-v1`;
+they are not folded into absent headers or into each other. This also retires old
+blank-Accept contents self-links from before the self-link correction. Raw/custom
+non-JSON media and contents without a nonempty scalar ref retain their keys.
+
 Actions summaries also include a server-controlled representation generation
 (`actions-summary-metadata-v3`) in this common key. Run views, attempt-qualified views,
 and repository/workflow run lists, including canonical supersets and identity-specific

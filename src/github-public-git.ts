@@ -48,6 +48,10 @@ export function gitRefRequest(
     capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: async (body, headers, status) => {
+      const mediaType = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+      if (mediaType !== "application/x-git-upload-pack-advertisement") {
+        return undefined;
+      }
       const refs = parseGitUploadPackAdvertisement(body);
       if (refs === undefined) {
         return undefined;

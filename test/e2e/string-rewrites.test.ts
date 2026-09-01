@@ -132,7 +132,12 @@ describe("canonical relay egress protection", () => {
       packet(`${sha} HEAD\0symref=HEAD:refs/heads/main\n`) +
       packet(`${sha} refs/heads/main\n`) +
       "0000";
-    const upstream = vi.fn<typeof fetch>(async () => new Response(advertisement));
+    const upstream = vi.fn<typeof fetch>(
+      async () =>
+        new Response(advertisement, {
+          headers: { "content-type": "application/x-git-upload-pack-advertisement" },
+        }),
+    );
     vi.stubGlobal("fetch", upstream);
     expect((await relay("/repos/example/demo/git/ref/heads/main")).status).toBe(403);
     expect(upstream).toHaveBeenCalledTimes(1);
