@@ -1,31 +1,43 @@
 # Changelog
 
-## 0.5.18 - Unreleased
+## 0.6.0 - 2026-09-01
 
-### Fixes
+### Highlights
 
-- Unblock the standard `gh pr create` shape under active rewrite rules: pin a missing `--head` to the current branch (fail closed on detached HEAD or non-git directories), make `--base` optional, and accept `--dry-run`.
-- Allow typed attachments on protected `gh issue edit` and `gh issue comment` through existing strict snapshots and inline-reference rewriting, requiring explicit complete bodies for attachment edits.
-- Fence cache bodies and public-repository proofs with committed D1 ownership, isolate old writers across upgrades, and reclaim abandoned owners without adding authority calls to hot cache hits.
-- Honor native input declarations and reject malformed nonempty declared JSON before dispatch, preserving explicit UTF-8 text, zero-byte best-effort compatibility, and existing interactive-input limits.
-- Normalize compound client-name aliases consistently across CLI, login and stats, safely rotate historical singletons in place, and refuse ambiguous legacy families without changing credentials; apply the schema write guards before rollout.
-- Include eligible wildcard PATs for explicitly allowed owners and fail over selected local credential errors with bounded shared cooldowns, preserving cache authorization, valid credential continuations, and hard aggregate egress denials.
-- Keep persisted identity quota and cooldown feedback monotonic across delayed responses, reject invalid numeric observations, and atomically preserve rate/cooldown state on storage failure.
-- Keep `--jq` expressions literal, preserve native `gh` output bytes with native jq 1.7+ on Windows, and recognize `octopool.exe` when resolving the shim target without requiring Unix execute bits.
-- Reject malformed stored pool policies before cache reuse or pooled GitHub access with a typed configuration-unavailable error, preserving valid partial-policy defaults.
-- Reject extra or malformed repository qualifiers and negated scope in issue, code, and commit searches before relay dispatch or cache reuse, preserving typed local fallback for unsupported queries.
-- Make active caller enrollment and named-client token rotation atomic across CLI, admin, and browser login, preserving existing access and history while refusing ambiguous upgrades.
-- Bind org membership checks to the enrolled GitHub account on every page, isolate verification timestamps across rolling upgrades, and preserve safe legacy re-login and typed upstream errors.
-- Validate protected `gh repo clone` repository inputs according to native argument ownership, preserving destination paths and Git flags while retaining visible-argument filtering and GitHub.com-only source checks.
-- Keep issue timelines and issue-event reads anonymous-only, retiring cached private cross-references and preserving safe conditional and native fallback behavior.
-- Preserve contributor credit in protected exact-head squash merges by accepting merge body files through the existing text rewriting and private snapshot checks.
-- Keep supported `gh run watch` on the relay when pagination or relay requests fail, rejecting incomplete job summaries without spending personal GitHub quota.
-- Keep CLI caller tokens bound to the loaded server URL when another login replaces saved auth during request setup.
-- Pin CLI login credential lookup to GitHub.com so Enterprise host settings cannot select an Enterprise token.
-- Block cross-origin redirects and HTTPS downgrades for CLI login and authenticated JSON requests to prevent credential replay.
-- Preserve exact raw Markdown in release-view JSON via the anonymous API and retire cached HTML-derived release summaries for existing clients.
-- Return native uppercase PR-list lifecycle states and lowercase merged PR-search states from nested merge metadata before `--jq`, preserving raw API and cache payloads.
-- Cache page-derived closed issues for one hour, matching REST closed issues while preserving response state casing and cached bodies.
+- **Protected draft releases with binary assets.** `gh release create --draft --verify-tag` now snapshots local release assets into private staging before native GitHub CLI execution, preserving filenames, order, notes, and bytes on macOS, Linux, and Windows.
+- **Smoother everyday maintainer workflows.** Create PRs from the current branch without spelling out `--head` or `--base`, attach files to protected issue edits and comments, preserve contributor credit with squash-merge body files, and clone into nested destinations while retaining native Git flags.
+- **More dependable scripts and exports.** Restore native PR, checks, and workflow-run JSON semantics, delegate detail exports that cannot be reconstructed completely, and preserve raw release Markdown, diffs, response bodies, and job-log bytes.
+- **Stronger shared-cache and sign-in safety.** Fence superseded cache publishers and repository-visibility proofs, bind membership checks to immutable GitHub accounts, and make enrollment and named-client rotation atomic without silently merging ambiguous accounts.
+
+### CLI and workflow fixes
+
+- Match native PR-list and PR-search lifecycle states, checks deduplication/order/timestamps and JSON exit codes, and workflow-run field defaults, historical attempts, workflow names, and nested job exports.
+- Delegate PR selections containing `commits`, `comments`, or `reviews` as a whole instead of returning partial approximations; reject incomplete or inconsistent workflow-job exports before emitting JSON.
+- Preserve native repeated-option ownership, CSV fields and labels, signed integer syntax, Boolean assignments, literal jq programs, and unsupported-option delegation. Respect declared JSON versus text input and reject malformed nonempty JSON before dispatch.
+- Keep supported `gh run watch` on the relay when reads or pagination fail, without starting a personal-token watcher or printing an incomplete final summary. Reject duplicate job IDs and contradictory run/head metadata across watch, human-view, and machine-export paths. Apply native watch polling floors only after final policy preparation, preserving valid rewritten intervals.
+- Explain policy-loader failures with bounded failure classes, observed HTTP status, UTC attempt time, elapsed milliseconds, and an optional validated CF-Ray; never expose credentials, rule content, raw errors, response bodies, or local paths.
+- Restrict policy-free help to complete built-in native command paths while preserving authentication hostname shorthand. Protected PR creation accepts `--dry-run` and refuses an inferred head outside a Git branch.
+- Preserve exact stdout bytes with native jq 1.7+ on Windows and recognize `octopool.exe` without Unix executable-bit assumptions.
+
+### Cache, authentication, and routing fixes
+
+- Prevent expired or superseded writers from publishing shared cache bodies or public-repository proofs across Worker upgrades. Preserve committed publication ownership and reclaim abandoned owners without adding authority reads to hot cache hits.
+- Keep credentials on their intended origin: bind each caller request to one loaded auth snapshot, reject cross-origin redirects and HTTPS downgrades, and select login credentials explicitly for GitHub.com rather than an Enterprise host.
+- Verify org membership against the enrolled immutable GitHub account on every page. Reconcile repeated `.local` client-name suffixes without losing token/audit history, and refuse ambiguous account or client families unchanged.
+- Route around selected unavailable pooled credentials, include eligible wildcard PATs for explicitly allowed owners, and retain conservative quota/cooldown observations despite delayed responses or storage failures.
+- Keep issue events and timelines anonymous-only, reject broadened or malformed repository search scopes, and fail closed on malformed stored pool policies before cache reuse or pooled GitHub access.
+- Preserve opaque response, diff, and log bytes, including invalid UTF-8 and leading BOMs. Derive Actions status/trigger metadata from the owning page elements, not arbitrary titles or branch prose.
+- Encode generated contents self-links exactly once, require complete Git ref advertisements, and bound PR-state metadata before parsing or caching its proof.
+- Cache page-derived closed issues for one hour, keep pending repository statistics uncached, and attribute anonymous replacements and conditional revalidations to the correct backend.
+- Reclaim expired coordinator leases and cooldowns in bounded indexed batches. Repair Worker-test isolation after storage eviction and isolate platform auth stores in cross-platform tests.
+
+### Upgrade notes
+
+- **Self-hosters:** apply and verify migrations `0017`–`0020` before deploying the Worker; follow the duplicate-account, client-alias, and publication-owner preflights in [Deployment & Operations](docs/operations.md). Preserve the publication allocator's high-water mark and the new schema guards on rollback. Do not resolve ambiguous accounts by guessing or discarding credentials.
+- Cache/public-proof generations and first-use immutable membership verification can increase upstream traffic after rollout. Drain old Worker instances before treating the changes as fully deployed; an in-flight request retains its already-checked policy snapshot.
+- **Script authors:** successful nonempty `pr checks --json`/`--jq` exports return 0 regardless of check outcomes; empty checks return 1 without JSON. PR-list states are uppercase and search states remain lowercase. Policy errors retain their generic prefix but append diagnostic fields, so exact full-line stderr comparisons must allow the suffix.
+- Release-view cache misses use the anonymous GitHub API to preserve raw Markdown. Unsupported/incomplete native exports still follow guarded delegation, and `OCTOPOOL_NO_FALLBACK=1` rejects typed fallback requests.
+- Protected release assets require an existing verified tag and explicit draft creation, with at most 16 files, 1 GiB per file, and 4 GiB total. Assets are opaque, not scanned or certified secret-free; failed uploads can leave a partial remote draft. This does not add automatic publication, rollback, or modeled standalone `release upload` support.
 
 ## 0.5.17 - 2026-08-30
 

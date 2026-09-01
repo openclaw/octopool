@@ -156,7 +156,7 @@ token still returns `503 org_verification_unavailable` when a refresh is require
 
 ### Immutable membership upgrade
 
-The 0.5.18 migration `0017_org_identity_verification.sql` adds nullable
+The 0.6.0 migration `0017_org_identity_verification.sql` adds nullable
 `callers.org_identity_verified_at` without backfilling it. Only successful identity-bound
 verification writes this column, including CLI/OAuth login, admin provisioning, and caller/session
 refresh. New auth TTL decisions use only this proof. A verified login stores it immediately, so the

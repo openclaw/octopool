@@ -16,8 +16,8 @@ durable release evidence; signing uses the OpenClaw Foundation Developer ID.
    below): download both darwin tarballs, sign the `octopool` binary with
    `Developer ID Application: OpenClaw Foundation (FWJYW4S8P8)` using
    `codesign --force --options runtime --timestamp`, notarize a zip of each
-   binary with `xcrun notarytool submit --wait` (App Store Connect key
-   `op://Molty/API Key - App Store Connect - Personal - Release`), verify
+   binary with `xcrun notarytool submit --wait` using the canonical release
+   App Store Connect key from the approved private credential workflow, verify
    `spctl -a -t install` reports `Notarized Developer ID`, repackage the
    tarballs, rewrite the two darwin lines in `checksums.txt`, and
    `gh release upload vX.Y.Z --clobber` the three files.
@@ -42,7 +42,9 @@ durable release evidence; signing uses the OpenClaw Foundation Developer ID.
    push token is unavailable, generate locally with
    `node scripts/openclaw-release-evidence.mjs` and commit the evidence
    directory directly (precedent: `evidence/octopool-0.5.0`).
-8. Reopen the changelog: add `## X.Y.(Z+1) - Unreleased`, commit, push.
+8. Verify the published release body exactly matches the finalized dated changelog section,
+   the final assets/checksums match the Homebrew formula, and the working tree is clean.
+   Do not prefill another `Unreleased` section; write the next version's notes at release time.
 
 ## Future: CI-hosted signing
 
