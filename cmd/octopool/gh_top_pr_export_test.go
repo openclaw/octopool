@@ -74,6 +74,38 @@ func TestRunGHPRViewAuthorNativeShape(t *testing.T) {
 	}
 }
 
+func TestRunGHPRViewRepeatedOptionHydration(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		flags []string
+	}{
+		{"control_one_occurrence", []string{"--json", "number,author,author"}},
+		{"regression_across_occurrences", []string{"--json", "number,author", "--json", "author"}},
+		{"regression_quoted_occurrence", []string{"--json", `"number",author`, "--json", "author"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var paths []string
+			relayTestServer(t, func(req map[string]any) any {
+				paths = append(paths, req["path"].(string))
+				switch req["path"] {
+				case "/repos/acme/repo/pulls/7":
+					return map[string]any{"number": 7, "user": map[string]any{"node_id": "U_alice", "login": "alice", "type": "User"}}
+				case "/users/alice":
+					return map[string]any{"id": 12, "node_id": "U_alice", "login": "alice", "name": "Alice", "type": "User"}
+				default:
+					t.Errorf("unexpected hydration path %v", req["path"])
+					return nil
+				}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), append([]string{"pr", "view", "7", "-R", "acme/repo"}, test.flags...), &out)
+			if result.action != ghComplete || result.err != nil || !reflect.DeepEqual(paths, []string{"/repos/acme/repo/pulls/7", "/users/alice"}) || !strings.Contains(out.String(), `"number":7`) || !strings.Contains(out.String(), `"name":"Alice"`) {
+				t.Fatalf("action=%v err=%v paths=%v output=%q", result.action, result.err, paths, out.String())
+			}
+		})
+	}
+}
+
 func TestRunGHPRViewLabelsNativeShape(t *testing.T) {
 	for _, empty := range []bool{false, true} {
 		t.Run(fmt.Sprint(empty), func(t *testing.T) {

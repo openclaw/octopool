@@ -385,7 +385,7 @@ func TestRunGHPRViewMetadataTypedFallback(t *testing.T) {
 				t.Fatalf("partial JSON before fallback: %q", out.String())
 			}
 			got := readRewriteCapture(t, capture)
-			want := []string{"pr", "view", "1", "--repo=acme/repo", "--json=statusCheckRollup"}
+			want := []string{"pr", "view", "1", "--repo=acme/repo", "--json", "statusCheckRollup"}
 			if !reflect.DeepEqual(got.Args, want) || got.Env["GH_HOST"] != "github.com" {
 				t.Fatalf("fallback=%+v", got)
 			}

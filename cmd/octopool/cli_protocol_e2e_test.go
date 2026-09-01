@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,6 +20,73 @@ func TestCLIEndToEndRelayProtocol(t *testing.T) {
 		t.Skip("builds and executes the CLI binary")
 	}
 	bin := buildCLIBinary(t)
+
+	t.Run("native_options", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			args       []string
+			mode, want string
+			policyCode int
+		}{
+			{"regression_json_jq", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "number", "--json=title", "--jq", "(", "--jq", ".number,.title"}, "relay", "7\nsynthetic\n", 200},
+			{"regression_invalid_csv_earlier", []string{"pr", "view", "7", "-R", "acme/repo", "--json", `"unterminated`, "--json=number"}, "reject", "", 200},
+			{"regression_invalid_limit_earlier", []string{"pr", "list", "-R", "acme/repo", "--json=number", "--limit=08", "--limit=2"}, "reject", "", 200},
+			{"regression_empty_json", []string{"pr", "view", "7", "-R", "acme/repo", "--json="}, "delegate", "child stdout\n", 200},
+			{"control_cap_delegation", []string{"pr", "list", "-R", "acme/repo", "--json=number", "--limit=101"}, "delegate", "child stdout\n", 200},
+			{"control_last_jq", []string{"pr", "view", "7", "-R", "acme/repo", "--json=number,title", "--jq", "(", "--jq", ".number"}, "relay", "7\n", 200},
+			{"control_policy_precedence", []string{"pr", "list", "-R", "acme/repo", "--json", `"unterminated`, "--limit=08"}, "reject", "", 401},
+			{"regression_run_duration_delegation", []string{"run", "watch", "42", "-R", "acme/repo", "--interval=9223372037"}, "delegate", "child stdout\n", 200},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				if strings.Contains(test.name, "jq") && !jqAvailable() {
+					t.Skip("jq not installed")
+				}
+				var paths []string
+				data := 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					paths = append(paths, r.URL.Path)
+					if r.URL.Path == "/v1/pools/maintainers/string-rewrites" && test.policyCode != 200 {
+						w.WriteHeader(test.policyCode)
+						return
+					}
+					if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
+						return
+					}
+					req := decodeCLIRequest(t, w, r)
+					data++
+					writeCLIEnvelope(t, w, nativeOptionsResponse(t, req))
+				}))
+				t.Cleanup(server.Close)
+				capture := captureRewriteGH(t)
+				result := runCLI(t, bin, server.URL, nil, append([]string{"gh"}, test.args...)...)
+				_, childErr := os.Stat(capture)
+				if test.mode == "reject" {
+					if result.err == nil || result.stdout != "" || data != 0 || !os.IsNotExist(childErr) {
+						t.Fatalf("invalid input err=%v data=%d child=%v output=%q stderr=%q", result.err, data, childErr, result.stdout, result.stderr)
+					}
+					if test.policyCode != 200 && (len(paths) != 1 || !strings.Contains(result.stderr, errRewritePolicy.Error())) {
+						t.Fatalf("policy precedence paths=%v stderr=%q", paths, result.stderr)
+					}
+					return
+				}
+				wantData := 1
+				if test.mode == "delegate" {
+					wantData = 0
+				}
+				if result.err != nil || result.stdout != test.want || data != wantData {
+					t.Fatalf("err=%v data=%d want=%d output=%q want=%q stderr=%q", result.err, data, wantData, result.stdout, test.want, result.stderr)
+				}
+				if test.mode == "delegate" {
+					got := readRewriteCapture(t, capture)
+					if !reflect.DeepEqual(got.Args, test.args) {
+						t.Fatalf("handoff argv=%q want=%q", got.Args, test.args)
+					}
+				} else if !os.IsNotExist(childErr) {
+					t.Fatal("relay output ran native child")
+				}
+			})
+		}
+	})
 
 	t.Run("direct api forwards query and headers and decodes text", func(t *testing.T) {
 		server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {

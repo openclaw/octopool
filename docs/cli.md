@@ -334,6 +334,66 @@ conditional requests only when instant freshness matters more than quota.
 `--jq` runs after `--json` filtering, matching the usual agent workflow for small
 machine-readable reads.
 
+#### Read-option occurrences and delegation
+
+Modeled read flags use their command's value types. Each `--json` occurrence is a
+CSV record: quotes and doubled quotes are decoded, spaces and empty elements are
+significant, and only the first record is read (with normal CSV CRLF handling).
+An empty raw value contributes no fields. Repeated occurrences append; valid fields
+are deduplicated in first-occurrence order before hydration. Malformed or unsupported
+earlier fields cannot disappear into a partial relay request. Explicit `--json=` with
+no effective fields delegates, never selects human output. `--json number --json=`
+still selects `number`. The last `--jq` program wins, including an empty program;
+even an empty `--jq` without `--json` delegates on top-level commands. API jq needs
+no JSON flag. Short `-q=` retains the native literal `=` value or delegates intact.
+Already-declared `-R`, `-L`, and `-q` aliases accept attached values such as
+`-Rowner/repo`, `-L5`, and `-q.number`, including under active rewrite policy;
+native handoff preserves those spellings. This does not add short-flag clusters.
+
+Issue-list labels use the same CSV occurrence rules. An empty effective sequence
+omits the labels query key. Decoded labels containing commas, empty elements, or
+line breaks delegate because the existing REST query cannot preserve them. Spaces
+and literal quotes remain supported. Ordinary repo, author, assignee, and jq flags
+are scalars, not CSV. Search repo filters are slices but multiple occurrences or
+multiple decoded repositories remain native-only. Unsupported filters remain
+unsupported even when empty. Search label filters retain typed local fallback,
+including labels that the issue-list REST query cannot represent, so
+`OCTOPOOL_NO_FALLBACK` still blocks that native dispatch. API fields/headers stay
+literal repeated values;
+`workflow run --json` stays Boolean. The documented workflow/gist view JSON
+extensions are unchanged.
+
+Every limit or interval assignment must pass native signed base-0 integer syntax,
+including prefixes, signs, underscores, and overflow checks. Only the final limit
+gets the command range check: at least 1 for lists, and 1–1000 for search. Values
+above the relay's 100-item bound delegate rather than being clamped into eligibility.
+Enum assignments are checked individually, case-insensitively; PR/issue list state
+is normalized, but run status spelling is preserved and unsupported spellings
+delegate. Run-view attempts use unsigned 64-bit syntax without signs: zero selects
+the latest run path, and values beyond the CLI's signed representation delegate
+before conversion. Jobs still belong to the returned run attempt.
+
+Watch durations must be representable before multiplication and the 30-second
+floor. An earlier int-valid duration can be overridden; an invalid integer cannot.
+A final unrepresentable run-watch duration delegates so native lookup and
+early-completion timing remain native-owned. Delegation changes only the effective
+valid interval (or inserts a proved default before a real `--` terminator), never
+discarded intervals, another flag's value, or unknown grammar.
+With no active rewrite rules, native PR-checks watch handoff recognizes `-w=false`
+and `-w=0` as disabled web mode and keeps the watch floor. The `-w` spelling remains
+native-only; short clusters and invalid Boolean assignments are left intact.
+
+These parsers run after the existing policy check. Active rules still inspect
+original occurrences and structural material, even overwritten scalars or CSV
+records ignored by decoding. Native argv retains spelling and order except for
+necessary repository/host pins and the effective watch floor; decoded CSV is never
+joined back into native arguments. Relay attempts and final native dispatch acquire
+policy again. The guarded `repo view` pin is positional, including when resolved
+from context or supplied with the shim's repo option; native `repo view` has no
+`--repo` flag. Publication duplicate restrictions and typed-fallback
+`OCTOPOOL_NO_FALLBACK` behavior are unchanged; direct unsupported-shape delegation
+remains protected native dispatch, not a universal no-fallback opt-out.
+
 #### Human-format reads
 
 When stdout is not a terminal, the shim renders `pr view`, `pr checks`, `pr list`,

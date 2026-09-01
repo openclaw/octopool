@@ -25,7 +25,7 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("issue "+args[0], args[1:])
 	if !ok {
 		return early
 	}
@@ -49,6 +49,13 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 		}
 		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields)) {
 			return ghDelegated()
+		}
+		// This REST representation limit is not a native label setter rule;
+		// unsupported search filters retain their own typed fallback boundary.
+		for _, label := range opts.labels {
+			if label == "" || strings.ContainsAny(label, ",\r\n") {
+				return ghDelegated()
+			}
 		}
 		query := listQuery(opts)
 		if opts.state != "" {

@@ -15,7 +15,7 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 	if args[0] == "watch" {
 		return handleGHRunWatch(ctx, args[1:], stdout)
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("run "+args[0], args[1:])
 	if !ok {
 		return early
 	}
@@ -80,7 +80,7 @@ func relayRunView(ctx context.Context, stdout io.Writer, repo string, id string,
 	run := map[string]any{}
 	human := len(opts.json) == 0
 	runPath := repoPath(repo, "actions", "runs", id)
-	if opts.attemptSet {
+	if opts.attemptSet && opts.attempt != 0 {
 		runPath = repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(opts.attempt))
 	}
 	envelope, err := client.do(ctx, ghAPIRequest{

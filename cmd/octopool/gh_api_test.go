@@ -35,6 +35,28 @@ func TestParseGHAPIArgs(t *testing.T) {
 	}
 }
 
+func TestParseGHAPIArgsOptionTypeControls(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		args       []string
+		jq, accept string
+		fallback   bool
+	}{
+		{"last_jq", []string{"--jq", "(", "--jq=.number"}, ".number", "", false},
+		{"empty_last_jq", []string{"--jq", "(", "--jq="}, "", "", false},
+		{"literal_header_comma", []string{"-H", "Accept: application/json,text/plain"}, "", "application/json,text/plain", false},
+		{"native_only_field", []string{"-f", "labels=a,b"}, "", "", true},
+		{"native_only_top_json", []string{"--json="}, "", "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req, fallback, err := parseGHAPIArgs(append([]string{"repos/acme/repo"}, test.args...))
+			if err != nil || fallback != test.fallback || req.jq != test.jq || req.headers["accept"] != test.accept {
+				t.Fatalf("request=%#v fallback=%v err=%v", req, fallback, err)
+			}
+		})
+	}
+}
+
 func TestParseGHAPIArgsDecodesQueryOnce(t *testing.T) {
 	request, fallback, err := parseGHAPIArgs([]string{
 		"/repos/openclaw/openclaw/actions/runs?branch=feature%2Ffoo&label=a&label=b",

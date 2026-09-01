@@ -21,7 +21,7 @@ func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResu
 	if kind != "issues" && kind != "prs" && kind != "repos" {
 		return ghDelegated()
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("search "+args[0], args[1:])
 	if !ok {
 		return early
 	}
@@ -74,14 +74,14 @@ func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResu
 }
 
 func relaySearchIssues(ctx context.Context, stdout io.Writer, repo string, rawQuery string, opts ghTopOptions) error {
-	if opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
+	if opts.read.has("--author") || opts.read.has("--assignee") || opts.read.has("--label") {
 		return localFallbackError{Reason: "unsupported_search_filter"}
 	}
 	return relayGitHubSearch(ctx, stdout, repo, rawQuery, "issue", opts, fieldMapIssue)
 }
 
 func relaySearchPRs(ctx context.Context, stdout io.Writer, repo string, rawQuery string, opts ghTopOptions) error {
-	if opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
+	if opts.read.has("--author") || opts.read.has("--assignee") || opts.read.has("--label") {
 		return localFallbackError{Reason: "unsupported_pr_search_filter"}
 	}
 	return relayGitHubSearch(ctx, stdout, repo, rawQuery, "pr", opts, fieldMapPR)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"reflect"
@@ -399,13 +400,205 @@ func TestGHWatchParsersHandleAttachedInterval(t *testing.T) {
 	if !ok || checkOpts.interval != watchMinInterval {
 		t.Fatalf("checks watch -i5 must floor: ok=%v interval=%v", ok, checkOpts.interval)
 	}
-	floored := floorGHWatchDelegateArgs([]string{"run", "watch", "42", "--json", "x", "-i5"})
-	if !reflect.DeepEqual(floored, []string{"run", "watch", "42", "--json", "x", "-i30"}) {
+	floored := floorGHWatchDelegateArgs([]string{"run", "watch", "42", "-i5"})
+	if !reflect.DeepEqual(floored, []string{"run", "watch", "42", "-i30"}) {
 		t.Fatalf("delegated -i5 must floor in place, got %v", floored)
+	}
+	invalid := []string{"run", "watch", "42", "--json", "x", "-i5"}
+	if got := floorGHWatchDelegateArgs(invalid); !reflect.DeepEqual(got, invalid) {
+		t.Fatalf("undeclared run-watch JSON must not be repaired: %v", got)
 	}
 	terminated := floorGHWatchDelegateArgs([]string{"run", "watch", "--", "42"})
 	if !reflect.DeepEqual(terminated, []string{"run", "watch", "--interval", "30", "--", "42"}) {
 		t.Fatalf("injected interval must precede the -- terminator, got %v", terminated)
+	}
+}
+
+func TestGHWatchIntervalOccurrences(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		flags     []string
+		seconds   int64
+		supported bool
+	}{
+		{"control_decimal", []string{"--interval=45"}, 45, true},
+		{"regression_octal", []string{"--interval=040"}, 32, true},
+		{"regression_hex", []string{"--interval=0x20"}, 32, true},
+		{"regression_binary", []string{"--interval=0b100000"}, 32, true},
+		{"regression_underscore", []string{"--interval=3_2"}, 32, true},
+		{"regression_attached_octal", []string{"-i040"}, 32, true},
+		{"regression_hex_floor", []string{"--interval=0x1"}, 30, true},
+		{"control_negative_floor", []string{"--interval=-1"}, 30, true},
+		{"control_zero_floor", []string{"--interval=0"}, 30, true},
+		{"regression_invalid_octal_earlier", []string{"--interval=08", "--interval=45"}, 0, false},
+		{"control_int_overflow_earlier", []string{"--interval=9223372036854775808", "--interval=45"}, 0, false},
+		{"regression_positive_duration_overflow", []string{"--interval=9223372037"}, 0, false},
+		{"regression_negative_duration_overflow", []string{"--interval=-9223372037"}, 0, false},
+		{"control_duration_overridden", []string{"--interval=9223372037", "--interval=45"}, 45, true},
+		{"control_duration_endpoint", []string{"--interval=9223372036"}, 9223372036, true},
+		{"control_negative_duration_endpoint", []string{"--interval=-9223372036"}, 30, true},
+	} {
+		for _, command := range []string{"run", "checks"} {
+			t.Run(command+"/"+test.name, func(t *testing.T) {
+				var interval time.Duration
+				var ok bool
+				if command == "run" {
+					opts, supported := parseGHRunWatchOptions(append([]string{"42"}, test.flags...))
+					interval, ok = opts.interval, supported
+				} else {
+					opts, supported := parseGHPRChecksWatchOptions(append([]string{"7", "--watch"}, test.flags...))
+					interval, ok = opts.interval, supported
+				}
+				if ok != test.supported || (ok && interval != time.Duration(test.seconds)*time.Second) {
+					t.Fatalf("supported=%v want=%v interval=%v wantSeconds=%d", ok, test.supported, interval, test.seconds)
+				}
+			})
+		}
+	}
+}
+
+func TestGHWatchFloorValueOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		args, want []string
+	}{
+		{"regression_hex_floor", []string{"run", "watch", "42", "--interval=0x1"}, []string{"run", "watch", "42", "--interval=30"}},
+		{"regression_attached_hex_floor", []string{"run", "watch", "42", "-i0x1"}, []string{"run", "watch", "42", "-i30"}},
+		{"regression_repo_owned_value", []string{"run", "watch", "42", "--repo", "-i1", "--compact"}, []string{"run", "watch", "42", "--repo", "-i1", "--compact", "--interval", "30"}},
+		{"regression_repo_owned_delimiter", []string{"run", "watch", "42", "--repo", "--", "--compact"}, []string{"run", "watch", "42", "--repo", "--", "--compact", "--interval", "30"}},
+		{"regression_discarded_interval", []string{"run", "watch", "42", "-i1", "--interval=45"}, []string{"run", "watch", "42", "-i1", "--interval=45"}},
+		{"regression_invalid_earlier_octal", []string{"run", "watch", "42", "-i08", "--interval=1"}, []string{"run", "watch", "42", "-i08", "--interval=1"}},
+		{"control_overridden_duration_floor", []string{"run", "watch", "42", "--interval=9223372037", "-i1"}, []string{"run", "watch", "42", "--interval=9223372037", "-i30"}},
+		{"control_final_floor", []string{"run", "watch", "42", "--interval=45", "-i1"}, []string{"run", "watch", "42", "--interval=45", "-i30"}},
+		{"control_original_large_spelling", []string{"run", "watch", "42", "--interval=0x20"}, []string{"run", "watch", "42", "--interval=0x20"}},
+		{"control_duration_overflow_untouched", []string{"run", "watch", "42", "--interval=9223372037"}, []string{"run", "watch", "42", "--interval=9223372037"}},
+		{"control_after_delimiter", []string{"run", "watch", "42", "--", "-i1"}, []string{"run", "watch", "42", "--interval", "30", "--", "-i1"}},
+		{"control_false_watch", []string{"pr", "checks", "7", "--watch=false", "-i1"}, []string{"pr", "checks", "7", "--watch=false", "-i1"}},
+		{"control_repo_owned_watch", []string{"pr", "checks", "7", "--repo", "--watch", "-i1"}, []string{"pr", "checks", "7", "--repo", "--watch", "-i1"}},
+		{"control_unknown_value_ownership", []string{"run", "watch", "42", "--unknown", "-i1"}, []string{"run", "watch", "42", "--unknown", "-i1"}},
+		{"regression_run_attached_repo", []string{"run", "watch", "42", "-Racme/repo", "-i1"}, []string{"run", "watch", "42", "-Racme/repo", "-i30"}},
+		{"regression_pr_attached_repo", []string{"pr", "checks", "7", "-Racme/repo", "--watch", "--required", "-i1"}, []string{"pr", "checks", "7", "-Racme/repo", "--watch", "--required", "-i30"}},
+		{"control_attached_repo_false_watch", []string{"pr", "checks", "7", "-Racme/repo", "--watch=false", "-i1"}, []string{"pr", "checks", "7", "-Racme/repo", "--watch=false", "-i1"}},
+		{"control_attached_repo_invalid_interval", []string{"run", "watch", "42", "-Racme/repo", "-i08", "--interval=1"}, []string{"run", "watch", "42", "-Racme/repo", "-i08", "--interval=1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			original := append([]string(nil), test.args...)
+			got := floorGHWatchDelegateArgs(test.args)
+			if !reflect.DeepEqual(got, test.want) || !reflect.DeepEqual(test.args, original) {
+				t.Fatalf("floored=%q want=%q caller=%q", got, test.want, test.args)
+			}
+		})
+	}
+}
+
+func TestGHReadShortBoolOccurrences(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		args     []string
+		raw      string
+		web      bool
+		rejected bool
+	}{
+		{"false_assignment", []string{"-w=false"}, "false", false, false},
+		{"zero_assignment", []string{"-w=0"}, "0", false, false},
+		{"long_then_short", []string{"--web=true", "-w=false"}, "false", false, false},
+		{"short_then_long", []string{"-w=true", "--web=false"}, "false", false, false},
+		{"short_true", []string{"-w=true"}, "true", true, false},
+		{"bare_short_control", []string{"-w"}, "true", true, false},
+		{"long_false_control", []string{"--web=false"}, "false", false, false},
+		{"lone_equals_control", []string{"-w="}, "", false, true},
+		{"cluster_control", []string{"-wf"}, "", false, true},
+		{"attached_false_control", []string{"-wfalse"}, "", false, true},
+		{"invalid_bool_control", []string{"-w=no"}, "", false, true},
+		{"invalid_earlier_control", []string{"-w=no", "--web=false"}, "", false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			original := append([]string(nil), test.args...)
+			specs := typedReadSpecs("pr checks", "", "--web,-w --watch")
+			parsed, unsupported, err := parseReadOptions(test.args, specs)
+			if !reflect.DeepEqual(test.args, original) {
+				t.Fatalf("caller argv changed: %q", test.args)
+			}
+			if test.rejected {
+				if err == nil && !unsupported {
+					t.Fatal("invalid or clustered shorthand accepted")
+				}
+				return
+			}
+			if err != nil || unsupported || !parsed.has("--web") || parsed.has("--watch") || parsed.values["--web"].boolean != test.web || parsed.values["--web"].raw != test.raw {
+				t.Fatalf("err=%v unsupported=%v values=%+v; want web=%v raw=%q and no watch", err, unsupported, parsed.values, test.web, test.raw)
+			}
+			if !reflect.DeepEqual(parsed.argv, original) || len(parsed.ordered) != len(test.args) {
+				t.Fatalf("raw ownership lost: %+v", parsed)
+			}
+			for i, occurrence := range parsed.ordered {
+				if occurrence.name != "--web" || occurrence.start != i || occurrence.end != i+1 {
+					t.Fatalf("alias occurrence lost: %+v", occurrence)
+				}
+			}
+		})
+	}
+}
+
+func TestGHWatchShortBoolFloorOwnership(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		flags, want []string
+	}{
+		{"false", []string{"--watch", "-w=false", "-i1"}, []string{"--watch", "-w=false", "-i30"}},
+		{"zero", []string{"--watch", "-w=0", "-i1"}, []string{"--watch", "-w=0", "-i30"}},
+		{"lower_f", []string{"--watch", "-w=f", "-i1"}, []string{"--watch", "-w=f", "-i30"}},
+		{"upper_f", []string{"--watch", "-w=F", "-i1"}, []string{"--watch", "-w=F", "-i30"}},
+		{"upper_false", []string{"--watch", "-w=FALSE", "-i1"}, []string{"--watch", "-w=FALSE", "-i30"}},
+		{"title_false", []string{"--watch", "-w=False", "-i1"}, []string{"--watch", "-w=False", "-i30"}},
+		{"mixed_final_short", []string{"--watch", "--web=true", "-w=false", "-i1"}, []string{"--watch", "--web=true", "-w=false", "-i30"}},
+		{"mixed_final_long", []string{"--watch", "-w=true", "--web=false", "-i1"}, []string{"--watch", "-w=true", "--web=false", "-i30"}},
+		{"effective_only", []string{"--watch", "-i1", "-w=0", "--interval=0x1"}, []string{"--watch", "-i1", "-w=0", "--interval=30"}},
+		{"default_before_terminator", []string{"--watch", "-w=false", "--", "-i1"}, []string{"--watch", "-w=false", "--interval", "30", "--", "-i1"}},
+		{"long_false_control", []string{"--watch", "--web=false", "--required", "-i1"}, []string{"--watch", "--web=false", "--required", "-i30"}},
+		{"lone_equals_control", []string{"--watch", "-w=", "-i1"}, []string{"--watch", "-w=", "-i1"}},
+		{"cluster_control", []string{"--watch", "-wf", "-i1"}, []string{"--watch", "-wf", "-i1"}},
+		{"invalid_bool_control", []string{"--watch", "-w=no", "--web=false", "-i1"}, []string{"--watch", "-w=no", "--web=false", "-i1"}},
+		{"terminator_control", []string{"--", "--watch", "-w=false", "-i1"}, []string{"--", "--watch", "-w=false", "-i1"}},
+		{"owned_web_control", []string{"--watch", "--jq", "-w=false", "-i1"}, []string{"--watch", "--jq", "-w=false", "-i30"}},
+		{"owned_watch_control", []string{"--jq", "--watch", "-w=false", "-i1"}, []string{"--jq", "--watch", "-w=false", "-i1"}},
+		{"false_watch_control", []string{"--watch", "-w=false", "--watch=false", "-i1"}, []string{"--watch", "-w=false", "--watch=false", "-i1"}},
+		{"web_is_not_watch_control", []string{"-w=true", "-i1"}, []string{"-w=true", "-i1"}},
+		{"large_raw_control", []string{"--watch", "-w=false", "-i0x20"}, []string{"--watch", "-w=false", "-i0x20"}},
+		{"invalid_interval_control", []string{"--watch", "-w=false", "-i08", "-i1"}, []string{"--watch", "-w=false", "-i08", "-i1"}},
+		{"duration_overflow_control", []string{"--watch", "-w=false", "--interval=9223372037"}, []string{"--watch", "-w=false", "--interval=9223372037"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"pr", "checks", "7", "-R", "acme/repo"}, test.flags...)
+			original := append([]string(nil), args...)
+			want := append([]string{"pr", "checks", "7", "-R", "acme/repo"}, test.want...)
+			if got := floorGHWatchDelegateArgs(args); !reflect.DeepEqual(got, want) || !reflect.DeepEqual(args, original) {
+				t.Fatalf("floored=%q want=%q caller=%q", got, want, args)
+			}
+		})
+	}
+}
+
+func TestGHRunWatchNativeIntervalSleep(t *testing.T) {
+	for _, raw := range []string{"040", "0x20"} {
+		t.Run(raw, func(t *testing.T) {
+			calls := 0
+			relayTestServer(t, func(req map[string]any) any {
+				if strings.HasSuffix(req["path"].(string), "/jobs") {
+					return map[string]any{"total_count": 0, "jobs": []any{}}
+				}
+				calls++
+				if calls == 1 {
+					return map[string]any{"status": "queued"}
+				}
+				return map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 3}
+			})
+			sleeps := recordWatchSleeps(t)
+			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo", "--interval", raw}, &bytes.Buffer{})
+			if result.action != ghComplete || result.err != nil || !reflect.DeepEqual(*sleeps, []time.Duration{32 * time.Second}) {
+				t.Fatalf("action=%v err=%v sleeps=%v", result.action, result.err, *sleeps)
+			}
+		})
 	}
 }
 
@@ -573,6 +766,76 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 	}
 }
 
+func TestGHWatchAttachedRepoNativeHandoff(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		repo []string
+	}{
+		{"attached", []string{"-Racme/repo"}},
+		{"separate_control", []string{"-R", "acme/repo"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := 0
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) { data++ })
+			t.Setenv("GH_HOST", "github.com")
+			t.Setenv("GH_REPO", "")
+			capturePath := captureRewriteGH(t)
+			args := append([]string{"pr", "checks", "7"}, test.repo...)
+			args = append(args, "--watch", "--required", "-i1")
+			original := append([]string(nil), args...)
+			var out bytes.Buffer
+			err := runGH(t.Context(), args, &out, io.Discard)
+			if err != nil || data != 0 || policies.Load() != 2 || out.String() != "child stdout\n" {
+				t.Fatalf("watch handoff: err=%v data=%d policies=%d output=%q", err, data, policies.Load(), out.String())
+			}
+			capture := readRewriteCapture(t, capturePath)
+			want := append([]string(nil), args...)
+			want[len(want)-1] = "-i30"
+			if !reflect.DeepEqual(capture.Args, want) || !reflect.DeepEqual(args, original) {
+				t.Fatalf("native watch interval/argv: got=%q want=%q caller=%q", capture.Args, want, args)
+			}
+		})
+	}
+}
+
+func TestGHWatchShortBoolNativeHandoff(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		flags, want []string
+	}{
+		{"false", []string{"--watch", "-w=false", "-i1"}, []string{"--watch", "-w=false", "-i30"}},
+		{"zero", []string{"--watch", "-w=0", "-i1"}, []string{"--watch", "-w=0", "-i30"}},
+		{"mixed_final_short", []string{"--watch", "--web=true", "-w=false", "-i1"}, []string{"--watch", "--web=true", "-w=false", "-i30"}},
+		{"mixed_final_long", []string{"--watch", "-w=true", "--web=false", "-i1"}, []string{"--watch", "-w=true", "--web=false", "-i30"}},
+		{"long_required_control", []string{"--watch", "--web=false", "--required", "-i1"}, []string{"--watch", "--web=false", "--required", "-i30"}},
+		{"lone_equals_control", []string{"--watch", "-w=", "-i1"}, []string{"--watch", "-w=", "-i1"}},
+		{"cluster_control", []string{"--watch", "-wf", "-i1"}, []string{"--watch", "-wf", "-i1"}},
+		{"invalid_bool_control", []string{"--watch", "-w=no", "-i1"}, []string{"--watch", "-w=no", "-i1"}},
+		{"false_watch_control", []string{"--watch=false", "-w=false", "-i1"}, []string{"--watch=false", "-w=false", "-i1"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := 0
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) { data++ })
+			t.Setenv("GH_HOST", "github.com")
+			t.Setenv("GH_REPO", "")
+			capturePath := captureRewriteGH(t)
+			args := append([]string{"pr", "checks", "7", "-R", "acme/repo"}, test.flags...)
+			original := append([]string(nil), args...)
+			var out, stderr bytes.Buffer
+			err := runGH(t.Context(), args, &out, &stderr)
+			// Each capture child emits one marker; exact output also proves one handoff.
+			if err != nil || data != 0 || policies.Load() != 2 || out.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+				t.Fatalf("handoff: err=%v data=%d policies=%d stdout=%q stderr=%q", err, data, policies.Load(), out.String(), stderr.String())
+			}
+			capture := readRewriteCapture(t, capturePath)
+			want := append([]string{"pr", "checks", "7", "-R", "acme/repo"}, test.want...)
+			if !reflect.DeepEqual(capture.Args, want) || !reflect.DeepEqual(args, original) || capture.Env["GH_HOST"] != "github.com" || capture.Stdin != "" {
+				t.Fatalf("capture=%+v want args=%q caller=%q", capture, want, args)
+			}
+		})
+	}
+}
+
 func TestGHWatchDelegatesWithFlooredInterval(t *testing.T) {
 	emptyRewriteTestServer(t)
 	tests := []struct {
@@ -593,7 +856,7 @@ func TestGHWatchDelegatesWithFlooredInterval(t *testing.T) {
 		{
 			name: "unknown run flag",
 			args: []string{"run", "watch", "42", "--web"},
-			want: "real-gh:run watch 42 --web --interval 30",
+			want: "real-gh:run watch 42 --web",
 		},
 	}
 	for _, test := range tests {

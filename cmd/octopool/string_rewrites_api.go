@@ -22,6 +22,7 @@ type rewriteAPIOptions struct {
 func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 	result := rewriteAPIOptions{headers: map[string]string{}}
 	seen := map[string]bool{}
+	jqCount := 0
 	values := rewriteFlagNames("--method,-X --input --field,-F --raw-field,-f --header,-H --jq,-q")
 	booleans := rewriteFlagNames("--include,-i --silent --paginate --slurp")
 	for i := 0; i < len(args); i++ {
@@ -51,9 +52,21 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 			return result, errRewriteUnsupported
 		}
 		flag := parsed.ordered[0]
+		if flag.name == "--jq" {
+			jqCount++
+			specs := typedReadSpecs("api", "--jq,-q", "")
+			short := specs["-q"]
+			short.attached = true
+			specs["-q"] = short
+			owned, unsupported, err := parseReadOptions(args[i:i+count], specs)
+			if err != nil || unsupported {
+				return result, errRewriteUnsupported
+			}
+			flag.value = owned.values["--jq"].raw
+		}
 		i += count - 1
 		if flag.name != "--field" && flag.name != "--raw-field" && flag.name != "--header" {
-			if seen[flag.name] {
+			if seen[flag.name] && flag.name != "--jq" {
 				return result, errRewriteBlocked
 			}
 			seen[flag.name] = true
@@ -90,6 +103,10 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 			result.headers[key] = value
 			result.output = append(result.output, "--header="+key+": "+value)
 		default:
+			if flag.name == "--jq" {
+				result.output = append(result.output, args[i-count+1:i+1]...)
+				continue
+			}
 			result.output = append(result.output, flag.name+"="+flag.value)
 		}
 	}
@@ -101,6 +118,9 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 		if len(result.fields) > 0 || result.inputSet {
 			result.method = "POST"
 		}
+	}
+	if jqCount > 1 && result.method != "GET" {
+		return result, errRewriteBlocked
 	}
 	if result.inputSet && len(result.fields) > 0 {
 		return result, errRewriteBlocked

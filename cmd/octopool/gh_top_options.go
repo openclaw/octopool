@@ -8,6 +8,7 @@ import (
 )
 
 type ghTopOptions struct {
+	read        readOptions
 	repo        string
 	repoCount   int
 	json        []string
@@ -29,92 +30,107 @@ type ghTopOptions struct {
 
 var digitsPattern = regexp.MustCompile(`^[0-9]+$`)
 
-func prepareGHTopOptions(args []string) (ghTopOptions, ghResult, bool) {
-	opts, fallback, err := parseGHTopOptions(args)
+func topReadSpecs(command string) map[string]readOptionSpec {
+	values, booleans := "--repo,-R --json --jq,-q", ""
+	switch command {
+	case "pr view", "issue view", "repo view", "release view", "workflow view", "gist view":
+	case "pr diff":
+		values, booleans = "--repo,-R", "--patch"
+	case "pr list", "issue list":
+		values += " --limit,-L --state --author --assignee --label"
+	case "run list":
+		values += " --limit,-L --branch --workflow --status"
+	case "run view":
+		values += " --attempt"
+	case "pr checks":
+		booleans = "--watch --required --fail-fast"
+	case "release list", "workflow list", "label list":
+		values += " --limit,-L"
+	case "search issues", "search prs":
+		values += " --limit,-L --state --author --assignee --label"
+	case "search repos":
+		values = "--json --jq,-q --limit,-L"
+	default:
+		return nil
+	}
+	return typedReadSpecs(command, values, booleans)
+}
+
+func prepareGHTopOptions(command string, args []string) (ghTopOptions, ghResult, bool) {
+	opts, fallback, err := parseGHTopOptions(args, topReadSpecs(command))
+	if _, invalidEnum := err.(readEnumError); invalidEnum {
+		return opts, ghDelegated(), false
+	}
 	if err != nil {
 		return opts, ghFailed(err), false
 	}
-	if fallback || topJQFallback(opts) {
+	if fallback || topJQFallback(opts) || (opts.read.has("--json") && len(opts.json) == 0) || (opts.read.has("--jq") && !opts.read.has("--json")) {
+		return opts, ghDelegated(), false
+	}
+	if opts.limitSet && (opts.limit < 1 || (strings.HasPrefix(command, "search ") && opts.limit > 1000)) {
+		return opts, ghFailed(fmt.Errorf("--limit is outside the command range")), false
+	}
+	if command == "pr list" || command == "issue list" {
+		opts.state = strings.ToLower(opts.state)
+	}
+	if command == "run list" && opts.status != strings.ToLower(opts.status) {
+		// Native preserves status spelling; the relay's modeled status set does not.
+		return opts, ghDelegated(), false
+	}
+	if command == "pr list" {
+		if opts.read.has("--author") || opts.read.has("--assignee") || opts.read.has("--label") {
+			return opts, ghDelegated(), false
+		}
+	}
+	if command == "pr checks" && (opts.read.values["--watch"].boolean || opts.read.values["--required"].boolean || opts.read.values["--fail-fast"].boolean) {
 		return opts, ghDelegated(), false
 	}
 	return opts, ghResult{}, true
 }
 
-func parseGHTopOptions(args []string) (ghTopOptions, bool, error) {
+func parseGHTopOptions(args []string, specs map[string]readOptionSpec) (ghTopOptions, bool, error) {
 	opts := ghTopOptions{limit: 30}
-	limitRaw := ""
-	attemptRaw := ""
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		valueFlag := func(name string) (string, bool, error) {
-			if arg == name {
-				index++
-				if index >= len(args) {
-					return "", false, fmt.Errorf("%s requires a value", name)
-				}
-				return args[index], true, nil
-			}
-			if strings.HasPrefix(arg, name+"=") {
-				return strings.TrimPrefix(arg, name+"="), true, nil
-			}
-			return "", false, nil
+	parsed, fallback, err := parseReadOptions(args, specs)
+	opts.read = parsed
+	if err != nil || fallback {
+		return opts, fallback, err
+	}
+	opts.positionals = parsed.positionals
+	opts.repo = parsed.values["--repo"].raw
+	for _, occurrence := range parsed.ordered {
+		if occurrence.name == "--repo" {
+			opts.repoCount++
 		}
-		for _, item := range []struct {
-			name string
-			set  func(string)
-		}{
-			{"-R", func(value string) { opts.repo = value; opts.repoCount++ }},
-			{"--repo", func(value string) { opts.repo = value; opts.repoCount++ }},
-			{"--json", func(value string) { opts.json = splitFields(value) }},
-			{"--jq", func(value string) { opts.jq = value }},
-			{"-q", func(value string) { opts.jq = value }},
-			{"--limit", func(value string) { limitRaw = value; opts.limitSet = true }},
-			{"-L", func(value string) { limitRaw = value; opts.limitSet = true }},
-			{"--state", func(value string) { opts.state = value }},
-			{"--branch", func(value string) { opts.branch = value }},
-			{"--workflow", func(value string) { opts.workflow = value }},
-			{"--status", func(value string) { opts.status = value }},
-			{"--attempt", func(value string) { attemptRaw = value; opts.attemptSet = true }},
-			{"--author", func(value string) { opts.author = value }},
-			{"--assignee", func(value string) { opts.assignee = value }},
-			{"--label", func(value string) { opts.labels = append(opts.labels, value) }},
-		} {
-			value, ok, err := valueFlag(item.name)
-			if err != nil {
-				return opts, false, err
-			}
-			if ok {
-				item.set(value)
-				goto nextArg
-			}
-		}
-		switch arg {
-		case "--patch":
-			opts.patch = true
-		case "--web", "--comments", "--template", "--paginate", "--slurp":
+	}
+	if spec, ok := specs["--repo"]; ok && spec.kind == readSlice && parsed.has("--repo") {
+		repos := parsed.values["--repo"].strings
+		if opts.repoCount > 1 || len(repos) != 1 {
 			return opts, true, nil
-		default:
-			if strings.HasPrefix(arg, "-") && arg != "--patch" {
-				return opts, true, nil
-			}
-			opts.positionals = append(opts.positionals, arg)
 		}
-	nextArg:
+		opts.repo = repos[0]
 	}
+	opts.json = uniqueReadFields(parsed.values["--json"].strings)
+	opts.jq = parsed.values["--jq"].raw
+	opts.patch = parsed.values["--patch"].boolean
+	opts.limitSet = parsed.has("--limit")
 	if opts.limitSet {
-		limit, err := strconv.Atoi(limitRaw)
-		if err != nil {
-			return opts, false, fmt.Errorf("--limit requires an integer: %w", err)
-		}
-		opts.limit = limit
+		opts.limit = int(parsed.values["--limit"].integer)
 	}
+	opts.state = parsed.values["--state"].raw
+	opts.branch = parsed.values["--branch"].raw
+	opts.workflow = parsed.values["--workflow"].raw
+	opts.status = parsed.values["--status"].raw
+	opts.attemptSet = parsed.has("--attempt")
 	if opts.attemptSet {
-		attempt, err := strconv.Atoi(attemptRaw)
-		if err != nil || attempt < 1 {
-			return opts, false, fmt.Errorf("--attempt requires a positive integer")
+		attempt := parsed.values["--attempt"].uint
+		if attempt > uint64(^uint(0)>>1) {
+			return opts, true, nil
 		}
-		opts.attempt = attempt
+		opts.attempt = int(attempt)
 	}
+	opts.author = parsed.values["--author"].raw
+	opts.assignee = parsed.values["--assignee"].raw
+	opts.labels = parsed.values["--label"].strings
 	return opts, false, nil
 }
 
@@ -133,9 +149,6 @@ func desiredLimit(opts ghTopOptions) int {
 func desiredLimitDefault(opts ghTopOptions, defaultLimit int) int {
 	if !opts.limitSet {
 		return defaultLimit
-	}
-	if opts.limit < 1 {
-		return 1
 	}
 	if opts.limit > 100 {
 		return 100
@@ -182,25 +195,6 @@ func hasTopModifiersExceptPatch(opts ghTopOptions) bool {
 func supportedWorkflowRef(ref string) bool {
 	lower := strings.ToLower(ref)
 	return isDigits(ref) || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".yaml")
-}
-
-func splitFields(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == ' '
-	})
-	out := make([]string, 0, len(parts))
-	seen := make(map[string]bool, len(parts))
-	for _, part := range parts {
-		if part != "" && !seen[part] {
-			seen[part] = true
-			out = append(out, part)
-		}
-	}
-	return out
 }
 
 func isDigits(raw string) bool {

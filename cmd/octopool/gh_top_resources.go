@@ -12,7 +12,7 @@ func handleGHRepo(ctx context.Context, args []string, stdout io.Writer) ghResult
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("repo "+args[0], args[1:])
 	if !ok {
 		return early
 	}
@@ -41,7 +41,7 @@ func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghRes
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("release "+args[0], args[1:])
 	if !ok {
 		return early
 	}
@@ -77,7 +77,7 @@ func handleGHWorkflow(ctx context.Context, args []string, stdout io.Writer) ghRe
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("workflow "+args[0], args[1:])
 	if !ok {
 		return early
 	}
@@ -109,7 +109,7 @@ func handleGHLabel(ctx context.Context, args []string, stdout io.Writer) ghResul
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("label "+args[0], args[1:])
 	if !ok {
 		return early
 	}
@@ -132,7 +132,7 @@ func handleGHGist(ctx context.Context, args []string, stdout io.Writer) ghResult
 	if len(args) == 0 {
 		return ghDelegated()
 	}
-	opts, early, ok := prepareGHTopOptions(args[1:])
+	opts, early, ok := prepareGHTopOptions("gist "+args[0], args[1:])
 	if !ok {
 		return early
 	}

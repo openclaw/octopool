@@ -57,7 +57,7 @@ func TestProtectionReadsStrictPreparation(t *testing.T) {
 			if err := prepareRewriteAPI(policy, args, strings.NewReader("unused stdin"), prepared); err != nil {
 				t.Fatal(err)
 			}
-			want := []string{"api", endpoint, "--method=GET", "--hostname=github.com", "--jq=type", "--paginate=true", "--slurp=true", "--include=true", "--silent=true"}
+			want := []string{"api", endpoint, "--method=GET", "--hostname=github.com", "--jq", "type", "--paginate=true", "--slurp=true", "--include=true", "--silent=true"}
 			if !slices.Equal(prepared.args, want) {
 				t.Fatalf("strict args=%v", prepared.args)
 			}
@@ -147,9 +147,14 @@ func TestProtectionReadsNativeHandoff(t *testing.T) {
 			if !slices.Contains(got.Args, "--hostname=github.com") || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" {
 				t.Fatal("native protection read lost GitHub.com host pinning")
 			}
-			for _, flag := range []string{"--jq=type", "--paginate=true", "--slurp=true"} {
-				if (flag == "--jq=type" && endpoint == "repos/acme/demo/rules/branches/main") ||
-					(flag != "--jq=type" && endpoint == "repos/acme/demo/rulesets") {
+			if slices.Contains(args, "--jq") {
+				index := slices.Index(got.Args, "--jq")
+				if index < 0 || index+1 >= len(got.Args) || got.Args[index+1] != "type" {
+					t.Fatalf("lost original jq occurrence: %v", got.Args)
+				}
+			}
+			for _, flag := range []string{"--paginate=true", "--slurp=true"} {
+				if endpoint == "repos/acme/demo/rulesets" {
 					if !slices.Contains(got.Args, flag) {
 						t.Fatalf("lost native flag %s", flag)
 					}

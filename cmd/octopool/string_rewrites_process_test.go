@@ -1266,7 +1266,7 @@ func TestStringRewriteReadFallbackCompatibility(t *testing.T) {
 	}{
 		{"read readiness", []string{"pr", "view", "123", "--repo", "acme/repo", "--json", "number,headRefOid,statusCheckRollup"}, "123"},
 		{"read issue comments", []string{"issue", "view", "123", "--repo", "https://github.com/acme/repo", "--json", "number,comments"}, "comments"},
-		{"filter pull head", []string{"pr", "list", "--repo", "https://github.com/acme/repo", "--head", "safe-branch", "--json", "number"}, "--head=safe-branch"},
+		{"filter pull head", []string{"pr", "list", "--repo", "https://github.com/acme/repo", "--head", "safe-branch", "--json", "number"}, "safe-branch"},
 		{"mark ready", []string{"pr", "ready", "123", "--repo", "https://github.com/acme/repo"}, "ready"},
 		{"pinned merge", []string{"pr", "merge", "123", "--repo", "https://github.com/acme/repo", "--squash", "--match-head-commit", sha}, "repos/acme/repo/pulls/123/merge"},
 	} {
@@ -1276,6 +1276,9 @@ func TestStringRewriteReadFallbackCompatibility(t *testing.T) {
 				t.Fatal(err)
 			}
 			capture := readRewriteCapture(t, capturePath)
+			if test.args[0] == "pr" && test.args[1] == "list" && !slices.Equal(capture.Args, []string{"pr", "list", "--repo=acme/repo", "--head", "safe-branch", "--json", "number"}) {
+				t.Fatalf("read fallback changed caller spelling/order: %v", capture.Args)
+			}
 			if !slices.Contains(capture.Args, "--repo=acme/repo") && !slices.Contains(capture.Args, "repos/acme/repo/pulls/123/merge") {
 				t.Fatalf("repository was not structurally pinned: %v", capture.Args)
 			}
@@ -2201,6 +2204,293 @@ func TestStringRewriteRelayReadAndAuthFailure(t *testing.T) {
 	}
 }
 
+func TestStringRewriteReadOptionOccurrences(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		args  []string
+		want  string
+		label any
+	}{
+		{"control_single_json", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "number,title"}, `{"number":7,"title":"synthetic"}`, nil},
+		{"regression_repeated_json", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "number", "--json=title"}, `{"number":7,"title":"synthetic"}`, nil},
+		{"regression_repeated_labels", []string{"issue", "list", "-R", "acme/repo", "--label", `"bug"`, "--label=docs", "--json", "number"}, `[{"number":7}]`, "bug,docs"},
+		{"regression_repeated_limit", []string{"pr", "list", "-R", "acme/repo", "--limit=0", "--limit=2", "--json", "number"}, `[{"number":7}]`, nil},
+		{"regression_top_last_jq", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "number,title", "--jq", "(", "--jq=.number"}, "7", nil},
+		{"regression_api_last_jq", []string{"api", "repos/acme/repo", "--jq", "(", "--jq=.number"}, "7", nil},
+		{"regression_api_empty_last_jq", []string{"api", "repos/acme/repo", "--jq", "(", "--jq="}, `{"number":7,"title":"synthetic"}`, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if strings.Contains(test.name, "jq") && !jqAvailable() {
+				t.Skip("jq not installed")
+			}
+			var requests []map[string]any
+			_, policies := rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				req := decodeCLIRequest(t, w, r)
+				requests = append(requests, req)
+				if test.args[0] == "api" {
+					writeCLIEnvelope(t, w, map[string]any{"number": 7, "title": "synthetic"})
+					return
+				}
+				writeCLIEnvelope(t, w, nativeOptionsResponse(t, req))
+			})
+			capture := captureRewriteGH(t)
+			var out bytes.Buffer
+			err := runGH(t.Context(), test.args, &out, io.Discard)
+			_, childErr := os.Stat(capture)
+			if err != nil || strings.TrimSpace(out.String()) != test.want || len(requests) != 1 || policies.Load() != 2 || !os.IsNotExist(childErr) {
+				t.Fatalf("err=%v output=%q want=%q data=%d policy=%d child=%v", err, out.String(), test.want, len(requests), policies.Load(), childErr)
+			}
+			if test.label != nil && requests[0]["query"].(map[string]any)["labels"] != test.label {
+				t.Fatalf("labels=%v", requests[0]["query"])
+			}
+		})
+	}
+}
+
+func TestStringRewriteRepoViewPositionalPin(t *testing.T) {
+	if !jqAvailable() {
+		t.Skip("jq not installed")
+	}
+	for _, test := range []struct {
+		name     string
+		repoArgs []string
+		envRepo  string
+		gitRepo  bool
+		blocked  bool
+	}{
+		{"positional", []string{"https://github.com/acme/repo"}, "", false, false},
+		{"environment", nil, "acme/repo", false, false},
+		{"current_fixture", nil, "", true, false},
+		{"shim_repo", []string{"--repo", "https://github.com/acme/repo"}, "", false, false},
+		{"shim_attached_repo", []string{"-Racme/repo"}, "", false, false},
+		{"empty_shim_repo", []string{"--repo="}, "acme/repo", false, false},
+		{"conflicting_positional", []string{"--repo=acme/other", "acme/repo"}, "", false, true},
+		{"enterprise_repo", []string{"--repo=https://other.example/acme/repo"}, "", false, true},
+		{"original_material", []string{"--repo=internal-model/repo", "--repo=acme/repo"}, "", false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := 0
+			_, policies := rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				data++
+				req := decodeCLIRequest(t, w, r)
+				if req["method"] != "GET" || req["path"] != "/repos/acme/repo" {
+					t.Errorf("wrong resolved repository: %v", req)
+				}
+				writeCLIFallback(t, w, "route_denied")
+			})
+			t.Setenv("GH_REPO", test.envRepo)
+			t.Setenv("GH_HOST", "other.example")
+			fixture := t.TempDir()
+			t.Chdir(fixture)
+			if test.gitRepo {
+				for _, args := range [][]string{{"init", "--quiet", fixture}, {"-C", fixture, "remote", "add", "origin", "https://github.com/acme/repo"}} {
+					if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+						t.Fatalf("synthetic repository setup: %v: %s", err, out)
+					}
+				}
+			}
+			capturePath := captureRewriteGH(t)
+			options := []string{"--json", `"name"`, "--json=url", "--jq", "(", "--jq=.name"}
+			args := append([]string{"repo", "view"}, test.repoArgs...)
+			args = append(args, options...)
+			var out bytes.Buffer
+			err := runGH(t.Context(), args, &out, io.Discard)
+			if test.blocked {
+				if err != errRewriteBlocked || data != 0 || policies.Load() != 1 || out.Len() != 0 {
+					t.Fatalf("strict repo boundary: err=%v data=%d policies=%d output=%q", err, data, policies.Load(), out.String())
+				}
+				if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+					t.Fatal("denied repo view ran native child")
+				}
+				return
+			}
+			if err != nil || data != 1 || policies.Load() != 3 || out.String() != "child stdout\n" {
+				t.Fatalf("repo handoff: err=%v data=%d policies=%d output=%q", err, data, policies.Load(), out.String())
+			}
+			capture := readRewriteCapture(t, capturePath)
+			want := append([]string{"repo", "view", "acme/repo"}, options...)
+			if !slices.Equal(capture.Args, want) || capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != "" || capture.Stdin != "" {
+				t.Fatalf("native repo-view positional pin/raw options: got=%+v want=%q", capture, want)
+			}
+		})
+	}
+}
+
+func TestStringRewriteAttachedReadAliases(t *testing.T) {
+	if !jqAvailable() {
+		t.Skip("jq not installed")
+	}
+	for _, policy := range []struct{ name, body string }{{"active", rewriteActiveTestPolicy}, {"empty", rewriteEmptyTestPolicy}} {
+		for _, test := range []struct {
+			name, want, limit string
+			args              []string
+		}{
+			{"limit", `[{"number":7}]`, "5", []string{"pr", "list", "-R", "acme/repo", "-L5", "--json=number"}},
+			{"jq", "7", "", []string{"pr", "view", "7", "-R", "acme/repo", "--json=number", "-q.number"}},
+			{"repo", `{"number":7}`, "", []string{"pr", "view", "7", "-Racme/repo", "--json=number"}},
+			{"equals_control", "7", "5", []string{"pr", "list", "-R=acme/repo", "-L=5", "--json=number", "-q=.[0].number"}},
+		} {
+			t.Run(policy.name+"/"+test.name, func(t *testing.T) {
+				var requests []map[string]any
+				_, policies := rewriteTestServer(t, policy.body, func(w http.ResponseWriter, r *http.Request) {
+					req := decodeCLIRequest(t, w, r)
+					requests = append(requests, req)
+					writeCLIEnvelope(t, w, nativeOptionsResponse(t, req))
+				})
+				capture := captureRewriteGH(t)
+				var out bytes.Buffer
+				err := runGH(t.Context(), test.args, &out, io.Discard)
+				_, childErr := os.Stat(capture)
+				if err != nil || strings.TrimSpace(out.String()) != test.want || len(requests) != 1 || policies.Load() != 2 || !os.IsNotExist(childErr) {
+					t.Fatalf("attached read: err=%v output=%q data=%d policies=%d child=%v", err, out.String(), len(requests), policies.Load(), childErr)
+				}
+				if test.limit != "" && requests[0]["query"].(map[string]any)["per_page"] != test.limit {
+					t.Fatalf("attached limit lost: query=%v", requests[0]["query"])
+				}
+			})
+		}
+	}
+}
+
+func TestStringRewriteOptionNativeArgv(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		args       []string
+		active     bool
+		relay      bool
+		noFallback bool
+	}{
+		{"control_unsupported_field_original", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "bogus", "--json=number"}, true, false, false},
+		{"control_active_empty_repo_pin", []string{"pr", "view", "7", "--repo=", "--json=bogus"}, true, false, false},
+		{"regression_unrepresentable_label", []string{"issue", "list", "-R", "acme/repo", "--label", `"a,b"`, "--json=number"}, false, false, false},
+		{"regression_active_unrepresentable_label", []string{"issue", "list", "-R", "acme/repo", "--label", `"a,b"`, "--json=number"}, true, false, false},
+		{"control_active_repeated_unrepresentable_label", []string{"issue", "list", "-R", "acme/repo", "--label", "bug", "--label", `"a,b"`, "--json=number"}, true, false, false},
+		{"control_direct_cap_no_fallback", []string{"pr", "list", "-R", "acme/repo", "--limit=101", "--json=number"}, false, false, true},
+		{"control_attached_cap_raw_argv", []string{"pr", "list", "-R", "acme/repo", "-L101", "--json=number", "-q.[].number"}, true, false, false},
+		{"control_search_issues_label_handoff", []string{"search", "issues", "bug", "-R", "acme/repo", "--json=number", "--label", `"a,b"`}, true, false, false},
+		{"control_search_prs_label_handoff", []string{"search", "prs", "bug", "-R", "acme/repo", "--json=number", "--label", `"a,b"`}, true, false, false},
+		{"control_issue_label_direct_no_fallback", []string{"issue", "list", "-R", "acme/repo", "--json=number", "--label", `"a,b"`}, false, false, true},
+		{"control_typed_no_fallback", []string{"pr", "view", "7", "-R", "acme/repo", "--json=number"}, false, true, true},
+		{"regression_api_jq_fallback_original", []string{"api", "repos/acme/repo", "--jq", ".title", "-q", ".number"}, true, true, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			policy := rewriteEmptyTestPolicy
+			t.Setenv("GH_REPO", "acme/repo")
+			if test.active {
+				policy = rewriteActiveTestPolicy
+			}
+			data := 0
+			_, policies := rewriteTestServer(t, policy, func(w http.ResponseWriter, r *http.Request) { data++; writeCLIFallback(t, w, "route_denied") })
+			capturePath := captureRewriteGH(t)
+			if test.noFallback {
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			}
+			var out bytes.Buffer
+			err := runGH(t.Context(), test.args, &out, io.Discard)
+			wantData := 0
+			if test.relay {
+				wantData = 1
+			}
+			if test.noFallback && test.relay {
+				if err == nil || out.Len() != 0 || data != 1 || policies.Load() != 2 {
+					t.Fatalf("typed fallback escaped: err=%v data=%d policy=%d output=%q", err, data, policies.Load(), out.String())
+				}
+				if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+					t.Fatal("typed NO_FALLBACK ran child")
+				}
+				return
+			}
+			if err != nil || data != wantData || policies.Load() != int64(2+wantData) {
+				t.Fatalf("err=%v data=%d want=%d policy=%d", err, data, wantData, policies.Load())
+			}
+			capture := readRewriteCapture(t, capturePath)
+			// Repository/hostname pins are allowed; every other original occurrence stays in order and spelling.
+			stripPins := func(args []string) []string {
+				var result []string
+				for i := 0; i < len(args); i++ {
+					arg := args[i]
+					if arg == "-R" || arg == "--repo" || arg == "--hostname" {
+						i++
+						continue
+					}
+					if strings.HasPrefix(arg, "--repo=") || strings.HasPrefix(arg, "--hostname=") || arg == "--method=GET" {
+						continue
+					}
+					result = append(result, arg)
+				}
+				return result
+			}
+			if !slices.Equal(stripPins(capture.Args), stripPins(test.args)) {
+				t.Fatalf("native argv=%q original=%q", capture.Args, test.args)
+			}
+			if test.active && (capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != "") {
+				t.Fatalf("unpinned child env=%v", capture.Env)
+			}
+			if test.active && test.args[0] != "api" && !slices.Contains(capture.Args, "--repo=acme/repo") {
+				t.Fatalf("missing explicit repository pin: %v", capture.Args)
+			}
+		})
+	}
+}
+
+func TestStringRewriteSearchFilterNoFallback(t *testing.T) {
+	for _, kind := range []string{"issues", "prs"} {
+		for _, flag := range []string{"--author", "--assignee", "--label"} {
+			values := []string{"", "alice"}
+			if flag == "--label" {
+				values = append(values, `"a,b"`, "a,,b", `""`, "\"a\r\nb\"")
+			}
+			for _, value := range values {
+				t.Run(kind+"/"+flag+"/value="+value, func(t *testing.T) {
+					data := 0
+					_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) { data++ })
+					t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+					capture := captureRewriteGH(t)
+					var out bytes.Buffer
+					err := runGH(t.Context(), []string{"search", kind, "bug", "-R", "acme/repo", "--json=number", flag, value}, &out, io.Discard)
+					if !isLocalFallback(err) || data != 0 || policies.Load() != 1 || out.Len() != 0 {
+						t.Fatalf("typed filter fallback changed: err=%v data=%d policies=%d output=%q", err, data, policies.Load(), out.String())
+					}
+					if _, err := os.Stat(capture); !os.IsNotExist(err) {
+						t.Fatal("NO_FALLBACK filter ran native child")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestStringRewriteOptionStrictControls(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{"publication_duplicate_label", []string{"issue", "create", "-R", "acme/repo", "--title=safe", "--body=safe", "--label=bug", "--label=docs"}},
+		{"api_duplicate_method", []string{"api", "repos/acme/repo", "--method=GET", "-X", "GET"}},
+		{"api_duplicate_input", []string{"api", "repos/acme/repo/issues/7/comments", "--input=-", "--input=-"}},
+		{"api_duplicate_field", []string{"api", "repos/acme/repo/issues/7/comments", "-fbody=a,b", "-fbody=c"}},
+		{"api_credential_header", []string{"api", "repos/acme/repo", "-H", "Authorization: synthetic"}},
+		{"original_repo_host", []string{"pr", "view", "7", "--repo", "https://other.example/acme/repo", "--repo", "acme/repo", "--json=number"}},
+		{"original_csv_ignored_record", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "number\nignored"}},
+		{"original_policy_material", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "number\n" + `{"pattern":"internal-model","replacement":"public"}`}},
+		{"search_issues_original_label_newline", []string{"search", "issues", "bug", "-R", "acme/repo", "--json=number", "--label", "\"a\r\nb\""}},
+		{"search_prs_original_label_newline", []string{"search", "prs", "bug", "-R", "acme/repo", "--json=number", "--label", "\"a\r\nb\""}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+			capture := captureRewriteGH(t)
+			var out bytes.Buffer
+			err := runGH(t.Context(), test.args, &out, io.Discard)
+			if err != errRewriteBlocked || out.Len() != 0 {
+				t.Fatalf("strict boundary: err=%v output=%q", err, out.String())
+			}
+			if _, err := os.Stat(capture); !os.IsNotExist(err) {
+				t.Fatal("strict denial ran child")
+			}
+		})
+	}
+}
+
 func TestStringRewritePrivateRunWatchFallback(t *testing.T) {
 	recordWatchSleeps(t)
 	relayCalls := 0
@@ -2223,7 +2513,7 @@ func TestStringRewritePrivateRunWatchFallback(t *testing.T) {
 	if relayCalls != 1 {
 		t.Fatalf("relay calls=%d, want initial lookup before private fallback", relayCalls)
 	}
-	want := []string{"run", "watch", "42", "--repo=acme/repo", "--interval=30", "--exit-status"}
+	want := []string{"run", "watch", "42", "--repo=acme/repo", "-i30", "--exit-status"}
 	if got := readRewriteCapture(t, capture); !slices.Equal(got.Args, want) || got.Env["GH_HOST"] != "github.com" {
 		t.Fatalf("native watch args=%v env=%v", got.Args, got.Env)
 	}

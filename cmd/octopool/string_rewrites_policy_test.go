@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,32 @@ func TestStringRewritePolicyFailuresNeverRunChild(t *testing.T) {
 				t.Fatal("policy failure reached child")
 			}
 		})
+	}
+}
+
+func TestStringRewritePolicyBeforeMalformedReadOptions(t *testing.T) {
+	for _, code := range []int{401, 503} {
+		for _, flags := range [][]string{{"--json", `"unterminated`, "--json=number"}, {"--json=number", "--limit=08", "--limit=2"}} {
+			t.Run(fmt.Sprintf("%d/%s", code, flags[1]), func(t *testing.T) {
+				isolateTestConfig(t)
+				t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
+				var paths []string
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { paths = append(paths, r.URL.Path); w.WriteHeader(code) }))
+				t.Cleanup(server.Close)
+				t.Setenv("OCTOPOOL_URL", server.URL)
+				t.Setenv("OCTOPOOL_POOL", "maintainers")
+				t.Setenv("OCTOPOOL_TOKEN", "test-token")
+				capture := captureRewriteGH(t)
+				var out, stderr bytes.Buffer
+				err := runGH(t.Context(), append([]string{"pr", "list", "-R", "acme/repo"}, flags...), &out, &stderr)
+				if err != errRewritePolicy || out.Len() != 0 || stderr.Len() != 0 || !slices.Equal(paths, []string{"/v1/pools/maintainers/string-rewrites"}) {
+					t.Fatalf("policy precedence err=%v paths=%v out=%q stderr=%q", err, paths, out.String(), stderr.String())
+				}
+				if _, err := os.Stat(capture); !os.IsNotExist(err) {
+					t.Fatal("policy denial executed child")
+				}
+			})
+		}
 	}
 }
 func TestStringRewritePolicyRedirectsAndTimeout(t *testing.T) {

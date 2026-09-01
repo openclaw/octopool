@@ -198,7 +198,11 @@ func TestPRChecksGrowingCollectionsUseGuardedFallback(t *testing.T) {
 }
 
 func TestSplitFieldsPreservesFirstOccurrence(t *testing.T) {
-	got := splitFields("assignees,assignees,files statusCheckRollup,files")
+	parsed, unsupported, err := parseReadOptions([]string{"--json", "assignees,assignees,files,statusCheckRollup,files"}, topReadSpecs("pr view"))
+	if err != nil || unsupported {
+		t.Fatalf("parse: unsupported=%v err=%v", unsupported, err)
+	}
+	got := uniqueReadFields(parsed.values["--json"].strings)
 	if !reflect.DeepEqual(got, []string{"assignees", "files", "statusCheckRollup"}) {
 		t.Fatalf("fields=%v", got)
 	}

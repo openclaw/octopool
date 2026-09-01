@@ -178,9 +178,51 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	default:
 		return errRewriteUnsupported
 	}
-	flags, err := parseRewriteFlags(args[2:], rewriteFlagNames(values), rewriteFlagNames(booleans))
-	if err != nil {
+	specs := typedReadSpecs(command, values, booleans)
+	// Retain the guard's existing attached aliases, including native-only filters.
+	for alias, spec := range specs {
+		spec.attached = len(alias) == 2
+		specs[alias] = spec
+	}
+	parsed, unsupported, err := parseReadOptions(args[2:], specs)
+	if unsupported {
 		return errRewriteUnsupported
+	}
+	if err != nil {
+		return errRewriteBlocked
+	}
+	flags := rewriteFlags{values: map[string]string{}, positionals: parsed.positionals}
+	for name, value := range parsed.values {
+		flags.values[name] = value.raw
+	}
+	if spec := specs["--repo"]; spec.kind == readSlice && parsed.has("--repo") {
+		repos := parsed.values["--repo"].strings
+		count := 0
+		for _, occurrence := range parsed.ordered {
+			if occurrence.name == "--repo" {
+				count++
+			}
+		}
+		if count > 1 || len(repos) != 1 {
+			return errRewriteUnsupported
+		}
+		flags.values["--repo"] = repos[0]
+	}
+	// Validate original material too: overwritten scalars and ignored CSV records
+	// do not erase structural/host policy input.
+	for _, occurrence := range parsed.ordered {
+		if occurrence.name == "--jq" {
+			continue
+		}
+		if err := policy.checkStructural(occurrence.raw); err != nil {
+			return err
+		}
+		if occurrence.name == "--repo" && specs["--repo"].kind != readSlice {
+			original := rewriteFlags{values: map[string]string{"--repo": occurrence.raw}}
+			if err := rewriteRepo(&original, policy); err != nil {
+				return err
+			}
+		}
 	}
 	if flags.has("--color") {
 		return errRewriteBlocked
@@ -258,19 +300,45 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 		if err := policy.checkStructural("github.com/" + flags.values["--repo"]); err != nil {
 			return err
 		}
+		// Native repo view owns a positional repository, not a --repo flag.
 		prepared.args = []string{"repo", "view", flags.values["--repo"]}
-	} else {
-		prepared.args = append([]string{args[0], args[1]}, flags.positionals...)
-		prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
-	}
-	for _, flag := range flags.ordered {
-		if flag.name != "--repo" {
-			if flag.boolean && flag.value == "true" {
-				prepared.args = append(prepared.args, flag.name)
-			} else {
-				prepared.args = append(prepared.args, flag.name+"="+flag.value)
+		for _, occurrence := range parsed.ordered {
+			if occurrence.name != "--repo" {
+				prepared.args = append(prepared.args, parsed.argv[occurrence.start:occurrence.end]...)
 			}
 		}
+		if parsed.delimiter < len(parsed.argv) {
+			prepared.args = append(prepared.args, "--")
+		}
+		prepared.stdin = strings.NewReader("")
+		return nil
+	}
+	prepared.args = append([]string(nil), args[:2]...)
+	occurrenceIndex := 0
+	for i := 0; i < len(parsed.argv); {
+		if occurrenceIndex < len(parsed.ordered) && parsed.ordered[occurrenceIndex].start == i {
+			occurrence := parsed.ordered[occurrenceIndex]
+			if occurrence.name == "--repo" {
+				repo := flags.values["--repo"]
+				if specs["--repo"].kind != readSlice && strings.TrimSpace(occurrence.raw) != "" {
+					repo = normalizeRepo(occurrence.raw)
+				}
+				prepared.args = append(prepared.args, "--repo="+repo)
+			} else {
+				prepared.args = append(prepared.args, parsed.argv[i:occurrence.end]...)
+			}
+			i = occurrence.end
+			occurrenceIndex++
+			continue
+		}
+		if i == parsed.delimiter && !parsed.has("--repo") {
+			prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
+		}
+		prepared.args = append(prepared.args, parsed.argv[i])
+		i++
+	}
+	if parsed.delimiter == len(parsed.argv) && !parsed.has("--repo") {
+		prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
 	}
 	prepared.stdin = strings.NewReader("")
 	return nil

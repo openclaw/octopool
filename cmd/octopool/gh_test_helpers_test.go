@@ -96,6 +96,30 @@ func emptyRewriteTestServer(t *testing.T) {
 	relayTestServer(t, func(map[string]any) any { t.Error("unexpected relay request"); return nil })
 }
 
+func nativeOptionsResponse(t *testing.T, request map[string]any) any {
+	t.Helper()
+	item := map[string]any{"number": 7, "title": "synthetic", "state": "open", "id": 42, "name": "synthetic", "run_attempt": 3, "status": "completed", "conclusion": "success"}
+	switch request["path"] {
+	case "/repos/acme/repo/pulls/7", "/repos/acme/repo/issues/7", "/repos/acme/repo/actions/runs/42", "/repos/acme/repo/actions/runs/42/attempts/2", "/repos/acme/repo", "/gists/abc123", "/repos/acme/repo/actions/workflows/ci.yml":
+		return item
+	case "/repos/acme/repo/pulls/7/reviews", "/repos/acme/repo/issues/7/comments":
+		return []any{}
+	case "/repos/acme/repo/pulls", "/repos/acme/repo/issues", "/repos/acme/repo/releases", "/repos/acme/repo/labels":
+		return []any{item}
+	case "/repos/acme/repo/actions/runs":
+		return map[string]any{"total_count": 1, "workflow_runs": []any{item}}
+	case "/repos/acme/repo/actions/workflows":
+		return map[string]any{"total_count": 1, "workflows": []any{map[string]any{"id": 42, "name": "synthetic", "state": "active"}}}
+	case "/repos/acme/repo/actions/runs/42/attempts/3/jobs":
+		return map[string]any{"total_count": 0, "jobs": []any{}}
+	case "/search/issues", "/search/repositories":
+		return map[string]any{"total_count": 1, "items": []any{item}}
+	default:
+		t.Errorf("unexpected synthetic option route: %v", request["path"])
+		return nil
+	}
+}
+
 // REST fixtures for the shared checks/rollup owners; no production hooks.
 type prChecksFixture struct {
 	checks, statuses, runs, workflows []any
