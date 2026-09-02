@@ -425,40 +425,50 @@ func testBootstrapOperational(t *testing.T, bin, native string, shim bool) {
 		t.Fatal(err)
 	}
 	base := []string{"pr", "merge", "123", "--repo", "acme/repo", "--squash", "--match-head-commit", sha}
-	for _, flags := range [][]string{{"--body-file", "--help"}, {"--body-file=--help"}, {"-F", "--help"}, {"-F--help"}, {"-F=--help"}} {
-		for _, exit := range []int{0, 19} {
-			t.Run(strings.Join(flags, "_")+"/exit="+strconv.Itoa(exit), func(t *testing.T) {
-				stdin := bootstrapInputFile(t, "unused live stdin")
-				before := fixture.calls.Load()
-				result, captures := fixture.run(t, append(slices.Clone(base), flags...), stdin, true, exit)
-				if len(captures) != 1 || len(captures[0].Files) != 1 {
-					t.Fatalf("merge did not dispatch one private snapshot: %+v; %+v", result, captures)
-				}
-				for snapshot, content := range captures[0].Files {
-					wantArgs := []string{"api", "repos/acme/repo/pulls/123/merge", "--method=PUT", "--hostname=github.com", "--input=" + snapshot, "--silent=true"}
-					assertBootstrapChild(t, result, captures, wantArgs, exit)
-					var payload map[string]string
-					if err := json.Unmarshal([]byte(content), &payload); err != nil || len(payload) != 3 || payload["sha"] != sha || payload["merge_method"] != "squash" || payload["commit_message"] != strings.ReplaceAll(body, "internal-model", "public") {
-						t.Fatalf("merge SHA/method/message/contributor bytes changed: %q (%v)", content, err)
+	for _, input := range []struct {
+		field string
+		want  string
+		forms [][]string
+	}{
+		{"commit_message", strings.ReplaceAll(body, "internal-model", "public"), [][]string{{"--body-file", "--help"}, {"--body-file=--help"}, {"-F", "--help"}, {"-F--help"}, {"-F=--help"}}},
+		{"commit_title", "--help", [][]string{{"--subject", "--help"}, {"--subject=--help"}, {"-t", "--help"}, {"-t--help"}, {"-t=--help"}}},
+	} {
+		for _, flags := range input.forms {
+			for _, exit := range []int{0, 19} {
+				t.Run(strings.Join(flags, "_")+"/exit="+strconv.Itoa(exit), func(t *testing.T) {
+					stdin := bootstrapInputFile(t, "unused live stdin")
+					before := fixture.calls.Load()
+					result, captures := fixture.run(t, append(slices.Clone(base), flags...), stdin, true, exit)
+					if len(captures) != 1 || len(captures[0].Files) != 1 {
+						t.Fatalf("merge did not dispatch one private snapshot: %+v; %+v", result, captures)
 					}
-					assertBootstrapSnapshot(t, captures[0], snapshot)
-				}
-				if got := fixture.calls.Load() - before; got != 2 {
-					t.Errorf("merge initial/final policy calls=%d, want 2", got)
-				}
-				if offset, err := stdin.Seek(0, io.SeekCurrent); err != nil || offset != 0 || captures[0].Stdin != "" {
-					t.Errorf("file merge consumed live stdin or forwarded it: offset=%d capture=%q err=%v", offset, captures[0].Stdin, err)
-				}
-				if original, err := os.ReadFile(path); err != nil || string(original) != body {
-					t.Fatalf("help-named original changed: %q (%v)", original, err)
-				}
-			})
+					for snapshot, content := range captures[0].Files {
+						wantArgs := []string{"api", "repos/acme/repo/pulls/123/merge", "--method=PUT", "--hostname=github.com", "--input=" + snapshot, "--silent=true"}
+						assertBootstrapChild(t, result, captures, wantArgs, exit)
+						var payload map[string]string
+						if err := json.Unmarshal([]byte(content), &payload); err != nil || len(payload) != 3 || payload["sha"] != sha || payload["merge_method"] != "squash" || payload[input.field] != input.want {
+							t.Fatalf("merge SHA/method/content bytes changed: %q (%v)", content, err)
+						}
+						assertBootstrapSnapshot(t, captures[0], snapshot)
+					}
+					if got := fixture.calls.Load() - before; got != 2 {
+						t.Errorf("merge initial/final policy calls=%d, want 2", got)
+					}
+					if offset, err := stdin.Seek(0, io.SeekCurrent); err != nil || offset != 0 || captures[0].Stdin != "" {
+						t.Errorf("file merge consumed live stdin or forwarded it: offset=%d capture=%q err=%v", offset, captures[0].Stdin, err)
+					}
+					if original, err := os.ReadFile(path); err != nil || string(original) != body {
+						t.Fatalf("help-named original changed: %q (%v)", original, err)
+					}
+				})
+			}
 		}
 	}
 	for _, flags := range [][]string{
 		{"--help=false"}, {"--help=invalid"}, {"--help=TRUE"}, {"-h=false"}, {"-sh"},
 		{"--", "--help"}, {"--body-file", "--", "--help"}, {"-sF--help"},
-		{"--subject", "--help"}, {"--auto"}, {"--admin"}, {"--match-head-commit", "short"},
+		{"--subject", "--help", "-tother"}, {"--subject"}, {"--title", "--help"},
+		{"--auto"}, {"--admin"}, {"--match-head-commit", "short"},
 	} {
 		t.Run("strict-merge/"+strings.Join(flags, "_"), func(t *testing.T) {
 			stdin := bootstrapInputFile(t, "unread input")
@@ -473,7 +483,7 @@ func testBootstrapOperational(t *testing.T, bin, native string, shim bool) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"view", "--help"}, {"help", "view", "pr"}, {"pr", "view", "list", "--help"}} {
+	for _, args := range [][]string{{"view", "--help"}, {"help", "view", "pr"}, {"pr", "view", "list", "--help"}, append(slices.Clone(base), "--subject", "--help")} {
 		t.Run("fresh-final-policy/"+strings.Join(args, "_"), func(t *testing.T) {
 			changed := newBootstrapCLI(t, bin, native, "final-401", shim)
 			result, captures := changed.run(t, args, nil, false, 0)

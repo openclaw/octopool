@@ -363,7 +363,7 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 		spec = "title:text body:text"
 		required = ""
 	case "pull-merge":
-		spec = "sha:string merge_method:squash commit_message:text"
+		spec = "sha:string merge_method:squash commit_message:text commit_title:text"
 		required = "sha merge_method"
 	case "release-create":
 		spec = "name:text body:text tag_name:string draft:bool prerelease:bool make_latest:string"

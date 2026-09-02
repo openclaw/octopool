@@ -21,7 +21,7 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 	case "pr ready":
 		booleans = rewriteFlagNames("--undo")
 	case "pr merge":
-		values = rewriteFlagNames("--repo,-R --match-head-commit --body-file,-F")
+		values = rewriteFlagNames("--repo,-R --match-head-commit --body-file,-F --subject,-t")
 		booleans = rewriteFlagNames("--squash")
 	default:
 		return errRewriteBlocked
@@ -69,6 +69,11 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		apiArgs := []string{
 			"api", endpoint, "--method=PUT", "--raw-field=sha=" + sha,
 			"--raw-field=merge_method=squash", "--silent",
+		}
+		if flags.has("--subject") {
+			// Keep leading @ and typed-looking titles literal; the API owner
+			// rewrites and snapshots publication text before child dispatch.
+			apiArgs = append(apiArgs, "--raw-field=commit_title="+flags.values["--subject"])
 		}
 		if flags.has("--body-file") {
 			// The API owner reads, rewrites, and snapshots the body before dispatch.
