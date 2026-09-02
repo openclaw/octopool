@@ -211,6 +211,36 @@ human-format reads. Supported `--json` fields are intentionally conservative. Co
 `gh` field names are mapped where the REST API uses different
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
+
+With active string protection, modeled `pr view`, `pr diff`, and non-watch `pr checks`
+also accept checked branch selectors, including `feature/topic` and `owner:feature/topic`.
+These use guarded native `gh`, not the numeric PR relay routes. Native owns branch lookup
+(including open/merged/default-branch selection), JSON/jq output, and exit status. Repository
+and branch material is checked, never rewritten to evade policy; the repository is pinned to
+GitHub.com and policy is fetched again before native dispatch. Output flag occurrences and
+the `--` delimiter retain their ownership.
+
+An omitted selector resolves the current branch locally, honoring tracked `refs/pull/N/head`,
+`@{push}`, and native push-remote/upstream-branch precedence, including fork-owner labels.
+Contextual repository resolution honors `GH_REPO` or one configured `gh-resolved` default
+(as set by `gh repo set-default`) first. Without either, modeled native reads have empty,
+non-TTY stdin and use native noninteractive remote priority: `upstream`, then `github`, then
+`origin`, then other names, case-insensitively. A single safe HTTPS GitHub.com origin needs
+no default-repository setup. All candidates must pass GitHub.com HTTPS validation, and the
+highest priority must have a unique remote; tied priorities fail closed rather than relying
+on native's unspecified tie ordering. `GH_FORCE_TTY` affects output, not stdin, and cannot
+enable prompting here. No interactive/network repository discovery runs during preparation.
+Nonempty `--repo` still requires a selector, as in native `gh`.
+Local Git context is converted to explicit checked selectors before dispatch, so later
+checkout/config changes cannot select another repository or branch. Numeric tracking PRs
+can retain numeric relay handling; ambiguous unqualified numeric _branches_ fail closed.
+Detached/missing Git context, PR URL selectors, foreign hosts, SSH repository forms/host
+aliases, multiple configured defaults or URL/config values, and unsupported ref shapes fail
+closed on this modeled path. Use an explicit branch with `-R OWNER/REPO` when local context
+cannot be proven. SSH remotes remain unsupported because native applies SSH-config URL
+translation, which this guard does not inspect. Issue/run selector restrictions and PR
+lifecycle-write rules are unchanged.
+
 `gh pr view --json state` and `gh pr list --json state` return the GraphQL lifecycle
 `OPEN`, `CLOSED`, or `MERGED` regardless of the other requested fields or whether the relay
 uses a public page or REST.

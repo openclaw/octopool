@@ -192,6 +192,9 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 		return errRewriteBlocked
 	}
 	flags := rewriteFlags{values: map[string]string{}, positionals: parsed.positionals}
+	prBranchRead := (command == "pr view" || command == "pr diff" || command == "pr checks") &&
+		(len(flags.positionals) != 1 || !isDigits(flags.positionals[0]))
+	prReadRepos := map[int]string{}
 	for name, value := range parsed.values {
 		flags.values[name] = value.raw
 	}
@@ -218,6 +221,16 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 			return err
 		}
 		if occurrence.name == "--repo" && specs["--repo"].kind != readSlice {
+			if prBranchRead {
+				if occurrence.raw != "" {
+					repo, err := rewritePRReadRepo(policy, occurrence.raw)
+					if err != nil {
+						return err
+					}
+					prReadRepos[occurrence.start] = repo
+				}
+				continue
+			}
 			original := rewriteFlags{values: map[string]string{"--repo": occurrence.raw}}
 			if err := rewriteRepo(&original, policy); err != nil {
 				return err
@@ -231,6 +244,23 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 		flags.values["--repo"] = flags.positionals[0]
 		flags.positionals = nil
 	}
+	if prBranchRead {
+		if len(flags.positionals) > 1 || len(flags.positionals) == 0 && flags.values["--repo"] != "" {
+			return errRewriteBlocked
+		}
+		repo, err := rewritePRReadBaseRepo(policy, flags.values["--repo"])
+		if err != nil {
+			return err
+		}
+		flags.values["--repo"] = repo
+		if len(flags.positionals) == 0 {
+			selector, err := rewritePRReadCurrent(policy, repo)
+			if err != nil {
+				return err
+			}
+			flags.positionals = []string{selector}
+		}
+	}
 	if err := rewriteRepo(&flags, policy); err != nil {
 		return err
 	}
@@ -241,7 +271,11 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 				return errRewriteBlocked
 			}
 			selector := flags.positionals[0]
-			if args[0] == "pr" || args[0] == "issue" || args[0] == "run" {
+			if prBranchRead && !isDigits(selector) {
+				if err := guardPRReadQuery(policy, flags.values["--repo"], selector); err != nil {
+					return err
+				}
+			} else if args[0] == "pr" || args[0] == "issue" || args[0] == "run" {
 				if !isDigits(selector) {
 					return errRewriteBlocked
 				}
@@ -280,7 +314,7 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	if resource := resources[args[0]]; resource != "" {
 		path += "/" + resource
 	}
-	if len(flags.positionals) == 1 && args[0] != "search" {
+	if len(flags.positionals) == 1 && args[0] != "search" && !(prBranchRead && !isDigits(flags.positionals[0])) {
 		path += "/" + flags.positionals[0]
 	}
 	request := ghAPIRequest{method: "GET", path: path, query: map[string]any{}}
@@ -314,6 +348,15 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 		return nil
 	}
 	prepared.args = append([]string(nil), args[:2]...)
+	if prBranchRead && len(parsed.positionals) == 0 {
+		prepared.args = append(prepared.args, flags.positionals[0])
+	}
+	pinRepo := func(repo string) string {
+		if prBranchRead {
+			return "https://github.com/" + repo
+		}
+		return repo
+	}
 	occurrenceIndex := 0
 	for i := 0; i < len(parsed.argv); {
 		if occurrenceIndex < len(parsed.ordered) && parsed.ordered[occurrenceIndex].start == i {
@@ -321,9 +364,13 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 			if occurrence.name == "--repo" {
 				repo := flags.values["--repo"]
 				if specs["--repo"].kind != readSlice && strings.TrimSpace(occurrence.raw) != "" {
-					repo = normalizeRepo(occurrence.raw)
+					if prBranchRead {
+						repo = prReadRepos[occurrence.start]
+					} else {
+						repo = normalizeRepo(occurrence.raw)
+					}
 				}
-				prepared.args = append(prepared.args, "--repo="+repo)
+				prepared.args = append(prepared.args, "--repo="+pinRepo(repo))
 			} else {
 				prepared.args = append(prepared.args, parsed.argv[i:occurrence.end]...)
 			}
@@ -332,13 +379,13 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 			continue
 		}
 		if i == parsed.delimiter && !parsed.has("--repo") {
-			prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
+			prepared.args = append(prepared.args, "--repo="+pinRepo(flags.values["--repo"]))
 		}
 		prepared.args = append(prepared.args, parsed.argv[i])
 		i++
 	}
 	if parsed.delimiter == len(parsed.argv) && !parsed.has("--repo") {
-		prepared.args = append(prepared.args, "--repo="+flags.values["--repo"])
+		prepared.args = append(prepared.args, "--repo="+pinRepo(flags.values["--repo"]))
 	}
 	prepared.stdin = strings.NewReader("")
 	return nil
