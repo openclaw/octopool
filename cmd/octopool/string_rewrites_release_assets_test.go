@@ -87,6 +87,114 @@ func releaseAssetArgs(paths ...string) []string {
 	return append([]string{"release", "create", "v1.2.3", "--repo=acme/toolkit", "--draft", "--verify-tag", "--title=Toolkit 1.2.3", "--notes=Reviewed notes.\n"}, paths...)
 }
 
+func TestReleaseHostQualifiedRepoSnapshots(t *testing.T) {
+	rewriteTestServer(t, prReadPolicy("private-term"), nil)
+	t.Setenv("GH_HOST", "other.example")
+	t.Setenv("GH_REPO", "other.example/wrong/repo")
+	for _, repo := range []string{"github.com/Acme/Toolkit", "https://github.com/Acme/Toolkit", "Acme/Toolkit"} {
+		for _, spelling := range []string{"--repo", "--repo=", "-R", "-Rattached"} {
+			for _, assets := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/assets=%t", repo, spelling, assets), func(t *testing.T) {
+					capturePath := captureRewriteGH(t)
+					title, notes := "private-term release", "# private-term\r\n\nSynthetic notes. 🦞\n"
+					if assets {
+						title, notes = "Toolkit 1.2.3", "# Toolkit 1.2.3\r\n\nSynthetic frozen notes. 🦞\n"
+					}
+					notesPath := releaseAssetFile(t, "frozen.md", []byte(notes))
+					args := []string{"release", "create", "v1.2.3", "--draft", "--verify-tag", "--title", title, "--notes-file", notesPath}
+					switch spelling {
+					case "--repo", "-R":
+						args = append(args, spelling, repo)
+					case "--repo=":
+						args = append(args, spelling+repo)
+					case "-Rattached":
+						args = append(args, "-R"+repo)
+					}
+					payload := []byte{0, 0xff, 1, 2}
+					assetPath := ""
+					if assets {
+						assetPath = releaseAssetFile(t, "toolkit.zip", payload)
+						args = append(args, assetPath)
+					}
+					original := slices.Clone(args)
+					if err := execRealGHWithStdin(t.Context(), args, strings.NewReader("unused"), io.Discard, io.Discard); err != nil {
+						t.Fatal(err)
+					}
+					got := readRewriteCapture(t, capturePath)
+					wantTitle := strings.ReplaceAll(title, "private-term", "public")
+					wantNotes := strings.ReplaceAll(notes, "private-term", "public")
+					for _, arg := range []string{"--repo=acme/Toolkit", "--title=" + wantTitle, "--draft=true", "--verify-tag=true"} {
+						if !slices.Contains(got.Args, arg) {
+							t.Errorf("missing %q in native args %q", arg, got.Args)
+						}
+					}
+					if !slices.Equal(args, original) || !slices.Equal(got.Args[:3], args[:3]) || got.Stdin != "" || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" {
+						t.Fatalf("argument/host/stream boundary changed: %+v", got)
+					}
+					wantFiles := 1
+					if assets {
+						wantFiles++
+						staged := got.Args[len(got.Args)-1]
+						if staged == assetPath || filepath.Base(staged) != "toolkit.zip" || !bytes.Equal(got.FileData[staged], payload) {
+							t.Fatal("asset snapshot changed")
+						}
+						if data, err := os.ReadFile(assetPath); err != nil || !bytes.Equal(data, payload) {
+							t.Fatal("source asset changed")
+						}
+					}
+					if len(got.Files) != wantFiles || !rewriteCaptureHasContent(got, wantNotes) {
+						t.Fatal("native child did not receive expected notes/assets")
+					}
+					for path := range got.Files {
+						if path == notesPath || got.Modes[path] != 0600 || got.DirectoryModes[path] != 0700 {
+							t.Fatal("source path or nonprivate snapshot reached native child")
+						}
+						if _, err := os.Stat(path); !os.IsNotExist(err) {
+							t.Fatal("snapshot leaked")
+						}
+					}
+					if data, err := os.ReadFile(notesPath); err != nil || string(data) != notes {
+						t.Fatal("original notes changed")
+					}
+					if os.Getenv("GH_HOST") != "other.example" || os.Getenv("GH_REPO") != "other.example/wrong/repo" {
+						t.Fatal("parent environment changed")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestReleaseHostQualifiedRepoRejectsUnsafeInputs(t *testing.T) {
+	rewriteTestServer(t, prReadPolicy("private-term"), nil)
+	safe := releaseAssetFile(t, "safe.zip", []byte("synthetic opaque bytes"))
+	for _, test := range []struct{ name, title, notes, asset string }{
+		{"changed title", "private-term", "safe", safe},
+		{"changed notes", "safe", "private-term", safe},
+		{"changed asset", "safe", "safe", releaseAssetFile(t, "private-term.zip", []byte("synthetic"))},
+		{"asset label", "safe", "safe", safe + "#label"},
+		{"policy material", "safe", prReadPolicy("private-term"), ""},
+		{"invalid title", "\xff", "safe", ""},
+		{"invalid notes", "safe", "\xff", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capture := captureRewriteGH(t)
+			temporary := releaseAssetTemp(t)
+			args := []string{"release", "create", "v1", "--repo=github.com/acme/repo", "--draft", "--verify-tag", "--title=" + test.title, "--notes=" + test.notes}
+			if test.asset != "" {
+				args = append(args, test.asset)
+			}
+			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != errRewriteBlocked {
+				t.Fatalf("error=%v", err)
+			}
+			if _, err := os.Stat(capture); !os.IsNotExist(err) {
+				t.Fatal("unsafe child executed")
+			}
+			assertReleaseAssetTempEmpty(t, temporary)
+		})
+	}
+}
+
 func releaseAssetFile(t *testing.T, name string, data []byte) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)

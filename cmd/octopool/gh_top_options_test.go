@@ -36,6 +36,62 @@ func TestTopLevelRepoNumber(t *testing.T) {
 	}
 }
 
+func TestNormalizeRepoHostQualified(t *testing.T) {
+	for _, test := range []struct{ raw, want string }{
+		{"github.com/Acme/Toolkit", "acme/Toolkit"},
+		{"github.com/Acme/Toolkit.git", "acme/Toolkit"},
+		{"Acme/Toolkit", "acme/Toolkit"},
+		{"https://github.com/Acme/Toolkit", "acme/Toolkit"},
+		{"git@github.com:Acme/Toolkit.git", "acme/Toolkit"},
+		{"ssh://git@github.com/Acme/Toolkit.git", "acme/Toolkit"},
+		{" /Acme/Toolkit/ ", "acme/Toolkit"},
+		// The shared normalizer also accepts this existing two-part owner/repo.
+		{"github.com/Toolkit", "github.com/Toolkit"},
+		{"other.example/Acme/Toolkit", ""},
+		{"github.com.other.example/Acme/Toolkit", ""},
+		{"github.com@other.example/Acme/Toolkit", ""},
+		{"github.com:443/Acme/Toolkit", ""},
+		{"github.com//Acme/Toolkit", ""},
+		{"github.com/Acme/Toolkit/extra", ""},
+		{"https://github.com/github.com/Acme/Toolkit", ""},
+	} {
+		t.Run(test.raw, func(t *testing.T) {
+			if got := normalizeRepo(test.raw); got != test.want {
+				t.Fatalf("normalizeRepo(%q) = %q, want %q", test.raw, got, test.want)
+			}
+		})
+	}
+}
+
+func TestTopLevelHostQualifiedRepoReads(t *testing.T) {
+	t.Setenv("GH_HOST", "other.example")
+	t.Setenv("GH_REPO", "other.example/wrong/repo")
+	for _, test := range []struct {
+		name string
+		args []string
+		path string
+	}{
+		{"issue", []string{"issue", "view", "7", "--json=number"}, "/repos/acme/repo/issues/7"},
+		{"pr", []string{"pr", "view", "7", "--json=number"}, "/repos/acme/repo/pulls/7"},
+		{"release", []string{"release", "view", "v1", "--json=name"}, "/repos/acme/repo/releases/tags/v1"},
+		{"repo", []string{"repo", "view", "--json=name"}, "/repos/acme/repo"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var paths []string
+			relayTestServer(t, func(req map[string]any) any {
+				paths = append(paths, req["path"].(string))
+				return map[string]any{"number": 7, "name": "synthetic"}
+			})
+			args := append(slices.Clone(test.args), "--repo=github.com/acme/repo")
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), args, &out)
+			if result.action != ghComplete || result.err != nil || !slices.Equal(paths, []string{test.path}) || out.Len() == 0 {
+				t.Fatalf("action=%v err=%v paths=%v output=%q", result.action, result.err, paths, out.String())
+			}
+		})
+	}
+}
+
 func TestGHTopReadOptionDispatch(t *testing.T) {
 	for _, test := range []struct {
 		name string

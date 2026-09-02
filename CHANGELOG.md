@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Accept explicit `github.com/OWNER/REPO` selectors in protected releases and shared repository parsing while preserving GitHub.com host pinning and outbound rewrite checks.
+
 ## 0.6.0 - 2026-09-01
 
 ### Highlights

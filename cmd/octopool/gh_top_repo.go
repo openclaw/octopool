@@ -99,6 +99,7 @@ func normalizeRepo(raw string) string {
 	if raw == "" {
 		return ""
 	}
+	hostQualified := strings.HasPrefix(raw, "github.com/")
 	raw = strings.TrimSuffix(raw, ".git")
 	if parsed, err := url.Parse(raw); err == nil && parsed.Scheme == "ssh" && parsed.Hostname() == "github.com" && parsed.RawQuery == "" && parsed.Fragment == "" {
 		hasPassword := false
@@ -112,6 +113,11 @@ func normalizeRepo(raw string) string {
 	raw = strings.TrimPrefix(raw, "git@github.com:")
 	raw = strings.TrimPrefix(raw, "https://github.com/")
 	parts := strings.Split(strings.Trim(raw, "/"), "/")
+	// Only a bare HOST/OWNER/REPO has a third component; do not strip a
+	// second host from a URL or change the existing two-part owner/repo form.
+	if hostQualified && len(parts) == 3 {
+		parts = parts[1:]
+	}
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return ""
 	}

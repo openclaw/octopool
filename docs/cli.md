@@ -764,14 +764,19 @@ attached values. Repeated flags/aliases and boolean clusters are rejected. Metad
 not listed by the guard are unsupported; use an allowlisted raw REST shape where applicable.
 Creation also rejects sanitized empty titles/bodies/notes to avoid implicit defaults.
 Repository context is normalized and pinned into an explicit `owner/repo` after validation;
-explicit `https://github.com/owner/repo` and GitHub SSH forms are accepted, while other hosts
-are blocked. Input files are read into bounded snapshots, never modified, and never reopened
-by the child. Sanitized snapshots use a private 0700 directory and 0600 files, removed
-after execution, including nonzero exits. These modeled commands do not retain live stdin.
+explicit `github.com/owner/repo`, `https://github.com/owner/repo`, and GitHub SSH forms are
+accepted, while other hosts are blocked. Protected native children force `GH_HOST=github.com`
+and remove inherited `GH_REPO`, so normalization cannot redirect an explicit GitHub.com
+repository to an ambient Enterprise host. Input files are read into bounded snapshots,
+never modified, and never reopened by the child. Sanitized snapshots use a private 0700
+directory and 0600 files, removed after execution, including nonzero exits. These modeled
+commands do not retain live stdin.
 
 With active rules, `gh release create TAG --repo OWNER/REPO --draft --verify-tag
 --title TITLE --notes-file NOTES FILE...` accepts up to 16 explicit local asset paths
-on macOS, Linux, and Windows. Each asset must be a nonempty regular file, at most 1 GiB;
+on macOS, Linux, and Windows. The explicit `--repo github.com/OWNER/REPO` spelling is
+also supported, including `--repo=...`, `-R ...`, and `-R...`; the same metadata and asset
+protections apply. Each asset must be a nonempty regular file, at most 1 GiB;
 the aggregate asset limit is 4 GiB. Public basenames are limited to 255 bytes and use
 only ASCII letters, digits, internal periods, underscores, and hyphens. A basename
 cannot start with a period or hyphen, or end with a period; a leading underscore is

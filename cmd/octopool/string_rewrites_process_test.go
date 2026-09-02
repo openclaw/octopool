@@ -240,6 +240,107 @@ func rewriteTestServerPolicySequence(t *testing.T, policy func(int64) (string, i
 const rewriteActiveTestPolicy = `{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[{"pattern":"internal-model","replacement":"public"}]}`
 const rewriteEmptyTestPolicy = `{"schema_version":1,"revision":1,"updated_at":"2026-08-28T00:00:00Z","rules":[]}`
 
+func TestStringRewriteHostQualifiedRepoRoutes(t *testing.T) {
+	rewriteTestServer(t, prReadPolicy("private-term"), nil)
+	t.Setenv("GH_HOST", "other.example")
+	t.Setenv("GH_REPO", "other.example/wrong/repo")
+	for _, test := range []struct {
+		name, pin, body string
+		args            []string
+	}{
+		{"issue create", "--repo=acme/repo", "public", []string{"issue", "create", "-Rgithub.com/acme/repo", "--title=private-term", "--body=private-term"}},
+		{"pr comment", "--repo=acme/repo", "public", []string{"pr", "comment", "7", "-R", "github.com/acme/repo", "--body=private-term"}},
+		{"release edit", "--repo=acme/repo", "public", []string{"release", "edit", "v1", "--repo=github.com/acme/repo", "--notes=private-term"}},
+		{"pr ready", "--repo=acme/repo", "", []string{"pr", "ready", "7", "--repo=github.com/acme/repo"}},
+		{"issue read", "--repo=acme/repo", "", []string{"issue", "view", "7", "--repo=github.com/acme/repo", "--json=number"}},
+		{"pr numeric read", "--repo=acme/repo", "", []string{"pr", "view", "7", "--repo=github.com/acme/repo", "--json=number"}},
+		{"pr branch read", "--repo=https://github.com/acme/repo", "", []string{"pr", "view", "topic", "--repo=github.com/acme/repo", "--json=number"}},
+		{"release read", "--repo=acme/repo", "", []string{"release", "view", "v1", "--repo=github.com/acme/repo", "--json=name"}},
+		{"repo positional read", "acme/repo", "", []string{"repo", "view", "github.com/acme/repo", "--json=name"}},
+		{"best effort", "--repo=github.com/acme/repo", "", []string{"workflow", "run", "ci.yml", "--repo=github.com/acme/repo", "-fmessage=private-term"}},
+		{"api read", "--hostname=github.com", "", []string{"api", "repos/acme/repo/issues/7"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capture := captureRewriteGH(t)
+			original := slices.Clone(test.args)
+			if err := execRealGHWithStdin(t.Context(), test.args, strings.NewReader(""), io.Discard, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			got := readRewriteCapture(t, capture)
+			if !slices.Contains(got.Args, test.pin) || !slices.Equal(test.args, original) || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" {
+				t.Fatalf("native repository boundary: %+v", got)
+			}
+			if test.body != "" && !rewriteCaptureHasContent(got, test.body) {
+				t.Fatal("rewritten body missing from native snapshot")
+			}
+			if strings.Contains(strings.Join(got.Args, " "), "private-term") {
+				t.Fatal("unrewritten argument reached native child")
+			}
+		})
+	}
+}
+
+func TestStringRewriteHostQualifiedRepoRejectsHosts(t *testing.T) {
+	rewriteTestServer(t, prReadPolicy("private-term"), nil)
+	for _, repo := range []string{
+		"other.example/acme/repo", "github.com.other.example/acme/repo",
+		"github.com@other.example/acme/repo", "github.com:443/acme/repo",
+		"www.github.com/acme/repo", "https://other.example/acme/repo",
+		"https://github.com@other.example/acme/repo", "github.com//acme/repo",
+		"github.com/acme/repo/extra", "github.com/acme/repo?query", "github.com/acme/repo#fragment",
+		"github.com/acme/../repo", "github.com/acme%2frepo/other", "github.com/acme/repo\nother",
+		"github.com/private-term/repo", "https://github.com/github.com/acme/repo",
+	} {
+		for _, command := range [][]string{
+			{"release", "create", "v1", "--verify-tag", "--title=safe", "--notes=safe"},
+			{"issue", "view", "7", "--json=number"},
+			{"workflow", "run", "ci.yml"},
+		} {
+			t.Run(command[0]+"/"+repo, func(t *testing.T) {
+				capture := captureRewriteGH(t)
+				args := append(slices.Clone(command), "--repo="+repo)
+				if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != errRewriteBlocked {
+					t.Fatalf("error=%v", err)
+				}
+				if _, err := os.Stat(capture); !os.IsNotExist(err) {
+					t.Fatal("unsafe repository reached child")
+				}
+			})
+		}
+	}
+}
+
+func TestStringRewriteHostQualifiedRepoRevalidation(t *testing.T) {
+	for _, replacement := range []string{"--repo=other.example/acme/repo", "--repo=github.com/acme/repo/extra", "--repo=github.com/acme/.."} {
+		t.Run(replacement, func(t *testing.T) {
+			policy, err := compileStringRewriteRules([]stringRewriteRule{{Pattern: "repo-marker", Replacement: replacement}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared := &rewritePreparation{}
+			defer prepared.cleanup()
+			// Only the final pass can see the repository declaration introduced by rewriting.
+			args := []string{"extension", "exec", "synthetic", "repo-marker"}
+			if err := prepareRewriteBestEffort(policy, args, strings.NewReader(""), prepared); err != errRewriteBlocked {
+				t.Fatalf("rewritten repository declaration accepted: %q, error=%v", prepared.args, err)
+			}
+		})
+	}
+	policy, err := compileStringRewriteRules([]stringRewriteRule{{Pattern: "acme", Replacement: "other"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags := rewriteFlags{values: map[string]string{"--repo": "github.com/acme/repo"}}
+	if err := rewriteRepo(&flags, policy); err != errRewriteBlocked {
+		t.Fatalf("structural identity rewrite accepted: %v", err)
+	}
+	// Best-effort's explicit-host contract stays stricter than normalizeRepo's
+	// existing two-part owner/repo contract.
+	if _, err := normalizeBestEffortRepo(policy, "github.com/repo"); err != errRewriteBlocked {
+		t.Fatalf("incomplete best-effort host accepted: %v", err)
+	}
+}
+
 func TestStringRewriteProcessSnapshots(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	for _, test := range []struct {
