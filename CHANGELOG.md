@@ -1,10 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 - 2026-09-02
 
 ### Fixes
 
 - Accept explicit `github.com/OWNER/REPO` selectors in protected releases and shared repository parsing while preserving GitHub.com host pinning and outbound rewrite checks.
+- Allow protected PR branch and current-branch reads through checked native fallback, preserving GitHub CLI lookup, output, and exit semantics without loosening numeric relay or lifecycle-write rules.
+- Support `gh pr merge --subject` / `-t` with bounded text rewriting and private snapshots while retaining exact-head, immediate squash-only merge restrictions.
+
+### Upgrade notes
+
+- This is a CLI-only patch release; no Worker deployment or database migration is required.
 
 ## 0.6.0 - 2026-09-01
 

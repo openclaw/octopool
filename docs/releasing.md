@@ -45,7 +45,8 @@ durable release evidence; signing uses the OpenClaw Foundation Developer ID.
    directory directly (precedent: `evidence/octopool-0.5.0`).
 8. Verify the published release body exactly matches the finalized dated changelog section,
    the final assets/checksums match the Homebrew formula, and the working tree is clean.
-   Do not prefill another `Unreleased` section; write the next version's notes at release time.
+   Resume an `Unreleased` section when the next user-visible changes land; keep their notes
+   current as work lands rather than deferring changelog maintenance to release time.
 
 ## Future: CI-hosted signing
 
