@@ -44,6 +44,11 @@ func TestRewriteCaptureProcess(t *testing.T) {
 		}
 	}
 	capture := rewriteCapture{Args: args, Files: map[string]string{}, FileData: map[string][]byte{}, Modes: map[string]uint32{}, DirectoryModes: map[string]uint32{}, Env: map[string]string{"GH_HOST": os.Getenv("GH_HOST"), "GH_REPO": os.Getenv("GH_REPO")}}
+	if os.Getenv("OCTOPOOL_TEST_SYNTHETIC_AUTH") == "1" {
+		for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
+			capture.Env[name] = os.Getenv(name)
+		}
+	}
 	input, _ := io.ReadAll(os.Stdin)
 	capture.Stdin = string(input)
 	if path := os.Getenv("OCTOPOOL_TEST_REWRITE_MUTATE_FILE"); path != "" {
@@ -105,7 +110,11 @@ func TestRewriteCaptureProcess(t *testing.T) {
 		<-interrupt
 		os.Exit(82)
 	}
-	_, _ = io.WriteString(os.Stdout, "child stdout\n")
+	output, customOutput := os.LookupEnv("OCTOPOOL_TEST_REWRITE_STDOUT")
+	if !customOutput {
+		output = "child stdout\n"
+	}
+	_, _ = io.WriteString(os.Stdout, output)
 	_, _ = io.WriteString(os.Stderr, "child stderr\n")
 	exit, _ := strconv.Atoi(os.Getenv("OCTOPOOL_TEST_REWRITE_EXIT"))
 	os.Exit(exit)

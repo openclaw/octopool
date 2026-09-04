@@ -79,7 +79,27 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 			// The API owner reads, rewrites, and snapshots the body before dispatch.
 			apiArgs = append(apiArgs, "--field=commit_message=@"+flags.values["--body-file"])
 		}
-		return prepareRewriteAPI(policy, apiArgs, stdin, prepared)
+		capture := prepared.mergeDiagnostics != nil && ghMergeIncludeAllowed(policy, args, apiArgs)
+		if capture {
+			apiArgs = append(apiArgs, ghMergeIncludeFlag)
+		}
+		// One preparation owns every input read and the sole publication snapshot.
+		if err := prepareRewriteAPI(policy, apiArgs, stdin, prepared); err != nil {
+			return err
+		}
+		if diagnostic := prepared.mergeDiagnostics; diagnostic != nil {
+			diagnostic.route = ghMergeREST
+			if capture && (ghMergeArgBytes(prepared.args) > rewriteMaxContent || prepared.outputBytes+len(ghMergeIncludeFlag) > rewriteMaxContent) {
+				// Instrumentation must never reject an otherwise valid merge.
+				prepared.args = prepared.args[:len(prepared.args)-1]
+				capture = false
+			}
+			if capture {
+				prepared.outputBytes += len(ghMergeIncludeFlag)
+			}
+			diagnostic.captureHeaders = capture
+		}
+		return nil
 	}
 	prepared.args = []string{"pr", args[1], flags.positionals[0], "--repo=" + flags.values["--repo"]}
 	for _, flag := range flags.ordered {

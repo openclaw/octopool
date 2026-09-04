@@ -89,6 +89,7 @@ type rewritePreparation struct {
 	bestEffortSources int
 	forceGitHubHost   bool
 	snapshots         map[string]bool
+	mergeDiagnostics  *ghMergePreparation
 }
 
 func (prepared *rewritePreparation) cleanup() {

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Add opt-in final PR-merge route, policy, child-outcome, and bounded REST-header diagnostics without changing authentication, merge behavior, or retries or attributing historical failures.
+- Identify successful relay `/rate_limit` output as pooled-reader quota rather than native-writer quota or permission proof, preserving JSON stdout and quiet native probes.
+
 ## 0.6.1 - 2026-09-02
 
 ### Fixes

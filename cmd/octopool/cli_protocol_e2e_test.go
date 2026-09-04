@@ -408,3 +408,61 @@ func TestGHShimProtocolRewritePolicyDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func TestCLIMergeDiagnosticsProtocol(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and executes the CLI binary")
+	}
+	bin := buildCLIBinary(t)
+	for _, enabled := range []string{"", "true", "1"} {
+		t.Run("diagnostics_"+enabled, func(t *testing.T) {
+			var policies atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/pools/maintainers/string-rewrites" {
+					t.Error("merge made an unexpected relay request")
+					w.WriteHeader(400)
+					return
+				}
+				policies.Add(1)
+				_, _ = io.WriteString(w, rewriteActiveTestPolicy)
+			}))
+			defer server.Close()
+			capturePath := captureRewriteGH(t)
+			calls := filepath.Join(t.TempDir(), "child-calls")
+			frame := mergeHeaderFrame(403, 4958)
+			result := runCLI(t, bin, server.URL, map[string]string{
+				"OCTOPOOL_DIAGNOSTICS": enabled, "OCTOPOOL_TEST_REWRITE_STDOUT": frame,
+				"OCTOPOOL_TEST_REWRITE_EXIT": "17", "OCTOPOOL_TEST_REWRITE_CALLS": calls,
+			}, append([]string{"gh"}, mergeDiagnosticArgs()...)...)
+			var exit *exec.ExitError
+			if !errors.As(result.err, &exit) || exit.ExitCode() != 17 || policies.Load() != 2 {
+				t.Fatal("CLI changed native exit or policy count")
+			}
+			data, err := os.ReadFile(calls)
+			if err != nil || string(data) != "child\n" {
+				t.Fatal("CLI launched more than one fake mutation")
+			}
+			capture := readRewriteCapture(t, capturePath)
+			include := false
+			for _, arg := range capture.Args {
+				include = include || arg == ghMergeIncludeFlag
+			}
+			if enabled == "1" {
+				line := mergeDiagnosticLine(t, result.stderr)
+				if result.stdout != "" || !include || !strings.Contains(line, "child_started=true outcome=exited route=rest_put") || !strings.Contains(line, "http_status=403") || !strings.Contains(line, "remaining=4958") {
+					t.Fatal("CLI diagnostic contract changed")
+				}
+				if !strings.HasPrefix(result.stderr, "child stderr\n") {
+					t.Fatal("native stderr changed")
+				}
+			} else if result.stdout != frame || result.stderr != "child stderr\n" || include {
+				t.Fatal("disabled diagnostics changed CLI output")
+			}
+			for path := range capture.Files {
+				if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+					t.Fatal("CLI left snapshot behind")
+				}
+			}
+		})
+	}
+}

@@ -117,18 +117,30 @@ func execRealGHWithStdinAndEnv(
 	stderr io.Writer,
 	env []string,
 ) error {
+	attempt := time.Now()
 	prepared, err := prepareProtectedGH(ctx, args, stdin)
+	var diagnostic *ghMergeDiagnostic
+	if prepared != nil && prepared.mergeDiagnostics != nil {
+		diagnostic = &ghMergeDiagnostic{attempt: attempt, preparation: prepared.mergeDiagnostics}
+		defer diagnostic.writeTo(stderr)
+	}
 	if err != nil {
 		return err
 	}
 	defer prepared.cleanup()
 	if err := ctx.Err(); err != nil {
+		if diagnostic != nil {
+			diagnostic.outcome = ghMergeCanceledBeforeStart
+		}
 		return err
 	}
 	if len(prepared.preflight) != 0 {
 		if err := execRealGHWithStdinAndEnv(ctx, prepared.preflight, strings.NewReader(""), io.Discard, io.Discard, env); err != nil {
 			return errRewriteBlocked
 		}
+	}
+	if diagnostic != nil {
+		diagnostic.outcome = ghMergeStartFailed
 	}
 	path, err := resolveGHPath(envDefault("OCTOPOOL_GH_PATH", "gh"))
 	if err != nil {
@@ -138,11 +150,41 @@ func execRealGHWithStdinAndEnv(
 	cmd.Stdin = prepared.stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	if diagnostic != nil && prepared.mergeDiagnostics.captureHeaders {
+		diagnostic.headers = &ghMergeHeaderCollector{}
+		cmd.Stdout = diagnostic.headers
+	}
 	if prepared.forceGitHubHost {
 		env = envWithGitHubHost(env)
 	}
 	cmd.Env = env
-	if err := cmd.Run(); err != nil {
+	if diagnostic == nil {
+		err = cmd.Run()
+	} else {
+		err = cmd.Start()
+		if err == nil {
+			diagnostic.childStarted = true
+			err = cmd.Wait()
+			diagnostic.outcome = ghMergeSucceeded
+			if cmd.ProcessState != nil {
+				code := cmd.ProcessState.ExitCode()
+				diagnostic.exitCode = &code
+			}
+			if err != nil {
+				diagnostic.outcome = ghMergeWaitFailed
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					diagnostic.outcome = ghMergeExited
+				}
+				if ctx.Err() != nil {
+					diagnostic.outcome = ghMergeCanceled
+				}
+			}
+		} else if ctx.Err() != nil {
+			diagnostic.outcome = ghMergeCanceledBeforeStart
+		}
+	}
+	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitCodeError{Code: exitErr.ExitCode()}

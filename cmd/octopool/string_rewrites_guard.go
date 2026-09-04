@@ -474,16 +474,27 @@ func rewriteBootstrapHelpTopic(topic []string) bool {
 
 func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*rewritePreparation, error) {
 	prepared := &rewritePreparation{ctx: ctx, args: args, stdin: stdin}
+	if ghMergeDiagnosticsEnabled(args) {
+		prepared.mergeDiagnostics = &ghMergePreparation{}
+	}
 	if rewriteBootstrapInvocation(args) {
 		prepared.forceGitHubHost = true
 		return prepared, nil
 	}
 	policy, err := currentStringRewritePolicy(ctx)
 	if err != nil {
-		return nil, err
+		return prepared, err
+	}
+	if diagnostic := prepared.mergeDiagnostics; diagnostic != nil {
+		diagnostic.policyKnown = true
+		diagnostic.serverRevision = policy.Revision
+		diagnostic.effectiveRules = len(policy.Rules)
 	}
 	if len(policy.Rules) == 0 {
 		prepared.args = floorGHWatchDelegateArgs(args)
+		if prepared.mergeDiagnostics != nil {
+			prepared.mergeDiagnostics.route = ghMergeNative
+		}
 		return prepared, nil
 	}
 	prepared.forceGitHubHost = true
@@ -491,7 +502,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	for _, arg := range args {
 		total += len(arg)
 		if total > rewriteMaxContent {
-			return nil, errRewriteBlocked
+			return prepared, errRewriteBlocked
 		}
 	}
 	switch {
@@ -517,7 +528,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	}
 	if err != nil {
 		prepared.cleanup()
-		return nil, errRewriteBlocked
+		return prepared, errRewriteBlocked
 	}
 	return prepared, nil
 }

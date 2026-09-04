@@ -125,10 +125,18 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		}
 		return err
 	}
+	output := &ghQuotaOutput{Writer: stdout}
+	var relayOutput io.Writer = stdout
+	if request.path == "/rate_limit" {
+		relayOutput = output
+	}
 	if request.paginate {
-		err = relayPaginatedGHAPI(ctx, client, request, stdout)
+		err = relayPaginatedGHAPI(ctx, client, request, relayOutput)
 		if err != nil && shouldRunRealGH(err) {
 			return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
+		}
+		if err == nil && request.path == "/rate_limit" && !output.failed {
+			_, _ = io.WriteString(stderr, ghRelayQuotaNotice)
 		}
 		return err
 	}
@@ -139,5 +147,26 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		}
 		return err
 	}
-	return writeGHBody(ctx, stdout, envelope, request.jq)
+	if err := writeGHBody(ctx, relayOutput, envelope, request.jq); err != nil {
+		return err
+	}
+	if request.path == "/rate_limit" && !output.failed {
+		_, _ = io.WriteString(stderr, ghRelayQuotaNotice)
+	}
+	return nil
+}
+
+const ghRelayQuotaNotice = "octopool: /rate_limit describes pooled-reader quota, not native-writer quota or permission proof.\n"
+
+// Track even a failed trailing newline or short write that the existing output
+// path ignores, without changing its result or wrapping native fallback output.
+type ghQuotaOutput struct {
+	io.Writer
+	failed bool
+}
+
+func (output *ghQuotaOutput) Write(p []byte) (int, error) {
+	n, err := output.Writer.Write(p)
+	output.failed = output.failed || err != nil || n != len(p)
+	return n, err
 }

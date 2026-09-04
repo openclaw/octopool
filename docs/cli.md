@@ -175,6 +175,62 @@ against Octopool's pool-health endpoint, then prints the saved login without spe
 API or pooled-identity quota. Token/URL overrides, other projections, headers, queries, and
 full user-profile reads retain the normal relay or real-`gh` behavior.
 
+### Quota provenance and merge diagnostics
+
+Bare `gh api rate_limit` is noncacheable but can use a pooled reader. After successful
+relay output, Octopool prints one fixed stderr notice: this is pooled-reader quota, not
+proof of the native writer's quota or permissions. JSON stdout is unchanged. Errors,
+failed output, native fallback, and caller-owned `--include` probes do not get that notice.
+The saved-login shortcut above also stays quiet; a matching login is not a credential or
+quota comparison.
+
+For contemporaneous, read-only native evidence, request headers on an actual resource read:
+
+```sh
+gh api user --include --jq '{login,id}'
+gh api graphql --include -f query='query { viewer { login } rateLimit { limit remaining used resetAt } }'
+```
+
+Included-header probes delegate to native `gh` under the normal outbound policy checks.
+Inspect the response's resource and quota headers alongside its status and request ID.
+An adjacent `/rate_limit` response may disagree with actual REST or GraphQL reads; even
+a later successful resource read cannot explain an earlier write failure or prove that
+the earlier writer had quota or permission. These probes perform no merge.
+
+Set exactly `OCTOPOOL_DIAGNOSTICS=1` to add one fixed-field `merge_diagnostics` stderr
+record at the final `gh pr merge` dispatch boundary. Other values disable it. It reports
+the UTC attempt start, elapsed milliseconds (including final preparation and execution),
+whether the native child started, its outcome and available exit code, and the final
+route: `native` or internally converted `rest_put`. Failed preparation has no dispatched
+route. A known `server_policy_revision` belongs to the server; `effective_rule_count`
+includes merged local rules, which that revision does not identify. Initial-policy failures
+before reaching this boundary retain the existing policy-failure diagnostic.
+
+Only an internally converted silent, nonpaginated REST merge can capture response metadata.
+Octopool checks an added include flag against the same final policy and byte limits, then
+uses the existing single body preparation and request. If instrumentation cannot pass,
+the merge arguments remain unchanged and `headers=unavailable` is reported. Capture
+suppresses the newly requested raw headers and body, preserving native stderr and the
+child's outcome. Native merges, generic API calls, caller-owned include output, and
+pagination are not intercepted. No probe, retry, or extra policy lookup is added.
+
+Accepted metadata is limited to HTTP status, a bounded hex-and-colon GitHub request ID,
+an allowlisted quota resource (`core`, `search`, `graphql`, `integration_manifest`, or
+`code_search`), and nonnegative signed-64-bit decimal limit, remaining, used, reset, and
+Retry-After values. Missing fields may be absent. Any malformed selected value, duplicate
+selected field (including comma-joined values), malformed/truncated framing, extra response
+or body, line above 4 KiB, or block above 32 KiB invalidates the entire block. Nothing is
+salvaged. The collector recognizes native gh's tested plain framing and bold-blue header-name
+wrapper; other terminal escapes are rejected. A future native output-format change may
+make headers unavailable. Raw output is drained even after rejection.
+
+Added records contain no argv, repository, PR number, SHA, publication text, snapshot path,
+environment values, rule text, raw errors, credentials, or credential fingerprints. Native
+stderr remains native output. Diagnostic parse/render/write failures do not change the
+operation's result. A 403 alone never establishes quota exhaustion, and this observability
+does not change routing, authentication, permissions, or server behavior or establish the
+cause of a past failure.
+
 ### `octopool gh pr|issue|run|repo|release ...`
 
 The shim also handles common top-level GitHub CLI read commands by translating them to
@@ -941,7 +997,8 @@ covers readiness/CI projections, issue comment projections, and PR head filters 
 GraphQL shapes are not representable by the relay. Numeric `pr ready` (or a checked
 current/explicit nonnumeric Git branch) and metadata-only PR/issue edits with add/remove label
 or assignee flags are also allowed without free-form text. Exact-head
-`pr merge --squash --match-head-commit` is converted to the immediate pull-request merge REST
+`pr merge --squash --match-head-commit` with a numeric selector is converted, when the final
+policy has active rules, to the immediate pull-request merge REST
 endpoint with the checked SHA and squash method; it never enables auto-merge, so a branch
 that requires a merge queue fails closed. An explicit `--body-file`/`-F` (including `-` for
 stdin) supplies an optional commit message through the same bounded text rewriting and private
@@ -955,6 +1012,9 @@ lifecycle path. Other editor/web/template/fill modes, unmodeled uploads, aliases
 GraphQL, and newly introduced native commands/flags use best-effort filtering and retain
 native behavior. A denial reports only the generic unsafe-input boundary and never echoes the
 rejected text.
+
+An empty final policy retains native `gh pr merge`; the final policy decision can differ
+from an earlier check. Neither route changes the local writer's authentication.
 
 Admin imports always fetch the current revision before the conditional update:
 
@@ -1041,6 +1101,8 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_TOKEN` — caller token override (required to use a non-saved URL).
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
+- `OCTOPOOL_DIAGNOSTICS=1` — opt-in final PR-merge dispatch and bounded response-metadata
+  diagnostics on stderr; only the exact value `1` enables them. See quota provenance above.
 - `OCTOPOOL_STRING_REWRITE_FILE` — optional local policy JSON; an explicit unreadable or
   missing file fails closed. Defaults to `string-rewrites.json` beside `auth.json`.
 - `OCTOPOOL_FRESH=1` — default every relayed read to `cache-control: max-age=0`, including
