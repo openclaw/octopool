@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const rewritePolicyTimeout = 5 * time.Second
+const rewritePolicyTimeout = 30 * time.Second
 
 func validRewriteTimestamp(value string) bool {
 	_, err := time.Parse(time.RFC3339Nano, value)

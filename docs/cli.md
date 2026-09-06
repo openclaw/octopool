@@ -689,7 +689,7 @@ Every protected `gh` command requires an Octopool login and a fresh authoritativ
 from `GET /v1/pools/<pool>/string-rewrites`. Each relay request and every final real-`gh`
 dispatch checks policy; a fallback cannot reuse approval for different arguments. There is
 no persistent policy cache, offline allowance, or fallback on authentication/policy errors.
-Policy HTTP requests reject redirects, use a five-second deadline, and bound the response
+Policy HTTP requests reject redirects, use a 30-second deadline, and bound the response
 to 65,536 bytes. Empty invocations, singleton help/version, known built-in topic help,
 and narrowly parsed GitHub authentication bootstrap commands remain available without a policy.
 
@@ -757,8 +757,9 @@ The fixed `class` identifies the failing check, not its underlying cause:
 to whole milliseconds. It includes GET/body reading and any subsequent server/local/merge
 checks reached, but excludes caller client setup and final stderr formatting. For `setup`
 only, both fields instead cover client setup. They do not measure a whole `gh` invocation;
-each guarded boundary reloads policy and starts another attempt. The existing five-second
-context and HTTP-client deadlines are unchanged, and do not bound later local/merge work.
+each guarded boundary reloads policy and starts another attempt. The 30-second context
+and HTTP-client deadlines do not bound later local/merge work. An earlier caller deadline
+or cancellation still takes precedence.
 
 `http_status` is omitted without an observed response. For `server_validation`, `local_read`,
 `local_validation`, or `merge`, `http_status=200` belongs to the preceding policy **GET**,
