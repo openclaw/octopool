@@ -1,11 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.2 - 2026-09-05
 
 ### Fixes
 
+- Allow authoritative policy requests up to 30 seconds so slow connections do not prematurely block guarded GitHub commands; preserve earlier caller deadlines, cancellation, and fail-closed policy checks.
 - Add opt-in final PR-merge route, policy, child-outcome, and bounded REST-header diagnostics without changing authentication, merge behavior, or retries or attributing historical failures.
 - Identify successful relay `/rate_limit` output as pooled-reader quota rather than native-writer quota or permission proof, preserving JSON stdout and quiet native probes.
+
+### Upgrade notes
+
+- This is a CLI-only patch release; no Worker deployment or database migration is required.
 
 ## 0.6.1 - 2026-09-02
 

@@ -493,13 +493,34 @@ func TestRewritePolicyTransportDiagnostics(t *testing.T) {
 	}
 }
 
+func TestRewritePolicyAllowsSlowResponse(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		useRewritePolicyTestTransport(t, func(r *http.Request) (*http.Response, error) {
+			select {
+			case <-time.After(6 * time.Second):
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(rewriteEmptyTestPolicy))}, nil
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+		})
+		started := time.Now()
+		result, err := rewritePolicyHTTP(t.Context(), "https://synthetic.invalid", "/policy", "synthetic-token", "GET", nil)
+		if err != nil || string(result.data) != rewriteEmptyTestPolicy {
+			t.Fatalf("slow policy response failed: %v", err)
+		}
+		if time.Since(started) != 6*time.Second {
+			t.Fatal("policy returned before the delayed response")
+		}
+	})
+}
+
 func TestRewritePolicyControlledTiming(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		duration time.Duration
 		class    rewritePolicyClass
 	}{
-		{"five second deadline", 5 * time.Second, rewritePolicyTimeoutClass},
+		{"thirty second deadline", 30 * time.Second, rewritePolicyTimeoutClass},
 		{"parent deadline", 23 * time.Millisecond, rewritePolicyTimeoutClass},
 		{"parent cancellation", 17 * time.Millisecond, rewritePolicyCanceled},
 	} {
@@ -522,7 +543,7 @@ func TestRewritePolicyControlledTiming(t *testing.T) {
 					if test.name == "parent deadline" {
 						want = test.duration
 					}
-					if !ok || deadline.Sub(time.Now()) != want || rewritePolicyTimeout != 5*time.Second {
+					if !ok || deadline.Sub(time.Now()) != want || rewritePolicyTimeout != 30*time.Second {
 						t.Error("policy context deadline changed")
 					}
 					<-r.Context().Done()
