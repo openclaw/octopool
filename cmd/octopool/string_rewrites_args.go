@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -139,6 +140,10 @@ func (prepared *rewritePreparation) snapshot(data []byte) (string, error) {
 var rewriteRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 var rewriteRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./:-]*$`)
 
+func validRewriteBaseBranch(branch string) bool {
+	return rewriteRefPattern.MatchString(branch) && exec.Command("git", "check-ref-format", "--branch", branch).Run() == nil
+}
+
 func rewriteRepo(flags *rewriteFlags, policy stringRewritePolicy) error {
 	repo := flags.values["--repo"]
 	// Pin explicit GitHub URLs and inferred repository context to owner/repo so
@@ -181,7 +186,7 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 		valueSpec += " --title,-t --body,-b --body-file,-F --head,-H --base,-B --label,-l --assignee,-a"
 		booleanSpec = "--draft,-d --no-maintainer-edit --dry-run"
 	case "pr edit":
-		valueSpec += " --title,-t --body,-b --body-file,-F --add-assignee --remove-assignee --add-label --remove-label"
+		valueSpec += " --title,-t --body,-b --body-file,-F --base,-B --add-assignee --remove-assignee --add-label --remove-label"
 	case "issue edit":
 		valueSpec += " --title,-t --body,-b --body-file,-F --add-label --remove-label --add-assignee --remove-assignee"
 	case "issue create":
@@ -259,8 +264,11 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	if create && (!flags.has("--title") || !hasBody) {
 		return errRewriteBlocked
 	}
-	metadataEdit := flags.has("--add-assignee") || flags.has("--remove-assignee") || flags.has("--add-label") || flags.has("--remove-label")
+	metadataEdit := flags.has("--base") || flags.has("--add-assignee") || flags.has("--remove-assignee") || flags.has("--add-label") || flags.has("--remove-label")
 	if args[1] == "edit" && !flags.has("--title") && !hasBody && !metadataEdit {
+		return errRewriteBlocked
+	}
+	if flags.has("--base") && !validRewriteBaseBranch(flags.values["--base"]) {
 		return errRewriteBlocked
 	}
 	for _, name := range []string{"--assignee", "--add-assignee", "--remove-assignee"} {
@@ -290,9 +298,6 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 			flags.ordered = append(flags.ordered, rewriteFlag{name: "--head", value: head})
 		}
 		if !rewriteRefPattern.MatchString(flags.values["--head"]) {
-			return errRewriteBlocked
-		}
-		if flags.has("--base") && !rewriteRefPattern.MatchString(flags.values["--base"]) {
 			return errRewriteBlocked
 		}
 	}

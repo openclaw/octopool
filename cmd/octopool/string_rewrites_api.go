@@ -357,10 +357,10 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 		spec = "title:text body:text"
 		required = ""
 	case "pull-create":
-		spec = "title:text body:text head:string base:string draft:bool maintainer_can_modify:bool"
+		spec = "title:text body:text head:string base:branch draft:bool maintainer_can_modify:bool"
 		required = "title body head base"
 	case "pull-edit":
-		spec = "title:text body:text"
+		spec = "title:text body:text base:branch"
 		required = ""
 	case "pull-merge":
 		spec = "sha:string merge_method:squash commit_message:text commit_title:text"
@@ -418,9 +418,12 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 				return errRewriteBlocked
 			}
 			payload[key] = rewritten
-		case "string":
+		case "string", "branch":
 			text, ok := value.(string)
 			if !ok || text == "" || (schema == "pull-merge" && key == "sha" && !rewriteCommitSHA.MatchString(text)) {
+				return errRewriteBlocked
+			}
+			if allowed[key] == "branch" && !validRewriteBaseBranch(text) {
 				return errRewriteBlocked
 			}
 			if err := policy.checkStructural(text); err != nil {

@@ -798,7 +798,10 @@ With active rules, the initial local publication vocabulary is deliberately cons
   the repository's default branch. `--dry-run` is accepted. Reviews require one
   explicit review action. PR/issue creation
   accepts one `--label`/`-l` and one `--assignee`/`-a` value (use comma-separated lists),
-  while PR/issue edits accept metadata-only add/remove label and assignee flags. Assignees may
+  while PR/issue edits accept metadata-only add/remove label and assignee flags. PR edits also
+  accept `--base` / `-B`, alone or with explicit title/body updates. Base branches must pass
+  Git branch-name validation and structural rewrite checks; branch names are never rewritten.
+  Assignees may
   include native `@me` or `@copilot`. PR/issue create/edit/comment also accept repeated
   `--attach` image/video files as described below.
 - Release `create`/`edit`: explicit title/notes or notes files and one tag.
@@ -812,6 +815,9 @@ With active rules, the initial local publication vocabulary is deliberately cons
   use `--input` JSON. Exact issue-assignee POSTs accept repeated raw `assignees[]` values;
   exact pull-request merge PUTs require a full 40-hex `sha` and `merge_method: squash`,
   with optional rewritten `commit_message` and `commit_title` strings.
+  Pull-request PATCHes accept a string `base` field with the same branch checks as the CLI;
+  base-only updates do not republish an implicit title or body. Numeric branch names must be
+  supplied as strings, such as `-f base=123` or JSON `{"base":"123"}`.
   Other bracket accumulation, duplicate keys, mixed input/field sources, unknown properties,
   and custom authentication headers are rejected. Raw release creation first verifies the
   existing remote tag with a local authenticated GET.

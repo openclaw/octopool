@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Support protected PR base changes with `gh pr edit --base` / `-B` and REST pull-request updates, including base-only edits, while retaining branch validation, authoritative rewrite checks, host pinning, and body sanitization.
+
 ## 0.6.2 - 2026-09-05
 
 ### Fixes
