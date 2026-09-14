@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.4 - 2026-09-14
+
+### Fixes
+
+- Refresh the PR head before collecting checks when `OCTOPOOL_FRESH=1`, so a fresh check read does not use a cached head commit.
+- Preserve raw GitHub response bytes without adding a trailing newline or merging opaque paginated bodies as JSON.
+- Show cache notices for mutable CI, commit, and Git-ref reads, including hits under `OCTOPOOL_FRESH=1`, and display Worker cache-expiry timestamps correctly.
+- Keep paginated commit comparisons separate from unpaged responses in every cache path, including explicit default page sizes.
+- Cool down secondary-rate-limited pooled identities across routes for at least 60 seconds, including failures during revalidation and pagination.
+- Coalesce concurrent configuration and caller-authentication refreshes while preserving each request's string-protection checks and isolating membership results by transport policy.
+- Use exact REST responses for JSON contents reads so symlinks, submodules, file metadata, and links retain GitHub's semantics.
+- Limit mutable commit checks, check suites, and statuses to 60 seconds of fresh caching plus at most five minutes of stale fallback, even after completion.
+- Accept valid literal Git branch names in protected PR base edits while rejecting checkout-history expressions.
+- Record bounded, content-free diagnostics for rejected relay and caller/admin policy requests, including failures before relay auditing begins.
+- Report cache-served responses and uncached outcomes in stats and the dashboard instead of claiming GitHub requests saved or fetched; retain the old JSON fields as deprecated aliases for shipped clients.
+
+### Upgrade notes
+
+- Upgrade the CLI and deploy the Worker to receive all fixes. No new D1 migration is required.
+- New cache generations retire previous comparison, contents, and commit-CI entries without a cache purge. Initial reads can require fresh upstream requests; ordinary CI reads remain bounded cache reads, so use `OCTOPOOL_FRESH=1` for live evidence.
+
 ## 0.6.3 - 2026-09-08
 
 ### Fixes
