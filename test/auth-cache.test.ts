@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticateCaller } from "../src/auth";
 import { clearConfigCache } from "../src/config-cache";
+import { withGitHubEgress } from "../src/github-egress";
 import { HttpError } from "../src/http";
 
 describe("caller authentication cache", () => {
@@ -13,7 +14,9 @@ describe("caller authentication cache", () => {
   it("shares a burst's D1 lookup and membership refresh after each request's guard", async () => {
     const fixture = authFixture();
     const gate = Promise.withResolvers<void>();
-    const guards = Array.from({ length: 32 }, () => vi.fn(async () => undefined));
+    const guards = Array.from({ length: 32 }, () =>
+      vi.fn(async () => withGitHubEgress(fixture.env, []).githubEgress),
+    );
     const upstream = vi.fn(async () => {
       await gate.promise;
       return membershipResponse();
@@ -44,7 +47,7 @@ describe("caller authentication cache", () => {
     const denied = vi.fn(async () => {
       throw denial;
     });
-    const allowed = vi.fn(async () => undefined);
+    const allowed = vi.fn(async () => withGitHubEgress(fixture.env, []).githubEgress);
     const outcomes = await Promise.allSettled([
       authenticateCaller(request(), fixture.env, "pool", denied),
       authenticateCaller(request(), fixture.env, "pool", allowed),
@@ -79,7 +82,7 @@ describe("caller authentication cache", () => {
   it("never reads protected policy for invalid local authentication", async () => {
     const fixture = authFixture();
     fixture.first.mockResolvedValue(null);
-    const guard = vi.fn(async () => undefined);
+    const guard = vi.fn(async () => withGitHubEgress(fixture.env, []).githubEgress);
     for (let attempt = 0; attempt < 2; attempt++) {
       await expect(authenticateCaller(request(), fixture.env, "pool", guard)).rejects.toMatchObject(
         {
