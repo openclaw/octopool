@@ -22,10 +22,7 @@ export type CacheFreshStrategy =
   | { kind: "run" }
   | { kind: "run_list" }
   | { kind: "jobs" }
-  | { kind: "checks" }
-  | { kind: "check_suites" }
-  | { kind: "status" }
-  | { kind: "status_list" }
+  | { kind: "mutable_ci" }
   | { kind: "job" }
   | { kind: "pr_state" };
 
@@ -47,6 +44,10 @@ export function cachePolicyForRouteKind(kind: RouteKind): RouteCachePolicy {
 
 export function isStateAwarePRRoute(kind: RouteKind): boolean {
   return cachePolicyForRouteKind(kind).fresh.kind === "pr_state";
+}
+
+export function isMutableCIRoute(kind: RouteKind): boolean {
+  return freshCacheStrategy(kind).kind === "mutable_ci";
 }
 
 function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
@@ -163,17 +164,14 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
       return { kind: "jobs" };
     case "commit_check_runs":
     case "commit_check_runs_ref":
-      return { kind: "checks" };
     case "commit_check_suites":
     case "commit_check_suites_ref":
-      return { kind: "check_suites" };
     case "commit_status":
     case "commit_status_ref":
-      return { kind: "status" };
     case "commit_statuses":
     case "commit_statuses_ref":
     case "ref_statuses":
-      return { kind: "status_list" };
+      return { kind: "mutable_ci" };
     case "job_view":
       return { kind: "job" };
     case "pr_files":
@@ -352,11 +350,6 @@ function terminalCIRoute(kind: RouteKind): boolean {
   switch (kind) {
     case "run_view":
     case "run_jobs":
-    case "commit_check_runs":
-    case "commit_check_suites":
-    case "commit_status":
-    case "commit_statuses":
-    case "ref_statuses":
     case "job_view":
       return true;
     default:

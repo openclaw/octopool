@@ -263,8 +263,8 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 - base workflow runs and base job lists → 60s even when terminal, because reruns reuse the run ID;
   completed attempt-qualified run/job lists get 1h fresh plus up to 24h bounded stale fallback
-- checks, check suites, and commit statuses → 60s while active; terminal payloads get 1h fresh
-  plus up to 24h bounded stale fallback
+- checks, check suites, and commit statuses → 60s fresh plus up to 5m bounded stale fallback,
+  even when terminal: reruns and new statuses can change results for the same commit SHA
 - run/workflow lists → 60s while active, 2m when every returned run is completed; lists
   remain mutable because new runs can appear
 - PR files with a validated state discriminator → 5m; PR commits, reviews,
@@ -279,6 +279,11 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 REST issue state `closed` and page-derived `CLOSED` both receive the one-hour TTL;
 classification preserves cached bodies and raw response states.
+
+Commit CI aggregate keys carry a server-owned policy generation, so existing hour-long
+entries cannot survive the shorter TTL rollout through edge, D1, revalidation, or stale
+fallback. Completed attempt-qualified runs/jobs and individual job IDs retain their longer
+retention. Ordinary reads remain bounded cache reads; use `OCTOPOOL_FRESH=1` for live evidence.
 
 ## Completed Actions log cache
 

@@ -9,6 +9,7 @@ import {
   type CacheFreshStrategy,
   cachePolicyForRouteKind,
   cacheResponseEligible,
+  isMutableCIRoute,
   isStateAwarePRRoute,
 } from "./cache-policy";
 import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
@@ -98,6 +99,9 @@ export async function githubCacheKey(
     // Old raw event bodies may contain privileged references, even after a 304
     // republished an identity entry as anonymous. Retire every variant together.
     ...(isIssueEventRoute(route.kind) ? { representation: "issue-events-public-v2" } : {}),
+    // Same-SHA reruns mutate aggregate CI results. Retire hour/day entries in
+    // every cache, validator, and fill path before applying their shorter TTLs.
+    ...(isMutableCIRoute(route.kind) ? { ci_cache_policy: "mutable-aggregates-v1" } : {}),
     // Adapter JSON eligibility includes blanks that intentionally remain in vary headers.
     // Old JSON file objects contain unescaped self-links, even for raw-origin fills.
     ...(route.kind === "contents" &&
@@ -456,14 +460,10 @@ function freshTTLSeconds(
       return route.run_attempt_completed === true && completedJobs(response)
         ? TERMINAL_CI_TTL_SECONDS
         : 60;
-    case "checks":
-      return completedChecks(response) ? TERMINAL_CI_TTL_SECONDS : 60;
-    case "check_suites":
-      return completedCheckSuites(response) ? TERMINAL_CI_TTL_SECONDS : 60;
-    case "status":
-      return completedStatus(response) ? TERMINAL_CI_TTL_SECONDS : 60;
-    case "status_list":
-      return completedStatusList(response) ? TERMINAL_CI_TTL_SECONDS : 60;
+    case "mutable_ci":
+      // A completed collection can acquire new checks or statuses without a
+      // new commit; its terminal status does not earn a longer TTL.
+      return 60;
     case "job":
       return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "pr_state":
@@ -552,40 +552,12 @@ function completedJob(response?: GitHubRelayResponse): boolean {
   return isRecord(response?.body) && response.body.status === "completed";
 }
 
-function completedChecks(response?: GitHubRelayResponse): boolean {
-  return completedCollection(response, "check_runs");
-}
-
-function completedCheckSuites(response?: GitHubRelayResponse): boolean {
-  return completedCollection(response, "check_suites");
-}
-
 function completedCollection(response: GitHubRelayResponse | undefined, key: string): boolean {
   if (!isRecord(response?.body) || !Array.isArray(response.body[key])) {
     return false;
   }
   const items = response.body[key];
   return items.length > 0 && items.every((item) => isRecord(item) && item.status === "completed");
-}
-
-function completedStatus(response?: GitHubRelayResponse): boolean {
-  if (!isRecord(response?.body) || !Array.isArray(response.body.statuses)) {
-    return false;
-  }
-  return (
-    response.body.statuses.length > 0 &&
-    response.body.statuses.every((item) => isRecord(item) && item.state !== "pending")
-  );
-}
-
-function completedStatusList(response?: GitHubRelayResponse): boolean {
-  if (!Array.isArray(response?.body)) {
-    return false;
-  }
-  return (
-    response.body.length > 0 &&
-    response.body.every((item) => isRecord(item) && item.state !== "pending")
-  );
 }
 
 function stateAwarePRSubresource(route: RouteInfo, response?: GitHubRelayResponse): boolean {
