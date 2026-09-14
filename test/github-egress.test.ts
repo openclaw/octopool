@@ -4,6 +4,28 @@ import { withGitHubEgress } from "../src/github-egress";
 describe("request-local canonical GitHub transport", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("scopes sharing by admission patterns with fixed-size keys", async () => {
+    const first = withGitHubEgress({} as Env, [
+      { pattern: "cobalt-mint", replacement: "public" },
+      { pattern: "azure-sage", replacement: "other" },
+    ]).githubEgress;
+    const equivalent = withGitHubEgress({} as Env, [
+      { pattern: "azure-sage", replacement: "changed" },
+      { pattern: "cobalt-mint", replacement: "changed-again" },
+    ]).githubEgress;
+    const different = withGitHubEgress({} as Env, [
+      { pattern: "cobalt-mint", replacement: "public" },
+    ]).githubEgress;
+    const scope = await first.sharingScope();
+    expect(scope).toMatch(/^protected:[A-Za-z0-9_-]{43}$/);
+    expect(await equivalent.sharingScope()).toBe(scope);
+    expect(await different.sharingScope()).not.toBe(scope);
+    expect(await withGitHubEgress({} as Env, []).githubEgress.sharingScope()).not.toBe(
+      "unprotected",
+    );
+    expect(first.sharingScope()).toBe(first.sharingScope());
+  });
+
   it.each([
     ["https://api.github.com/repos/example/safe/../cobalt-mint", {}],
     ["https://api.github.com/repos/example/demo?q=cobalt%2Dmint", {}],

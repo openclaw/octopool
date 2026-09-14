@@ -19,7 +19,7 @@ type CallerRow = {
   client_name: string;
 };
 
-type CallerAuthentication = { caller: Caller; membership?: Promise<void> };
+type CallerAuthentication = { caller: Caller; membershipKey: string };
 
 export async function authenticateCaller(
   request: Request,
@@ -41,18 +41,26 @@ export async function authenticateCaller(
     if (row.org_login.toLowerCase() !== allowedOrg) {
       throw new HttpError(403, "org_denied", `Caller is not a ${allowedOrg} org user`);
     }
-    return { caller: { ...row, client_name: normalizeClientName(row.client_name) } };
+    return {
+      caller: { ...row, client_name: normalizeClientName(row.client_name) },
+      membershipKey: crypto.randomUUID(),
+    };
   });
+  // Local authentication precedes policy access, but every request must check
+  // its own protection before joining a refresh or accepting a cached success.
+  const egress = await beforeMembership?.();
+  const scope = egress === undefined ? "unprotected" : await egress.sharingScope();
   try {
-    // Local authentication precedes policy access, but every request must check
-    // its own protection before joining a refresh or accepting a cached success.
-    const egress = await beforeMembership?.();
-    authentication.membership ??= ensureFreshOrgMembership(env, authentication.caller, egress);
-    await authentication.membership;
+    // A new row generation cannot reuse an older authorization. Distinct
+    // transport policies must never share a request-specific egress denial.
+    await cachedConfigLookup(`membership:${authentication.membershipKey}:${scope}`, () =>
+      ensureFreshOrgMembership(env, authentication.caller, egress),
+    );
     return authentication.caller;
   } catch (error) {
-    // Keep successful membership proof for only this row's existing cache TTL.
-    // Rejected authentication must reread D1 on the next attempt.
+    // A policy denial leaves the shared local row and other scopes intact.
+    // Authentication failures must reread D1 on the next attempt.
+    rethrowStringRewriteDenial(error);
     invalidateConfigValue(key, authentication);
     throw error;
   }

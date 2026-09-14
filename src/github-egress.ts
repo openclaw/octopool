@@ -1,4 +1,5 @@
 import { HttpError } from "./http";
+import { bytesToBase64URL } from "./encoding";
 import {
   assertNoStringRewriteMatch,
   compileStringRewriteRules,
@@ -10,6 +11,7 @@ import {
 // Worker binding object. The private compiled snapshot cannot cross requests.
 export type GitHubEgressEnv = Env & {
   readonly githubEgress: Readonly<{
+    sharingScope(): Promise<string>;
     fetch(url: string | URL, init?: RequestInit): Promise<Response>;
   }>;
 };
@@ -18,7 +20,18 @@ export function withGitHubEgress(env: Env, rules: readonly StringRewriteRule[]):
   const compiled = Object.freeze(
     compileStringRewriteRules(rules.map(({ pattern, replacement }) => ({ pattern, replacement }))),
   );
+  let scope: Promise<string> | undefined;
   const githubEgress = Object.freeze({
+    sharingScope(): Promise<string> {
+      // Admission rejects the union of patterns; order and replacement text
+      // cannot change it. Hash the bounded snapshot to keep shared keys small.
+      return (scope ??= crypto.subtle
+        .digest(
+          "SHA-256",
+          new TextEncoder().encode(JSON.stringify(compiled.map(({ pattern }) => pattern).sort())),
+        )
+        .then((digest) => `protected:${bytesToBase64URL(new Uint8Array(digest))}`));
+    },
     async fetch(input: string | URL, init?: RequestInit): Promise<Response> {
       const raw = String(input);
       // WHATWG URL strips these controls before fetch; encoded %09 is different.

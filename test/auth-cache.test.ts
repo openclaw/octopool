@@ -9,13 +9,23 @@ describe("caller authentication cache", () => {
   afterEach(() => {
     clearConfigCache();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("shares a burst's D1 lookup and membership refresh after each request's guard", async () => {
     const fixture = authFixture();
     const gate = Promise.withResolvers<void>();
-    const guards = Array.from({ length: 32 }, () =>
-      vi.fn(async () => withGitHubEgress(fixture.env, []).githubEgress),
+    const guards = Array.from({ length: 32 }, (_, index) =>
+      vi.fn(
+        async () =>
+          withGitHubEgress(
+            fixture.env,
+            (index % 2 === 0
+              ? ["unused-first", "unused-second"]
+              : ["unused-second", "unused-first"]
+            ).map((pattern) => ({ pattern, replacement: String(index) })),
+          ).githubEgress,
+      ),
     );
     const upstream = vi.fn(async () => {
       await gate.promise;
@@ -37,6 +47,74 @@ describe("caller authentication cache", () => {
     expect(guards[0]).toHaveBeenCalledTimes(2);
     expect(fixture.first).toHaveBeenCalledTimes(1);
     expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["unprotected", "different policy"])(
+    "isolates a paginated policy denial from a concurrent %s refresh",
+    async (followerScope) => {
+      const fixture = authFixture();
+      const gate = Promise.withResolvers<void>();
+      const upstream = vi.fn<typeof fetch>(async (_input, init) => {
+        const { variables } = JSON.parse(String(init?.body)) as {
+          variables: { after: string | null };
+        };
+        if (upstream.mock.calls.length === 1) await gate.promise;
+        return variables.after === null
+          ? membershipResponse("other-org", "blocked-cursor")
+          : membershipResponse();
+      });
+      vi.stubGlobal("fetch", upstream);
+      const leader = authenticateCaller(
+        request(),
+        fixture.env,
+        "pool",
+        async () =>
+          withGitHubEgress(fixture.env, [{ pattern: "blocked-cursor", replacement: "public" }])
+            .githubEgress,
+      );
+      await vi.waitFor(() => expect(upstream).toHaveBeenCalledTimes(1));
+      const guard =
+        followerScope === "unprotected"
+          ? undefined
+          : async () => withGitHubEgress(fixture.env, []).githubEgress;
+      const follower = authenticateCaller(request(), fixture.env, "pool", guard);
+      const settled = Promise.allSettled([leader, follower]);
+      try {
+        await vi.waitFor(() => expect(upstream).toHaveBeenCalledTimes(3));
+      } finally {
+        gate.resolve();
+        await settled;
+      }
+      expect(await settled).toEqual([
+        { status: "rejected", reason: expect.objectContaining({ code: "string_rewrite_denied" }) },
+        { status: "fulfilled", value: fixture.caller },
+      ]);
+      await expect(authenticateCaller(request(), fixture.env, "pool", guard)).resolves.toEqual(
+        fixture.caller,
+      );
+      expect(fixture.first).toHaveBeenCalledTimes(1);
+      expect(fixture.run).toHaveBeenCalledTimes(1);
+      expect(upstream).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it("does not let a later scoped refresh extend the caller row's authorization lifetime", async () => {
+    const started = Date.UTC(2026, 0, 1);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(started);
+    const fixture = authFixture();
+    const upstream = vi.fn(async () => membershipResponse());
+    vi.stubGlobal("fetch", upstream);
+    await authenticateCaller(request(), fixture.env, "pool");
+    clock.mockReturnValue(started + 29_000);
+    const guard = async () => withGitHubEgress(fixture.env, []).githubEgress;
+    await authenticateCaller(request(), fixture.env, "pool", guard);
+    fixture.first.mockResolvedValue(null);
+    clock.mockReturnValue(started + 30_000);
+    await expect(authenticateCaller(request(), fixture.env, "pool", guard)).rejects.toMatchObject({
+      code: "invalid_auth",
+    });
+    expect(fixture.first).toHaveBeenCalledTimes(2);
+    expect(upstream).toHaveBeenCalledTimes(2);
   });
 
   it("does not share a request-specific protection denial with an allowed caller", async () => {
@@ -128,14 +206,14 @@ function request(): Request {
   });
 }
 
-function membershipResponse(): Response {
+function membershipResponse(org = "openclaw", cursor: string | null = null): Response {
   return Response.json({
     data: {
       user: {
         databaseId: 42,
         organizations: {
-          nodes: [{ login: "openclaw" }],
-          pageInfo: { endCursor: null, hasNextPage: false },
+          nodes: [{ login: org }],
+          pageInfo: { endCursor: cursor, hasNextPage: cursor !== null },
         },
       },
     },
