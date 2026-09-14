@@ -1,4 +1,4 @@
-import { errorResponse, logUnexpectedWorkerError } from "./http";
+import { errorResponse, logExpectedWorkerError, logUnexpectedWorkerError } from "./http";
 import { runScheduledMaintenance } from "./maintenance";
 import { PoolCoordinator } from "./pool-coordinator";
 import { routeRequest } from "./router";
@@ -9,6 +9,7 @@ export { PoolCoordinator };
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const started = Date.now();
     const requestId = crypto.randomUUID();
     const redirect = httpsRedirect(request);
     if (redirect !== undefined) {
@@ -17,6 +18,7 @@ export default {
     try {
       return secureResponse(request, await routeRequest(request, env, ctx, requestId));
     } catch (error) {
+      logExpectedWorkerError(request, requestId, error, started);
       logUnexpectedWorkerError(request, requestId, error);
       if (shouldUseWebError(request)) {
         return secureResponse(request, webErrorResponse(error, requestId));

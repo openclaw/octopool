@@ -431,12 +431,21 @@ describe("server read enforcement", () => {
     });
     expect(response.status).toBe(403);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    const body = await response.text();
-    expect(body).toContain('"code":"string_rewrite_denied"');
-    expect(body).not.toContain("internal-model");
-    expect(body).not.toContain("fallback_local");
+    const body = await response.json<{ error: { code: string; request_id: string } }>();
+    expect(body.error.code).toBe("string_rewrite_denied");
+    expect(JSON.stringify(body)).not.toContain("internal-model");
+    expect(JSON.stringify(body)).not.toContain("fallback_local");
     expect(upstream).not.toHaveBeenCalled();
-    expect(logs).not.toHaveBeenCalled();
+    expect(logs).toHaveBeenCalledExactlyOnceWith({
+      event: "octopool.worker.request_error",
+      request_id: body.error.request_id,
+      route_family: "relay",
+      method: "POST",
+      status: 403,
+      code: "string_rewrite_denied",
+      duration_ms: expect.any(Number),
+    });
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("internal-model");
     await expectNoPublication();
   });
 
@@ -548,23 +557,39 @@ describe("server read enforcement", () => {
     const upstream = vi.fn<typeof fetch>();
     const logs = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", upstream);
-    for (const response of [
-      await relay("/repos/openclaw/octopool"),
-      await callWorker(adminPath, { headers: adminHeaders }),
-      await callWorker(callerPath, { headers: { authorization: `Bearer ${CALLER_TOKEN}` } }),
-      await put([]),
-    ]) {
+    const cases = [
+      [await relay("/repos/openclaw/octopool"), "relay", "POST"],
+      [await callWorker(adminPath, { headers: adminHeaders }), "admin_policy", "GET"],
+      [
+        await callWorker(callerPath, { headers: { authorization: `Bearer ${CALLER_TOKEN}` } }),
+        "caller_policy",
+        "GET",
+      ],
+      [await put([]), "admin_policy", "PUT"],
+    ] as const;
+    for (const [index, [response, routeFamily, method]] of cases.entries()) {
       expect(response.status).toBe(503);
       expect(response.headers.get("cache-control")).toBe("no-store");
-      expect(await response.json()).toMatchObject({
+      const body = await response.json<{ error: { request_id: string } }>();
+      expect(body).toMatchObject({
         error: {
           code: "string_rewrite_policy_unavailable",
           message: "String protection policy unavailable",
         },
       });
+      expect(logs).toHaveBeenNthCalledWith(index + 1, {
+        event: "octopool.worker.request_error",
+        request_id: body.error.request_id,
+        route_family: routeFamily,
+        method,
+        status: 503,
+        code: "string_rewrite_policy_unavailable",
+        duration_ms: expect.any(Number),
+      });
     }
     expect(upstream).not.toHaveBeenCalled();
-    expect(logs).not.toHaveBeenCalled();
+    expect(logs).toHaveBeenCalledTimes(cases.length);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("internal-model");
     await expectNoPublication();
   });
 

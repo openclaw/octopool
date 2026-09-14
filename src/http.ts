@@ -70,6 +70,71 @@ const MAX_UNEXPECTED_ERROR_FRAMES = 5;
 const MAX_STACK_SCAN_CHARS = 8_192;
 const STACK_LOCATION = /\.([cm]?[jt]sx?):(\d{1,8}):(\d{1,6})\)?\s*$/;
 
+const REQUEST_ERROR_CODES = new Set([
+  "admin_unconfigured",
+  "fallback_local",
+  "github_identity_mismatch",
+  "github_identity_required",
+  "invalid_admin_auth",
+  "invalid_auth",
+  "invalid_headers",
+  "invalid_json",
+  "invalid_path",
+  "invalid_query",
+  "invalid_request",
+  "invalid_string_rewrite_policy",
+  "method_denied",
+  "missing_auth",
+  "org_denied",
+  "org_member_denied",
+  "org_verification_failed",
+  "org_verification_unavailable",
+  "pool_not_found",
+  "pool_policy_unavailable",
+  "relay_overloaded",
+  "string_rewrite_denied",
+  "string_rewrite_policy_unavailable",
+  "string_rewrite_revision_conflict",
+  "unsupported_media_type",
+]);
+
+export function logExpectedWorkerError(
+  request: Request,
+  requestId: string,
+  error: unknown,
+  started: number,
+): void {
+  const typed = error instanceof HttpError ? error : backendOverloadedError(error);
+  if (typed === undefined) {
+    return;
+  }
+  const pathname = new URL(request.url).pathname;
+  let routeFamily: "relay" | "caller_policy" | "admin_policy";
+  if (request.method === "POST" && pathname === "/v1/github/request") {
+    routeFamily = "relay";
+  } else if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/string-rewrites$/.test(pathname)) {
+    routeFamily = "caller_policy";
+  } else if (
+    (request.method === "GET" || request.method === "PUT") &&
+    pathname === "/v1/admin/string-rewrites"
+  ) {
+    routeFamily = "admin_policy";
+  } else {
+    return;
+  }
+  // Admission can fail before a trusted caller/pool exists for D1 auditing.
+  // Keep this event content-free, including unknown future HttpError codes.
+  console.error({
+    event: "octopool.worker.request_error",
+    request_id: requestId,
+    route_family: routeFamily,
+    method: request.method,
+    status: typed.status,
+    code: REQUEST_ERROR_CODES.has(typed.code) ? typed.code : "http_error",
+    duration_ms: Math.max(0, Date.now() - started),
+  });
+}
+
 function safeErrorName(error: Error): string {
   if (error instanceof TypeError) return "TypeError";
   if (error instanceof RangeError) return "RangeError";
