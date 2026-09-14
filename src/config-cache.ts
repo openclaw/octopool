@@ -11,16 +11,15 @@
 const CONFIG_CACHE_TTL_MS = 30_000;
 const MAX_ENTRIES = 256;
 
-type Entry = { value: unknown; expires: number };
+type Entry = { expires: number } & ({ value: unknown } | { pending: Promise<unknown> });
 const store = new Map<string, Entry>();
 
 export async function cachedConfigLookup<T>(key: string, load: () => Promise<T>): Promise<T> {
   const now = Date.now();
   const hit = store.get(key);
   if (hit !== undefined && hit.expires > now) {
-    return hit.value as T;
+    return "pending" in hit ? (hit.pending as Promise<T>) : (hit.value as T);
   }
-  const value = await load();
   if (store.size >= MAX_ENTRIES) {
     for (const [staleKey, entry] of store) {
       if (entry.expires <= now) {
@@ -31,8 +30,35 @@ export async function cachedConfigLookup<T>(key: string, load: () => Promise<T>)
       store.clear();
     }
   }
-  store.set(key, { value, expires: now + CONFIG_CACHE_TTL_MS });
-  return value;
+  // Share only fully consumed data, never a Response or another request's I/O
+  // objects. Pending entries use the same bound and deadline as ready values.
+  const entry: Entry = {
+    expires: now + CONFIG_CACHE_TTL_MS,
+    pending: Promise.resolve()
+      .then(load)
+      .then(
+        (value) => {
+          // A clear, expiry, or eviction may have replaced this load meanwhile.
+          if (store.get(key) === entry) {
+            store.set(key, { value, expires: entry.expires });
+          }
+          return value;
+        },
+        (error: unknown) => {
+          if (store.get(key) === entry) store.delete(key);
+          throw error;
+        },
+      ),
+  };
+  store.set(key, entry);
+  return entry.pending as Promise<T>;
+}
+
+// Auth can reject a locally valid row after its request-specific checks. Do not
+// evict a newer row if an older in-flight authentication fails after a clear.
+export function invalidateConfigValue(key: string, value: unknown): void {
+  const entry = store.get(key);
+  if (entry !== undefined && "value" in entry && entry.value === value) store.delete(key);
 }
 
 // Tests mutate callers/identities/policies mid-run and expect immediate effect.
