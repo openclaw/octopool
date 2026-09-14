@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { contentsLinks } from "../fixtures/contents-links";
-import { relay, seedPool } from "./harness";
+import { contentsKinds, contentsLinks } from "../fixtures/contents-links";
+import { jsonResponse, relay, seedPool } from "./harness";
 
 type Envelope = {
   body: (typeof contentsLinks)[number]["body"];
@@ -8,7 +8,7 @@ type Envelope = {
   relay: { cache: string; backend: string };
 };
 
-describe("contents self-links at the Worker", () => {
+describe("contents REST responses at the Worker", () => {
   beforeEach(seedPool);
 
   it.each([
@@ -27,16 +27,35 @@ describe("contents self-links at the Worker", () => {
     expect(upstream).not.toHaveBeenCalled();
   });
 
+  it.each(contentsKinds)("preserves $label through fill and cache hit", async (fixture) => {
+    const path = `/repos/openclaw/octopool/contents/${fixture.path}`;
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(request.url).toBe(`https://api.github.com${path}?ref=main`);
+      expect(request.headers.has("authorization")).toBe(false);
+      return jsonResponse(fixture.body);
+    });
+    vi.stubGlobal("fetch", upstream);
+    for (const cache of ["miss", "hit"]) {
+      const response = await relay(path, undefined, { query: { ref: "main" } });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        body: fixture.body,
+        body_encoding: "json",
+        relay: { cache },
+      });
+    }
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
   it.each(contentsLinks)(
-    "preserves $label through a real raw fill and cache hit",
+    "preserves $label through a real API fill and cache hit",
     async (fixture) => {
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
-        expect(request.url).toBe(fixture.body.download_url);
+        expect(request.url).toBe(fixture.body.url);
         expect(request.headers.has("authorization")).toBe(false);
-        return new Response(new Uint8Array([0, 255, 65]), {
-          headers: { "content-type": "application/octet-stream" },
-        });
+        return jsonResponse(fixture.body);
       });
       vi.stubGlobal("fetch", upstream);
       for (const cache of ["miss", "hit"]) {
@@ -58,10 +77,7 @@ describe("contents self-links at the Worker", () => {
           .soft(Array.from(atob(wire.body.content), (char) => char.charCodeAt(0)))
           .toEqual([0, 255, 65]);
       }
-      expect(upstream).toHaveBeenCalledExactlyOnceWith(
-        fixture.body.download_url,
-        expect.any(Object),
-      );
+      expect(upstream).toHaveBeenCalledExactlyOnceWith(fixture.body.url, expect.any(Object));
     },
   );
 });

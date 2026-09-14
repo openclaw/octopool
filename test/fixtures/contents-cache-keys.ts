@@ -1,4 +1,4 @@
-// Frozen by the actual key owner at fec6a1d, before contents self-link retirement.
+// Frozen by the actual key owner at 8f427935, before contents REST retirement.
 // Shared and identity digests include publication-v1 and the current opaque body codec.
 export const contentsCacheKeys = [
   {
@@ -12,8 +12,8 @@ export const contentsCacheKeys = [
         ref: "feature/topic&mode=fast#part",
       },
     },
-    shared: "xWPXCPHS2DQwL9SjnCSAx2vZdmlZuIKFk5HJwNMBJtY",
-    identity: "6pNL_mxgILprOKRrCzRC6DwmxyEYivjwC5heW_B24eM",
+    shared: "cnhhwB-zMDRIl29RHZUn4MuRcaKvy_TYYrCZ7Cd_VYY",
+    identity: "64iWs3quNbqJNG_dRftoxHCYBUCH1sdg_ZjxbSU_47A",
   },
   {
     name: "plain filename",
@@ -26,8 +26,8 @@ export const contentsCacheKeys = [
         ref: "main",
       },
     },
-    shared: "OGyiz-X838qe7z1K7E50eWjFIE5jSA0qVoZF0mde1bQ",
-    identity: "PLfE0_agw0XmiZ99k-ci3EgMn3W_J_FQzncEQ9MBfls",
+    shared: "VevDwP2Kn6cEbud5yZW3jzcriuZbxKEXSbuze3xEoFw",
+    identity: "XrGGGpkLafNRu5CdaLHa2plMOX-ZdHXI27EcN2R_0QA",
   },
   {
     name: "literal percent escape",
@@ -40,8 +40,8 @@ export const contentsCacheKeys = [
         ref: "main",
       },
     },
-    shared: "QwKu0VK30L55LaLgbDKmcKPLvHX38EHx5TVq1MCxTk0",
-    identity: "Qmhdcfatl1FDwiPexCoBptSpuMeL1fvAkdUPyyb16Js",
+    shared: "W1Y4zGnDsSj5DmCBW9bWVd1CaDL8YrESp2GOPyStlRw",
+    identity: "18rLXbAu_W1moRngaiARnRnKvWL_zX9VTs71FluEkkA",
   },
   {
     name: "scalar fallback ref",
@@ -54,8 +54,8 @@ export const contentsCacheKeys = [
         ref: "../main",
       },
     },
-    shared: "PcYREN8DtYfqTFaEduIiWwCbxlddFvnyncMvApxYvN8",
-    identity: "JD-K0tmNvXNRktEcXd65Uusu54GjOfCSnhmm6VpAPlY",
+    shared: "-XVlPpuhrasxDR1TklqLNE3bBAzzDVcPaXPKAI16N9g",
+    identity: "fKBZCOrVsGK1G3KjQ_fSmusqCbUY3URtxEFGR0pgQBA",
   },
   {
     name: "no ref contents",
@@ -127,8 +127,8 @@ export const contentsCacheKeys = [
         accept: "",
       },
     },
-    shared: "f1jpVswl4dKikLpzBBitTr7uiiJ-Szh2PN4_0PEbOQ4",
-    identity: "-a8a1g5Coj7V5iMuu5a1W_mKmLbCRrSC2QcafFJe3gQ",
+    shared: "P9AxXKa8kOURFGkzWlh-ByaJtZ-QaDoS_usNrvlcM5Q",
+    identity: "SENO5kkRPm3INHFF_YJr3W_xwULOVYxadFyS4EjlGO8",
   },
   {
     name: "octet contents",
@@ -270,8 +270,8 @@ export const contentsCacheKeys = [
         accept: "",
       },
     },
-    shared: "5LZxwUE6vuajKMsNFk9dKxhGp3Hjcfw9datJAlwhhjQ",
-    identity: "sQw_8Va3HLseJXYJHG6kUUnneNOkQQ_5RccNbTurK4Q",
+    shared: "nEC7WewvPRpSSrqHnBGHDTytvrLFvlUIEGzIYfjt8zI",
+    identity: "8Me5pXt5HzowrpQYOvzm1KOIvU7Ij_fou-BYWGpu_BY",
   },
   {
     name: "whitespace nested contents",
@@ -287,8 +287,8 @@ export const contentsCacheKeys = [
         accept: " \t ",
       },
     },
-    shared: "yfYli2DCLDbcHKWPHmSTURIoCEDPl3ETL2P3YEaheU8",
-    identity: "fp-SLWJ7SN-qmNqSDv3cs8qIAcNqWK671jWfbpcQrMc",
+    shared: "RJgao5DXj7Up5iPPhjkynofd8SiJbdN9PeHmrgVcJmU",
+    identity: "TFe09FionfivkXYuEMaiT-0y_V-Z2UuxDePR3FX9Xoc",
   },
   {
     name: "whitespace plain contents",
@@ -304,8 +304,8 @@ export const contentsCacheKeys = [
         accept: " \t ",
       },
     },
-    shared: "bZ9Oc3s_qMGYWY_QAppK2b02vItKP93Zi2aw6oKz_fE",
-    identity: "KNSZSNeXWc3nPNe44Iuyk3ZVUd8yo7GhP28uGQ2BPDM",
+    shared: "p39EwRB17Yc2OYMs4rDDKCHTiuZRi_22W8WZwPj92Vw",
+    identity: "ia8MdHIsDaqKFhRVChsF54uLncGwraOnfoDKcriNnmg",
   },
   {
     name: "whitespace no-ref contents",

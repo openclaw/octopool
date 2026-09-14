@@ -105,12 +105,12 @@ export async function githubCacheKey(
     // Same-SHA reruns mutate aggregate CI results. Retire hour/day entries in
     // every cache, validator, and fill path before applying their shorter TTLs.
     ...(isMutableCIRoute(route.kind) ? { ci_cache_policy: "mutable-aggregates-v1" } : {}),
-    // Adapter JSON eligibility includes blanks that intentionally remain in vary headers.
-    // Old JSON file objects contain unescaped self-links, even for raw-origin fills.
+    // Raw-origin contents cannot distinguish files, symlinks, or submodules.
+    // Retire their bodies and validators, including explicit blank JSON Accept values.
     ...(route.kind === "contents" &&
     scalarQuery(request.query, "ref") !== undefined &&
     defaultGitHubJSONAccept(request.headers?.accept)
-      ? { representation: "contents-self-links-v1" }
+      ? { representation: "contents-rest-v2" }
       : {}),
     // Retire partial advertisements across every body, validator, and fill owner.
     ...((route.kind === "git_ref" || route.kind === "git_matching_refs") &&

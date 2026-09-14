@@ -15,9 +15,8 @@ const blankFixtures = contentsCacheKeys.filter(
     fixture.name === "blank nested contents" || fixture.name === "whitespace nested contents",
 );
 const expected = contentsLinks[5].body;
-const oldURL =
-  "https://api.github.com/repos/openclaw/octopool/contents/docs/a#b?c% name🦞.txt?ref=feature%2Ftopic%26mode%3Dfast%23part";
-const oldBody = { ...expected, url: oldURL, _links: { ...expected._links, self: oldURL } };
+const oldContent = "dGFyZ2V0LnR4dA==";
+const oldBody = { ...expected, content: oldContent, size: 10 };
 const identity: Identity = {
   id: "primary",
   kind: "pat",
@@ -49,14 +48,11 @@ describe("contents cache retirement at the Worker", () => {
         if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
           return jsonResponse({ private: false });
         expect(fetched.headers.has("if-none-match")).toBe(false);
-        if (fetched.url === expected.download_url) {
-          expect(bearer(fetched)).toBeUndefined();
-          return layer === "identity"
-            ? new Response(null, { status: 404 })
-            : new Response(new Uint8Array([0, 255, 65]));
-        }
         expect(fetched.url).toBe(expected.url);
-        if (bearer(fetched) === undefined) return jsonResponse({ message: "unavailable" }, 503);
+        if (bearer(fetched) === undefined)
+          return layer === "identity"
+            ? jsonResponse({ message: "unavailable" }, 503)
+            : jsonResponse(expected);
         expect(bearer(fetched)).toBe("test-primary-token");
         return jsonResponse(expected, 200, rateHeaders({ remaining: 4998 }));
       });
@@ -72,7 +68,7 @@ describe("contents cache retirement at the Worker", () => {
             new Request(input, init).headers.get("if-none-match"),
           ),
         )
-        .not.toContain('"old-links"');
+        .not.toContain('"old-raw"');
       await seedOld(true, fixture);
       const calls = upstream.mock.calls.length;
       expect
@@ -82,14 +78,14 @@ describe("contents cache retirement at the Worker", () => {
         upstream.mock.calls.slice(calls).map(([input, init]) => new Request(input, init).url),
       ).toEqual(
         layer === "identity"
-          ? [expected.download_url, expected.url, "https://api.github.com/repos/openclaw/octopool"]
+          ? [expected.url, "https://api.github.com/repos/openclaw/octopool"]
           : [],
       );
       expect(
         upstream.mock.calls.filter(
           ([input, init]) => new Request(input, init).url === expected.download_url,
         ),
-      ).toHaveLength(layer === "identity" ? 2 : 1);
+      ).toHaveLength(0);
       expect(
         upstream.mock.calls.filter(([input, init]) => bearer(input, init) === "test-primary-token"),
       ).toHaveLength(layer === "identity" ? 1 : 0);
@@ -120,7 +116,6 @@ describe("contents cache retirement at the Worker", () => {
         const fetched = new Request(input, init);
         if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
           return jsonResponse({ private: false });
-        if (fetched.url === expected.download_url) return new Response(null, { status: 404 });
         expect(fetched.url).toBe(expected.url);
         if (outage)
           return jsonResponse(
@@ -135,7 +130,7 @@ describe("contents cache retirement at the Worker", () => {
             headers: { etag: validator, ...rateHeaders({ remaining: 4998 }) },
           });
         return jsonResponse(expected, 200, {
-          etag: '"new-links"',
+          etag: '"new-rest"',
           ...rateHeaders({ remaining: 4998 }),
         });
       });
@@ -148,7 +143,7 @@ describe("contents cache retirement at the Worker", () => {
             new Request(input, init).headers.get("if-none-match"),
           ),
         )
-        .not.toContain('"old-links"');
+        .not.toContain('"old-raw"');
       const key = await githubCacheKey(request.pool, request, route);
       await expire(key);
       expect
@@ -160,7 +155,7 @@ describe("contents cache retirement at the Worker", () => {
             new Request(input, init).headers.get("if-none-match"),
           ),
         )
-        .toContain('"new-links"');
+        .toContain('"new-rest"');
       await expire(key);
       outage = true;
       expect
@@ -170,7 +165,7 @@ describe("contents cache retirement at the Worker", () => {
   );
 
   it.each([frozen, ...blankFixtures])(
-    "never serves old shared or identity stale links during an outage ($name)",
+    "never serves old shared or identity stale contents during an outage ($name)",
     async (fixture) => {
       const request = validateRelayRequest(fixture.request);
       await seedOld(true, fixture);
@@ -180,7 +175,7 @@ describe("contents cache retirement at the Worker", () => {
         const fetched = new Request(input, init);
         if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
           return jsonResponse({ private: false });
-        expect([expected.url, expected.download_url]).toContain(fetched.url);
+        expect(fetched.url).toBe(expected.url);
         return jsonResponse(
           { message: "rate limited" },
           429,
@@ -192,7 +187,7 @@ describe("contents cache retirement at the Worker", () => {
       expect.soft(response.status).toBe(424);
       const wire = await response.json();
       expect.soft(wire).toMatchObject({ error: { code: "fallback_local" } });
-      expect.soft(JSON.stringify(wire)).not.toContain(oldURL);
+      expect.soft(JSON.stringify(wire)).not.toContain(oldContent);
       expect.soft(JSON.stringify(wire)).not.toContain('"cache":"stale"');
     },
   );
@@ -237,7 +232,7 @@ async function seedOld(
           status: 200,
           headers: {
             "content-type": "application/json",
-            etag: '"old-links"',
+            etag: '"old-raw"',
             ...rateHeaders({ remaining: 4998 }),
           },
           body: oldBody,

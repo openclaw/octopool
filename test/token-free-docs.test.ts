@@ -51,7 +51,6 @@ describe("token-free endpoint documentation", () => {
     const docs = readFileSync(path.join(root, "docs/token-free.md"), "utf8");
     for (const source of [
       "patch-diff.githubusercontent.com",
-      "raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}",
       "{repo}.git/info/refs?service=git-upload-pack",
       "/issues?q=is%3Aissue",
       "/actions/runs/{id}/job_groups_batch?attempt={attempt}",

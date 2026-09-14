@@ -70,7 +70,7 @@ Durable Object partition key: `pool:<pool_id>`.
    and public-repository proof before serving.
 5. Acquire renewable, token-fenced cache-fill ownership. Followers wait on coordinator
    completion (`shared`, `edge_only`, or `failed`) rather than polling cache storage.
-6. Try an exact token-free adapter: anonymous API, public page/raw content, or Git smart HTTP.
+6. Try an exact token-free adapter: anonymous API, public pages, or Git smart HTTP.
 7. Establish public-repository proof from the direct response or the explicit guard.
 8. If the route requires credentials, select a scoped identity through the pool coordinator,
    call GitHub, record rate state/cooldowns, and retry another candidate when appropriate.

@@ -47,14 +47,15 @@ media retirement, not a purge of hypothetical malformed non-JSON responses previ
 returned to default-JSON requests. Future opaque decoding is lossless regardless of
 the request's negotiation.
 
-Default-JSON contents reads with a nonempty scalar `ref` carry
-`contents-self-links-v1`. This retires old generated file objects whose API self-links
-did not escape filename characters, across shared and identity keys, edge/D1 hits,
-validators, stale fallback, and late old fills. The predicate covers plain filenames
-too; it does not infer safety from filename characters or duplicate raw-adapter validation.
-Contents without a scalar ref, custom media (including their `body_codec`), blobs,
-README routes, and unrelated representations retain their keys. No publication epoch,
-public-repository proof, or R2 generation changes or cache purge are required.
+Default-JSON contents reads with a nonempty scalar `ref` carry `contents-rest-v2`.
+This retires raw-origin file objects that cannot represent symlinks and submodules
+correctly, including earlier `contents-self-links-v1` bodies, across shared and
+identity keys, edge/D1 hits, validators, stale fallback, and late old fills. All new
+JSON contents fills use exact REST responses. The predicate covers plain filenames;
+it does not guess which paths are symlinks. Contents without a scalar ref, custom
+media (including their `body_codec`), blobs, README routes, and unrelated
+representations retain their keys. No publication epoch, public-repository proof,
+or R2 generation changes or cache purge are required.
 
 Default JSON `git_ref` and `git_matching_refs` keys include `git-refs-framing-v1`.
 This retires older potentially incomplete ref objects and arrays for exact and matching
@@ -64,11 +65,11 @@ is not guessed. Branch lists/views, Git objects, custom media, contents, Actions
 and public-repository proof keys retain their existing generations. No purge or schema
 change is needed.
 
-The contents and Git-ref representation predicates follow their adapters' JSON
+The contents and Git-ref representation predicates follow their JSON
 eligibility, including missing, empty, and whitespace-only `Accept`. Explicit blank
 values keep their existing distinct vary-header keys and `body_codec: lossless-v1`;
 they are not folded into absent headers or into each other. This also retires old
-blank-Accept contents self-links from before the self-link correction. Raw/custom
+blank-Accept reconstructed contents responses. Raw/custom
 non-JSON media and contents without a nonempty scalar ref retain their keys.
 
 Actions summaries also include a server-controlled representation generation
@@ -195,8 +196,6 @@ The main transport classes are:
   reactions, assignees, repo-wide issue/PR comments and events, commit pull/check-suite/
   branch/status metadata, network events, repository stats, repository search, and
   repo-scoped issue/commit search
-- explicit-ref contents reads prefer `raw.githubusercontent.com`, returned as an API-shaped
-  JSON file payload
 - branch refs, matching branch prefixes, and annotated-tag refs can use Git smart HTTP
   advertisements with exact REST-compatible IDs and object metadata; ambiguous lightweight
   tags fall back to the API

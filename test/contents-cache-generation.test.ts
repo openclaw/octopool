@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { githubCacheKey } from "../src/cache";
-import { rawContentRequest } from "../src/github-public-content";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import { contentsCacheKeys } from "./fixtures/contents-cache-keys";
 
-describe("contents self-link cache generation", () => {
+describe("contents REST cache generation", () => {
   it.each(contentsCacheKeys)("bounds shared and identity retirement for $name", async (fixture) => {
     const request = validateRelayRequest(fixture.request);
     const route = classifyRoute(request, defaultPolicy("openclaw"));
@@ -23,7 +22,6 @@ describe("contents self-link cache generation", () => {
         kind: "pat",
       });
       if (request.headers?.accept?.trim() === "") {
-        expect(rawContentRequest({} as Env, request, route)).toBeDefined();
         expect(shared).not.toBe(canonicalShared);
         expect(identity).not.toBe(canonicalIdentity);
         const otherBlank = {

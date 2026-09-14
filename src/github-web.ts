@@ -2,7 +2,7 @@ import { requestTimeoutMs } from "./github-limits";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./github-public-api";
 import { actionsPageRequest } from "./github-public-actions";
-import { mediaFormat, mediaWebRequest, rawContentRequest } from "./github-public-content";
+import { mediaFormat, mediaWebRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
 import { summaryPageRequest } from "./github-public-pages";
 import { githubResponseHeaders } from "./github-response";
@@ -144,10 +144,6 @@ function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteIn
   const actions = actionsPageRequest(env, request, route);
   if (actions !== undefined) {
     out.push(actions);
-  }
-  const rawContent = rawContentRequest(env, request, route);
-  if (rawContent !== undefined) {
-    out.push(rawContent);
   }
   return out;
 }

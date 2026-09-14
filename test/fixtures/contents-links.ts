@@ -246,3 +246,43 @@ export const contentsLinks = [
     },
   },
 ] as const;
+
+// REST contents decides whether a symlink resolves to a regular file. Raw-host
+// bytes alone cannot establish these shapes or the target's metadata.
+export const contentsKinds = [
+  {
+    label: "resolved symlink",
+    path: "GUIDE.md",
+    body: {
+      type: "file",
+      name: "GUIDE.md",
+      path: "GUIDE.md",
+      sha: "348630008934b7003f5d3e7a85e8d8401f08569e",
+      size: 15,
+      encoding: "base64",
+      content: "dGFyZ2V0IGNvbnRlbnRz",
+      download_url: "https://raw.githubusercontent.com/openclaw/octopool/main/GUIDE.md",
+    },
+  },
+  {
+    label: "unresolved symlink",
+    path: "external-link",
+    body: { type: "symlink", name: "external-link", path: "external-link", target: "../outside" },
+  },
+  {
+    label: "submodule",
+    path: "vendor",
+    body: {
+      type: "submodule",
+      name: "vendor",
+      path: "vendor",
+      sha: "0123456789abcdef0123456789abcdef01234567",
+      submodule_git_url: "https://github.com/octocat/Hello-World.git",
+    },
+  },
+  {
+    label: "directory",
+    path: "docs",
+    body: [{ type: "file", name: "guide.md", path: "docs/guide.md" }],
+  },
+] as const;

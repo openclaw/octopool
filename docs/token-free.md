@@ -9,9 +9,8 @@ There are two different token-free transports:
 - **Anonymous GitHub API:** REST-shaped JSON from `api.github.com`, without an
   `Authorization` header. These consume GitHub's shared anonymous API quota and still
   pass Octopool's normal response sanitization.
-- **No-API-quota sources:** public `github.com`, `raw.githubusercontent.com`, and Git
-  smart HTTP endpoints. These do not consume GitHub API quota. Some return exact REST
-  shapes; others are bounded shapes used only by supported top-level `gh --json`
+- **No-API-quota sources:** public `github.com` pages and Git smart HTTP endpoints.
+  These do not consume GitHub API quota. Some return exact REST shapes; others are bounded shapes used only by supported top-level `gh --json`
   commands.
 
 Cache hits reuse a stored body. Visibility, membership, and revalidation checks can still
@@ -47,24 +46,14 @@ contact GitHub, so a cache hit is not proof of zero upstream requests.
 GitHub may redirect these to `patch-diff.githubusercontent.com`; Octopool permits only
 that known patch host.
 
-### Contents and Git refs
+### Git refs
 
-| Relay request                                                | Public source                                                             | Limits                                                                      |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `GET /repos/{owner}/{repo}/contents/{path}?ref={ref}`        | `https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}`           | Explicit safe ref and file path only; returned as an API-shaped file object |
-| `GET /repos/{owner}/{repo}/git/ref/heads/{branch}`           | `https://github.com/{owner}/{repo}.git/info/refs?service=git-upload-pack` | Exact branch ref                                                            |
-| `GET /repos/{owner}/{repo}/git/matching-refs/heads/{prefix}` | Same Git smart HTTP advertisement                                         | Exact matching branch refs                                                  |
-| `GET /repos/{owner}/{repo}/git/ref/tags/{tag}`               | Same Git smart HTTP advertisement                                         | Annotated tags only                                                         |
-| `GET /repos/{owner}/{repo}/git/matching-refs/tags/{prefix}`  | Same Git smart HTTP advertisement                                         | Only when every matched tag is annotated                                    |
-
-Successful raw contents reads preserve the decoded file `path` and `name`, binary
-content/base64, byte size, and Git blob SHA. The generated API `url` and `_links.self`
-match and encode each path segment once, retaining directory separators and literal
-`#`, `?`, `%`, spaces, and Unicode. A literal filename `%23` arrives as `%2523` and
-stays literal; `ref` is one encoded query value. Raw/download, HTML, and Git object
-links retain their existing semantics. Missing or unsafe refs, ambiguous query values,
-ineligible file paths, raw misses, and oversized raw bodies retain the existing exact
-anonymous API fallback; traversal and route restrictions are unchanged.
+| Relay request                                                | Public source                                                             | Limits                                   |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------------------------------------- |
+| `GET /repos/{owner}/{repo}/git/ref/heads/{branch}`           | `https://github.com/{owner}/{repo}.git/info/refs?service=git-upload-pack` | Exact branch ref                         |
+| `GET /repos/{owner}/{repo}/git/matching-refs/heads/{prefix}` | Same Git smart HTTP advertisement                                         | Exact matching branch refs               |
+| `GET /repos/{owner}/{repo}/git/ref/tags/{tag}`               | Same Git smart HTTP advertisement                                         | Annotated tags only                      |
+| `GET /repos/{owner}/{repo}/git/matching-refs/tags/{prefix}`  | Same Git smart HTTP advertisement                                         | Only when every matched tag is annotated |
 
 Git refs require an `application/x-git-upload-pack-advertisement` response and a
 complete bounded v0 envelope: the upload-pack service packet, its header flush,
@@ -80,9 +69,9 @@ Only after accepting the whole advertisement do Git ref responses read
 ID needed for exact REST-compatible ref node IDs. Lightweight tags remain anonymous
 API-only because the advertisement cannot prove their target object type.
 
-Contents and Git-ref JSON adapters accept missing, empty, and whitespace-only
-`Accept` as well as the supported JSON media types. Their cache representation
-generations cover these eligible blanks while preserving distinct blank-header keys.
+Git-ref JSON adapters accept missing, empty, and whitespace-only `Accept` as well
+as the supported JSON media types. Their cache representation generation covers
+these eligible blanks while preserving distinct blank-header keys.
 
 ### Bounded CLI shapes
 
@@ -151,6 +140,20 @@ a reduced public-page response shape.
 Every path below maps directly to `GET https://api.github.com{path}` without an
 `Authorization` header. Query parameters accepted by the corresponding relay route are
 preserved. Repository responses are cached only after the public-repo guard succeeds.
+
+### Exact contents responses
+
+Contents JSON reads, with or without an explicit `ref`, use the anonymous REST API.
+Octopool preserves GitHub's file, symlink, submodule, and directory responses instead
+of constructing file metadata from `raw.githubusercontent.com` bytes. GitHub may
+return a symlink target's contents or describe the symlink itself; only the REST
+endpoint knows which response is correct.
+
+These cache misses consume anonymous API quota. If the anonymous API is unavailable,
+the existing public-repository guard, pooled API, and bounded stale-cache paths still
+apply. Explicit raw, HTML, and object media keep their existing exact API handling.
+The contents cache generation retires old reconstructed JSON responses; see
+[cache keys](cache.md#cache-key).
 
 ### Exact release bodies
 
