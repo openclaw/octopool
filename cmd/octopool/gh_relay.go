@@ -36,7 +36,10 @@ type relayMeta struct {
 func volatileRouteKind(kind string) bool {
 	switch kind {
 	case "pr_view", "pr_list", "issue_view", "issue_list", "run_view", "run_list",
-		"checks", "check_suites", "status", "status_list", "jobs", "job", "commit_view", "ref_view":
+		"workflow_run_list", "commit_check_runs", "commit_check_runs_ref",
+		"commit_check_suites", "commit_check_suites_ref", "commit_status", "commit_status_ref",
+		"commit_statuses", "commit_statuses_ref", "ref_statuses", "run_jobs", "job_view",
+		"commit_view", "commit_view_ref", "git_ref", "git_matching_refs":
 		return true
 	default:
 		return false
@@ -47,7 +50,7 @@ func volatileRouteKind(kind string) bool {
 // cached answer is indistinguishable from a live one, which is how a stale head
 // SHA or a "still open" merged PR reads as truth.
 func noteCachedRead(envelope relayEnvelope) {
-	if quietCacheNotices() || (freshReadRequested() && envelope.Relay.Cache != "stale") {
+	if quietCacheNotices() {
 		return
 	}
 	if envelope.Relay.Cache != "hit" && envelope.Relay.Cache != "stale" {
@@ -59,6 +62,10 @@ func noteCachedRead(envelope relayEnvelope) {
 	advice := "set OCTOPOOL_FRESH=1 for a live read"
 	if envelope.Relay.Cache == "stale" {
 		advice = "not a live read; do not use for live decisions"
+	} else if freshReadRequested() {
+		// FRESH can be overridden by explicit headers, and the relay's hit marker
+		// does not distinguish an ordinary cache hit from live revalidation.
+		advice = "freshness is not confirmed by this cache hit"
 	}
 	fmt.Fprintf(
 		os.Stderr,
@@ -74,7 +81,12 @@ func cacheExpirySuffix(expiresAt string) string {
 	if expiresAt == "" {
 		return ""
 	}
-	expires, err := time.Parse(time.RFC3339, strings.Replace(strings.TrimSpace(expiresAt), " ", "T", 1))
+	value := strings.TrimSpace(expiresAt)
+	// The Worker publishes SQLite timestamps in UTC without a timezone suffix.
+	expires, err := time.Parse(time.DateTime, value)
+	if err != nil {
+		expires, err = time.Parse(time.RFC3339, strings.Replace(value, " ", "T", 1))
+	}
 	if err != nil {
 		return ""
 	}

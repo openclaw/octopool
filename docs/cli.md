@@ -1064,7 +1064,8 @@ Three things keep that honest:
   it was a hit or a stale serve, and when it refreshes. stdout stays untouched, so `--json`
   and `--jq` consumers are unaffected. A stale response warns that it is unsafe for live
   decisions even under `OCTOPOOL_FRESH=1`; older relays may ignore the requested bound.
-  A normal `hit` under FRESH remains quiet because it may have been live-revalidated.
+  A `hit` remains visible under FRESH: the response does not distinguish live revalidation
+  from an ordinary cache hit, and explicit cache-control headers can still allow cached reads.
   Silence cache notices with `OCTOPOOL_QUIET_CACHE=1`.
 - **Anything can request a live read.** `OCTOPOOL_FRESH=1` applies `max-age=0` at shared
   relay request construction, including top-level `run view` and every jobs hydration

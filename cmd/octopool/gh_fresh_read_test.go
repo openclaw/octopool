@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 // A merge-gate field must never be answered from the shared cache: right after
@@ -92,16 +94,40 @@ func TestGHAPICacheControlHeaderRelays(t *testing.T) {
 }
 
 func TestVolatileRouteKindCoversDecisionRoutes(t *testing.T) {
-	for _, kind := range []string{"pr_view", "run_view", "checks", "status"} {
+	for _, kind := range []string{
+		"pr_view", "pr_list", "issue_view", "issue_list", "run_view", "run_list", "workflow_run_list",
+		"commit_check_runs", "commit_check_runs_ref", "commit_check_suites", "commit_check_suites_ref",
+		"commit_status", "commit_status_ref", "commit_statuses", "commit_statuses_ref", "ref_statuses",
+		"run_jobs", "job_view", "commit_view", "commit_view_ref", "git_ref", "git_matching_refs",
+	} {
 		if !volatileRouteKind(kind) {
 			t.Fatalf("%s should be treated as volatile", kind)
 		}
 	}
-	for _, kind := range []string{"repo_view", "user_view", "license_view"} {
+	for _, kind := range []string{"repo_view", "user_view", "repo_license", "checks", "status", "ref_view"} {
 		if volatileRouteKind(kind) {
 			t.Fatalf("%s should not be treated as volatile", kind)
 		}
 	}
+}
+
+func TestCacheExpirySuffix(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		expires := time.Now().Add(2 * time.Minute)
+		for _, test := range []struct{ name, timestamp, want string }{
+			{"worker UTC timestamp", expires.UTC().Format("2006-01-02 15:04:05"), ", refreshes in 2m0s"},
+			{"RFC3339 UTC", expires.UTC().Format(time.RFC3339), ", refreshes in 2m0s"},
+			{"RFC3339 offset", expires.In(time.FixedZone("offset", 3600)).Format(time.RFC3339), ", refreshes in 2m0s"},
+			{"surrounding whitespace", " " + expires.UTC().Format("2006-01-02 15:04:05") + "\n", ", refreshes in 2m0s"},
+			{"expired", time.Now().Add(-time.Minute).UTC().Format("2006-01-02 15:04:05"), ""},
+			{"missing", "", ""},
+			{"invalid", "not a timestamp", ""},
+		} {
+			if got := cacheExpirySuffix(test.timestamp); got != test.want {
+				t.Errorf("%s: cacheExpirySuffix(%q) = %q, want %q", test.name, test.timestamp, got, test.want)
+			}
+		}
+	})
 }
 
 func TestCLIEndToEndCacheFreshnessNotices(t *testing.T) {
@@ -110,15 +136,19 @@ func TestCLIEndToEndCacheFreshnessNotices(t *testing.T) {
 	}
 	bin := buildCLIBinary(t)
 	for _, test := range []struct {
-		name, cache, fresh, quiet string
-		wantNotice                bool
+		name, cache, fresh, quiet, cacheControl string
+		wantNotice                              bool
 	}{
-		{"ordinary stale", "stale", "", "", true},
-		{"fresh stale from older relay", "stale", "1", "", true},
-		{"quiet stale", "stale", "1", "1", false},
-		{"ordinary hit", "hit", "", "", true},
-		{"fresh revalidated hit", "hit", "1", "", false},
-		{"fresh miss", "miss", "1", "", false},
+		{"ordinary stale", "stale", "", "", "", true},
+		{"fresh stale from older relay", "stale", "1", "", "", true},
+		{"quiet stale", "stale", "1", "1", "", false},
+		{"ordinary hit", "hit", "", "", "", true},
+		{"fresh hit without revalidation proof", "hit", "1", "", "", true},
+		{"explicit cache age overrides fresh", "hit", "1", "", "max-age=60", true},
+		{"quiet hit", "hit", "1", "1", "max-age=60", false},
+		{"fresh miss", "miss", "1", "", "", false},
+		{"ordinary miss", "miss", "", "", "", false},
+		{"cache bypass", "bypass", "", "", "", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -128,8 +158,12 @@ func TestCLIEndToEndCacheFreshnessNotices(t *testing.T) {
 					return
 				}
 				headers, _ := request["headers"].(map[string]any)
-				if test.fresh == "1" && headers["cache-control"] != "max-age=0" {
-					t.Errorf("headers = %v, want max-age=0", headers)
+				wantCacheControl := test.cacheControl
+				if test.fresh == "1" && wantCacheControl == "" {
+					wantCacheControl = "max-age=0"
+				}
+				if wantCacheControl != "" && headers["cache-control"] != wantCacheControl {
+					t.Errorf("headers = %v, want %s", headers, wantCacheControl)
 				}
 				w.Header().Set("Content-Type", "application/json")
 				if err := json.NewEncoder(w).Encode(relayEnvelope{
@@ -139,10 +173,14 @@ func TestCLIEndToEndCacheFreshnessNotices(t *testing.T) {
 					t.Error(err)
 				}
 			})
+			args := []string{"gh", "api", "repos/openclaw/freshness-fixture/pulls/73"}
+			if test.cacheControl != "" {
+				args = append(args, "-H", "Cache-Control: "+test.cacheControl)
+			}
 			result := runCLI(t, bin, server.URL, map[string]string{
 				"OCTOPOOL_FRESH": test.fresh, "OCTOPOOL_QUIET_CACHE": test.quiet,
 				"OCTOPOOL_NO_FALLBACK": "1",
-			}, "gh", "api", "repos/openclaw/freshness-fixture/pulls/73")
+			}, args...)
 			if result.err != nil {
 				t.Fatalf("err=%v stderr=%q", result.err, result.stderr)
 			}
@@ -160,6 +198,11 @@ func TestCLIEndToEndCacheFreshnessNotices(t *testing.T) {
 			if test.cache == "stale" && test.wantNotice {
 				if !strings.Contains(result.stderr, "not a live read") || strings.Contains(result.stderr, "set OCTOPOOL_FRESH=1") {
 					t.Errorf("stale notice must warn against live decisions without repeating FRESH advice: %q", result.stderr)
+				}
+			}
+			if test.cache == "hit" && test.fresh == "1" && test.wantNotice {
+				if !strings.Contains(result.stderr, "freshness is not confirmed") || strings.Contains(result.stderr, "set OCTOPOOL_FRESH=1") {
+					t.Errorf("fresh cache hit must not assume revalidation or repeat FRESH advice: %q", result.stderr)
 				}
 			}
 		})
