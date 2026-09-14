@@ -238,6 +238,35 @@ describe("Worker end-to-end relay", () => {
     );
   });
 
+  it.each([403, 429])(
+    "cools a secondary-limited identity across routes after %s without Retry-After",
+    async (status) => {
+      await seedPool({ secondary: true });
+      const upstream = githubUpstream({
+        primary: jsonResponse(
+          { message: "You have exceeded a secondary rate limit." },
+          status,
+          rateHeaders({ remaining: 4_999 }),
+        ),
+        secondary: jsonResponse({ id: 2, private: false }, 200, rateHeaders({ remaining: 4_998 })),
+      });
+      vi.stubGlobal("fetch", upstream);
+      for (const path of ["/repos/openclaw/octopool", "/repos/openclaw/octopool/issues/42"]) {
+        const response = await relay(path);
+        expect(response.status).toBe(200);
+        const envelope = await response.json<RelayEnvelope>();
+        expect(envelope.identity).toEqual({ id: "secondary", kind: "pat" });
+        expect(envelope).not.toHaveProperty("secondaryRateLimited");
+      }
+      expect(
+        upstream.mock.calls.filter(([input, init]) => bearer(input, init) === "test-primary-token"),
+      ).toHaveLength(1);
+      expect((await poolCoordinatorStub(env, POOL).snapshot()).cooldowns).toEqual([
+        expect.objectContaining({ identity_id: "primary", route_key: "*", status }),
+      ]);
+    },
+  );
+
   it("scopes permission 403 cooldowns to the failed route", async () => {
     await seedPool({ secondary: true });
     const routeA = "/repos/openclaw/octopool";

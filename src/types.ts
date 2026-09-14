@@ -70,6 +70,8 @@ export type GitHubRelayResponse = {
   body: unknown;
   body_encoding?: "json" | "text" | "base64";
   backend?: "github" | "web";
+  // Captured before response sanitization can remove GitHub's error message.
+  secondaryRateLimited?: true;
 };
 
 export type AuditBackend = "github_web" | "github_api" | "github_identity";
@@ -104,6 +106,7 @@ export type RecordResult = {
   routeKey: string;
   resource: string;
   status: number;
+  secondaryRateLimited?: true;
   rate?: {
     limit?: number;
     remaining?: number;

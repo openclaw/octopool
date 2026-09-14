@@ -118,8 +118,12 @@ remain suppressed until reset.
 For GitHub resource responses, only `401`/`403`/`429` write cooldowns, independently of quota validation:
 
 - `401` → global `*` cooldown (usable Retry-After, otherwise 120s).
+- A `403` or `429` whose GitHub error message identifies a secondary rate limit → global
+  `*` cooldown for at least 60s, honoring a longer usable Retry-After or, without that
+  header, the reset time when the primary budget is also exhausted. The relay records
+  this fact before sanitizing error bodies, including revalidation and paginated reads.
 - `403` or `429` with usable Retry-After → global `*` cooldown for that duration.
-- `403` without usable Retry-After → route-key cooldown, 120s, including permission/SSO
+- Other `403` without usable Retry-After → route-key cooldown, 120s, including permission/SSO
   failures. A complete zero-budget observation also excludes that resource until reset.
 - `429` without usable Retry-After → `resource:<resource>` cooldown, 120s.
 

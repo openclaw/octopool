@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { terminalLogCacheKey, terminalLogCacheProof } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } from "./harness";
@@ -451,6 +452,34 @@ describe("terminal Actions log cache", () => {
     });
     expect(await env.ACTIONS_LOGS.get(key)).toBeNull();
     expect(logBackendCalls(upstream)).toBe(2);
+  });
+
+  it("does not immediately redownload a log after a secondary-limited existence probe", async () => {
+    const base = terminalLogUpstream("completed");
+    vi.stubGlobal("fetch", base);
+    await relay(LOG_PATH);
+    const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+    await ageTerminalLog(key, "-2 hours");
+    let limitedRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        if (bearer(input, init) === "test-primary-token") {
+          limitedRequests++;
+          return jsonResponse(
+            { message: "You have exceeded a secondary rate limit." },
+            403,
+            rateHeaders({ remaining: 4_998 }),
+          );
+        }
+        return base(input, init);
+      }),
+    );
+    expect((await relay(LOG_PATH)).status).toBe(424);
+    expect(limitedRequests).toBe(1);
+    expect((await poolCoordinatorStub(env, "maintainers").snapshot()).cooldowns).toEqual([
+      expect.objectContaining({ identity_id: "primary", route_key: "*", status: 403 }),
+    ]);
   });
 
   it("refreshes the one-hour no-contact window after an existence probe", async () => {

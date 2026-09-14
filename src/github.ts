@@ -2,7 +2,7 @@ import { encodeOpaqueBytes } from "./encoding";
 import type { GitHubEgressEnv } from "./github-egress";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
-import { githubResponseHeaders } from "./github-response";
+import { githubResponseHeaders, isSecondaryRateLimit } from "./github-response";
 import { HttpError } from "./http";
 import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
@@ -10,7 +10,7 @@ import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 export type GitHubLogProbe =
   | { kind: "exists"; status: number; headers: Record<string, string> }
   | { kind: "deleted"; response: GitHubRelayResponse }
-  | { kind: "unknown"; status: number; headers: Record<string, string> };
+  | { kind: "unknown"; response: GitHubRelayResponse };
 
 export async function callGitHub(
   env: GitHubEgressEnv,
@@ -45,20 +45,10 @@ export async function probeGitHubLog(
     githubLogRedirectURL(response);
     return { kind: "exists", status: response.status, headers };
   }
-  if (response.status !== 404) {
-    return { kind: "unknown", status: response.status, headers };
-  }
-  const bodyBytes = await readGitHubBody(response, responseCapBytes(env));
-  const contentType = response.headers.get("content-type") ?? "";
-  const { body, encoding } = decodeBody(bodyBytes, contentType);
+  const github = await readGitHubResponse(response, responseCapBytes(env));
   return {
-    kind: "deleted",
-    response: {
-      status: response.status,
-      headers,
-      body,
-      body_encoding: encoding,
-    },
+    kind: response.status === 404 ? "deleted" : "unknown",
+    response: github,
   };
 }
 
@@ -82,7 +72,14 @@ async function callGitHubAPI(
     }
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
   }
-  const bodyBytes = await readGitHubBody(response, responseCapBytes(env));
+  return readGitHubResponse(response, responseCapBytes(env));
+}
+
+async function readGitHubResponse(
+  response: Response,
+  capBytes: number,
+): Promise<GitHubRelayResponse> {
+  const bodyBytes = await readGitHubBody(response, capBytes);
   const contentType = response.headers.get("content-type") ?? "";
   const { body, encoding } = decodeBody(bodyBytes, contentType);
   return {
@@ -90,6 +87,7 @@ async function callGitHubAPI(
     headers: githubResponseHeaders(response.headers),
     body,
     body_encoding: encoding,
+    ...(isSecondaryRateLimit(response.status, body) ? { secondaryRateLimited: true as const } : {}),
   };
 }
 

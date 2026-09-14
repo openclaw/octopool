@@ -229,6 +229,41 @@ describe("persisted quota feedback", () => {
 
 describe("persisted cooldown feedback", () => {
   it.each([
+    { status: 403, rate: { remaining: 9, resetAt: R2 }, duration: 60_000 },
+    { status: 429, rate: {}, duration: 60_000 },
+    { status: 403, rate: { remaining: 0, resetAt: R2 }, duration: R2 * 1000 - NOW },
+    { status: 403, rate: { retryAfter: 1 }, duration: 60_000 },
+    { status: 429, rate: { retryAfter: 180 }, duration: 180_000 },
+    { status: 403, rate: { retryAfter: NaN }, duration: 60_000 },
+  ])(
+    "persists identity-wide secondary cooldowns for $status $rate",
+    async ({ status, rate, duration }) => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(NOW);
+      let stub = coordinator();
+      await stub.recordResult({ ...feedback(rate, status), secondaryRateLimited: true });
+      await evictDurableObject(stub);
+      stub = coordinator();
+      expect((await rows()).cooldowns).toEqual([
+        {
+          identity_id: "a",
+          route_key: "*",
+          status,
+          reason: "github_error",
+          expires_at: NOW + duration,
+        },
+      ]);
+      for (const resource of ["core", "search"]) {
+        expect((await stub.selectIdentity(request("B", resource))).kind).toBe("unavailable");
+      }
+      expect((await stub.selectIdentity(request("B", "core", "b"))).kind).toBe("selected");
+      clock.mockReturnValue(NOW + duration - 1);
+      expect((await stub.selectIdentity(request("B"))).kind).toBe("unavailable");
+      clock.mockReturnValue(NOW + duration);
+      expect((await stub.selectIdentity(request("B"))).kind).toBe("selected");
+    },
+  );
+
+  it.each([
     { seconds: 9_005_399_254_740, key: "*", deadline: 9_007_199_254_740_000 },
     { seconds: 9_005_399_254_741, key: "resource:core", deadline: NOW + 120_000 },
   ])(

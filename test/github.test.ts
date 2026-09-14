@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callPublicGitHub } from "../src/github";
+import { callPublicGitHub, probeGitHubLog } from "../src/github";
+import { sanitizeGitHubResponse } from "../src/github-sanitize";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { responseCapBytes } from "../src/github-limits";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
@@ -10,6 +11,49 @@ describe("github api provider", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    [403, "You have exceeded a secondary rate limit.", true],
+    [429, "You have exceeded a secondary rate limit.", true],
+    [403, "Resource not accessible by integration", false],
+    [403, "API rate limit exceeded", false],
+    [200, "You have exceeded a secondary rate limit.", false],
+  ] as const)(
+    "classifies secondary limits before sanitizing status %s: %s",
+    async (status, message, limited) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ message }, { status })),
+      );
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool",
+      });
+      const route = classifyRoute(request, policy);
+      const response = sanitizeGitHubResponse(route, await callPublicGitHub(env(), request, route));
+      expect(response.body).not.toHaveProperty("message");
+      expect(response.secondaryRateLimited).toBe(limited ? true : undefined);
+    },
+  );
+
+  it("retains secondary-limit feedback from an unsuccessful log existence probe", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ message: "You have exceeded a secondary rate limit." }, { status: 403 }),
+      ),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/jobs/42/logs",
+    });
+    expect(await probeGitHubLog(env(), "test-token", request)).toMatchObject({
+      kind: "unknown",
+      response: { status: 403, secondaryRateLimited: true },
+    });
   });
 
   it.each(opaqueBytes)("round-trips API $name without changing bytes", async (fixture) => {

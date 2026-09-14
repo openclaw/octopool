@@ -27,6 +27,46 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end cache revalidation", () => {
+  it("does not reuse a secondary-limited revalidation identity for another route", async () => {
+    await seedPool({ secondary: true });
+    let limited = false;
+    let primaryRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const token = bearer(request);
+        if (token === "test-org-token") return jsonResponse({ private: false });
+        if (token === "test-primary-token") {
+          primaryRequests++;
+          return limited
+            ? jsonResponse(
+                { message: "You have exceeded a secondary rate limit." },
+                403,
+                rateHeaders({ remaining: 4_998 }),
+              )
+            : jsonResponse({ id: 123, status: "in_progress" }, 200, {
+                ...rateHeaders({ remaining: 4_999 }),
+                etag: '"identity-run"',
+              });
+        }
+        if (token === "test-secondary-token")
+          return jsonResponse({ id: 123, status: "completed" }, 200);
+        return jsonResponse({ message: "anonymous unavailable" }, 503);
+      }),
+    );
+    await relay(RUN_PATH);
+    await expireCacheEntry("run_view");
+    limited = true;
+    for (const path of [RUN_PATH, "/repos/openclaw/octopool/issues/42"]) {
+      expect(await (await relay(path)).json()).toMatchObject({ identity: { id: "secondary" } });
+    }
+    expect(primaryRequests).toBe(2);
+    expect((await poolCoordinatorStub(env, POOL).snapshot()).cooldowns).toEqual([
+      expect.objectContaining({ identity_id: "primary", route_key: "*", status: 403 }),
+    ]);
+  });
+
   it.each(["network", "timeout"])(
     "recovers an asynchronous %s failure in explicit public API revalidation",
     async (failure) => {

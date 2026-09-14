@@ -1,3 +1,5 @@
+import { isRecord } from "./object";
+
 const RESPONSE_HEADERS = [
   "etag",
   "last-modified",
@@ -10,6 +12,17 @@ const RESPONSE_HEADERS = [
   "retry-after",
   "x-github-request-id",
 ];
+
+export function isSecondaryRateLimit(status: number, body: unknown): boolean {
+  // GitHub can omit Retry-After on secondary limits. A permission 403 alone
+  // is not enough: only the documented error message identifies this scope.
+  return (
+    (status === 403 || status === 429) &&
+    isRecord(body) &&
+    typeof body.message === "string" &&
+    /\bsecondary rate\b/i.test(body.message)
+  );
+}
 
 export function githubResponseHeaders(
   headers: Headers,

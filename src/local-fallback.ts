@@ -14,11 +14,12 @@ export function localFallbackError(error: unknown): HttpError | undefined {
 export function githubResponseLocalFallbackReason(
   status: number,
   rate: GitHubRate,
+  secondaryRateLimited = false,
 ): string | undefined {
   if (status === 401) {
     return "github_identity_unauthorized";
   }
-  if (status === 429 || rate.retryAfter !== undefined) {
+  if (status === 429 || rate.retryAfter !== undefined || secondaryRateLimited) {
     return "github_rate_limited";
   }
   if (status === 403 && rate.remaining === 0) {

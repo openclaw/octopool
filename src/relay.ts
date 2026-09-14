@@ -604,14 +604,15 @@ async function finishRevalidation(
   if (github.status !== 304) {
     if (identity !== undefined) {
       if (
-        githubResponseLocalFallbackReason(github.status, rateFromHeaders(github.headers)) !==
-        undefined
+        githubResponseLocalFallbackReason(
+          github.status,
+          rateFromHeaders(github.headers),
+          github.secondaryRateLimited,
+        ) !== undefined
       ) {
         state.failedIdentityIds.add(identity.id);
       }
-      await state.coordinator.recordResult(
-        coordinatorResult(state, identity, github.status, rateFromHeaders(github.headers)),
-      );
+      await state.coordinator.recordResult(coordinatorResult(state, identity, github));
     }
     return undefined;
   }
@@ -732,6 +733,7 @@ async function callPublicBackend(state: ActiveRelay): Promise<Response> {
   const fallbackReason = githubResponseLocalFallbackReason(
     github.status,
     rateFromHeaders(github.headers),
+    github.secondaryRateLimited,
   );
   if (fallbackReason === undefined) {
     return finalizeRelaySuccess(state, { github, backend: "github_public" });
@@ -799,6 +801,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     if (token === undefined) continue;
     const terminalLog = await revalidateCachedTerminalLog(state, identity, selection.reason, token);
     if (terminalLog !== undefined) return terminalLog;
+    if (state.failedIdentityIds.has(identity.id)) continue;
     const firstPage = sanitizeGitHubResponse(
       state.route,
       await callGitHub(state.env, token, state.cacheRequest, state.route),
@@ -811,11 +814,15 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
       identityRunJobsPage(state, identity, firstPage),
     );
     const rate = rateFromHeaders(github.headers);
-    const identityFallback = githubResponseLocalFallbackReason(github.status, rate);
+    const identityFallback = githubResponseLocalFallbackReason(
+      github.status,
+      rate,
+      github.secondaryRateLimited,
+    );
     if (identityFallback !== undefined) {
       state.failedIdentityIds.add(identity.id);
       fallbackReason = identityFallback;
-      await state.coordinator.recordResult(coordinatorResult(state, identity, github.status, rate));
+      await state.coordinator.recordResult(coordinatorResult(state, identity, github, rate));
       continue;
     }
     return finalizeRelaySuccess(state, {
@@ -881,7 +888,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
       state.ctx.waitUntil(
         state.coordinator.recordResult(
-          coordinatorResult(state, result.identity, result.github.status, result.rate),
+          coordinatorResult(state, result.identity, result.github, result.rate),
         ),
       );
     }
@@ -919,7 +926,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     if (result.identity !== undefined) {
       state.ctx.waitUntil(
         state.coordinator.recordResult(
-          coordinatorResult(state, result.identity, result.github.status, result.rate),
+          coordinatorResult(state, result.identity, result.github, result.rate),
         ),
       );
     }
@@ -960,8 +967,9 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
         coordinatorResult(
           state,
           result.identity,
-          result.upstreamStatus ?? result.github.status,
+          result.github,
           result.rate,
+          result.upstreamStatus,
         ),
       ),
     );
@@ -991,14 +999,16 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
 function coordinatorResult(
   state: ActiveRelay,
   identity: Identity,
-  status: number,
-  rate: GitHubRate | undefined,
+  response: Pick<GitHubRelayResponse, "status" | "headers" | "secondaryRateLimited">,
+  rate: GitHubRate | undefined = rateFromHeaders(response.headers),
+  status = response.status,
 ): RecordResult {
   return {
     identityId: identity.id,
     routeKey: state.route.routeKey,
     resource: state.route.resource,
     status,
+    ...(response.secondaryRateLimited === true ? { secondaryRateLimited: true as const } : {}),
     ...(rate === undefined ? {} : { rate }),
   };
 }
@@ -1011,9 +1021,7 @@ async function recordFirstPaginatedIdentityRate(
   if (state.paginatedIdentityRateRecorded) {
     return;
   }
-  await state.coordinator.recordResult(
-    coordinatorResult(state, identity, response.status, rateFromHeaders(response.headers)),
-  );
+  await state.coordinator.recordResult(coordinatorResult(state, identity, response));
   state.paginatedIdentityRateRecorded = true;
 }
 
@@ -1036,9 +1044,7 @@ function identityRunJobsPage(
       state.route,
       await callGitHub(state.env, token, request, state.route),
     );
-    await state.coordinator.recordResult(
-      coordinatorResult(state, identity, page.status, rateFromHeaders(page.headers)),
-    );
+    await state.coordinator.recordResult(coordinatorResult(state, identity, page));
     return page;
   };
 }
@@ -1349,35 +1355,43 @@ async function revalidateCachedTerminalLog(
     return undefined;
   }
   state.terminalLogCached = undefined;
+  let probe: Awaited<ReturnType<typeof probeGitHubLog>>;
   try {
-    const probe = await probeGitHubLog(state.env, token, state.request);
-    if (probe.kind === "exists") {
-      await publishTerminalLogCache(state.env, key, cached);
-      state.ctx.waitUntil(
-        state.coordinator.recordResult(
-          coordinatorResult(state, identity, probe.status, rateFromHeaders(probe.headers)),
-        ),
-      );
-      return serveCachedGitHubResponse(
-        state.env,
-        state.ctx,
-        cachedResponseParams(state, cached, "hit"),
-      );
-    }
-    if (probe.kind === "deleted") {
-      await deleteTerminalLogCache(state.env, key);
-      const github = sanitizeGitHubResponse(state.route, probe.response);
-      return finalizeRelaySuccess(state, {
-        github,
-        identity,
-        leaseReason,
-        rate: rateFromHeaders(github.headers),
-      });
-    }
+    probe = await probeGitHubLog(state.env, token, state.request);
   } catch (error) {
     rethrowStringRewriteDenial(error);
     console.error("actions log existence probe failed", error);
+    return undefined;
   }
+  if (probe.kind === "exists") {
+    await publishTerminalLogCache(state.env, key, cached);
+    state.ctx.waitUntil(state.coordinator.recordResult(coordinatorResult(state, identity, probe)));
+    return serveCachedGitHubResponse(
+      state.env,
+      state.ctx,
+      cachedResponseParams(state, cached, "hit"),
+    );
+  }
+  const github = sanitizeGitHubResponse(state.route, probe.response);
+  if (probe.kind === "deleted") {
+    await deleteTerminalLogCache(state.env, key);
+    return finalizeRelaySuccess(state, {
+      github,
+      identity,
+      leaseReason,
+      rate: rateFromHeaders(github.headers),
+    });
+  }
+  const rate = rateFromHeaders(github.headers);
+  if (
+    githubResponseLocalFallbackReason(github.status, rate, github.secondaryRateLimited) !==
+    undefined
+  ) {
+    // A failed existence probe must not immediately retry the same credential
+    // as a full log download before the coordinator cooldown can take effect.
+    state.failedIdentityIds.add(identity.id);
+  }
+  await state.coordinator.recordResult(coordinatorResult(state, identity, github, rate));
   return undefined;
 }
 

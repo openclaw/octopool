@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { historicalHead, runPage } from "../fixtures/actions-ownership";
 
 type RelayEnvelope = {
@@ -13,6 +14,54 @@ type RelayEnvelope = {
 
 describe("Actions attempt job-list cache", () => {
   beforeEach(seedPool);
+
+  it("records a secondary limit from a later identity-backed jobs page", async () => {
+    const pages: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (bearer(request) === "test-org-token") return jsonResponse({ private: false });
+        if (bearer(request) !== "test-primary-token")
+          return jsonResponse({ message: "anonymous unavailable" }, 503);
+        pages.push(url.searchParams.get("page")!);
+        if (url.searchParams.get("page") === "2") {
+          return jsonResponse(
+            { message: "You have exceeded a secondary rate limit." },
+            403,
+            rateHeaders({ remaining: 4_998 }),
+          );
+        }
+        return jsonResponse(
+          { total_count: 200, jobs: Array.from({ length: 100 }, (_, id) => ({ id })) },
+          200,
+          rateHeaders({ remaining: 4_999 }),
+        );
+      }),
+    );
+    const response = await relay(
+      "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs",
+      undefined,
+      {
+        query: { per_page: "100" },
+        headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+      },
+    );
+    expect(response.status).toBe(424);
+    expect(pages).toEqual(["1", "2"]);
+    const coordinator = poolCoordinatorStub(env, "maintainers");
+    expect((await coordinator.snapshot()).cooldowns).toEqual([
+      expect.objectContaining({ identity_id: "primary", route_key: "*", status: 403 }),
+    ]);
+    expect(
+      await coordinator.selectIdentity({
+        routeKey: "another route",
+        resource: "search",
+        candidates: [{ id: "primary", weight: 200 }],
+      }),
+    ).toMatchObject({ kind: "unavailable" });
+  });
 
   it("shares bounded latest variants on an attempt-qualified complete page", async () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {

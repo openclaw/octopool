@@ -465,6 +465,12 @@ function classifyCooldown(result: RecordResult, now: number): { key: string; ttl
   if (result.status === 401) {
     return { key: "*", ttlMs: retryAfterMs ?? 120_000 };
   }
+  if (result.secondaryRateLimited === true) {
+    const resetAt = result.rate?.resetAt;
+    const resetWaitMs =
+      result.rate?.remaining === 0 && isRateSeconds(resetAt) ? resetAt * 1000 - now : 0;
+    return { key: "*", ttlMs: Math.max(60_000, retryAfterMs ?? resetWaitMs) };
+  }
   if (retryAfterMs !== undefined) {
     return { key: "*", ttlMs: retryAfterMs };
   }
