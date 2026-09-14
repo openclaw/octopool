@@ -168,7 +168,16 @@ describe("mutable commit CI cache", () => {
         }
         return jsonResponse(result("queued"));
       });
-      vi.stubGlobal("fetch", upstream);
+      // A failed anonymous resource fetch requires a live visibility probe;
+      // the seeded proof only covers serving the old cached body.
+      const publicRepoProbe = vi.fn(() => jsonResponse({ private: false }));
+      const fetchWithPublicRepoProbe: typeof fetch = async (input, init) => {
+        if (new Request(input, init).url === "https://api.github.com/repos/openclaw/octopool") {
+          return publicRepoProbe();
+        }
+        return upstream(input, init);
+      };
+      vi.stubGlobal("fetch", fetchWithPublicRepoProbe);
       const response = await relay(path);
       if (storage === "stale") {
         expect(response.status).toBe(424);
@@ -179,6 +188,9 @@ describe("mutable commit CI cache", () => {
         });
       }
       expect(upstream).toHaveBeenCalledTimes(storage === "identity" ? 2 : 1);
+      expect(publicRepoProbe).toHaveBeenCalledTimes(
+        storage === "identity" || storage === "stale" ? 1 : 0,
+      );
     },
   );
 });
