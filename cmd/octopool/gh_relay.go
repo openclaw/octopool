@@ -283,6 +283,11 @@ func writeGHBody(ctx context.Context, stdout io.Writer, envelope relayEnvelope, 
 		_, _ = stdout.Write(out)
 		return fmt.Errorf("github returned status %d", envelope.Status)
 	}
+	if envelope.BodyEncoding != "json" && jq == "" {
+		// Opaque bodies are downloads: a formatting newline changes their bytes.
+		_, err := io.Copy(stdout, bytes.NewReader(out))
+		return err
+	}
 	return writeBytes(ctx, stdout, out, jq)
 }
 

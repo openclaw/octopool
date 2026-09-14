@@ -45,6 +45,38 @@ func TestRunGHAPIPaginatesArrayResponse(t *testing.T) {
 	}
 }
 
+func TestWriteGHAPIPagesPreservesRawBodies(t *testing.T) {
+	for _, test := range []struct {
+		name, encoding, contentType string
+		bodies                      []string
+		want                        string
+	}{
+		{"text", "text", "text/plain", []string{`"hello"`, `" world"`}, "hello world"},
+		{"text resembling arrays", "text", "text/plain", []string{`" [1] "`, `" [2] "`}, " [1]  [2] "},
+		{"binary", "base64", "application/octet-stream", []string{`"AAEC"`, `"//4="`}, string([]byte{0, 1, 2, 255, 254})},
+		{"empty", "text", "text/plain", []string{`null`, `""`}, ""},
+		{"json array formatting", "json", "application/json", []string{`[1]`, `[2]`}, "[1,2]\n"},
+		{"text encoded json", "text", "application/vnd.github+json; charset=utf-8", []string{`"[1]"`, `"[2]"`}, "[1,2]\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pages := make([]relayEnvelope, 0, len(test.bodies))
+			for _, body := range test.bodies {
+				pages = append(pages, relayEnvelope{
+					Status: 200, Body: json.RawMessage(body), BodyEncoding: test.encoding,
+					Headers: map[string]string{"Content-Type": test.contentType},
+				})
+			}
+			var out bytes.Buffer
+			if err := writeGHAPIPages(t.Context(), &out, pages, "", false); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != test.want {
+				t.Fatalf("output = %q, want %q", out.String(), test.want)
+			}
+		})
+	}
+}
+
 func TestRunGHAPIPaginatesExactMultipleThroughEmptyPage(t *testing.T) {
 	requests := 0
 	relayTestServer(t, func(body map[string]any) any {

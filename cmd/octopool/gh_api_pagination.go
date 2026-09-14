@@ -311,6 +311,7 @@ func writeGHAPIPages(
 	slurp bool,
 ) error {
 	bodies := make([][]byte, 0, len(pages))
+	hasOpaqueBody := false
 	for _, envelope := range pages {
 		body, err := decodeRelayBody(envelope)
 		if err != nil {
@@ -320,12 +321,28 @@ func writeGHAPIPages(
 			return errors.New("cannot slurp a non-JSON response")
 		}
 		bodies = append(bodies, body)
+		// Vendor +json responses can arrive text-encoded; real gh still
+		// coalesces their arrays based on the upstream content type.
+		contentType, _ := relayResponseHeader(envelope.Headers, "content-type")
+		mediaType, _, _ := strings.Cut(contentType, ";")
+		hasOpaqueBody = hasOpaqueBody || (envelope.BodyEncoding != "json" &&
+			!strings.HasSuffix(mediaType, "/json") && !strings.HasSuffix(mediaType, "+json"))
 	}
 	// real gh evaluates --jq once per response page; only --slurp collapses
 	// the pages into a single jq input.
 	if jq != "" && !slurp {
 		for _, body := range bodies {
 			if err := writeBytes(ctx, stdout, body, jq); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if hasOpaqueBody && !slurp {
+		// Link-backed opaque pages must bypass both JSON array merging and
+		// the trailing newline used for formatted JSON output.
+		for _, body := range bodies {
+			if _, err := io.Copy(stdout, bytes.NewReader(body)); err != nil {
 				return err
 			}
 		}

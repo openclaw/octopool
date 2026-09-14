@@ -114,20 +114,32 @@ func TestCLIEndToEndRelayProtocol(t *testing.T) {
 			"gh", "api", "repos/openclaw/octopool/contents/README.md?ref=main",
 			"-H", "Accept: application/vnd.github.raw+json",
 		)
-		if result.err != nil || result.stdout != "hello from relay\n" {
+		if result.err != nil || result.stdout != "hello from relay" {
 			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
 		}
 	})
 
-	t.Run("decodes base64 response", func(t *testing.T) {
-		server := cliRelayServer(t, func(w http.ResponseWriter, _ *http.Request) {
-			writeRawCLIEnvelope(t, w, 200, "base64", "AAEC")
+	for _, test := range []struct {
+		name, encoding string
+		body           any
+		want           string
+	}{
+		{"binary", "base64", "AAEC", string([]byte{0, 1, 2})},
+		{"binary trailing newline", "base64", "AAECCg==", string([]byte{0, 1, 2, '\n'})},
+		{"text trailing newline", "text", "hello\n", "hello\n"},
+		{"empty text", "text", "", ""},
+		{"null body", "text", nil, ""},
+	} {
+		t.Run("preserves raw response bytes/"+test.name, func(t *testing.T) {
+			server := cliRelayServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				writeRawCLIEnvelope(t, w, 200, test.encoding, test.body)
+			})
+			result := runCLI(t, bin, server.URL, nil, "gh", "api", "repos/openclaw/octopool")
+			if result.err != nil || result.stdout != test.want {
+				t.Fatalf("err=%v stdout=%q want=%q stderr=%q", result.err, result.stdout, test.want, result.stderr)
+			}
 		})
-		result := runCLI(t, bin, server.URL, nil, "gh", "api", "repos/openclaw/octopool")
-		if result.err != nil || result.stdout != string([]byte{0, 1, 2})+"\n" {
-			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
-		}
-	})
+	}
 
 	for _, encoding := range []string{"", "yaml"} {
 		name := "rejects unknown encoding"

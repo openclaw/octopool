@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
+	"io"
 	"testing"
 )
 
@@ -43,6 +45,35 @@ func TestEnvelopeBodyBytesRejectsGitHubErrorStatus(t *testing.T) {
 		t.Fatal("expected GitHub status error")
 	}
 }
+
+func TestRawRelayOutputWriteErrors(t *testing.T) {
+	envelope := relayEnvelope{Status: 200, BodyEncoding: "text", Body: []byte(`"hello"`)}
+	wantError := errors.New("output closed")
+	for _, test := range []struct {
+		name string
+		out  relayBodyTestWriter
+		want error
+	}{
+		{"write error", relayBodyTestWriter{err: wantError}, wantError},
+		{"short write", relayBodyTestWriter{n: 1}, io.ErrShortWrite},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := writeGHBody(t.Context(), test.out, envelope, ""); !errors.Is(err, test.want) {
+				t.Errorf("direct output error = %v, want %v", err, test.want)
+			}
+			if err := writeGHAPIPages(t.Context(), test.out, []relayEnvelope{envelope}, "", false); !errors.Is(err, test.want) {
+				t.Errorf("paginated output error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+type relayBodyTestWriter struct {
+	n   int
+	err error
+}
+
+func (w relayBodyTestWriter) Write([]byte) (int, error) { return w.n, w.err }
 
 func quotedBase64(value []byte) []byte {
 	return []byte(`"` + base64.StdEncoding.EncodeToString(value) + `"`)
