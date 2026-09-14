@@ -82,10 +82,13 @@ export async function githubCacheKey(
     pool,
     method: request.method,
     path: request.path,
-    query: normalizedCacheQuery(request.query ?? {}),
+    query: normalizedCacheQuery(request.query ?? {}, route.kind),
     headers: stableRecord(varyHeaders),
     route_key: route.routeKey,
     state: cacheStateDiscriminator(route),
+    // Old compare keys conflated GitHub's unpaged 250-commit response with
+    // explicit pagination, including the default 30-commit first page.
+    ...(route.kind === "compare" ? { query_semantics: "compare-pagination-v1" } : {}),
     // Retire contaminated page shapes for existing clients in every cache/fill path.
     ...(request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.actionsSummary &&
     ["run_view", "run_list", "workflow_run_list"].includes(route.kind)
@@ -490,11 +493,12 @@ function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, stri
 
 function normalizedCacheQuery(
   input: Record<string, string | string[]>,
+  kind: RouteInfo["kind"],
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const key of Object.keys(input).sort()) {
     const value = input[key];
-    if (value === undefined || defaultQueryValue(key, value)) {
+    if (value === undefined || (kind !== "compare" && defaultQueryValue(key, value))) {
       continue;
     }
     out[key] = Array.isArray(value) ? [...value] : value;

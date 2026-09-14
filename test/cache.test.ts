@@ -105,6 +105,44 @@ describe("github cache policy", () => {
     );
   });
 
+  it.each([undefined, { id: "primary", kind: "pat" as const }])(
+    "keeps compare pagination presence separate and retires old keys for %j",
+    async (identity) => {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/compare/base...head",
+      });
+      const route = classifyRoute(request, policy);
+      // The unpaged and default-page requests shared this digest at 8f42793.
+      const retired =
+        identity === undefined
+          ? "LpYd5940bJTLFeB01Z1l1H8C4IuTPINZphvXXFZ7nHk"
+          : "O-LH0lsicrFTucOoKOunSLc9mvOkjx6VWAY4q7S92Ko";
+      const queries: Record<string, string>[] = [
+        {},
+        { page: "1" },
+        { per_page: "30" },
+        { page: "1", per_page: "30" },
+      ];
+      const keys = await Promise.all(
+        queries.map((query) =>
+          githubCacheKey(request.pool, { ...request, query }, route, identity),
+        ),
+      );
+      expect(new Set(keys).size).toBe(queries.length);
+      expect(keys).not.toContain(retired);
+      expect(
+        await githubCacheKey(
+          request.pool,
+          { ...request, query: { per_page: "30", page: "1" } },
+          route,
+          identity,
+        ),
+      ).toBe(keys[3]);
+    },
+  );
+
   it.each([
     ["/repos/openclaw/openclaw/actions/runs", "actions-summary-v1"],
     ["/repos/openclaw/openclaw/pulls/85341", "pr-summary-v1"],
