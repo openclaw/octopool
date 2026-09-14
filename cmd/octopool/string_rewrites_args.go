@@ -141,7 +141,8 @@ var rewriteRepoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 var rewriteRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./:-]*$`)
 
 func validRewriteBaseBranch(branch string) bool {
-	return rewriteRefPattern.MatchString(branch) && exec.Command("git", "check-ref-format", "--branch", branch).Run() == nil
+	// Git expands @{-n} in --branch mode; publication needs a literal name.
+	return !strings.Contains(branch, "@{") && exec.Command("git", "check-ref-format", "--branch", branch).Run() == nil
 }
 
 func rewriteRepo(flags *rewriteFlags, policy stringRewritePolicy) error {
