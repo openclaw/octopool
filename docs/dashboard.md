@@ -24,14 +24,19 @@ non-admin org members cannot load dashboard data.
 - caller and pool identity
 - active/total pooled identities
 - Durable Object rate-limit snapshots, active cooldowns, and live leases
-- D1 cache totals, fresh/expired entries, body byte size, raw and successful-eligible hit
-  rates, and route-kind breakdown
-- top route kinds for the last 24 hours, with eligible hit rate, coalesced fills, local
+- D1 cache totals, fresh/expired entries, body byte size, raw and successful-eligible
+  cached-body reuse rates, and route-kind breakdown
+- top route kinds for the last 24 hours, with eligible body-reuse rate, coalesced fills, local
   fallbacks, and service errors
 - seven-day normalized route-key traffic and fallback/failure outcome tables
 - public-repo proof count
-- per-caller and per-client usage for the last seven days
+- per-caller and per-client usage for the last seven days, with cache-served responses
+  and uncached outcomes
 - recent audit traffic with caller client, route kind, status, fallback reason, identity,
   and duration
+
+Counts describe relay-audited outcomes, not actual or avoided upstream requests. A cache
+serve can perform GitHub probes; an uncached outcome can perform zero or several fetches.
+Policy GETs and failures before relay admission are outside these totals.
 
 Secrets, raw caller tokens, PAT values, and GitHub App private keys are never returned.

@@ -326,8 +326,9 @@ wrangler r2 bucket lifecycle add octopool-actions-logs octopool-actions-logs-exp
 The operator owns this rule; worker code does not scan R2 or manage bucket lifecycle.
 
 As with edge + D1 hits, Octopool runs the public-repository guard before returning an R2
-log hit. Successful hits are audited as cacheable `hit` events and count as saved GitHub
-requests; active-run log fetches remain non-cacheable `bypass` events.
+log hit. Successful hits are audited as cacheable `hit` events and count as cache-served
+responses; active-run log fetches remain non-cacheable `bypass` events. Neither outcome
+counts upstream requests, including visibility and log-existence probes.
 Requests carrying `If-None-Match` or `If-Modified-Since` skip the completion lookup and
 all R2 reads and writes, preserving the normal conditional-request bypass path.
 
@@ -491,10 +492,18 @@ for rollout, restore, and backlog monitoring requirements.
 Hits are still audited, with the cached identity attributed. Each audit row records cache
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and
 the dashboard hit-rate/top-route views. Coalesced followers are marked separately. Stats
-count both fresh and stale hits as saved GitHub requests and expose an eligible hit rate
-that excludes failed misses and deliberate local fallback responses.
-Successful `304` refreshes use the existing `hit` status so current stats and CLI parsers count
-the saved request, with `fallback_reason = cache_revalidated` as the distinct audit marker.
+count fresh and stale hits as `cache_served_responses`, including bodies reused after a
+successful `304` refresh. Miss and bypass rows count as `uncached_outcomes`, including
+failed requests and local fallbacks. The body-reuse rate retains the historical
+`cache_hit_rate` field; its eligible variant excludes failed misses and deliberate local
+fallback responses. Successful `304` refreshes retain `hit` with
+`fallback_reason = cache_revalidated` as their distinct audit marker.
+These are relay-audited outcomes, not actual or avoided GitHub requests: one outcome can
+include several upstream attempts, and cache serves can require visibility, membership,
+or revalidation checks. Unknown cache outcomes are counted separately.
+The deprecated JSON fields `saved_github_requests` and `backend_requests` remain historical
+aliases for `cache_served_responses` and `uncached_outcomes` for shipped clients; they do
+not measure GitHub savings or fetch totals. New consumers must use the canonical fields.
 Audit backend describes the resource fetch or verifier for that request: anonymous API
 `200` replacements and `304` validations use `github_api`, regardless of the cached body's
 source. Request-only verifier metadata does not alter stored identity, body encoding, delivered

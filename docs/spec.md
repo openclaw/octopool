@@ -232,10 +232,10 @@ Configuration: `OCTOPOOL_URL`, `OCTOPOOL_TOKEN`, `OCTOPOOL_POOL`, `OCTOPOOL_GH_P
 
 ## Operations and observability
 
-The stats API and dashboard expose request/error/fallback counts, cache hit/miss/stale/
-bypass metrics, successful-eligible hit rate, coalesced fills, top routes, normalized route
-patterns, outcome causes, per-caller/client use, identity health, rate snapshots, cooldowns, leases,
-cache size, and public-proof counts.
+The stats API and dashboard expose relay-audited request/error/fallback counts, cache
+hit/miss/stale/bypass outcomes, successful-eligible body-reuse rate, coalesced fills, top
+routes, normalized route patterns, outcome causes, per-caller/client use, identity health,
+rate snapshots, cooldowns, leases, cache size, and public-proof counts.
 
 Hourly maintenance deletes cache entries after persisted route-specific stale deadlines and
 audit events older than the 30-day stats window in bounded batches.

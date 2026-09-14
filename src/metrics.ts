@@ -39,7 +39,11 @@ export type CacheAggregate = {
   eligible_cache_hit_rate: number | null;
   bypass_rate: number | null;
   coalesced: number;
+  cache_served_responses: number;
+  uncached_outcomes: number;
+  /** @deprecated Historical alias for cache_served_responses, not avoided GitHub requests. */
   saved_github_requests: number;
+  /** @deprecated Historical alias for uncached_outcomes, not upstream fetches. */
   backend_requests: number;
 };
 
@@ -56,9 +60,11 @@ export function normalizeCacheActivity(row: CacheActivityRow | null, eligibleSuc
   const cacheHits = row?.cache_hits ?? 0;
   const cacheStale = row?.cache_stale ?? 0;
   const cacheMisses = row?.cache_misses ?? 0;
-  const saved = cacheHits + cacheStale;
-  const cacheDenominator = saved + cacheMisses;
-  const eligibleHits = eligibleSuccessOnly ? (row?.eligible_cache_hits ?? saved) : saved;
+  const cacheServed = cacheHits + cacheStale;
+  const cacheDenominator = cacheServed + cacheMisses;
+  const eligibleHits = eligibleSuccessOnly
+    ? (row?.eligible_cache_hits ?? cacheServed)
+    : cacheServed;
   const eligibleRequests = row?.eligible_cache_requests ?? 0;
   return {
     cache_hits: cacheHits,
@@ -66,10 +72,10 @@ export function normalizeCacheActivity(row: CacheActivityRow | null, eligibleSuc
     cache_misses: cacheMisses,
     cache_bypass: row?.cache_bypass ?? 0,
     coalesced: row?.coalesced ?? 0,
-    cache_hit_rate: cacheDenominator === 0 ? null : saved / cacheDenominator,
+    cache_hit_rate: cacheDenominator === 0 ? null : cacheServed / cacheDenominator,
     eligible_cache_hit_rate: eligibleRequests === 0 ? null : eligibleHits / eligibleRequests,
-    saved_github_requests: saved,
-    backend_requests: cacheMisses + (row?.cache_bypass ?? 0),
+    cache_served_responses: cacheServed,
+    uncached_outcomes: cacheMisses + (row?.cache_bypass ?? 0),
   };
 }
 
@@ -93,12 +99,14 @@ export function normalizeAggregate(row: UsageAggregateRow | null): CacheAggregat
     eligible_cache_requests: row?.eligible_cache_requests ?? 0,
     cache_hit_rate: cache.cache_hit_rate,
     cacheable_hit_rate:
-      cacheableRequests === 0 ? null : cache.saved_github_requests / cacheableRequests,
+      cacheableRequests === 0 ? null : cache.cache_served_responses / cacheableRequests,
     eligible_cache_hit_rate: cache.eligible_cache_hit_rate,
     bypass_rate: requests === 0 ? null : cache.cache_bypass / requests,
     coalesced: cache.coalesced,
-    saved_github_requests: cache.saved_github_requests,
-    backend_requests: cache.backend_requests,
+    cache_served_responses: cache.cache_served_responses,
+    uncached_outcomes: cache.uncached_outcomes,
+    saved_github_requests: cache.cache_served_responses,
+    backend_requests: cache.uncached_outcomes,
   };
 }
 

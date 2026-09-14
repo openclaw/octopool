@@ -726,6 +726,10 @@ describe("Worker end-to-end read models", () => {
         fallbacks: 1,
         cache_hits: 2,
         cache_misses: 2,
+        cache_served_responses: 2,
+        uncached_outcomes: 2,
+        saved_github_requests: 2,
+        backend_requests: 2,
       },
       caller_usage: {
         requests: 4,
@@ -740,6 +744,10 @@ describe("Worker end-to-end read models", () => {
         fallbacks: 0,
         cache_hits: 1,
         cache_misses: 1,
+        cache_served_responses: 1,
+        uncached_outcomes: 1,
+        saved_github_requests: 1,
+        backend_requests: 1,
       },
       cache: { total_entries: 0 },
     });
@@ -835,6 +843,16 @@ describe("Worker end-to-end read models", () => {
         cache_hit_rate_24h: 0.5,
         eligible_cache_hit_rate_24h: 0.5,
       },
+      clients: [
+        {
+          github_login: "caller",
+          requests: 3,
+          cache_served_responses: 1,
+          uncached_outcomes: 1,
+          saved_github_requests: 1,
+          backend_requests: 1,
+        },
+      ],
       cache: { total_entries: 0 },
     });
     expect(body.route_usage).toEqual(

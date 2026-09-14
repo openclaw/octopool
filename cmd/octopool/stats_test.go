@@ -2,9 +2,43 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestRenderStatsWorkerMetricVersions(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		body             string
+		cached, uncached int
+	}{
+		{"historical Worker", `{"saved_github_requests":7,"backend_requests":3}`, 7, 3},
+		{"canonical Worker", `{"cache_served_responses":7,"uncached_outcomes":3}`, 7, 3},
+		{"canonical zero", `{"cache_served_responses":0,"uncached_outcomes":0,"saved_github_requests":7,"backend_requests":3}`, 0, 0},
+		{"mixed Worker", `{"cache_served_responses":0,"saved_github_requests":7,"backend_requests":3}`, 0, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var aggregate statsAggregate
+			if err := json.Unmarshal([]byte(tc.body), &aggregate); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := renderStats(&out, statsResponse{
+				PoolUsage:   aggregate,
+				ClientUsage: aggregate,
+				Clients:     []statsClient{{ClientName: "test-client", statsAggregate: aggregate}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf("%d cache-served, %d uncached", tc.cached, tc.uncached)
+			if strings.Count(out.String(), want) != 3 {
+				t.Fatalf("expected pool, current-client and client-list metrics %q in:\n%s", want, out.String())
+			}
+		})
+	}
+}
 
 func TestRenderStats(t *testing.T) {
 	rate := 0.625
@@ -84,16 +118,16 @@ func TestRenderStats(t *testing.T) {
 		"pool: maintainers",
 		"operator: steipete",
 		"client: steipete-mbp",
-		"cache: 62.5% hit (5 hits, 2 stale, 3 misses, 4 bypass, 0 unknown)",
-		"eligible: 8/12 requests, 62.5% hit",
+		"cache: 62.5% body reuse (5 hits, 2 stale, 3 misses, 4 bypass, 0 unknown)",
+		"eligible: 8/12 requests, 62.5% body reuse",
 		"coalesced: 2 duplicate misses",
-		"github: 7 saved, 7 backend",
-		"this client: 5 requests, 4 saved, 1 backend",
+		"outcomes: 7 cache-served, 7 uncached",
+		"this client: 5 requests, 4 cache-served, 1 uncached",
 		"entries: 7 fresh / 9 total, 2 expired, 1.5 KiB",
-		"  pr_view: 6 req, 62.5% eligible hit, 1 stale, 1 miss, 2 bypass, 0 errors, 1 fallback",
-		"backends:\n  github_web / pr_view: 3 req, 3 miss, 0 bypass, 0 revalidated",
+		"  pr_view: 6 req, 62.5% eligible body reuse, 1 stale, 1 miss, 2 bypass, 0 errors, 1 fallback",
+		"backend-attributed relay outcomes:\n  github_web / pr_view: 3 req, 3 miss, 0 bypass, 0 revalidated",
 		"fallback reasons:\n  identity_pool_depleted / pr_view: 1 req",
-		"clients:\n  steipete-mbp: 5 req, 4 saved, 1 backend, 0 fallback",
+		"clients:\n  steipete-mbp: 5 req, 4 cache-served, 1 uncached, 0 fallback",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in:\n%s", want, got)
@@ -107,7 +141,7 @@ func TestRenderStatsNoRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if !strings.Contains(got, "cache: n/a hit") {
+	if !strings.Contains(got, "cache: n/a body reuse") {
 		t.Fatalf("missing n/a cache rate:\n%s", got)
 	}
 	if !strings.Contains(got, "top routes:\n  none") {
@@ -130,7 +164,7 @@ func TestRenderStatsClientFilter(t *testing.T) {
 	if !strings.Contains(got, "client: steipete-mbp\nclient filter: ci-runner\n") {
 		t.Fatalf("missing client filter after calling client:\n%s", got)
 	}
-	if !strings.Contains(got, "ci-runner: 4 requests, 1 saved, 3 backend") {
+	if !strings.Contains(got, "ci-runner: 4 requests, 1 cache-served, 3 uncached") {
 		t.Fatalf("missing filtered usage label:\n%s", got)
 	}
 	if strings.Contains(got, "this client:") {

@@ -44,12 +44,14 @@ describe("stats aggregates", () => {
       eligible_cache_hit_rate: null,
       bypass_rate: null,
       coalesced: 0,
+      cache_served_responses: 0,
+      uncached_outcomes: 0,
       saved_github_requests: 0,
       backend_requests: 0,
     });
   });
 
-  it("counts stale cache serves as saved GitHub requests", () => {
+  it("counts cache-served responses and uncached outcomes with historical wire aliases", () => {
     expect(
       normalizeAggregate({
         requests: 13,
@@ -84,6 +86,8 @@ describe("stats aggregates", () => {
       eligible_cache_hit_rate: 1,
       bypass_rate: 2 / 13,
       coalesced: 2,
+      cache_served_responses: 9,
+      uncached_outcomes: 5,
       saved_github_requests: 9,
       backend_requests: 5,
     });

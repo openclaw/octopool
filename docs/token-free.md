@@ -14,7 +14,8 @@ There are two different token-free transports:
   shapes; others are bounded shapes used only by supported top-level `gh --json`
   commands.
 
-Cache hits are separate: a fresh D1 cache hit contacts no GitHub endpoint.
+Cache hits reuse a stored body. Visibility, membership, and revalidation checks can still
+contact GitHub, so a cache hit is not proof of zero upstream requests.
 
 ## Selection rules
 

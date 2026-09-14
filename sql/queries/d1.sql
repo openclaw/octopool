@@ -200,8 +200,8 @@ SELECT
   audit_events.client_name,
   COUNT(*) AS requests,
   SUM(CASE WHEN audit_events.status >= 400 THEN 1 ELSE 0 END) AS errors,
-  SUM(CASE WHEN audit_events.cache_status IN ('hit', 'stale') THEN 1 ELSE 0 END) AS saved_github_requests,
-  SUM(CASE WHEN audit_events.cache_status IN ('miss', 'bypass') THEN 1 ELSE 0 END) AS backend_requests,
+  SUM(CASE WHEN audit_events.cache_status IN ('hit', 'stale') THEN 1 ELSE 0 END) AS cache_served_responses,
+  SUM(CASE WHEN audit_events.cache_status IN ('miss', 'bypass') THEN 1 ELSE 0 END) AS uncached_outcomes,
   MAX(audit_events.created_at) AS last_seen
 FROM audit_events
 JOIN callers ON callers.id = audit_events.caller_id

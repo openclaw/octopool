@@ -161,7 +161,7 @@ const DASHBOARD_HTML = `<!doctype html>
   </div>
   <section class="sect">
     <div class="sect-head"><span class="idx">04</span><h2>Top routes</h2><span class="note">24 hours</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Route</th><th class="num">Requests</th><th class="num">Eligible hit</th><th class="num">Coalesced</th><th class="num">Fallback</th><th class="num">Svc errors</th></tr></thead><tbody id="route-usage"></tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Route</th><th class="num">Requests</th><th class="num">Eligible reuse</th><th class="num">Coalesced</th><th class="num">Fallback</th><th class="num">Svc errors</th></tr></thead><tbody id="route-usage"></tbody></table></div>
   </section>
   <section class="sect">
     <div class="sect-head"><span class="idx">05</span><h2>Request patterns</h2><span class="note">7 days · normalized keys</span></div>
@@ -173,7 +173,7 @@ const DASHBOARD_HTML = `<!doctype html>
   </section>
   <section class="sect">
     <div class="sect-head"><span class="idx">07</span><h2>Client sessions</h2><span class="note">7 days</span></div>
-    <div class="table-wrap"><table><thead><tr><th>User</th><th>Client</th><th class="num">Requests</th><th class="num">Saved</th><th class="num">Backend</th><th class="num">Errors</th><th class="num">Last seen</th></tr></thead><tbody id="clients"></tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>User</th><th>Client</th><th class="num">Requests</th><th class="num">Cache-served</th><th class="num">Uncached</th><th class="num">Errors</th><th class="num">Last seen</th></tr></thead><tbody id="clients"></tbody></table></div>
   </section>
   <section class="sect">
     <div class="sect-head"><span class="idx">08</span><h2>Recent traffic</h2><span class="note">latest 20</span></div>
@@ -238,8 +238,8 @@ function render(data) {
   note.title = data.generated_at;
   who.replaceChildren(el("span", "", "beacon"), el("strong", data.operator.github_login), note);
   $("tiles").replaceChildren(
-    tile("Requests / 24h", fmt(data.usage.requests_24h), fmt(data.usage.service_errors_24h) + " svc · " + fmt(data.usage.fallbacks_24h) + " fallback · " + fmt(data.usage.denied_24h) + " denied", data.usage.service_errors_24h ? "hot" : ""),
-    tile("Eligible cache hit", pct(data.usage.eligible_cache_hit_rate_24h), pct(data.usage.cache_hit_rate_24h) + " raw · " + fmt(data.usage.coalesced_24h) + " coalesced"),
+    tile("Relay outcomes / 24h", fmt(data.usage.requests_24h), fmt(data.usage.service_errors_24h) + " svc · " + fmt(data.usage.fallbacks_24h) + " fallback · " + fmt(data.usage.denied_24h) + " denied", data.usage.service_errors_24h ? "hot" : ""),
+    tile("Eligible body reuse", pct(data.usage.eligible_cache_hit_rate_24h), pct(data.usage.cache_hit_rate_24h) + " raw · " + fmt(data.usage.coalesced_24h) + " coalesced"),
     tile("Average latency", Math.round(data.usage.avg_duration_ms_24h || 0) + " ms", "relay response time", data.usage.avg_duration_ms_24h > 1000 ? "warn" : ""),
     tile("Fresh cache", fmt(data.cache.fresh_entries), fmt(data.cache.total_entries) + " entries · " + bytes(data.cache.body_bytes)),
     tile("Identity health", fmt(data.identities.active) + "/" + fmt(data.identities.total), data.coordinator.cooldowns.length + " cooldowns", data.coordinator.cooldowns.length ? "warn" : ""),
@@ -250,7 +250,7 @@ function render(data) {
   rows("route-usage", data.route_usage, (item) => [item.route_kind, fmt(item.requests), pct(item.eligible_cache_hit_rate), fmt(item.coalesced), fmt(item.fallbacks), fmt(item.service_errors)]);
   rows("route-keys", data.route_keys_7d, (item) => [item.route_key, fmt(item.requests), fmt(item.cache_hits), fmt(item.cache_misses), fmt(item.coalesced), fmt(item.fallbacks), rel(item.latest_seen_at)]);
   rows("callers", data.users, (item) => [item.github_login, fmt(item.requests), fmt(item.errors), fmt(Math.round(item.avg_duration_ms || 0)), rel(item.last_seen)]);
-  rows("clients", data.clients, (item) => [item.github_login, item.client_name, fmt(item.requests), fmt(item.saved_github_requests), fmt(item.backend_requests), fmt(item.errors), rel(item.last_seen)]);
+  rows("clients", data.clients, (item) => [item.github_login, item.client_name, fmt(item.requests), fmt(item.cache_served_responses ?? item.saved_github_requests), fmt(item.uncached_outcomes ?? item.backend_requests), fmt(item.errors), rel(item.last_seen)]);
   rows("recent", data.recent, (item) => [rel(item.created_at), item.github_login, item.client_name || "legacy", item.route_kind, statusPill(item.status, item.fallback_reason || item.error_code), item.identity_id || "none"]);
 }
 

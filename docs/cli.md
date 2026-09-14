@@ -404,8 +404,9 @@ job-total, pagination and catalogue refusal reasons remain distinct. Exports buf
 validation/hydration before output; successful JSON commands return success independently
 of run conclusion. Downstream writer/jq errors still fail and cannot be rolled back.
 `gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request
-for the common plain-term `-R owner/repo --state ... --json ...` shape. Cache hits cost
-zero GitHub Search quota. All supported search fields use the anonymous GitHub Search API;
+for the common plain-term `-R owner/repo --state ... --json ...` shape. Cached bodies avoid
+a full result download; conditional revalidation can still use GitHub Search quota.
+All supported search fields use the anonymous GitHub Search API;
 this path remains available when pooled search is disabled and never uses a pooled identity
 or local token. Qualified search syntax
 such as `author:` or custom sort/match flags falls through to the real `gh`. PR search
@@ -629,13 +630,22 @@ audit labels. These are derived labels, not proof that credentials or physical m
 were reconciled; stored audit names and caller/token links remain unchanged.
 
 Fetches `GET /v1/pools/<pool>/stats` using the stored token. The default human output
-shows the pool request count, service errors, expected local fallbacks, raw and
-successful-eligible cache hit rates, coalesced duplicate misses, caller- and client-specific
-usage, all of the caller's active client usage, D1 cache entries, and top route kinds.
-When the server records backend attribution, it also ranks attributed upstream work by
+shows recorded relay request counts, service errors, expected local fallbacks, raw and
+successful-eligible cached-body reuse rates, coalesced duplicate misses, caller- and
+client-specific usage, all of the caller's active client usage, D1 cache entries, and top route kinds.
+When the server records backend attribution, it also ranks attributed relay outcomes by
 route and bounded source (`github_web`, anonymous `github_api`, or `github_identity`) and
 groups local delegation by fallback reason. No request bodies, query values, or credentials
 enter these aggregates.
+`cache_served_responses` counts hit and stale outcomes, including successful revalidations;
+`uncached_outcomes` counts miss and bypass outcomes, including failures and local fallbacks.
+Neither counts actual or avoided upstream requests. Cache serves may still need GitHub
+probes, and a miss may try several upstream requests. Unknown outcomes remain separate.
+The deprecated `saved_github_requests` and `backend_requests` JSON fields are historical
+aliases for these canonical fields, retained for shipped clients. The CLI also reads
+those aliases when connected to an older Worker.
+Stats cover relay-audited outcomes; policy GETs and failures before relay admission are
+not included, so these totals are not a census of all service requests.
 `--since` accepts `30m`, `24h`, or `7d` style windows, capped at 30 days.
 `--client` filters `client_usage` and `client_routes` to that named client while retaining
 the authenticated caller's scope. Human output identifies both the calling client and the
@@ -645,20 +655,20 @@ filter; JSON includes `client_filter` only when the filter is active.
 octopool stats
 # pool: maintainers
 # client: steipete-mbp
-# requests: 54 (1 service errors, 2 local fallbacks)
-# cache: 82.4% hit (40 hits, 2 stale, 9 misses, 3 bypass, 0 unknown)
-# eligible: 49/54 requests, 85.7% hit
+# recorded relay requests: 54 (1 service errors, 2 local fallbacks)
+# cache: 82.4% body reuse (40 hits, 2 stale, 9 misses, 3 bypass, 0 unknown)
+# eligible: 49/54 requests, 85.7% body reuse
 # coalesced: 4 duplicate misses
-# github: 42 saved, 12 backend
-# this client: 38 requests, 31 saved, 7 backend
+# outcomes: 42 cache-served, 12 uncached
+# this client: 38 requests, 31 cache-served, 7 uncached
 # top routes:
-#   pr_view: 31 req, 86.1% eligible hit, 1 stale, 5 miss, 0 bypass, 0 errors, 1 fallback
-# backends:
+#   pr_view: 31 req, 86.1% eligible body reuse, 1 stale, 5 miss, 0 bypass, 0 errors, 1 fallback
+# backend-attributed relay outcomes:
 #   github_web / workflow_run_list: 12 req, 12 miss, 0 bypass, 0 revalidated
 # fallback reasons:
 #   identity_pool_depleted / contents: 1 req
 # clients:
-#   steipete-mbp: 38 req, 31 saved, 7 backend, 1 fallback
+#   steipete-mbp: 38 req, 31 cache-served, 7 uncached, 1 fallback
 ```
 
 Use `--json` for dashboards or scripts that want the raw aggregate:

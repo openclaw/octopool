@@ -150,15 +150,18 @@ async function dashboardClients(env: Env, pool: string) {
     client_name: string;
     requests: number;
     errors: number | null;
-    saved_github_requests: number | null;
-    backend_requests: number | null;
+    cache_served_responses: number | null;
+    uncached_outcomes: number | null;
     last_seen: string | null;
   }>();
   return rows.results.map((row) => ({
     ...row,
     errors: row.errors ?? 0,
-    saved_github_requests: row.saved_github_requests ?? 0,
-    backend_requests: row.backend_requests ?? 0,
+    cache_served_responses: row.cache_served_responses ?? 0,
+    uncached_outcomes: row.uncached_outcomes ?? 0,
+    // Deprecated wire aliases count relay outcomes, not avoided or actual upstream requests.
+    saved_github_requests: row.cache_served_responses ?? 0,
+    backend_requests: row.uncached_outcomes ?? 0,
   }));
 }
 

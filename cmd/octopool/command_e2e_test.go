@@ -60,7 +60,7 @@ func TestCLIEndToEndServiceCommands(t *testing.T) {
 		result := runCLI(t, bin, server.URL, nil, "stats", "-client", "ci-runner")
 		if result.err != nil ||
 			!strings.Contains(result.stdout, "client: test-mac\nclient filter: ci-runner\n") ||
-			!strings.Contains(result.stdout, "ci-runner: 3 requests, 2 saved, 1 backend") {
+			!strings.Contains(result.stdout, "ci-runner: 3 requests, 2 cache-served, 1 uncached") {
 			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
 		}
 	})

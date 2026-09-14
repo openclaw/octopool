@@ -38,25 +38,40 @@ type statsOperator struct {
 }
 
 type statsAggregate struct {
-	Requests          int      `json:"requests"`
-	Errors            int      `json:"errors"`
-	ServiceErrors     int      `json:"service_errors"`
-	Fallbacks         int      `json:"fallbacks"`
-	AvgDurationMS     *float64 `json:"avg_duration_ms"`
-	CacheHits         int      `json:"cache_hits"`
-	CacheStale        int      `json:"cache_stale"`
-	CacheMisses       int      `json:"cache_misses"`
-	CacheBypass       int      `json:"cache_bypass"`
-	CacheUnknown      int      `json:"cache_unknown"`
-	CacheableRequests int      `json:"cacheable_requests"`
-	EligibleRequests  int      `json:"eligible_cache_requests"`
-	CacheHitRate      *float64 `json:"cache_hit_rate"`
-	CacheableHitRate  *float64 `json:"cacheable_hit_rate"`
-	EligibleHitRate   *float64 `json:"eligible_cache_hit_rate"`
-	BypassRate        *float64 `json:"bypass_rate"`
-	Coalesced         int      `json:"coalesced"`
-	SavedGitHubCalls  int      `json:"saved_github_requests"`
-	BackendRequests   int      `json:"backend_requests"`
+	Requests             int      `json:"requests"`
+	Errors               int      `json:"errors"`
+	ServiceErrors        int      `json:"service_errors"`
+	Fallbacks            int      `json:"fallbacks"`
+	AvgDurationMS        *float64 `json:"avg_duration_ms"`
+	CacheHits            int      `json:"cache_hits"`
+	CacheStale           int      `json:"cache_stale"`
+	CacheMisses          int      `json:"cache_misses"`
+	CacheBypass          int      `json:"cache_bypass"`
+	CacheUnknown         int      `json:"cache_unknown"`
+	CacheableRequests    int      `json:"cacheable_requests"`
+	EligibleRequests     int      `json:"eligible_cache_requests"`
+	CacheHitRate         *float64 `json:"cache_hit_rate"`
+	CacheableHitRate     *float64 `json:"cacheable_hit_rate"`
+	EligibleHitRate      *float64 `json:"eligible_cache_hit_rate"`
+	BypassRate           *float64 `json:"bypass_rate"`
+	Coalesced            int      `json:"coalesced"`
+	CacheServedResponses *int     `json:"cache_served_responses"`
+	UncachedOutcomes     *int     `json:"uncached_outcomes"`
+	// Deprecated wire aliases remain readable until older Workers are upgraded.
+	SavedGitHubCalls int `json:"saved_github_requests"`
+	BackendRequests  int `json:"backend_requests"`
+}
+
+func (stats statsAggregate) cacheOutcomes() (int, int) {
+	cacheServed, uncached := stats.SavedGitHubCalls, stats.BackendRequests
+	// Presence matters: a canonical zero must override a nonzero historical alias.
+	if stats.CacheServedResponses != nil {
+		cacheServed = *stats.CacheServedResponses
+	}
+	if stats.UncachedOutcomes != nil {
+		uncached = *stats.UncachedOutcomes
+	}
+	return cacheServed, uncached
 }
 
 type statsRoute struct {
@@ -147,6 +162,8 @@ func runStats(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func renderStats(w io.Writer, stats statsResponse) error {
+	poolCached, poolUncached := stats.PoolUsage.cacheOutcomes()
+	clientCached, clientUncached := stats.ClientUsage.cacheOutcomes()
 	lines := []string{
 		"pool: " + stats.Pool,
 		"window: " + firstNonEmpty(stats.Window.Label, "24h"),
@@ -160,13 +177,13 @@ func renderStats(w io.Writer, stats statsResponse) error {
 	}
 	lines = append(lines,
 		fmt.Sprintf(
-			"requests: %s (%s service errors, %s local fallbacks)",
+			"recorded relay requests: %s (%s service errors, %s local fallbacks)",
 			intFmt(stats.PoolUsage.Requests),
 			intFmt(stats.PoolUsage.ServiceErrors),
 			intFmt(stats.PoolUsage.Fallbacks),
 		),
 		fmt.Sprintf(
-			"cache: %s hit (%s hits, %s stale, %s misses, %s bypass, %s unknown)",
+			"cache: %s body reuse (%s hits, %s stale, %s misses, %s bypass, %s unknown)",
 			percent(stats.PoolUsage.CacheHitRate),
 			intFmt(stats.PoolUsage.CacheHits),
 			intFmt(stats.PoolUsage.CacheStale),
@@ -175,28 +192,28 @@ func renderStats(w io.Writer, stats statsResponse) error {
 			intFmt(stats.PoolUsage.CacheUnknown),
 		),
 		fmt.Sprintf(
-			"eligible: %s/%s requests, %s hit",
+			"eligible: %s/%s requests, %s body reuse",
 			intFmt(stats.PoolUsage.EligibleRequests),
 			intFmt(stats.PoolUsage.Requests),
 			percent(stats.PoolUsage.EligibleHitRate),
 		),
 		fmt.Sprintf("coalesced: %s duplicate misses", intFmt(stats.PoolUsage.Coalesced)),
 		fmt.Sprintf(
-			"github: %s saved, %s backend",
-			intFmt(stats.PoolUsage.SavedGitHubCalls),
-			intFmt(stats.PoolUsage.BackendRequests),
+			"outcomes: %s cache-served, %s uncached",
+			intFmt(poolCached),
+			intFmt(poolUncached),
 		),
 		fmt.Sprintf(
-			"caller: %s requests, %s hit",
+			"caller: %s requests, %s body reuse",
 			intFmt(stats.CallerUsage.Requests),
 			percent(stats.CallerUsage.CacheHitRate),
 		),
 		fmt.Sprintf(
-			"%s: %s requests, %s saved, %s backend",
+			"%s: %s requests, %s cache-served, %s uncached",
 			clientUsageLabel,
 			intFmt(stats.ClientUsage.Requests),
-			intFmt(stats.ClientUsage.SavedGitHubCalls),
-			intFmt(stats.ClientUsage.BackendRequests),
+			intFmt(clientCached),
+			intFmt(clientUncached),
 		),
 		fmt.Sprintf(
 			"entries: %s fresh / %s total, %s expired, %s",
@@ -222,7 +239,7 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		for _, route := range stats.Routes {
 			if _, err := fmt.Fprintf(
 				w,
-				"  %s: %s req, %s eligible hit, %s stale, %s miss, %s bypass, %s errors, %s fallback\n",
+				"  %s: %s req, %s eligible body reuse, %s stale, %s miss, %s bypass, %s errors, %s fallback\n",
 				route.RouteKind,
 				intFmt(route.Requests),
 				percent(route.EligibleHitRate),
@@ -237,7 +254,7 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		}
 	}
 	if len(stats.Backends) > 0 {
-		if _, err := fmt.Fprintln(w, "backends:"); err != nil {
+		if _, err := fmt.Fprintln(w, "backend-attributed relay outcomes:"); err != nil {
 			return err
 		}
 		for _, backend := range stats.Backends {
@@ -279,13 +296,14 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		return err
 	}
 	for _, client := range stats.Clients {
+		cached, uncached := client.statsAggregate.cacheOutcomes()
 		if _, err := fmt.Fprintf(
 			w,
-			"  %s: %s req, %s saved, %s backend, %s fallback\n",
+			"  %s: %s req, %s cache-served, %s uncached, %s fallback\n",
 			client.ClientName,
 			intFmt(client.Requests),
-			intFmt(client.SavedGitHubCalls),
-			intFmt(client.BackendRequests),
+			intFmt(cached),
+			intFmt(uncached),
 			intFmt(client.Fallbacks),
 		); err != nil {
 			return err

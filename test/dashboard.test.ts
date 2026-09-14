@@ -16,7 +16,10 @@ describe("dashboard page", () => {
     expect(html).toContain('href="/logout">Log out</a>');
     expect(html).toContain('credentials: "same-origin"');
     expect(html).toContain('aria-live="polite"');
-    expect(html).toContain("Eligible cache hit");
+    expect(html).toContain("Eligible body reuse");
+    expect(html).toContain("Relay outcomes / 24h");
+    expect(html).toContain(">Cache-served</th>");
+    expect(html).toContain(">Uncached</th>");
     expect(html).toContain("Request patterns");
     expect(html).toContain("Fallback &amp; failure causes");
     expect(html).toContain("function ratePercent(rate)");

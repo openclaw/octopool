@@ -652,6 +652,12 @@ async function expectAnonymousAuditStats(revalidated: boolean, requests = 2): Pr
   });
   expect(stats.status).toBe(200);
   expect(await stats.json()).toMatchObject({
+    pool_usage: {
+      cache_served_responses: revalidated ? 2 : 1,
+      uncached_outcomes: revalidated ? requests - 1 : requests,
+      saved_github_requests: revalidated ? 2 : 1,
+      backend_requests: revalidated ? requests - 1 : requests,
+    },
     backends: [
       {
         backend: "github_api",
