@@ -93,7 +93,8 @@ describe("canonical relay egress protection", () => {
     ],
     [
       "/repos/example/demo/contents/README.md",
-      "^/example/demo/main/README.md$",
+      // The full URL exists only after the exact REST transport adds the origin and query.
+      "^https://api[.]github[.]com/repos/example/demo/contents/README[.]md[?]ref=main$",
       { query: { ref: "main" } },
     ],
     ["/repos/example/demo/git/ref/heads/main", "^/example/demo.git/info/refs$", {}],
