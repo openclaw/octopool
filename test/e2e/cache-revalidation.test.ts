@@ -368,35 +368,38 @@ describe("Worker end-to-end cache revalidation", () => {
 
   it("does not send web-origin validators to the GitHub API", async () => {
     await seedPool();
-    let rawCalls = 0;
+    const path = "/repos/openclaw/octopool/pulls/42";
+    const options = { headers: { accept: "application/vnd.github.diff" } };
+    const webURL = "https://github.com/openclaw/octopool/pull/42.diff";
+    const oldBody = "diff --git a/old b/old\n";
+    const newBody = "diff --git a/new b/new\n";
+    let webCalls = 0;
     let conditionalCalls = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) => {
-        const request = new Request(input, init);
-        expect(request.url).toBe(
-          "https://raw.githubusercontent.com/openclaw/octopool/main/README.md",
-        );
-        if (request.headers.has("if-none-match") || request.headers.has("if-modified-since")) {
-          conditionalCalls++;
-        }
-        rawCalls++;
-        return new Response(rawCalls === 1 ? "old" : "new", {
-          headers: { etag: '"raw-etag"', "content-type": "text/plain" },
-        });
-      }),
-    );
-    const options = { query: { ref: "main" } };
-
-    await relay("/repos/openclaw/octopool/contents/README.md", undefined, options);
-    await expireCacheEntry("contents");
-    const response = await relay("/repos/openclaw/octopool/contents/README.md", undefined, options);
-
-    expect(await response.json<RelayEnvelope>()).toMatchObject({
-      body: { content: "bmV3" },
-      relay: { cache: "miss", route_kind: "contents" },
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (request.headers.has("if-none-match") || request.headers.has("if-modified-since")) {
+        conditionalCalls++;
+      }
+      expect(request.url).toBe(webURL);
+      expect(bearer(request)).toBeUndefined();
+      webCalls++;
+      return new Response(webCalls === 1 ? oldBody : newBody, {
+        headers: { etag: '"web-etag"', "content-type": "text/x-diff" },
+      });
     });
-    expect(rawCalls).toBe(2);
+    vi.stubGlobal("fetch", upstream);
+
+    expect((await relay(path, undefined, options)).status).toBe(200);
+    await expireCacheEntry("pr_view");
+    const response = await relay(path, undefined, options);
+
+    expect(await response.json()).toMatchObject({
+      body: newBody,
+      body_encoding: "text",
+      relay: { cache: "miss", route_kind: "pr_view" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(2);
+    expect(webCalls).toBe(2);
     expect(conditionalCalls).toBe(0);
   });
 
