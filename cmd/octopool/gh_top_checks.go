@@ -136,7 +136,12 @@ func relayPRChecksHead(ctx context.Context, client ghRelayClient, repo, number s
 }
 
 func relayPRCheckItemsWithHead(ctx context.Context, client ghRelayClient, repo, number string) ([]prCheckRow, prCheckHead, error) {
-	head, err := relayPRChecksHead(ctx, client, repo, number, prChecksMaxPRAgeSeconds)
+	maxAge := prChecksMaxPRAgeSeconds
+	// This internal default must not pin a fresh checks read to a cached head.
+	if freshReadRequested() {
+		maxAge = 0
+	}
+	head, err := relayPRChecksHead(ctx, client, repo, number, maxAge)
 	if err != nil {
 		return nil, prCheckHead{}, err
 	}

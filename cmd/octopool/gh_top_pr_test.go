@@ -281,6 +281,7 @@ func TestRunGHPRViewFilesFallsBackWhenHeadMoves(t *testing.T) {
 }
 
 func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
+	t.Setenv("OCTOPOOL_FRESH", "0")
 	relayTestServer(t, func(body map[string]any) any {
 		if body["path"] != "/repos/openclaw/octopool/pulls/7" {
 			if _, ok := body["headers"]; ok {
@@ -323,6 +324,67 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 	}
 	if got := out.String(); !strings.Contains(got, `"name":"CI"`) {
 		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHPRChecksFreshUsesCurrentHead(t *testing.T) {
+	for _, format := range []string{"human", "json"} {
+		t.Run(format, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_FRESH", "1")
+			const cachedHead = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			f := newPRChecksFixture()
+			f.checks = []any{prChecksCheck(1, "unit", "queued", "")}
+			var paths []string
+			relayTestServer(t, func(request map[string]any) any {
+				path := request["path"].(string)
+				paths = append(paths, path)
+				headers, _ := request["headers"].(map[string]any)
+				if headers["cache-control"] != "max-age=0" {
+					t.Errorf("fresh %s headers=%v, want max-age=0", path, headers)
+				}
+				if path == "/repos/acme/repo/pulls/7" {
+					if headers["x-octopool-public-shape"] != publicShapePullRequestSummary {
+						t.Errorf("PR head lost its public summary shape: %v", headers)
+					}
+					if headers["cache-control"] != "max-age=0" {
+						return map[string]any{"head": map[string]any{"sha": cachedHead, "ref": "feature"}}
+					}
+				}
+				// The old head is green. Refreshing only its checks still reports
+				// success, even though a push has left the current head pending.
+				switch path {
+				case "/repos/acme/repo/commits/" + cachedHead + "/check-runs":
+					check := prChecksCheck(1, "unit", "completed", "success")
+					check["head_sha"] = cachedHead
+					check["app"] = map[string]any{"id": 999, "slug": "third-party"}
+					return map[string]any{"total_count": 1, "check_runs": []any{check}}
+				case "/repos/acme/repo/commits/" + cachedHead + "/status":
+					return map[string]any{"total_count": 0, "statuses": []any{}}
+				}
+				return f.response(t, request)
+			})
+			args := []string{"checks", "7", "-R", "acme/repo"}
+			if format == "json" {
+				args = append(args, "--json", "name,state,bucket,workflow")
+			}
+			var out bytes.Buffer
+			result := handleGHPR(t.Context(), args, &out)
+			if format == "human" {
+				assertExitCode(t, result.err, 8)
+			} else if result.action != ghComplete || result.err != nil || out.String() != "[{\"bucket\":\"pending\",\"name\":\"unit\",\"state\":\"QUEUED\",\"workflow\":\"CI\"}]\n" {
+				t.Fatalf("fresh checks result=%+v output=%q", result, out.String())
+			}
+			wantPaths := []string{
+				"/repos/acme/repo/pulls/7",
+				"/repos/acme/repo/commits/" + metadataHead + "/check-runs",
+				"/repos/acme/repo/commits/" + metadataHead + "/status",
+				"/repos/acme/repo/actions/runs",
+				"/repos/acme/repo/actions/workflows",
+			}
+			if !reflect.DeepEqual(paths, wantPaths) {
+				t.Fatalf("fresh checks paths=%v, want %v", paths, wantPaths)
+			}
+		})
 	}
 }
 
