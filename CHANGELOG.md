@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Return the native GraphQL node ID from `gh repo view --json id`, preserving numeric IDs in raw REST API reads and guarded fallback for incomplete repository identities.
+
 ## 0.6.4 - 2026-09-14
 
 ### Fixes

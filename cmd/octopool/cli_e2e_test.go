@@ -34,12 +34,27 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 				return
 			}
 			writeCLIEnvelope(t, w, map[string]any{
+				"id": 42, "node_id": "R_repository",
 				"name": "octopool", "full_name": "openclaw/octopool", "private": false,
 			})
 		})
-		result := runCLI(t, bin, server.URL, nil, "gh", "repo", "view", "-R", "openclaw/octopool", "--json", "nameWithOwner")
-		if result.err != nil || !strings.Contains(result.stdout, `"nameWithOwner":"openclaw/octopool"`) {
+		result := runCLI(t, bin, server.URL, nil, "gh", "repo", "view", "-R", "openclaw/octopool", "--json", "id,nameWithOwner")
+		if result.err != nil || result.stdout != "{\"id\":\"R_repository\",\"nameWithOwner\":\"openclaw/octopool\"}\n" {
 			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+		}
+		if jqAvailable() {
+			for _, test := range []struct {
+				args []string
+				want string
+			}{
+				{[]string{"gh", "repo", "view", "openclaw/octopool", "--json", "id", "--jq", ".id"}, "R_repository\n"},
+				{[]string{"gh", "api", "repos/openclaw/octopool", "--jq", ".id"}, "42\n"},
+			} {
+				result := runCLI(t, bin, server.URL, nil, test.args...)
+				if result.err != nil || result.stdout != test.want {
+					t.Fatalf("args=%v err=%v stdout=%q stderr=%q", test.args, result.err, result.stdout, result.stderr)
+				}
+			}
 		}
 	})
 

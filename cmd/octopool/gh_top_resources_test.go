@@ -4,9 +4,105 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestRunGHRepoViewNodeID(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		node   any
+		fields string
+		want   string
+	}{
+		{"node ID", "R_repository", "id", `{"id":"R_repository"}`},
+		{"mixed fields", "R_repository", "id,nameWithOwner", `{"id":"R_repository","nameWithOwner":"acme/repo"}`},
+		{"missing", nil, "id,nameWithOwner", ""},
+		{"null", json.RawMessage(`null`), "id,nameWithOwner", ""},
+		{"numeric", 42, "id,nameWithOwner", ""},
+		{"empty", "", "id,nameWithOwner", ""},
+		{"whitespace", " \t", "id,nameWithOwner", ""},
+		{"ID not selected", nil, "nameWithOwner", `{"nameWithOwner":"acme/repo"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			relayTestServer(t, func(request map[string]any) any {
+				if request["path"] != "/repos/acme/repo" {
+					t.Errorf("path = %v", request["path"])
+				}
+				repository := map[string]any{"id": 42, "full_name": "acme/repo"}
+				if test.node != nil {
+					repository["node_id"] = test.node
+				}
+				return repository
+			})
+			var out bytes.Buffer
+			result := handleGHRepo(t.Context(), []string{"view", "acme/repo", "--json", test.fields}, &out)
+			if test.want == "" {
+				if result.action != ghFail || !isLocalFallback(result.err) || out.Len() != 0 {
+					t.Fatalf("expected typed fallback without output: action=%v err=%v out=%q", result.action, result.err, out.String())
+				}
+				return
+			}
+			if result.action != ghComplete || result.err != nil || out.String() != test.want+"\n" {
+				t.Fatalf("action=%v err=%v out=%q want=%q", result.action, result.err, out.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestRunGHRepoViewUnsupportedFieldsDelegate(t *testing.T) {
+	emptyRewriteTestServer(t)
+	var out bytes.Buffer
+	result := handleGHRepo(t.Context(), []string{"view", "acme/repo", "--json", "id,diskUsage"}, &out)
+	if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
+		t.Fatalf("action=%v err=%v out=%q", result.action, result.err, out.String())
+	}
+}
+
+func TestRunGHRepoViewNodeIDFallback(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		for _, noFallback := range []bool{false, true} {
+			t.Run(fmt.Sprintf("active=%v/no-fallback=%v", active, noFallback), func(t *testing.T) {
+				policy := rewriteEmptyTestPolicy
+				if active {
+					policy = rewriteActiveTestPolicy
+				}
+				_, policies := rewriteTestServer(t, policy, func(w http.ResponseWriter, r *http.Request) {
+					request := decodeCLIRequest(t, w, r)
+					if request["path"] != "/repos/acme/repo" {
+						t.Errorf("path = %v", request["path"])
+					}
+					writeCLIEnvelope(t, w, map[string]any{"id": 42, "full_name": "acme/repo"})
+				})
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+				if noFallback {
+					t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+				}
+				capture := captureRewriteGH(t)
+				var out, stderr bytes.Buffer
+				err := runGH(t.Context(), []string{"repo", "view", "acme/repo", "--json", "id,nameWithOwner"}, &out, &stderr)
+				if noFallback {
+					if !isLocalFallback(err) || out.Len() != 0 || stderr.Len() != 0 {
+						t.Fatalf("err=%v stdout=%q stderr=%q", err, out.String(), stderr.String())
+					}
+					if _, err := os.Stat(capture); !os.IsNotExist(err) {
+						t.Fatal("disabled fallback ran native child")
+					}
+					return
+				}
+				if err != nil || out.String() != "child stdout\n" || policies.Load() != 3 {
+					t.Fatalf("err=%v stdout=%q policies=%d", err, out.String(), policies.Load())
+				}
+				got := readRewriteCapture(t, capture)
+				if active && got.Env["GH_HOST"] != "github.com" {
+					t.Fatalf("guarded fallback host = %q", got.Env["GH_HOST"])
+				}
+			})
+		}
+	}
+}
 
 func TestRunGHReleaseListRelays(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {

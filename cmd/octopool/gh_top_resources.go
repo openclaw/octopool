@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 )
 
 func handleGHRepo(ctx context.Context, args []string, stdout io.Writer) ghResult {
@@ -29,12 +30,48 @@ func handleGHRepo(ctx context.Context, args []string, stdout io.Writer) ghResult
 		if !ok {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo)}, opts, fieldMapRepo))
+		return ghCompleted(relayRepoView(ctx, stdout, repo, opts))
 	case "list":
 		return ghDelegated()
 	default:
 		return ghDelegated()
 	}
+}
+
+func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTopOptions) error {
+	request := ghAPIRequest{method: "GET", path: repoPath(repo)}
+	if !safeRelayRequest(request) {
+		return errors.New("internal error: top-level gh command built an unsupported relay request")
+	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	envelope, err := client.do(ctx, request)
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	var repository map[string]any
+	if err := json.Unmarshal(body, &repository); err != nil {
+		return err
+	}
+	if hasJSONField(opts.json, "id") {
+		nodeID := firstString(repository, "node_id")
+		if strings.TrimSpace(nodeID) == "" {
+			return localFallbackError{Reason: "repository response did not include a node ID"}
+		}
+		// Native repo view exports the GraphQL ID, not REST's numeric ID.
+		repository["id"] = nodeID
+	}
+	raw, err := json.Marshal(filterJSONValue(repository, opts.json, fieldMapRepo))
+	if err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, raw, opts.jq)
 }
 
 func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghResult {

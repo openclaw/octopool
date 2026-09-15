@@ -268,6 +268,11 @@ human-format reads. Supported `--json` fields are intentionally conservative. Co
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
 
+`gh repo view --json id` returns the repository's GraphQL node ID before `--jq`,
+matching native `gh`. Missing, empty, or non-string node IDs use guarded native
+fallback before any JSON is printed; `OCTOPOOL_NO_FALLBACK=1` keeps these cases as
+failures. Raw `gh api repos/OWNER/REPO` reads retain the numeric REST `id`.
+
 With active string protection, modeled `pr view`, `pr diff`, and non-watch `pr checks`
 also accept checked branch selectors, including `feature/topic` and `owner:feature/topic`.
 These use guarded native `gh`, not the numeric PR relay routes. Native owns branch lookup
