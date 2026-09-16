@@ -67,6 +67,22 @@ func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTo
 		// Native repo view exports the GraphQL ID, not REST's numeric ID.
 		repository["id"] = nodeID
 	}
+	if hasJSONField(opts.json, "owner") {
+		owner, ok := repository["owner"].(map[string]any)
+		nodeID, login := firstString(owner, "node_id"), firstString(owner, "login")
+		if !ok || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(login) == "" {
+			return localFallbackError{Reason: "repository response did not include a complete owner"}
+		}
+		repository["owner"] = map[string]any{"id": nodeID, "login": login}
+	}
+	if hasJSONField(opts.json, "visibility") {
+		switch visibility := firstString(repository, "visibility"); visibility {
+		case "public", "private", "internal":
+			repository["visibility"] = strings.ToUpper(visibility)
+		default:
+			return localFallbackError{Reason: "repository response did not include a valid visibility"}
+		}
+	}
 	raw, err := json.Marshal(filterJSONValue(repository, opts.json, fieldMapRepo))
 	if err != nil {
 		return err

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Match native `gh repo view` owner IDs, owner fields, and visibility values before JSON/jq output, with guarded fallback for incomplete metadata.
 - Return the native GraphQL node ID from `gh repo view --json id`, preserving numeric IDs in raw REST API reads and guarded fallback for incomplete repository identities.
 
 ## 0.6.4 - 2026-09-14

@@ -273,6 +273,11 @@ matching native `gh`. Missing, empty, or non-string node IDs use guarded native
 fallback before any JSON is printed; `OCTOPOOL_NO_FALLBACK=1` keeps these cases as
 failures. Raw `gh api repos/OWNER/REPO` reads retain the numeric REST `id`.
 
+Repository views export `owner` as `{id, login}` with the owner's GraphQL node ID,
+and `visibility` as `PUBLIC`, `PRIVATE`, or `INTERNAL`, matching native `gh` before
+`--jq` runs. Incomplete selected owner or visibility metadata uses the same guarded
+fallback. Raw API reads retain REST owner fields and lowercase visibility.
+
 With active string protection, modeled `pr view`, `pr diff`, and non-watch `pr checks`
 also accept checked branch selectors, including `feature/topic` and `owner:feature/topic`.
 These use guarded native `gh`, not the numeric PR relay routes. Native owns branch lookup
