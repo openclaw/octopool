@@ -148,6 +148,9 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 		return errRewriteBlocked
 	}
 	command := args[0] + " " + args[1]
+	if command == "run rerun" {
+		return prepareRewriteCIRetry(policy, args, prepared)
+	}
 	values := "--repo,-R --json --jq,-q"
 	booleans := ""
 	switch command {
@@ -485,6 +488,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	if err != nil {
 		return prepared, err
 	}
+	prepared.policy = policy
 	if diagnostic := prepared.mergeDiagnostics; diagnostic != nil {
 		diagnostic.policyKnown = true
 		diagnostic.serverRevision = policy.Revision
@@ -528,7 +532,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	}
 	if err != nil {
 		prepared.cleanup()
-		return prepared, errRewriteBlocked
+		return prepared, rewriteGitError(err)
 	}
 	return prepared, nil
 }

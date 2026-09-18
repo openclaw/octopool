@@ -103,7 +103,7 @@ func TestRunGHPRDetailExportNativeBoundary(t *testing.T) {
 						}
 						return
 					}
-					if err != nil || stdout.String() != "child stdout\n" || stderr.String() != "octopool: octopool requested local gh fallback: unsupported_pr_detail_export; falling back to real gh\nchild stderr\n" || string(calls) != "child\n" || callErr != nil || policies.Load() != 2 {
+					if err != nil || stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "octopool: octopool requested local gh fallback: unsupported_pr_detail_export; falling back to real gh\nchild stderr\n" || string(calls) != "child\n" || callErr != nil || policies.Load() != 2 {
 						t.Error("typed handoff must precede exactly one synthetic native child, which owns all stdout/jq; only initial and final policy reads")
 					}
 					if _, statErr := os.Stat(capture); statErr != nil {
@@ -214,7 +214,7 @@ func TestRunGHPRDetailExportDirectDelegationControls(t *testing.T) {
 			}
 			err := runGH(t.Context(), args, &out, &stderr)
 			calls, callErr := os.ReadFile(capture + ".calls")
-			if err != nil || out.String() != "child stdout\n" || stderr.String() != "child stderr\n" || policies.Load() != 2 || data.Load() != 0 || string(calls) != "child\n" || callErr != nil || !reflect.DeepEqual(args, original) {
+			if err != nil || out.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" || policies.Load() != 2 || data.Load() != 0 || string(calls) != "child\n" || callErr != nil || !reflect.DeepEqual(args, original) {
 				t.Fatalf("direct protected delegation must ignore typed-only NO_FALLBACK: err=%v out=%q stderr=%q policies=%d data=%d calls=%q", err, out.String(), stderr.String(), policies.Load(), data.Load(), calls)
 			}
 			want := original

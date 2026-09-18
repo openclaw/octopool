@@ -118,6 +118,10 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 		if len(result.fields) > 0 || result.inputSet {
 			result.method = "POST"
 		}
+		path, _, _ := strings.Cut("/"+strings.TrimPrefix(result.endpoint, "/"), "?")
+		if rewriteWorkflowRunsPath.MatchString(path) && !result.inputSet {
+			result.method = "GET"
+		}
 	}
 	if jqCount > 1 && result.method != "GET" {
 		return result, errRewriteBlocked
@@ -131,6 +135,9 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reader, prepared *rewritePreparation) error {
 	opts, err := parseRewriteAPI(args[1:])
 	if err != nil {
+		if modeledCIAPI(args) {
+			return errRewriteBlocked
+		}
 		return err
 	}
 	request, err := rewriteAPIRequest(opts)
@@ -142,6 +149,21 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 	}
 	if err := policy.checkStructural("github.com"); err != nil {
 		return err
+	}
+	if ciRetryPath(request.path) {
+		return prepareRewriteCIRetryAPI(policy, opts, request, prepared)
+	}
+	if rewriteWorkflowRunsPath.MatchString(request.path) && (len(opts.fields) > 0 || opts.inputSet || opts.method != "GET") {
+		request, err = workflowRunsQuery(opts, request)
+		if err != nil {
+			return err
+		}
+		if err := policy.guardRequest(request); err != nil {
+			return err
+		}
+		prepared.args = append([]string{"api", workflowRunsEndpoint(request), "--method=GET", "--hostname=github.com"}, opts.output...)
+		prepared.stdin = strings.NewReader("")
+		return nil
 	}
 	if opts.method == "GET" {
 		if opts.inputSet || len(opts.fields) > 0 || !rewriteReadPath(request.path) {

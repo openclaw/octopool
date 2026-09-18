@@ -234,7 +234,7 @@ func TestCLIEndToEndRelayAndFallback(t *testing.T) {
 			if strings.Count(result.stdout, fakeGHArgvPrefix) != 1 || !strings.Contains(result.stdout, wantChild) {
 				t.Fatalf("stdout=%q, want one %q", result.stdout, wantChild)
 			}
-			if result.stderr != boundary || strings.Contains(result.stderr, "error: exit status") {
+			if withoutGraphQLNotice(result.stderr) != boundary || strings.Contains(result.stderr, "error: exit status") {
 				t.Fatalf("stderr=%q", result.stderr)
 			}
 			progress := strings.Index(result.stdout, "Watching run")

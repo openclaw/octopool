@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -80,6 +79,7 @@ func (flags rewriteFlags) has(name string) bool { _, ok := flags.values[name]; r
 
 type rewritePreparation struct {
 	ctx               context.Context
+	policy            stringRewritePolicy
 	closeDirectory    func()
 	preflight         []string
 	args              []string
@@ -142,7 +142,11 @@ var rewriteRefPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_./:-]*$`)
 
 func validRewriteBaseBranch(branch string) bool {
 	// Git expands @{-n} in --branch mode; publication needs a literal name.
-	return !strings.Contains(branch, "@{") && exec.Command("git", "check-ref-format", "--branch", branch).Run() == nil
+	if strings.Contains(branch, "@{") {
+		return false
+	}
+	_, err := gitProbe("check-ref-format", "--branch", branch)
+	return err == nil
 }
 
 func rewriteRepo(flags *rewriteFlags, policy stringRewritePolicy) error {
@@ -153,7 +157,11 @@ func rewriteRepo(flags *rewriteFlags, policy stringRewritePolicy) error {
 		repo = normalizeRepo(repo)
 	} else {
 		var ok bool
-		repo, ok = repoFromOptionOrCurrent("")
+		var err error
+		repo, ok, err = repoFromOptionOrCurrent("")
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return errRewriteBlocked
 		}
@@ -291,9 +299,9 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 		// missing head is pinned to the current branch instead of blocking the
 		// default invocation shape; an unpushed head fails at GitHub, not by push.
 		if !flags.has("--head") {
-			head, ok := rewriteCurrentBranch()
-			if !ok {
-				return errRewriteBlocked
+			head, err := rewriteCurrentBranch()
+			if err != nil {
+				return err
 			}
 			flags.values["--head"] = head
 			flags.ordered = append(flags.ordered, rewriteFlag{name: "--head", value: head})

@@ -114,7 +114,10 @@ func handleGHRunWatch(ctx context.Context, args []string, stdout io.Writer) ghRe
 	if !ok {
 		return ghDelegated()
 	}
-	repo, ok := repoFromOptionOrCurrent(opts.repo)
+	repo, ok, err := repoFromOptionOrCurrent(opts.repo)
+	if err != nil {
+		return ghFailed(err)
+	}
 	if !ok {
 		return ghDelegated()
 	}
@@ -377,7 +380,10 @@ func handleGHPRChecksWatch(ctx context.Context, args []string, stdout io.Writer)
 	if !ok {
 		return ghDelegated()
 	}
-	repo, ok := repoFromOptionOrCurrent(opts.repo)
+	repo, ok, err := repoFromOptionOrCurrent(opts.repo)
+	if err != nil {
+		return ghFailed(err)
+	}
 	if !ok {
 		return ghDelegated()
 	}

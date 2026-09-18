@@ -527,6 +527,12 @@ func testBootstrapOperational(t *testing.T, bin, native string, shim bool) {
 		t.Run(test.name, func(t *testing.T) {
 			before := fixture.calls.Load()
 			result, captures := fixture.run(t, test.args, bootstrapInputFile(t, test.body), true, 0)
+			if test.name == "content" {
+				if len(captures) != 2 || !slices.Equal(captures[0].Args, []string{"api", "rate_limit", "--hostname=github.com", "--cache=60s"}) || captures[0].Stdin != "" || len(captures[0].Files) != 0 {
+					t.Fatalf("unexpected quota probe: %+v", captures)
+				}
+				captures = captures[1:]
+			}
 			if result.err != nil || len(captures) != 1 {
 				t.Fatalf("operational sibling failed: %+v; %+v", result, captures)
 			}

@@ -36,7 +36,10 @@ func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResu
 		opts.positionals = nil
 		return ghCompleted(relaySearchRepos(ctx, stdout, query, opts))
 	}
-	repo, ok := repoFromOptionOrCurrent(opts.repo)
+	repo, ok, err := repoFromOptionOrCurrent(opts.repo)
+	if err != nil {
+		return ghFailed(err)
+	}
 	if !ok || repo == "" || opts.repoCount > 1 || !machineReadable(opts) || limitOverOnePage(opts) {
 		return ghDelegated()
 	}

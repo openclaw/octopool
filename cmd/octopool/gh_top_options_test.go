@@ -13,25 +13,25 @@ import (
 
 func TestTopLevelRepoNumber(t *testing.T) {
 	opts := ghTopOptions{repo: "openclaw/openclaw", positionals: []string{"85341"}}
-	repo, number, ok := repoNumber(opts)
-	if !ok || repo != "openclaw/openclaw" || number != "85341" {
+	repo, number, ok, err := repoNumber(opts)
+	if err != nil || !ok || repo != "openclaw/openclaw" || number != "85341" {
 		t.Fatalf("repoNumber = %q %q %v", repo, number, ok)
 	}
 
 	opts = ghTopOptions{positionals: []string{"https://github.com/openclaw/openclaw/pull/85341"}}
-	repo, number, ok = repoNumber(opts)
-	if !ok || repo != "openclaw/openclaw" || number != "85341" {
+	repo, number, ok, err = repoNumber(opts)
+	if err != nil || !ok || repo != "openclaw/openclaw" || number != "85341" {
 		t.Fatalf("repoNumber URL = %q %q %v", repo, number, ok)
 	}
 
 	opts = ghTopOptions{repo: "cli/cli", positionals: []string{"1"}}
-	repo, number, ok = repoNumber(opts)
-	if !ok || repo != "cli/cli" || number != "1" {
+	repo, number, ok, err = repoNumber(opts)
+	if err != nil || !ok || repo != "cli/cli" || number != "1" {
 		t.Fatalf("repoNumber outside default owner = %q %q %v", repo, number, ok)
 	}
 
 	opts = ghTopOptions{repo: "openclaw", positionals: []string{"1"}}
-	if _, _, ok = repoNumber(opts); ok {
+	if _, _, ok, err = repoNumber(opts); ok || err != nil {
 		t.Fatal("malformed explicit repo should fall back")
 	}
 }

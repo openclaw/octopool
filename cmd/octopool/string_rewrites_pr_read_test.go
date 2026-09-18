@@ -73,7 +73,7 @@ func TestProtectedPRReadBranchNative(t *testing.T) {
 				t.Fatalf("protected PR branch read rejected: %v", err)
 			}
 			got := readRewriteCapture(t, capture)
-			if !slices.Equal(got.Args, test.want) || !slices.Equal(test.args, original) || policies.Load() != 2 || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" || got.Stdin != "" || out.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+			if !slices.Equal(got.Args, test.want) || !slices.Equal(test.args, original) || policies.Load() != 2 || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" || got.Stdin != "" || out.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 				t.Fatalf("native boundary: args=%q want=%q policies=%d output=%q/%q env=%v", got.Args, test.want, policies.Load(), out.String(), stderr.String(), got.Env)
 			}
 		})
@@ -226,7 +226,11 @@ func TestProtectedPRReadCurrentDenials(t *testing.T) {
 			capture := captureRewriteGH(t)
 			var out, stderr bytes.Buffer
 			err := runGH(t.Context(), append([]string{"pr", "view", "--json=number"}, test.args...), &out, &stderr)
-			assertPRReadDenied(t, err, capture, &out, &stderr, data.Load())
+			if test.name == "invalid_push_default" {
+				assertPRReadGitUnavailable(t, err, capture, &out, &stderr, data.Load())
+			} else {
+				assertPRReadDenied(t, err, capture, &out, &stderr, data.Load())
+			}
 		})
 	}
 }
@@ -420,8 +424,19 @@ func TestProtectedPRReadMissingAndDetachedContext(t *testing.T) {
 			capture := captureRewriteGH(t)
 			var out, stderr bytes.Buffer
 			err := runGH(t.Context(), []string{"pr", "view", "--json=number"}, &out, &stderr)
-			assertPRReadDenied(t, err, capture, &out, &stderr, data.Load())
+			assertPRReadGitUnavailable(t, err, capture, &out, &stderr, data.Load())
 		})
+	}
+}
+
+func assertPRReadGitUnavailable(t *testing.T, err error, capture string, out, stderr *bytes.Buffer, data int64) {
+	t.Helper()
+	var exit exitCodeError
+	if !errors.As(err, &exit) || exit.Code != 1 || out.Len() != 0 || data != 0 || !strings.HasPrefix(stderr.String(), "octopool: git unavailable (") {
+		t.Fatalf("git context failure lost: err=%v out=%q stderr=%q data=%d", err, out.String(), stderr.String(), data)
+	}
+	if _, err := os.Stat(capture); !os.IsNotExist(err) {
+		t.Fatal("unavailable git context started native child")
 	}
 }
 
@@ -497,7 +512,7 @@ func TestProtectedPRReadNoDefault(t *testing.T) {
 			}
 			want := []string{"pr", "view", selector, "--json", "number", "--jq", "(", "--repo=https://github.com/" + test.wantRepo}
 			got := readRewriteCapture(t, capture)
-			if !slices.Equal(got.Args, want) || !slices.Equal(args, original) || policies.Load() != 2 || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" || got.Stdin != "" || out.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+			if !slices.Equal(got.Args, want) || !slices.Equal(args, original) || policies.Load() != 2 || got.Env["GH_HOST"] != "github.com" || got.Env["GH_REPO"] != "" || got.Stdin != "" || out.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 				t.Fatalf("native no-default boundary: args=%q want=%q policies=%d capture=%+v output=%q/%q", got.Args, want, policies.Load(), got, out.String(), stderr.String())
 			}
 		})

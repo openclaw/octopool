@@ -31,7 +31,10 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 	}
 	switch args[0] {
 	case "view":
-		repo, number, ok := repoNumber(opts)
+		repo, number, ok, err := repoNumber(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || hasTopModifiers(opts) {
 			return ghDelegated()
 		}
@@ -43,7 +46,10 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 		}
 		return ghCompleted(relayIssueView(ctx, stdout, repo, number, opts))
 	case "list":
-		repo, ok := repoOnly(opts)
+		repo, ok, err := repoOnly(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || limitOverOnePage(opts) || hasCurrentUserFilter(opts) {
 			return ghDelegated()
 		}

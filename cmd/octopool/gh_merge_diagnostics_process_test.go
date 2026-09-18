@@ -102,7 +102,7 @@ func TestGHMergeDiagnosticsOff(t *testing.T) {
 				var stdout, stderr bytes.Buffer
 				err := execRealGHWithStdin(t.Context(), args, strings.NewReader("body"), &stdout, &stderr)
 				var exit exitCodeError
-				if !errors.As(err, &exit) || exit.Code != 17 || stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" || policies.Load() != 1 {
+				if !errors.As(err, &exit) || exit.Code != 17 || stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" || policies.Load() != 1 {
 					t.Fatal("disabled diagnostics changed streams, exit, or policy reads")
 				}
 				capture := readRewriteCapture(t, capturePath)
@@ -169,7 +169,7 @@ func TestGHMergeDiagnosticsFinalPolicy(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !strings.HasPrefix(stderr.String(), "child stderr\n") || !strings.Contains(line, "child_started=true outcome=succeeded") {
+			if err != nil || !strings.HasPrefix(withoutGraphQLNotice(stderr.String()), "child stderr\n") || !strings.Contains(line, "child_started=true outcome=succeeded") {
 				t.Fatal("child outcome changed")
 			}
 			capture := readRewriteCapture(t, capturePath)
@@ -454,7 +454,7 @@ func TestGHMergeDiagnosticsUnrelated(t *testing.T) {
 			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), &stdout, &stderr); err != nil {
 				t.Fatal(err)
 			}
-			if stdout.String() != frame || stderr.String() != "child stderr\n" {
+			if stdout.String() != frame || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 				t.Fatal("unrelated/native-owned output intercepted")
 			}
 			capture := readRewriteCapture(t, capturePath)

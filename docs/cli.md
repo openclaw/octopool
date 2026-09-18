@@ -177,6 +177,23 @@ full user-profile reads retain the normal relay or real-`gh` behavior.
 
 ### Quota provenance and merge diagnostics
 
+Native GraphQL delegation prints `octopool: graphql delegated to personal token` on
+stderr. This includes unsupported PR exports, native PR checks, and raw `gh api graphql`;
+relay-backed reads do not print it. When the last observation has fewer than 500 remaining,
+the notice appends `(remaining N/limit, resets HH:MM UTC)`. The shim reads the personal
+credential's rate-limit-exempt REST `/rate_limit` endpoint through native `gh`, using its
+credential-keyed 60-second response cache. It never substitutes the pool's quota. A failed
+or policy-blocked quota probe leaves the delegation notice without guessed numbers.
+
+A raw or native GraphQL rate-limit error, including GraphQL errors returned with HTTP 200, prints
+`octopool: graphql rate limit (remaining N/limit, resets HH:MM UTC); retry after reset, not re-authentication`.
+Subsequent misleading invalid-token/login hints are suppressed; unrelated 403 permission
+errors, REST failures in mixed commands such as `pr diff`, and secondary-rate-limit/backoff
+diagnostics stay unchanged. If the quota probe is
+unavailable, authentication is overridden by a header, or the effective repository host is uncertain, native errors are retained and
+the reset time is identified as unavailable. stdout and native exit codes are preserved,
+and prompts and watches keep streaming stderr.
+
 Bare `gh api rate_limit` is noncacheable but can use a pooled reader. After successful
 relay output, Octopool prints one fixed stderr notice: this is pooled-reader quota, not
 proof of the native writer's quota or permissions. JSON stdout is unchanged. Errors,
@@ -261,6 +278,34 @@ octopool gh release list -R openclaw/octopool --limit 10 --json tagName,name,url
 octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content
 ```
+
+Bounded CI retries use your local GitHub identity after structural policy checks:
+
+```sh
+gh run rerun 26360397003 --failed -R openclaw/openclaw
+gh api -X POST repos/openclaw/openclaw/actions/runs/26360397003/rerun
+gh api --method POST repos/openclaw/openclaw/actions/runs/26360397003/rerun-failed-jobs
+gh api -X POST repos/openclaw/openclaw/actions/jobs/123456789/rerun
+gh api --method GET repos/openclaw/openclaw/actions/workflows/ci.yml/runs -f event=pull_request -F per_page=100
+```
+
+`run rerun ID [--failed] [-R owner/repo]` pins one positive decimal run ID and repository;
+under active protection it becomes the corresponding bodyless REST POST. The three exact
+REST retry routes accept no body, query, field, pagination, or debug options. Run/job IDs
+must fit a signed 64-bit integer; zero, leading zeroes, and ambiguous selectors are rejected.
+The Worker remains read-only. Retries never use pooled credentials.
+
+Workflow-run reads accept literal `event`, `head_sha` (40 hex characters), `branch`, `status`,
+and `per_page` (1–100) query fields through `-f`/`--raw-field` or `-F`/`--field`.
+For this exact route, fields default to GET even without `--method GET`; they are encoded
+into the checked query before relay dispatch. Duplicate/unknown fields, typed file sources,
+placeholders, and request bodies are rejected on this modeled path.
+
+Local repository/branch git probes have a 10-second deadline. A failed probe reports
+`octopool: git unavailable (<resolved path>): <error>; pass -R owner/repo or fix git`
+and exits nonzero, preserving the distinction from a policy denial. Explicit `-R` or
+`GH_REPO` skips repository discovery, so numeric PR/run and repository-scoped reads work
+without git. Commands that infer or validate a branch still need working git.
 
 Top-level commands relay machine-readable `--json` shapes and selected non-interactive
 human-format reads. Supported `--json` fields are intentionally conservative. Common

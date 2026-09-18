@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/url"
 	"os"
 	"os/exec"
@@ -8,44 +9,41 @@ import (
 	"strings"
 )
 
-func repoNumber(opts ghTopOptions) (string, string, bool) {
+func repoNumber(opts ghTopOptions) (string, string, bool, error) {
 	if len(opts.positionals) != 1 {
-		return "", "", false
+		return "", "", false, nil
 	}
 	repo, number := repoAndNumber(opts.repo, opts.positionals[0])
 	if repo == "" {
 		if strings.TrimSpace(opts.repo) != "" {
-			return "", "", false
+			return "", "", false, nil
 		}
-		repo = currentGitHubRepo()
+		var err error
+		repo, err = currentGitHubRepo()
+		if err != nil {
+			return "", "", false, err
+		}
 	}
 	if repo == "" || number == "" {
-		return "", "", false
+		return "", "", false, nil
 	}
-	return repo, number, true
+	return repo, number, true, nil
 }
 
-func repoOnly(opts ghTopOptions) (string, bool) {
+func repoOnly(opts ghTopOptions) (string, bool, error) {
 	if len(opts.positionals) != 0 {
-		return "", false
+		return "", false, nil
 	}
-	repo, ok := repoFromOptionOrCurrent(opts.repo)
-	if !ok {
-		return "", false
-	}
-	if repo == "" {
-		return "", false
-	}
-	return repo, true
+	return repoFromOptionOrCurrent(opts.repo)
 }
 
-func repoFromOptionOrCurrent(raw string) (string, bool) {
+func repoFromOptionOrCurrent(raw string) (string, bool, error) {
 	if strings.TrimSpace(raw) != "" {
 		repo := normalizeRepo(raw)
-		return repo, repo != ""
+		return repo, repo != "", nil
 	}
-	repo := currentGitHubRepo()
-	return repo, repo != ""
+	repo, err := currentGitHubRepo()
+	return repo, repo != "", err
 }
 
 func repoAndNumber(repo string, raw string) (string, string) {
@@ -79,15 +77,21 @@ func repoNumberFromURL(raw string) (string, string) {
 	return normalizeRepo(parts[0] + "/" + parts[1]), parts[3]
 }
 
-func currentGitHubRepo() string {
+func currentGitHubRepo() (string, error) {
 	if repo := strings.TrimSpace(os.Getenv("GH_REPO")); repo != "" {
-		return normalizeRepo(repo)
+		return normalizeRepo(repo), nil
 	}
-	out, err := exec.Command("git", "config", "--get", "remote.origin.url").Output()
+	out, err := gitProbe("config", "--get", "remote.origin.url")
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		// An unset origin is not an unavailable git binary. Native gh can select
+		// another remote when this simple relay lookup cannot resolve the repo.
+		return "", nil
+	}
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return normalizeRepo(strings.TrimSpace(string(out)))
+	return normalizeRepo(strings.TrimSpace(out)), nil
 }
 
 func isHex(raw string) bool {

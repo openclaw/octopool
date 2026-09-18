@@ -21,7 +21,10 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 	}
 	switch args[0] {
 	case "list":
-		repo, ok := repoOnly(opts)
+		repo, ok, err := repoOnly(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok {
 			return ghDelegated()
 		}
@@ -60,7 +63,10 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasRunViewModifiers(opts) {
 			return ghDelegated()
 		}
-		repo, ok := repoFromOptionOrCurrent(opts.repo)
+		repo, ok, err := repoFromOptionOrCurrent(opts.repo)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok {
 			return ghDelegated()
 		}

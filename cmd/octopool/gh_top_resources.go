@@ -26,7 +26,10 @@ func handleGHRepo(ctx context.Context, args []string, stdout io.Writer) ghResult
 			opts.repo = opts.positionals[0]
 			opts.positionals = nil
 		}
-		repo, ok := repoOnly(opts)
+		repo, ok, err := repoOnly(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok {
 			return ghDelegated()
 		}
@@ -100,13 +103,19 @@ func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghRes
 	}
 	switch args[0] {
 	case "list":
-		repo, ok := repoOnly(opts)
+		repo, ok, err := repoOnly(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "releases"), query: listQuery(opts)}, opts, fieldMapRelease))
 	case "view":
-		repo, ok := repoFromOptionOrCurrent(opts.repo)
+		repo, ok, err := repoFromOptionOrCurrent(opts.repo)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseViewFields) {
 			return ghDelegated()
 		}
@@ -134,7 +143,10 @@ func handleGHWorkflow(ctx context.Context, args []string, stdout io.Writer) ghRe
 	if !ok {
 		return early
 	}
-	repo, ok := repoFromOptionOrCurrent(opts.repo)
+	repo, ok, err := repoFromOptionOrCurrent(opts.repo)
+	if err != nil {
+		return ghFailed(err)
+	}
 	if !ok || repo == "" {
 		return ghDelegated()
 	}
@@ -169,7 +181,10 @@ func handleGHLabel(ctx context.Context, args []string, stdout io.Writer) ghResul
 	if args[0] != "list" || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
 		return ghDelegated()
 	}
-	repo, ok := repoOnly(opts)
+	repo, ok, err := repoOnly(opts)
+	if err != nil {
+		return ghFailed(err)
+	}
 	if !ok {
 		return ghDelegated()
 	}

@@ -84,7 +84,7 @@ func TestDeclaredInput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prepared child: %v; stderr=%s", err, &stderr)
 		}
-		if stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+		if stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 			t.Fatalf("child streams changed: %q %q", &stdout, &stderr)
 		}
 		got := readRewriteCapture(t, capturePath)
@@ -541,7 +541,7 @@ func TestDeclaredInput(t *testing.T) {
 				t.Fatal("expected child failure")
 			}
 			if failure == "exit" {
-				if err != (exitCodeError{Code: 7}) || stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+				if err != (exitCodeError{Code: 7}) || stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 					t.Fatalf("child exit lost: %v %q %q", err, &stdout, &stderr)
 				}
 				got := readRewriteCapture(t, capture)
@@ -626,7 +626,7 @@ func TestDeclaredInputBundles(t *testing.T) {
 		if err := json.Unmarshal(data, &got); err != nil {
 			t.Fatal(err)
 		}
-		if stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+		if stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 			t.Error("child streams changed")
 		}
 		return got

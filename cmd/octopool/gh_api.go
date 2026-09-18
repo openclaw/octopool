@@ -18,6 +18,11 @@ type ghAPIRequest struct {
 }
 
 func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
+	var err error
+	args, err = normalizeWorkflowRunsAPIArgs(args)
+	if err != nil {
+		return ghAPIRequest{}, false, err
+	}
 	request := ghAPIRequest{
 		method:  "GET",
 		query:   map[string]any{},

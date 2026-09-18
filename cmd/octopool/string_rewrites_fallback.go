@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 )
 
@@ -369,11 +368,16 @@ func bestEffortNeedsRepository(args []string) bool {
 }
 
 func currentBestEffortRepo(policy stringRewritePolicy) (string, error) {
-	out, err := exec.Command("git", "config", "--get", "remote.origin.url").Output()
-	if err != nil {
-		return "", errRewriteBlocked
+	// Unsupported ambient hosts retain the existing GitHub-origin fallback;
+	// a valid GitHub selector is pinned and policy-checked before clearing it.
+	if repo := os.Getenv("GH_REPO"); repo != "" && normalizeRepo(repo) != "" {
+		return normalizeBestEffortRepo(policy, repo)
 	}
-	return normalizeBestEffortRepo(policy, strings.TrimSpace(string(out)))
+	out, err := gitProbe("config", "--get", "remote.origin.url")
+	if err != nil {
+		return "", err
+	}
+	return normalizeBestEffortRepo(policy, strings.TrimSpace(out))
 }
 
 func pinBestEffortPositionalRepositories(policy stringRewritePolicy, args []string) ([]string, error) {

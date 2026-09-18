@@ -158,6 +158,16 @@ func execRealGHWithStdinAndEnv(
 		env = envWithGitHubHost(env)
 	}
 	cmd.Env = env
+	var graphQLOutput *ghGraphQLStderr
+	if delegatedGHUsesGraphQL(prepared.args) {
+		graphQLOutput = newGHGraphQLStderr(stderr, func() *ghGraphQLQuota {
+			if !graphQLQuotaUsesGitHub(prepared.args, env) {
+				return nil
+			}
+			return readPersonalGraphQLQuota(ctx, path, env, prepared.policy)
+		}, prepared.args[0] == "api")
+		cmd.Stderr = graphQLOutput
+	}
 	if diagnostic == nil {
 		err = cmd.Run()
 	} else {
@@ -182,6 +192,11 @@ func execRealGHWithStdinAndEnv(
 			}
 		} else if ctx.Err() != nil {
 			diagnostic.outcome = ghMergeCanceledBeforeStart
+		}
+	}
+	if graphQLOutput != nil {
+		if flushErr := graphQLOutput.flush(); err == nil {
+			err = flushErr
 		}
 	}
 	if err != nil {

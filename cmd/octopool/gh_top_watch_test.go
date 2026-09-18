@@ -824,7 +824,7 @@ func TestGHWatchShortBoolNativeHandoff(t *testing.T) {
 			var out, stderr bytes.Buffer
 			err := runGH(t.Context(), args, &out, &stderr)
 			// Each capture child emits one marker; exact output also proves one handoff.
-			if err != nil || data != 0 || policies.Load() != 2 || out.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+			if err != nil || data != 0 || policies.Load() != 2 || out.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 				t.Fatalf("handoff: err=%v data=%d policies=%d stdout=%q stderr=%q", err, data, policies.Load(), out.String(), stderr.String())
 			}
 			capture := readRewriteCapture(t, capturePath)

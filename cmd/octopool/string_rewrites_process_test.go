@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,19 @@ func TestRewriteCaptureProcess(t *testing.T) {
 			args = args[i+1:]
 			break
 		}
+	}
+	if len(args) > 1 && args[0] == "api" && args[1] == "rate_limit" && slices.Contains(args, "--cache=60s") {
+		if path := os.Getenv("OCTOPOOL_TEST_GRAPHQL_PROBE"); path != "" {
+			if err := os.WriteFile(path, []byte("probe"), 0600); err != nil {
+				os.Exit(85)
+			}
+		}
+		quota := os.Getenv("OCTOPOOL_TEST_GRAPHQL_QUOTA")
+		if quota == "" {
+			quota = `{"resources":{"graphql":{"remaining":5000,"limit":5000,"reset":2000000000}}}`
+		}
+		fmt.Fprintln(os.Stdout, quota)
+		os.Exit(0)
 	}
 	capture := rewriteCapture{Args: args, Files: map[string]string{}, FileData: map[string][]byte{}, Modes: map[string]uint32{}, DirectoryModes: map[string]uint32{}, Env: map[string]string{"GH_HOST": os.Getenv("GH_HOST"), "GH_REPO": os.Getenv("GH_REPO")}}
 	if os.Getenv("OCTOPOOL_TEST_SYNTHETIC_AUTH") == "1" {
@@ -115,7 +129,11 @@ func TestRewriteCaptureProcess(t *testing.T) {
 		output = "child stdout\n"
 	}
 	_, _ = io.WriteString(os.Stdout, output)
-	_, _ = io.WriteString(os.Stderr, "child stderr\n")
+	stderr, customStderr := os.LookupEnv("OCTOPOOL_TEST_REWRITE_STDERR")
+	if !customStderr {
+		stderr = "child stderr\n"
+	}
+	_, _ = io.WriteString(os.Stderr, stderr)
 	exit, _ := strconv.Atoi(os.Getenv("OCTOPOOL_TEST_REWRITE_EXIT"))
 	os.Exit(exit)
 }
@@ -390,7 +408,7 @@ func TestStringRewriteProcessSnapshots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if out.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+			if out.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 				t.Fatalf("streams: %q %q", out.String(), stderr.String())
 			}
 			capture := readRewriteCapture(t, capturePath)
@@ -714,7 +732,7 @@ func TestStringRewriteIssueAttachments(t *testing.T) {
 							t.Fatalf("child exit: got %v, want %d", err, test.exitCode)
 						}
 					}
-					if stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+					if stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 						t.Fatalf("child streams: %q %q", stdout.String(), stderr.String())
 					}
 					capture := readRewriteCapture(t, capturePath)
@@ -2224,7 +2242,7 @@ func TestStringRewriteFreshLocalMergeAndExit(t *testing.T) {
 	if !errors.As(err, &exit) || exit.Code != 7 {
 		t.Fatalf("exit=%v", err)
 	}
-	if out.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+	if out.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 		t.Fatal("child streams changed")
 	}
 	for _, content := range readRewriteCapture(t, capture).Files {
@@ -2851,7 +2869,7 @@ func TestStringRewritePRWatchPolicyFloor(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || childCount != 1 || stdout.String() != "child stdout\n" || stderr.String() != "child stderr\n" {
+			if err != nil || childCount != 1 || stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "child stderr\n" {
 				t.Fatalf("native child markers/result changed: err=%v", err)
 			}
 			capture := readRewriteCapture(t, capturePath)
@@ -2930,7 +2948,7 @@ func TestStringRewritePrivateRunWatchFallback(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || policies.Load() != 3 || stdout.String() != "child stdout\n" || stderr.String() != "octopool: octopool requested local gh fallback: repo_not_public; falling back to real gh\nchild stderr\n" {
+			if err != nil || policies.Load() != 3 || stdout.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != "octopool: octopool requested local gh fallback: repo_not_public; falling back to real gh\nchild stderr\n" {
 				t.Fatalf("private watch handoff changed: err=%v policies=%d stdout=%q stderr=%q", err, policies.Load(), stdout.String(), stderr.String())
 			}
 			want := []string{"run", "watch", "42", "--repo=acme/repo", "-i30", "--exit-status"}

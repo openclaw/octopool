@@ -64,7 +64,11 @@ func rewritePRReadBranch(policy stringRewritePolicy, selector string) (string, e
 		}
 	}
 	if _, err := rewritePRReadGit("check-ref-format", "--branch", branch); err != nil {
-		return "", errRewriteBlocked
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 {
+			return "", errRewriteBlocked
+		}
+		return "", rewriteGitError(err)
 	}
 	return branch, nil
 }
@@ -80,7 +84,7 @@ func rewritePRReadBaseRepo(policy stringRewritePolicy, raw string) (string, erro
 	}
 	names, err := rewritePRReadGit("remote")
 	if err != nil {
-		return "", errRewriteBlocked
+		return "", rewriteGitError(err)
 	}
 	base := ""
 	remoteNames := strings.Fields(names)
@@ -160,7 +164,7 @@ func rewritePRReadRemote(policy stringRewritePolicy, remote string) (string, err
 	// SSH host aliases are deliberately outside this local resolution boundary.
 	raw, err := rewritePRReadGit("remote", "get-url", "--all", remote)
 	if err != nil {
-		return "", errRewriteBlocked
+		return "", rewriteGitError(err)
 	}
 	return rewritePRReadRepo(policy, strings.TrimSuffix(raw, "\n"))
 }
@@ -168,7 +172,7 @@ func rewritePRReadRemote(policy stringRewritePolicy, remote string) (string, err
 func rewritePRReadCurrent(policy stringRewritePolicy, repo string) (string, error) {
 	raw, err := rewritePRReadGit("symbolic-ref", "--quiet", "HEAD")
 	if err != nil {
-		return "", errRewriteBlocked
+		return "", rewriteGitError(err)
 	}
 	raw = strings.TrimSuffix(raw, "\n")
 	branch, ok := strings.CutPrefix(raw, "refs/heads/")
@@ -196,8 +200,8 @@ func rewritePRReadCurrent(policy stringRewritePolicy, repo string) (string, erro
 	remote, ref := "", branch
 	push, pushErr := rewritePRReadGit("rev-parse", "--symbolic-full-name", branch+"@{push}")
 	var exitErr *exec.ExitError
-	if pushErr != nil && !errors.As(pushErr, &exitErr) {
-		return "", errRewriteBlocked
+	if pushErr != nil && (!errors.As(pushErr, &exitErr) || exitErr.ExitCode() < 0) {
+		return "", rewriteGitError(pushErr)
 	}
 	if pushErr == nil && strings.HasPrefix(push, "refs/remotes/") {
 		if err := policy.checkStructural(strings.TrimSuffix(push, "\n")); err != nil {
@@ -209,7 +213,10 @@ func rewritePRReadCurrent(policy stringRewritePolicy, repo string) (string, erro
 		}
 	} else {
 		pushDefault, err := rewritePRReadConfig(policy, "push.default")
-		if err != nil || !slices.Contains([]string{"", "nothing", "current", "upstream", "tracking", "simple", "matching"}, pushDefault) {
+		if err != nil {
+			return "", err
+		}
+		if !slices.Contains([]string{"", "nothing", "current", "upstream", "tracking", "simple", "matching"}, pushDefault) {
 			return "", errRewriteBlocked
 		}
 		if (pushDefault == "upstream" || pushDefault == "tracking") && merge != "" {
@@ -277,7 +284,7 @@ func rewritePRReadConfig(policy stringRewritePolicy, key string) (string, error)
 	}
 	value := strings.TrimSuffix(out, "\n")
 	if err != nil || policy.checkStructural(value) != nil {
-		return "", errRewriteBlocked
+		return "", rewriteGitError(err)
 	}
 	return value, nil
 }
@@ -292,9 +299,5 @@ func (out *prReadGitOutput) Write(data []byte) (int, error) {
 }
 
 func rewritePRReadGit(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	var out prReadGitOutput
-	cmd.Stdout = &out
-	err := cmd.Run()
-	return out.data.String(), err
+	return gitProbe(args...)
 }

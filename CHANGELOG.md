@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Allow structurally checked CI run/job retries and workflow-run query fields, announce personal-token GraphQL delegation with low-quota/reset details, and report bounded git-probe failures with explicit repository recovery guidance.
 - Match native `gh repo view` owner IDs, owner fields, and visibility values before JSON/jq output, with guarded fallback for incomplete metadata.
 - Return the native GraphQL node ID from `gh repo view --json id`, preserving numeric IDs in raw REST API reads and guarded fallback for incomplete repository identities.
 

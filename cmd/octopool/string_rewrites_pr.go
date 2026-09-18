@@ -2,7 +2,6 @@ package main
 
 import (
 	"io"
-	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -31,9 +30,9 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		return errRewriteBlocked
 	}
 	if command == "pr ready" && len(flags.positionals) == 0 {
-		selector, ok := rewriteCurrentBranch()
-		if !ok {
-			return errRewriteBlocked
+		selector, err := rewriteCurrentBranch()
+		if err != nil {
+			return err
 		}
 		flags.positionals = []string{selector}
 	}
@@ -120,13 +119,16 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 
 // Current checkout branch, validated as a plain branch name. Detached HEAD,
 // non-git directories, and unusual ref shapes fail closed.
-func rewriteCurrentBranch() (string, bool) {
-	branch, err := exec.Command("git", "symbolic-ref", "--quiet", "--short", "HEAD").Output()
-	selector := strings.TrimSpace(string(branch))
-	if err != nil || !validRewriteReadyBranch(selector) {
-		return "", false
+func rewriteCurrentBranch() (string, error) {
+	branch, err := gitProbe("symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return "", err
 	}
-	return selector, true
+	selector := strings.TrimSpace(branch)
+	if !validRewriteReadyBranch(selector) {
+		return "", errRewriteBlocked
+	}
+	return selector, nil
 }
 
 func validRewriteReadyBranch(selector string) bool {
@@ -136,7 +138,8 @@ func validRewriteReadyBranch(selector string) bool {
 	if strings.ContainsAny(selector, `:\?#`) || strings.Contains(selector, "/pull/") || strings.HasPrefix(selector, "github.com/") {
 		return false
 	}
-	return exec.Command("git", "check-ref-format", "--branch", selector).Run() == nil
+	_, err := gitProbe("check-ref-format", "--branch", selector)
+	return err == nil
 }
 
 func validRewriteAssignees(value string) bool {

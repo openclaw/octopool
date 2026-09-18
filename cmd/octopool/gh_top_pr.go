@@ -46,7 +46,10 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 	}
 	switch args[0] {
 	case "view":
-		repo, number, ok := repoNumber(opts)
+		repo, number, ok, err := repoNumber(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || hasTopModifiers(opts) {
 			return ghDelegated()
 		}
@@ -58,7 +61,10 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		}
 		return ghCompleted(relayPRView(ctx, stdout, repo, number, opts))
 	case "list":
-		repo, ok := repoOnly(opts)
+		repo, ok, err := repoOnly(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || !supportedPRListState(opts.state) || limitOverOnePage(opts) || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
 			return ghDelegated()
 		}
@@ -83,7 +89,10 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 			headers: publicShapeHeaders(opts, supportedPublicPRListFields, publicShapePullRequestList),
 		}, opts))
 	case "diff":
-		repo, number, ok := repoNumber(opts)
+		repo, number, ok, err := repoNumber(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || hasTopModifiersExceptPatch(opts) || machineReadable(opts) || opts.jq != "" {
 			return ghDelegated()
 		}
@@ -98,7 +107,10 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		}
 		return ghCompleted(relayTop(ctx, stdout, request, ghTopOptions{}, nil))
 	case "checks":
-		repo, number, ok := repoNumber(opts)
+		repo, number, ok, err := repoNumber(opts)
+		if err != nil {
+			return ghFailed(err)
+		}
 		if !ok || hasTopModifiers(opts) {
 			return ghDelegated()
 		}

@@ -8,7 +8,14 @@ import (
 	"os"
 )
 
-func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) error {
+func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) (result error) {
+	defer func() {
+		var unavailable *gitUnavailableError
+		if errors.As(result, &unavailable) {
+			fmt.Fprintln(stderr, unavailable)
+			result = exitCodeError{Code: 1}
+		}
+	}()
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		fmt.Fprintln(stdout, "usage: octopool gh api <GET path> [--paginate] [--slurp] [--jq expr]")
 		fmt.Fprintln(stdout, "       octopool gh pr|issue|run|repo|release|workflow|label|gist|search ...")
@@ -19,9 +26,17 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		if err != nil {
 			return err
 		}
+		if args[0] == "api" {
+			normalized, err := normalizeWorkflowRunsAPIArgs(args[1:])
+			if err != nil {
+				return err
+			}
+			args = append([]string{"api"}, normalized...)
+		}
 		if len(policy.Rules) != 0 {
 			lifecycle := len(args) >= 2 && args[0] == "pr" && (args[1] == "ready" || args[1] == "merge")
-			if rewriteContentCommand(args) || lifecycle || args[0] == "api" {
+			ciRetry := len(args) >= 2 && args[0] == "run" && args[1] == "rerun"
+			if rewriteContentCommand(args) || lifecycle || ciRetry || args[0] == "api" {
 				// Mutations and content snapshots are prepared exactly once, at the
 				// final child boundary. Read API dispatch still uses the relay.
 				if args[0] != "api" {
