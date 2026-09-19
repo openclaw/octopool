@@ -16,11 +16,14 @@ const RESPONSE_HEADERS = [
 export function isSecondaryRateLimit(status: number, body: unknown): boolean {
   // GitHub can omit Retry-After on secondary limits. A permission 403 alone
   // is not enough: only the documented error message identifies this scope.
+  return (status === 403 || status === 429) && hasSecondaryRateLimitMessage(body);
+}
+
+export function hasSecondaryRateLimitMessage(error: unknown): boolean {
   return (
-    (status === 403 || status === 429) &&
-    isRecord(body) &&
-    typeof body.message === "string" &&
-    /\bsecondary rate\b/i.test(body.message)
+    isRecord(error) &&
+    typeof error.message === "string" &&
+    /\bsecondary rate\b/i.test(error.message)
   );
 }
 

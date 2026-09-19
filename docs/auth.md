@@ -151,8 +151,19 @@ malformed upstream IDs, organization nodes, or pagination, invalid JSON, transpo
 and rate-limit failures return `502 org_verification_failed`. Failed verification never refreshes
 the timestamp. Responses omit upstream bodies and exception text. Requests retain timeouts,
 response-size caps, and relay egress protection; protection denials remain `403 string_rewrite_denied`.
-Membership checks use GraphQL, without adding a REST core-quota dependency. An unset verifier
-token still returns `503 org_verification_unavailable` when a refresh is required.
+Membership checks normally use GraphQL, without spending REST core quota. When GitHub reports
+primary GraphQL exhaustion and the response headers confirm resource `graphql` with zero
+remaining quota, verification tries `GET /orgs/{org}/memberships/{login}` with the
+same token. Both `RATE_LIMIT` and `RATE_LIMITED` GraphQL error types are recognized, but
+neither triggers fallback with nonzero or unconfirmed quota. This REST response must identify
+the expected numeric user ID, the allowed organization, and an `active` membership; a `pending`
+invitation denies access. A REST `404`
+cannot distinguish missing membership from missing token permissions and remains an upstream
+verification failure. Permission failures, completed GraphQL nonmembership, secondary limits,
+and explicit `Retry-After` responses do not trigger the fallback. Both transports retain the
+same egress protection, timeouts, body caps, and redirect restrictions. If REST also fails,
+its response's quota metadata accompanies the error; no separate quota estimate overrides it.
+An unset verifier token still returns `503 org_verification_unavailable` when a refresh is required.
 
 ### Immutable membership upgrade
 

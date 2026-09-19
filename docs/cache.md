@@ -19,6 +19,13 @@ direct repository-resource response also proves that the repository is public, a
 separate repository metadata request; routes that need a pooled identity still run the
 explicit public-repository guard first. Successful results write through to both layers.
 
+Fresh identity-specific entries are checked before conditional revalidation and
+token-free resource fetches. Reuse still verifies the identity's current pool/scope
+eligibility, public visibility, and the caller's maximum age; a missing credential or
+quota cooldown does not invalidate an otherwise eligible cached body. This prevents a
+warm pooled response from needlessly hitting GitHub again just because the shared
+anonymous key is empty.
+
 Expired API-origin entries with an `etag` or `last-modified` validator are conditionally
 revalidated through the API before the normal token-free/API/pool fill chain. Anonymous REST
 entries are distinguished from web/raw/page entries by their stored `x-ratelimit-resource`

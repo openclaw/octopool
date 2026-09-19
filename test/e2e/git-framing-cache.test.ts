@@ -180,9 +180,7 @@ describe("Git framing and cache retirement at the Worker", () => {
       expect
         .soft(await (await relay(request.path, undefined, request)).json())
         .toMatchObject({ body: exactGitRefs, relay: { cache: "hit" } });
-      expect(urls(upstream).slice(calls)).toEqual(
-        layer === "identity" ? [gitAdvertisementURL, apiURL, repoURL] : [],
-      );
+      expect(urls(upstream).slice(calls)).toEqual([]);
       expect(
         await env.DB.prepare(
           "SELECT count(*) AS n FROM github_cache_entries WHERE cache_key IN (?, ?) AND body_json = ?",

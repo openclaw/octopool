@@ -407,12 +407,7 @@ describe("identity routing lifecycle boundaries", () => {
         token: "test-primary-token",
       },
     ]);
-    // Existing revalidation/public-proof and web phases precede the identity cache scan.
-    expect(following).toEqual([
-      { url: "https://api.github.com/repos/openclaw/octopool", token: "test-org-token" },
-      { url: "https://github.com/openclaw/octopool/pull/42.diff", token: undefined },
-      { url: "https://api.github.com/repos/openclaw/octopool", token: "test-org-token" },
-    ]);
+    expect(following).toEqual([]);
     await env.DB.prepare("DELETE FROM identity_scopes WHERE identity_id = 'primary'").run();
     const route = classifyRoute(
       { pool: POOL, method: "GET", path: DIFF_PATH },

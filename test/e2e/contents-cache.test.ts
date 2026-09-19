@@ -76,11 +76,7 @@ describe("contents cache retirement at the Worker", () => {
         .toMatchObject({ body: expected, relay: { cache: "hit" } });
       expect(
         upstream.mock.calls.slice(calls).map(([input, init]) => new Request(input, init).url),
-      ).toEqual(
-        layer === "identity"
-          ? [expected.url, "https://api.github.com/repos/openclaw/octopool"]
-          : [],
-      );
+      ).toEqual([]);
       expect(
         upstream.mock.calls.filter(
           ([input, init]) => new Request(input, init).url === expected.download_url,

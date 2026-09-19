@@ -27,6 +27,56 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end cache revalidation", () => {
+  it.each([true, false])(
+    "reuses a fresh identity entry before upstream reads (validator: %s)",
+    async (validator) => {
+      await seedPool();
+      let anonymousAvailable = false;
+      const resourceRequests: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          if (bearer(request) === "test-org-token") return jsonResponse({ private: false });
+          expect(request.url).toBe(`https://api.github.com${RUN_PATH}`);
+          const identity = bearer(request) === "test-primary-token";
+          resourceRequests.push(identity ? "identity" : "anonymous");
+          if (!identity && !anonymousAvailable)
+            return jsonResponse({ message: "unavailable" }, 503);
+          return jsonResponse({ id: 123, status: identity ? "in_progress" : "completed" }, 200, {
+            ...rateHeaders({ remaining: 4_999 }),
+            ...(validator ? { etag: '"run-v1"' } : {}),
+          });
+        }),
+      );
+      expect(await (await relay(RUN_PATH)).json()).toMatchObject({
+        body: { status: "in_progress" },
+        identity: { id: "primary" },
+        relay: { cache: "miss" },
+      });
+      const firstRequests = [...resourceRequests];
+      anonymousAvailable = true;
+      expect(await (await relay(RUN_PATH)).json()).toMatchObject({
+        body: { status: "in_progress" },
+        identity: { id: "primary" },
+        relay: { cache: "hit" },
+      });
+      expect(resourceRequests).toEqual(firstRequests);
+      expect(
+        await env.DB.prepare(
+          "SELECT backend, cache_status, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+        ).first(),
+      ).toEqual({ backend: null, cache_status: "hit", fallback_reason: null });
+
+      expect(
+        await (
+          await relay(RUN_PATH, undefined, { headers: { "cache-control": "max-age=0" } })
+        ).json(),
+      ).toMatchObject({ body: { status: "completed" }, relay: { cache: "miss" } });
+      expect(resourceRequests).toEqual([...firstRequests, "anonymous"]);
+    },
+  );
+
   it("does not reuse a secondary-limited revalidation identity for another route", async () => {
     await seedPool({ secondary: true });
     let limited = false;

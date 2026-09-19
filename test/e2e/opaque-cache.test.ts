@@ -37,10 +37,9 @@ describe("opaque cache retirement at the Worker", () => {
       const second = await (await relay(request.path, undefined, request)).json<Envelope>();
       expect.soft(envelopeBytes(second)).toEqual([0xff, 0x41]);
       expect.soft(second.relay.cache).toBe("hit");
-      // Identity hits still run the existing fresh public-repository guard.
       expect(
         upstream.mock.calls.slice(calls).map(([input, init]) => new Request(input, init).url),
-      ).toEqual(["https://api.github.com/repos/openclaw/octopool"]);
+      ).toEqual([]);
       expect(
         upstream.mock.calls.filter(
           ([input, init]) => new URL(new Request(input, init).url).pathname === request.path,

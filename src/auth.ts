@@ -6,6 +6,8 @@ import { HttpError, requestBearer } from "./http";
 import { queries } from "./generated/sql";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { readBodyCapped } from "./response-body";
+import { isRecord } from "./object";
+import { hasSecondaryRateLimitMessage } from "./github-response";
 import type { Caller } from "./types";
 
 type CallerRow = {
@@ -224,7 +226,26 @@ export async function verifyGitHubOrgMemberWithToken(
       rethrowStringRewriteDenial(error);
       throw new HttpError(502, "org_verification_failed", "GitHub membership request failed");
     }
+    const graphQLQuotaExhausted =
+      response.headers.get("x-ratelimit-resource") === "graphql" &&
+      response.headers.get("x-ratelimit-remaining") === "0";
     if (!response.ok) {
+      if (
+        response.status === 403 &&
+        graphQLQuotaExhausted &&
+        !response.headers.has("retry-after")
+      ) {
+        const body = await readOrgMembershipResponse(response, responseCapBytes(env));
+        if (
+          !hasSecondaryRateLimitMessage(body) &&
+          (hasPrimaryGraphQLRateLimitErrors(body) ||
+            (body.errors === undefined &&
+              typeof body.message === "string" &&
+              /^API rate limit (?:already )?exceeded\b/i.test(body.message)))
+        ) {
+          return verifyRESTOrgMembership(env, token, login, expectedUserId, egress);
+        }
+      }
       throw new HttpError(
         502,
         "org_verification_failed",
@@ -233,7 +254,16 @@ export async function verifyGitHubOrgMemberWithToken(
       );
     }
 
-    const page = await parseOrgMembershipPage(response, responseCapBytes(env));
+    const body = await readOrgMembershipResponse(response, responseCapBytes(env));
+    if (
+      graphQLQuotaExhausted &&
+      hasPrimaryGraphQLRateLimitErrors(body) &&
+      !hasSecondaryRateLimitMessage(body) &&
+      !response.headers.has("retry-after")
+    ) {
+      return verifyRESTOrgMembership(env, token, login, expectedUserId, egress);
+    }
+    const page = parseOrgMembershipPage(body, response.headers);
     if (page === null || page.userId !== expectedUserId) {
       throw new HttpError(
         403,
@@ -255,6 +285,75 @@ export async function verifyGitHubOrgMemberWithToken(
   }
 }
 
+function hasPrimaryGraphQLRateLimitErrors(body: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(body.errors) &&
+    body.errors.length > 0 &&
+    body.errors.every(
+      (error: unknown) =>
+        isRecord(error) &&
+        (error.type === "RATE_LIMIT" || error.type === "RATE_LIMITED") &&
+        !hasSecondaryRateLimitMessage(error),
+    )
+  );
+}
+
+async function verifyRESTOrgMembership(
+  env: Env,
+  token: string,
+  login: string,
+  expectedUserId: number,
+  egress?: GitHubEgressEnv["githubEgress"],
+): Promise<string> {
+  const org = env.ALLOWED_GITHUB_ORG;
+  let response: Response;
+  try {
+    response = await (egress?.fetch ?? fetch)(
+      `https://api.github.com/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(login)}`,
+      {
+        redirect: "manual",
+        headers: githubHeaders(token),
+        signal: githubRequestSignal(env),
+      },
+    );
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    throw new HttpError(502, "org_verification_failed", "GitHub membership request failed");
+  }
+  // A 404 can also conceal missing token permissions; only an explicit
+  // identity-bound membership response can establish a membership decision.
+  if (!response.ok) {
+    throw new HttpError(
+      502,
+      "org_verification_failed",
+      `GitHub membership check failed with ${response.status}`,
+      githubRateLimitDetails(response.headers),
+    );
+  }
+  const body = await readOrgMembershipResponse(response, responseCapBytes(env));
+  if (
+    !isRecord(body.user) ||
+    !isGitHubUserId(body.user.id) ||
+    !isRecord(body.organization) ||
+    typeof body.organization.login !== "string" ||
+    body.organization.login.toLowerCase() !== org.toLowerCase() ||
+    (body.state !== "active" && body.state !== "pending")
+  ) {
+    throw new HttpError(502, "org_verification_failed", "GitHub membership response was invalid");
+  }
+  if (body.user.id !== expectedUserId) {
+    throw new HttpError(
+      403,
+      "github_identity_mismatch",
+      "GitHub account no longer matches this login; sign in again or ask an admin to reprovision",
+    );
+  }
+  if (body.state !== "active") {
+    throw new HttpError(403, "org_member_denied", `${login} is not a ${org} org member`);
+  }
+  return new Date().toISOString();
+}
+
 const ORG_MEMBERSHIP_QUERY = `
   query OctopoolOrgMembership($login: String!, $after: String) {
     user(login: $login) {
@@ -267,15 +366,10 @@ const ORG_MEMBERSHIP_QUERY = `
   }
 `;
 
-async function parseOrgMembershipPage(
+async function readOrgMembershipResponse(
   response: Response,
   capBytes: number,
-): Promise<{
-  userId: number;
-  organizations: string[];
-  endCursor: string | null;
-  hasNextPage: boolean;
-} | null> {
+): Promise<Record<string, unknown>> {
   let body: unknown;
   try {
     body = JSON.parse(
@@ -295,9 +389,21 @@ async function parseOrgMembershipPage(
   } catch {
     throw new HttpError(502, "org_verification_failed", "GitHub membership response was invalid");
   }
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+  if (!isRecord(body)) {
     throw new HttpError(502, "org_verification_failed", "GitHub membership response was invalid");
   }
+  return body;
+}
+
+function parseOrgMembershipPage(
+  body: Record<string, unknown>,
+  headers: Headers,
+): {
+  userId: number;
+  organizations: string[];
+  endCursor: string | null;
+  hasNextPage: boolean;
+} | null {
   const payload = body as {
     data?: {
       user?: {
@@ -314,7 +420,12 @@ async function parseOrgMembershipPage(
     payload.errors !== undefined &&
     (!Array.isArray(payload.errors) || payload.errors.length > 0)
   ) {
-    throw new HttpError(502, "org_verification_failed", "GitHub membership query failed");
+    throw new HttpError(
+      502,
+      "org_verification_failed",
+      "GitHub membership query failed",
+      githubRateLimitDetails(headers),
+    );
   }
   if (payload.data?.user === null) {
     return null;

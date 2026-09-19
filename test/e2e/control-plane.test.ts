@@ -592,6 +592,72 @@ describe("Worker end-to-end control plane", () => {
     },
   );
 
+  it.each(["CLI", "admin"])(
+    "enrolls and refreshes %s callers while GraphQL quota is exhausted",
+    async (surface) => {
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const path = new URL(request.url).pathname;
+        if (path === "/graphql") {
+          return jsonResponse({ errors: [{ type: "RATE_LIMIT" }] }, 200, {
+            "x-ratelimit-resource": "graphql",
+            "x-ratelimit-remaining": "0",
+          });
+        }
+        if (path === "/orgs/openclaw/memberships/cli-user") {
+          expect(bearer(request)).toBe(
+            surface === "CLI" && !refreshing ? "github-user-token" : "test-org-token",
+          );
+          return jsonResponse({
+            state: "active",
+            user: { id: userId },
+            organization: { login: "openclaw" },
+          });
+        }
+        if (path === "/user" || path === "/users/cli-user") {
+          return jsonResponse({ id: 101, login: "cli-user" });
+        }
+        throw new Error(`Unexpected synthetic GitHub request: ${path}`);
+      });
+      let refreshing = false;
+      let userId = 101;
+      vi.stubGlobal("fetch", upstream);
+      const response =
+        surface === "CLI"
+          ? await postJSON("/v1/login/github-cli", {
+              github_token: "github-user-token",
+              client_name: "linux-client",
+            })
+          : await postJSON(
+              "/v1/admin/callers",
+              { pool: POOL, github_login: "cli-user" },
+              "test-admin-token",
+            );
+      expect(response.status).toBe(201);
+      const { caller, token } = await response.json<Enrollment>();
+      expect(await tokenHealth(token)).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(3);
+
+      refreshing = true;
+      await env.DB.prepare("UPDATE callers SET org_identity_verified_at = ? WHERE id = ?")
+        .bind(STALE, caller.id)
+        .run();
+      expect(await tokenHealth(token)).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(5);
+
+      userId = 202;
+      await env.DB.prepare("UPDATE callers SET org_identity_verified_at = ? WHERE id = ?")
+        .bind(STALE, caller.id)
+        .run();
+      expect(await tokenHealth(token)).toBe(403);
+      expect(
+        await env.DB.prepare("SELECT org_identity_verified_at FROM callers WHERE id = ?")
+          .bind(caller.id)
+          .first(),
+      ).toEqual({ org_identity_verified_at: STALE });
+    },
+  );
+
   it("reports active, disabled, empty, and missing pool health correctly", async () => {
     await seedPool({ secondary: true });
     await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'secondary'").run();
@@ -771,6 +837,8 @@ describe("Worker end-to-end control plane", () => {
     const studio = await studioResponse.json<{ token: string }>();
     expect(studioResponse.status).toBe(201);
 
+    // Make the tested rotation newer even when successive logins share a millisecond.
+    await env.DB.prepare("UPDATE caller_tokens SET updated_at = ?").bind(STALE).run();
     const rotatedResponse = await postJSON("/v1/login/github-cli", {
       github_token: "github-user-token",
       pool: POOL,

@@ -425,6 +425,10 @@ async function attemptStaleRelayCacheRevalidation(
     capabilities.fallback === "pool"
       ? await loadIdentities(state.env, state.request.pool, state.route)
       : [];
+  // Identity entries share the route's freshness contract. Check them before
+  // revalidation or token-free reads, which would otherwise bypass warm bodies.
+  const identityCached = await serveFreshIdentityCache(state, identities);
+  if (identityCached !== undefined) return identityCached;
   await rememberIdentityCacheKeys(state, identities);
   const candidates = await staleRevalidationCandidates(state);
   if (candidates.length === 0) {
