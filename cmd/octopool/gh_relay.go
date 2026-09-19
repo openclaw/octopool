@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -189,7 +192,23 @@ func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relay
 func transientRelayFailure(err error) bool {
 	var relay *relayResponseError
 	if !errors.As(err, &relay) {
-		return false
+		if errors.Is(err, context.Canceled) {
+			return false
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+			errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EPIPE) {
+			return true
+		}
+		// Winsock reset/abort codes differ from Go's synthesized POSIX errno values.
+		if runtime.GOOS == "windows" && (errors.Is(err, syscall.Errno(10054)) || errors.Is(err, syscall.Errno(10053))) {
+			return true
+		}
+		var network net.Error
+		var dns *net.DNSError
+		if errors.As(err, &dns) && dns.IsNotFound {
+			return false
+		}
+		return errors.As(err, &network) && (network.Timeout() || network.Temporary())
 	}
 	if relay.Code == "fallback_local" {
 		return transientFallbackReason(relayFallbackReason(relay))
@@ -201,7 +220,7 @@ func transientRelayFailure(err error) bool {
 		return relay.Code == "internal_error"
 	}
 	switch relay.Status {
-	case 502, 503, 504:
+	case 502, 503, 504, 520, 521, 522, 523, 524:
 		return true
 	default:
 		return false
@@ -242,6 +261,11 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	}
 	out, status, err := doRaw(ctx, apiURL(client.baseURL, "/v1/github/request"), client.token, body)
 	if err != nil {
+		if status >= 300 && !errors.Is(err, errJSONResponseTooLarge) {
+			// An interrupted error body must not turn observed auth/policy rejection
+			// into a retryable transport failure or an unproven native handoff.
+			return relayEnvelope{}, parseRelayResponseError(status, nil)
+		}
 		return relayEnvelope{}, err
 	}
 	if status < 200 || status >= 300 {

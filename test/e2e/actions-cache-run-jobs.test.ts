@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { historicalHead, runPage } from "../fixtures/actions-ownership";
+import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
+import { deleteEdgeJSON } from "../../src/edge-cache";
 
 type RelayEnvelope = {
   status: number;
@@ -14,6 +16,106 @@ type RelayEnvelope = {
 
 describe("Actions attempt job-list cache", () => {
   beforeEach(seedPool);
+
+  it.each<{ source: string; attemptPath: boolean; shaped?: boolean; reject?: string }>([
+    { source: "anonymous", attemptPath: false },
+    { source: "anonymous", attemptPath: true },
+    { source: "pooled", attemptPath: false },
+    { source: "pooled", attemptPath: true },
+    { source: "anonymous", attemptPath: false, shaped: true },
+    { source: "pooled", attemptPath: true, shaped: true },
+    ...[
+      "different attempt",
+      "active",
+      "wrong run",
+      "force fresh",
+      "expired",
+      "revoked identity",
+    ].map((reject) => ({ source: "pooled", attemptPath: false, reject })),
+  ])(
+    "checks $source run proof (attempt: $attemptPath, shaped: $shaped, rejection: $reject)",
+    async ({ source, attemptPath, shaped, reject }) => {
+      const runPath = "/repos/openclaw/octopool/actions/runs/42";
+      const attempt = `${runPath}/attempts/2`;
+      let warmingRun = true;
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (bearer(request) === "test-org-token") return jsonResponse({ private: false });
+        if (url.hostname === "api.github.com" && url.pathname.endsWith("/jobs")) {
+          return jsonResponse({ total_count: 1, jobs: [{ id: 1, status: "completed" }] });
+        }
+        if (
+          url.hostname === "github.com" ||
+          (source === "pooled" && bearer(request) !== "test-primary-token")
+        ) {
+          return jsonResponse({ message: "public backend unavailable" }, 503);
+        }
+        if (!warmingRun) return jsonResponse({ message: "metadata unavailable" }, 503);
+        return jsonResponse({
+          id: reject === "wrong run" ? 43 : 42,
+          status: reject === "active" ? "in_progress" : "completed",
+          run_attempt: reject === "different attempt" ? 3 : 2,
+        });
+      });
+      vi.stubGlobal("fetch", upstream);
+      expect(
+        (
+          await relay(
+            attemptPath ? attempt : runPath,
+            undefined,
+            shaped ? { headers: { "x-octopool-public-shape": "actions-summary-v1" } } : {},
+          )
+        ).status,
+      ).toBe(200);
+      if (reject === "expired") {
+        const row = await env.DB.prepare(
+          "SELECT cache_key FROM github_cache_entries WHERE route_kind = 'run_view'",
+        ).first<{ cache_key: string }>();
+        await env.DB.prepare(
+          "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second') WHERE cache_key = ?",
+        )
+          .bind(row!.cache_key)
+          .run();
+        await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, row!.cache_key);
+      }
+      if (reject === "revoked identity") {
+        await env.DB.prepare(
+          "UPDATE identities SET status = 'disabled' WHERE id = 'primary'",
+        ).run();
+      }
+      warmingRun = false;
+      upstream.mockClear();
+
+      const options = {
+        query: { per_page: "100" },
+        headers: {
+          ...(shaped ? { "x-octopool-public-shape": "actions-jobs-v1" } : {}),
+          ...(reject === "force fresh" ? { "cache-control": "max-age=0" } : {}),
+        },
+      };
+      const response = await relay(`${attempt}/jobs`, undefined, options);
+      expect(response.status).toBe(200);
+      expect(
+        await env.DB.prepare(
+          `SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl
+       FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
+        ).first(),
+      ).toEqual({ ttl: reject === undefined ? 3600 : 60 });
+      const metadataFetches = upstream.mock.calls.filter(([input, init]) => {
+        const path = new URL(new Request(input, init).url).pathname;
+        return path.endsWith("/actions/runs/42") || path.endsWith("/actions/runs/42/attempts/2");
+      });
+      expect(metadataFetches).toHaveLength(reject === undefined ? 0 : 2);
+      upstream.mockClear();
+      const next = await relay(`${attempt}/jobs`, undefined, {
+        ...options,
+        headers: shaped ? { "x-octopool-public-shape": "actions-jobs-v1" } : {},
+      });
+      expect((await next.json<RelayEnvelope>()).relay.cache).toBe("hit");
+      expect(upstream).not.toHaveBeenCalled();
+    },
+  );
 
   it("records a secondary limit from a later identity-backed jobs page", async () => {
     const pages: string[] = [];

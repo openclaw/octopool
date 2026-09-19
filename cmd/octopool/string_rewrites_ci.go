@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -94,31 +93,4 @@ func workflowRunsQuery(opts rewriteAPIOptions, request ghAPIRequest) (ghAPIReque
 		}
 	}
 	return request, nil
-}
-
-func workflowRunsEndpoint(request ghAPIRequest) string {
-	query := url.Values{}
-	for key, value := range request.query {
-		query.Set(key, value.(string))
-	}
-	if len(query) == 0 {
-		return request.path
-	}
-	return request.path + "?" + query.Encode()
-}
-
-func normalizeWorkflowRunsAPIArgs(args []string) ([]string, error) {
-	opts, err := parseRewriteAPI(args)
-	if err != nil || len(opts.fields) == 0 {
-		return args, nil
-	}
-	request, err := rewriteAPIRequest(opts)
-	if err != nil || !rewriteWorkflowRunsPath.MatchString(request.path) {
-		return args, nil
-	}
-	request, err = workflowRunsQuery(opts, request)
-	if err != nil {
-		return nil, err
-	}
-	return append([]string{workflowRunsEndpoint(request), "--method=GET"}, opts.output...), nil
 }

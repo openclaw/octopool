@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,8 +13,107 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 )
+
+func TestJSONResponseSizeLimitRejectsHiddenSuffix(t *testing.T) {
+	const frame = `{"status":200,"body":{"ok":true},"body_encoding":"json","pool":"maintainers"}`
+	const limit = 8 << 20
+	for _, command := range [][]string{{"gh", "api", "repos/acme/repo"}, {"request", "--path", "/repos/acme/repo"}, {"stats"}} {
+		for _, scenario := range []string{"exact", "oversized", "oversized with read error"} {
+			t.Run(command[0]+"/"+scenario, func(t *testing.T) {
+				isolateTestConfig(t)
+				oversized := scenario != "exact"
+				payload := frame + strings.Repeat(" ", limit-len(frame))
+				if oversized {
+					payload += "!"
+				}
+				var calls atomic.Int64
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
+						return
+					}
+					wantPath, wantMethod := "/v1/github/request", "POST"
+					if command[0] == "stats" {
+						wantPath, wantMethod = "/v1/pools/maintainers/stats", "GET"
+					}
+					if r.URL.Path != wantPath || r.Method != wantMethod || r.Header.Get("Authorization") != "Bearer test-token" {
+						t.Error("unexpected JSON request")
+					}
+					calls.Add(1)
+					_, _ = io.WriteString(w, payload)
+				}))
+				t.Cleanup(server.Close)
+				t.Setenv("OCTOPOOL_URL", server.URL)
+				t.Setenv("OCTOPOOL_TOKEN", "test-token")
+				t.Setenv("OCTOPOOL_POOL", "maintainers")
+				if scenario == "oversized with read error" {
+					useHTTPTestTransport(t, rewritePolicyTestTransport(func(request *http.Request) (*http.Response, error) {
+						calls.Add(1)
+						body := iotest.DataErrReader(io.MultiReader(strings.NewReader(payload), iotest.ErrReader(io.ErrUnexpectedEOF)))
+						return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(body), Request: request}, nil
+					}))
+				}
+				t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
+				useTestRelayRetryDelays(t, time.Millisecond)
+				var out, stderr bytes.Buffer
+				err := run(t.Context(), command, &out, &stderr)
+				if oversized {
+					if err == nil || !strings.Contains(err.Error(), "exceeds") || out.Len() != 0 {
+						t.Fatalf("oversized response: err=%v output bytes=%d", err, out.Len())
+					}
+				} else if err != nil || (command[0] == "stats" && !strings.Contains(out.String(), "pool: maintainers")) || (command[0] != "stats" && !strings.Contains(out.String(), "true")) {
+					t.Fatalf("bounded response: err=%v output=%q", err, out.String())
+				}
+				if calls.Load() != 1 || strings.Contains(stderr.String(), "falling back") {
+					t.Fatalf("size violation retried or delegated: calls=%d stderr=%q", calls.Load(), stderr.String())
+				}
+			})
+		}
+	}
+}
+
+func TestLoginRejectsOversizedDiscoveryBeforeCredentialExchange(t *testing.T) {
+	const frame = `{"service":"octopool","version":1,"default_pool":"maintainers","auth":{"cli_github_token":true}}`
+	const limit = 1 << 20
+	for _, oversized := range []bool{false, true} {
+		t.Run(strconv.FormatBool(oversized), func(t *testing.T) {
+			isolateTestConfig(t)
+			t.Setenv("GH_TOKEN", "synthetic-github-token")
+			payload := frame + strings.Repeat(" ", limit-len(frame))
+			if oversized {
+				payload += "!"
+			}
+			var discoveryCalls, loginCalls atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/.well-known/octopool":
+					discoveryCalls.Add(1)
+					_, _ = io.WriteString(w, payload)
+				case "/v1/login/github-cli":
+					loginCalls.Add(1)
+					_, _ = io.WriteString(w, `{"caller":{"github_login":"synthetic-user","pool":"maintainers"},"token":"op_synthetic_caller"}`)
+				default:
+					t.Error("unexpected login request")
+				}
+			}))
+			t.Cleanup(server.Close)
+			var out, stderr bytes.Buffer
+			err := run(t.Context(), []string{"login", server.URL, "--client", "size-test"}, &out, &stderr)
+			if oversized {
+				if err == nil || !strings.Contains(err.Error(), "exceeds") || out.Len() != 0 || loginCalls.Load() != 0 {
+					t.Fatalf("err=%v output=%q exchanges=%d", err, out.String(), loginCalls.Load())
+				}
+			} else if err != nil || !strings.Contains(out.String(), "synthetic-user") || loginCalls.Load() != 1 {
+				t.Fatalf("err=%v output=%q exchanges=%d", err, out.String(), loginCalls.Load())
+			}
+			if discoveryCalls.Load() != 1 || stderr.Len() != 0 {
+				t.Fatalf("discovery=%d stderr=%q", discoveryCalls.Load(), stderr.String())
+			}
+		})
+	}
+}
 
 func useHTTPTestTransport(t *testing.T, transport http.RoundTripper) {
 	t.Helper()

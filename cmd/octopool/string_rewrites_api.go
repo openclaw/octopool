@@ -161,7 +161,7 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 		if err := policy.guardRequest(request); err != nil {
 			return err
 		}
-		prepared.args = append([]string{"api", workflowRunsEndpoint(request), "--method=GET", "--hostname=github.com"}, opts.output...)
+		prepared.args = append([]string{"api", apiQueryEndpoint(request), "--method=GET", "--hostname=github.com"}, opts.output...)
 		prepared.stdin = strings.NewReader("")
 		return nil
 	}

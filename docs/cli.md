@@ -141,9 +141,20 @@ web-synthesized and legacy-cached responses fall back to array-length and `total
 shape heuristics. Longer result sets and unprovable header-less shapes fall through
 to the real `gh` for a complete response.
 
+Explicit `--method GET` calls can pass scalar query parameters with `-f`/`--raw-field`
+or `-F`/`--field`. They share cache entries with the equivalent URL query, including
+under active protection rules. Typed integers use native numeric conversion and typed
+`null` becomes an empty query value; raw values stay strings. The normalized outbound
+query is checked before relay dispatch. Calls without an explicit method retain native
+POST behavior, apart from the existing workflow-run read exception. Nested/array fields,
+file inputs, placeholders, duplicate query keys and unsupported shapes retain native handling.
+Permission-sensitive branch-protection and ruleset reads also retain their existing native
+query-field dispatch.
+
 ```sh
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 # 85341
+octopool gh api --method GET repos/openclaw/octopool/contents/README.md -f ref=main --jq .sha
 ```
 
 Repository protection reads use guarded native fallback, retaining your existing GitHub
@@ -1191,8 +1202,12 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_RELAY_RETRIES` — how many times transient pool-exhaustion fallbacks
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
   `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and
-  malformed 502/503/504 gateway responses are retried against the relay (1s, then 3s for
-  subsequent retries). Exhausted transient fallbacks may delegate to real `gh` except for
+  malformed 502/503/504 or Cloudflare 520–524 gateway responses are retried against the
+  relay (1s, then 3s for subsequent retries). Interrupted response bodies and transient
+  connection failures or timeouts on safe relay reads use the same budget. Every retry
+  obtains current protection policy; policy failures, authentication denials, response-size
+  violations and caller cancellation never become retries or native handoffs. Exhausted
+  transient fallbacks may delegate to real `gh` except for
   supported `gh run watch`, which fails explicitly. Exhausted service errors remain failures
   instead of spending local GitHub quota. Default `2`; `0`
   disables retries.

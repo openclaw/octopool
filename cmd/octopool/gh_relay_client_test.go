@@ -1,15 +1,244 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/x509"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 )
+
+func TestGHRelayRecoversHTTPFailuresWithoutNativeFallback(t *testing.T) {
+	for _, failure := range []string{"closed connection", "connection reset", "partial response", "520", "521", "522", "523", "524"} {
+		t.Run(failure, func(t *testing.T) {
+			var calls atomic.Int64
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				if calls.Add(1) == 1 {
+					if code, err := strconv.Atoi(failure); err == nil {
+						w.WriteHeader(code)
+						_, _ = io.WriteString(w, "synthetic gateway failure")
+						return
+					}
+					conn, buffer, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					if failure == "partial response" {
+						_, _ = buffer.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\n{\"status\":200,\"body\":")
+						_ = buffer.Flush()
+					}
+					if failure == "connection reset" {
+						if err := conn.(*net.TCPConn).SetLinger(0); err != nil {
+							t.Error(err)
+						}
+					}
+					_ = conn.Close()
+					return
+				}
+				writeCLIEnvelope(t, w, map[string]any{"ok": true})
+			})
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			useTestRelayRetryDelays(t, time.Millisecond)
+			var out, stderr bytes.Buffer
+			err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
+			if err != nil || out.String() != "{\"ok\":true}\n" || stderr.Len() != 0 || calls.Load() != 2 || policies.Load() != 3 {
+				t.Fatalf("err=%v output=%q stderr=%q relay=%d policies=%d", err, out.String(), stderr.String(), calls.Load(), policies.Load())
+			}
+		})
+	}
+}
+
+func TestGHRelayHTTPFailureDoesNotRetryRejections(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		status  int
+		body    string
+		partial bool
+	}{
+		{"partial unauthorized", 401, `{"error":`, true},
+		{"partial forbidden", 403, `{"error":`, true},
+		{"partial fallback", 424, `{"error":`, true},
+		{"edge status with auth rejection", 520, `{"error":{"code":"invalid_auth"}}`, false},
+		{"edge status with policy rejection", 520, `{"error":{"code":"string_rewrite_denied"}}`, false},
+		{"TLS handshake error", 525, "synthetic TLS failure", false},
+		{"certificate error", 526, "synthetic certificate failure", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls atomic.Int64
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				if test.partial {
+					w.Header().Set("Content-Length", "200")
+				}
+				w.WriteHeader(test.status)
+				_, _ = io.WriteString(w, test.body)
+			})
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			useTestRelayRetryDelays(t, time.Millisecond)
+			var out, stderr bytes.Buffer
+			err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
+			if err == nil || out.Len() != 0 || stderr.Len() != 0 || calls.Load() != 1 || policies.Load() != 2 {
+				t.Fatalf("err=%v output=%q stderr=%q relay=%d policies=%d", err, out.String(), stderr.String(), calls.Load(), policies.Load())
+			}
+		})
+	}
+}
+
+func TestGHRelayRetryRechecksPolicy(t *testing.T) {
+	var calls atomic.Int64
+	policies := rewriteTestServerPolicySequence(t, func(call int64) (string, int) {
+		if call == 3 {
+			return "synthetic policy outage", 503
+		}
+		return rewriteEmptyTestPolicy, 200
+	}, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Length", "200")
+		_, _ = io.WriteString(w, `{"status":200,"body":`)
+	})
+	t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
+	useTestRelayRetryDelays(t, time.Millisecond)
+	var out, stderr bytes.Buffer
+	err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
+	if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || calls.Load() != 1 || policies.Load() != 3 {
+		t.Fatalf("err=%v output=%q stderr=%q relay=%d policies=%d", err, out.String(), stderr.String(), calls.Load(), policies.Load())
+	}
+}
+
+func TestGHRelayPolicyTransportFailureIsTerminal(t *testing.T) {
+	for _, mode := range []string{"partial policy", "policy timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			var resources atomic.Int64
+			rewriteTestServer(t, rewriteEmptyTestPolicy, func(http.ResponseWriter, *http.Request) { resources.Add(1) })
+			original := http.DefaultTransport
+			var policies int
+			useRewritePolicyTestTransport(t, func(request *http.Request) (*http.Response, error) {
+				if strings.HasSuffix(request.URL.Path, "/string-rewrites") {
+					policies++
+					if policies == 2 {
+						if mode == "policy timeout" {
+							return nil, &net.DNSError{Err: "synthetic timeout", IsTimeout: true}
+						}
+						return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(io.MultiReader(strings.NewReader(`{"schema_version":`), iotest.ErrReader(io.ErrUnexpectedEOF))), Request: request}, nil
+					}
+				}
+				return original.RoundTrip(request)
+			})
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
+			useTestRelayRetryDelays(t, time.Millisecond)
+			var out, stderr bytes.Buffer
+			err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
+			if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || policies != 2 || resources.Load() != 0 {
+				t.Fatalf("err=%v output=%q stderr=%q policies=%d resources=%d", err, out.String(), stderr.String(), policies, resources.Load())
+			}
+		})
+	}
+}
+
+func TestGHRelayTransportTimeoutHonorsCallerContext(t *testing.T) {
+	for _, mode := range []string{"HTTP timeout", "caller deadline", "caller cancellation"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			original := httpClient
+			client := *original
+			client.Timeout = 100 * time.Millisecond
+			if mode == "caller deadline" {
+				var cancelDeadline context.CancelFunc
+				ctx, cancelDeadline = context.WithTimeout(ctx, 200*time.Millisecond)
+				defer cancelDeadline()
+				client.Timeout = time.Second
+			}
+			httpClient = &client
+			t.Cleanup(func() { httpClient = original })
+			var calls atomic.Int64
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				if calls.Add(1) == 1 {
+					if _, err := io.Copy(io.Discard, r.Body); err != nil {
+						t.Error(err)
+						return
+					}
+					if mode == "caller cancellation" {
+						cancel()
+					}
+					<-r.Context().Done()
+					return
+				}
+				writeCLIEnvelope(t, w, map[string]any{"ok": true})
+			})
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
+			useTestRelayRetryDelays(t, time.Millisecond)
+			var out, stderr bytes.Buffer
+			err := run(ctx, []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
+			wantCalls := int64(1)
+			if mode == "HTTP timeout" {
+				wantCalls = 2
+				if err != nil || out.String() != "{\"ok\":true}\n" {
+					t.Fatalf("err=%v output=%q", err, out.String())
+				}
+			} else if !errors.Is(err, ctx.Err()) || ctx.Err() == nil || out.Len() != 0 {
+				t.Fatalf("err=%v context=%v output=%q", err, ctx.Err(), out.String())
+			}
+			if calls.Load() != wantCalls || policies.Load() != wantCalls+1 || stderr.Len() != 0 {
+				t.Fatalf("relay=%d policies=%d stderr=%q", calls.Load(), policies.Load(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestGHRelayDoesNotRetryPermanentTransportFailures(t *testing.T) {
+	for _, cause := range []error{&x509.UnknownAuthorityError{}, &net.DNSError{Err: "no such host", IsNotFound: true}, errors.New("synthetic protocol error")} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
+			var calls int
+			useHTTPTestTransport(t, rewritePolicyTestTransport(func(*http.Request) (*http.Response, error) {
+				calls++
+				return nil, cause
+			}))
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
+			useTestRelayRetryDelays(t, time.Millisecond)
+			var out, stderr bytes.Buffer
+			err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
+			if !errors.Is(err, cause) || out.Len() != 0 || stderr.Len() != 0 || calls != 1 || policies.Load() != 2 {
+				t.Fatalf("err=%v output=%q stderr=%q relay=%d policies=%d", err, out.String(), stderr.String(), calls, policies.Load())
+			}
+		})
+	}
+}
+
+func TestGHRelayTransportExhaustionDoesNotDelegate(t *testing.T) {
+	for _, retries := range []string{"0", "2"} {
+		t.Run(retries, func(t *testing.T) {
+			var calls atomic.Int64
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Length", "200")
+				_, _ = io.WriteString(w, `{"status":200,"body":`)
+			})
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", retries)
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			useTestRelayRetryDelays(t, time.Millisecond)
+			var out, stderr bytes.Buffer
+			err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
+			count, _ := strconv.Atoi(retries)
+			if !errors.Is(err, io.ErrUnexpectedEOF) || out.Len() != 0 || strings.Contains(stderr.String(), "falling back") || calls.Load() != int64(count+1) || policies.Load() != int64(count+2) {
+				t.Fatalf("err=%v output=%q stderr=%q relay=%d policies=%d", err, out.String(), stderr.String(), calls.Load(), policies.Load())
+			}
+		})
+	}
+}
 
 func TestWriteGHBodyAllowsNullTextBody(t *testing.T) {
 	envelope := relayEnvelope{Status: 304, Body: []byte("null"), BodyEncoding: "text"}

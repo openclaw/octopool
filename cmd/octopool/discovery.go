@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -85,7 +84,7 @@ func fetchServerDiscovery(ctx context.Context, baseURL string) (serverDiscovery,
 		return serverDiscovery{}, fmt.Errorf("server discovery failed: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := readJSONResponseBody(resp.Body, 1<<20)
 	if err != nil {
 		return serverDiscovery{}, err
 	}

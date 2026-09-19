@@ -326,7 +326,7 @@ it.each(["token-free", "revalidation"])(
         expect(request.headers.has("authorization")).toBe(false);
         if (url.hostname === "github.com") return jsonResponse({}, 404);
         if (url.pathname.endsWith("/attempts/2"))
-          return jsonResponse({ status: "completed", run_attempt: 2 });
+          return jsonResponse({ id: 42, status: "completed", run_attempt: 2 });
         expect(url.pathname).toBe(jobsPath);
         const page = Number(url.searchParams.get("page"));
         if (holding && page === 2) {

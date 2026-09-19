@@ -23,6 +23,9 @@ contact GitHub, so a cache hit is not proof of zero upstream requests.
 - Diff and patch media use public web endpoints directly.
 - A parser that cannot prove completeness or exactness returns no result. Octopool then
   tries the anonymous API in the same request cycle or falls through to the pooled identity.
+- Unsuccessful HTTP responses are cancelled before trying another source. Rejected redirect
+  chains and failed enrichment responses also release their streams without widening redirect
+  permissions or changing the response shape.
 - Shaped page fallbacks require an internal `x-octopool-public-shape` header generated
   by supported top-level CLI commands. Raw `gh api` requests do not opt into these
   reduced page shapes.

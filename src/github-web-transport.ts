@@ -55,6 +55,7 @@ export async function fetchWebResponse(
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (redirected.status >= 300 && redirected.status < 400) {
+      await cancelResponseBody(redirected);
       return undefined;
     }
     return {
@@ -67,7 +68,7 @@ export async function fetchWebResponse(
   }
 }
 
-async function cancelResponseBody(response: Response): Promise<void> {
+export async function cancelResponseBody(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
@@ -84,7 +85,11 @@ export async function fetchPublicPage(
     requestTimeoutMs(env),
     true,
   );
-  if (fetched === undefined || fetched.response.status < 200 || fetched.response.status >= 300) {
+  if (fetched === undefined) {
+    return undefined;
+  }
+  if (fetched.response.status < 200 || fetched.response.status >= 300) {
+    await cancelResponseBody(fetched.response);
     return undefined;
   }
   try {

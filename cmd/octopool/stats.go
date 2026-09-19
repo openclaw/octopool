@@ -147,7 +147,7 @@ func runStats(ctx context.Context, args []string, stdout io.Writer) error {
 		return writeJSONResponse(stdout, resp)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, err := readJSONResponseBody(resp.Body, 8<<20)
 	if err != nil {
 		return err
 	}

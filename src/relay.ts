@@ -1441,23 +1441,24 @@ async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> 
     pool: state.request.pool,
     method: "GET",
     path,
-    headers: { "x-octopool-public-shape": PUBLIC_SHAPES.actionsSummary },
+    headers: {
+      "x-octopool-public-shape": PUBLIC_SHAPES.actionsSummary,
+      ...(state.request.headers?.["x-github-api-version"] === undefined
+        ? {}
+        : { "x-github-api-version": state.request.headers["x-github-api-version"] }),
+    },
   };
   const route: RouteInfo = {
     ...state.route,
     kind: "run_view",
     routeKey: state.route.routeKey.replace(/\/jobs$/, ""),
   };
+  if (await cachedRunAttemptCompleted(state, request)) {
+    return { ...state.route, run_attempt_completed: true };
+  }
   try {
     const response = await callGitHubWeb(state.env, request, route);
-    if (
-      response !== undefined &&
-      response.status >= 200 &&
-      response.status < 300 &&
-      isRecord(response.body) &&
-      response.body.status === "completed" &&
-      response.body.run_attempt === state.route.run_attempt
-    ) {
+    if (runAttemptCompleted(response, state.route.run_attempt, path)) {
       return { ...state.route, run_attempt_completed: true };
     }
   } catch (error) {
@@ -1465,6 +1466,56 @@ async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> 
     // The proof only enables a longer TTL; failure keeps the conservative default.
   }
   return state.route;
+}
+
+async function cachedRunAttemptCompleted(
+  state: ActiveRelay,
+  attemptRequest: RelayRequest,
+): Promise<boolean> {
+  if (state.maxAgeSeconds === 0 || hasConditionalRequestHeaders(state.request)) return false;
+  try {
+    const headers = { ...attemptRequest.headers };
+    if (state.request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.actionsJobs) {
+      delete headers["x-octopool-public-shape"];
+    }
+    const identities = await loadIdentities(state.env, state.request.pool, state.route);
+    // Both run-view forms can prove completion, but only for the jobs' exact attempt.
+    for (const path of [attemptRequest.path.replace(/\/attempts\/\d+$/, ""), attemptRequest.path]) {
+      const request = { ...attemptRequest, path, headers };
+      const route = classifyRoute(request, state.policy);
+      for (const identity of [undefined, ...identities]) {
+        const key = await githubCacheKey(request.pool, request, route, identity);
+        const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
+        if (
+          cached !== undefined &&
+          runAttemptCompleted(cached, state.route.run_attempt, attemptRequest.path) &&
+          (await cachedResponseAvailable(state.env, request.pool, route, cached, identity))
+        ) {
+          return true;
+        }
+      }
+    }
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    // Cache/proof lookup failure still permits the existing live metadata check.
+  }
+  return false;
+}
+
+function runAttemptCompleted(
+  response: GitHubRelayResponse | undefined,
+  attempt: number | undefined,
+  path: string,
+): boolean {
+  return (
+    response !== undefined &&
+    response.status >= 200 &&
+    response.status < 300 &&
+    isRecord(response.body) &&
+    response.body.status === "completed" &&
+    response.body.run_attempt === attempt &&
+    String(response.body.id) === /\/runs\/([0-9]+)\//.exec(path)?.[1]
+  );
 }
 
 async function switchToExactRunList(state: ActiveRelay): Promise<void> {

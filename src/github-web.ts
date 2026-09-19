@@ -7,7 +7,7 @@ import { gitRefRequest } from "./github-public-git";
 import { summaryPageRequest } from "./github-public-pages";
 import { githubResponseHeaders } from "./github-response";
 import type { WebRequest } from "./github-web-types";
-import { fetchWebResponse, readWebBody } from "./github-web-transport";
+import { cancelResponseBody, fetchWebResponse, readWebBody } from "./github-web-transport";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 export async function callGitHubWeb(
@@ -39,6 +39,7 @@ export async function callGitHubWeb(
       await storePublicAPIRate(env, route.resource, response.headers);
     }
     if (response.status < 200 || response.status >= 300) {
+      await cancelResponseBody(response);
       continue;
     }
     try {
@@ -90,6 +91,7 @@ export async function callAnonymousGitHubAPI(
     };
   }
   if (response.status < 200 || response.status >= 300) {
+    await cancelResponseBody(response);
     return undefined;
   }
   try {

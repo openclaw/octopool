@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Reuse fresh, guarded run metadata to prove completion of the same Actions attempt, preserving the existing one-hour jobs cache when anonymous metadata is unavailable.
+- Route explicit REST GET scalar query fields through the shared cache while preserving native typed values, protected dispatch, and fallback for complex inputs.
+- Recover interrupted relay reads and transient Cloudflare gateway failures within the existing retry budget, without retrying policy denials or spending local GitHub quota on transport failures.
+- Reject oversized JSON responses instead of accepting a valid prefix with an unread suffix.
+- Release unsuccessful public HTTP response streams before fallback, including failed enrichment and rejected redirect chains.
+
+### Upgrade notes
+
+- Upgrade the CLI for query-field coverage and HTTP recovery. Deploy the Worker for completion-proof reuse and HTTP stream cleanup. No schema migration or cache lifetime change is required.
+
 ## 0.6.6 - 2026-09-19
 
 ### Fixes

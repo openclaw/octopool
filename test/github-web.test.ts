@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callGitHubWeb } from "../src/github-web";
+import { callAnonymousGitHubAPI, callGitHubWeb } from "../src/github-web";
+import { fetchPublicPage } from "../src/github-web-transport";
 import { releaseHTML, releaseMarkdown } from "./fixtures/release-summary";
 import { contentsKinds, contentsLinks } from "./fixtures/contents-links";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
@@ -81,6 +82,107 @@ describe("github web provider", () => {
       }),
     );
   });
+
+  it("cancels a rejected second redirect without following it", async () => {
+    const firstCancel = vi.fn();
+    const secondCancel = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new ReadableStream({ cancel: firstCancel }), {
+          status: 302,
+          headers: {
+            location: "https://patch-diff.githubusercontent.com/raw/openclaw/octopool/pull/12.diff",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(new ReadableStream({ cancel: secondCancel }), {
+          status: 302,
+          headers: { location: "https://github.com/openclaw/octopool/pull/12.diff" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls/12",
+      headers: { accept: "application/vnd.github.v3.diff" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(firstCancel).toHaveBeenCalledOnce();
+    expect(secondCancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels an unsuccessful HTML response before completing the exact API fallback", async () => {
+    const events: string[] = [];
+    const cancel = vi.fn(() => {
+      events.push("cancel");
+    });
+    const exact = { total_count: 1, workflow_runs: [{ id: 123, exact_field: "preserved" }] };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status: 503 }))
+      .mockImplementationOnce(async () => {
+        events.push("api");
+        return Response.json(exact);
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      status: 200,
+      body: exact,
+      backend: "github",
+    });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(events).toEqual(["cancel", "api"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://github.com/openclaw/octopool/actions",
+      "https://api.github.com/repos/openclaw/octopool/actions/runs",
+    ]);
+  });
+
+  it.each(["anonymous revalidation", "public-page enrichment"] as const)(
+    "cancels an unsuccessful response during %s",
+    async (entryPoint) => {
+      const cancel = vi.fn();
+      const fetchMock = vi.fn(
+        async () =>
+          new Response(new ReadableStream({ cancel }), {
+            status: 429,
+            headers: { "retry-after": "60" },
+          }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/branches",
+        headers: { "if-none-match": '"previous"' },
+      });
+      const response =
+        entryPoint === "anonymous revalidation"
+          ? await callAnonymousGitHubAPI(env(), request, classifyRoute(request, policy))
+          : await fetchPublicPage("https://github.com/openclaw/octopool/actions", 1024, env());
+
+      expect(response).toBeUndefined();
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
 
   it.each(contentsKinds)("preserves the REST $label response", async (fixture) => {
     const fetchMock = vi.fn(async () => Response.json(fixture.body));

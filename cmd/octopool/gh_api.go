@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -19,7 +20,7 @@ type ghAPIRequest struct {
 
 func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	var err error
-	args, err = normalizeWorkflowRunsAPIArgs(args)
+	args, err = normalizeGHAPIQueryArgs(args)
 	if err != nil {
 		return ghAPIRequest{}, false, err
 	}
@@ -63,6 +64,18 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 		case "-f", "-F", "--field", "--raw-field":
 			return request, true, nil
 		default:
+			if name, value, ok := strings.Cut(arg, "="); ok && (name == "--paginate" || name == "--slurp") {
+				enabled, err := strconv.ParseBool(value)
+				if err != nil {
+					return request, true, nil
+				}
+				if name == "--paginate" {
+					request.paginate = enabled
+				} else {
+					request.slurp = enabled
+				}
+				continue
+			}
 			if strings.HasPrefix(arg, "--method=") {
 				request.method = strings.ToUpper(strings.TrimPrefix(arg, "--method="))
 				continue
@@ -120,6 +133,63 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 		}
 	}
 	return request, request.method != "GET", nil
+}
+
+func normalizeGHAPIQueryArgs(args []string) ([]string, error) {
+	opts, err := parseRewriteAPI(args)
+	if err != nil || len(opts.fields) == 0 {
+		return args, nil
+	}
+	request, err := rewriteAPIRequest(opts)
+	if err != nil {
+		return args, nil
+	}
+	if rewriteWorkflowRunsPath.MatchString(request.path) {
+		request, err = workflowRunsQuery(opts, request)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Fields imply POST in native gh unless GET was explicit. Keep complex
+		// field expansion and request bodies with the native owner.
+		if opts.method != "GET" || opts.inputSet {
+			return args, nil
+		}
+		for _, pattern := range nativeReadPathPatterns {
+			if pattern.MatchString(request.path) {
+				return args, nil
+			}
+		}
+		for _, field := range opts.fields {
+			key, value, ok := strings.Cut(field.value, "=")
+			if _, duplicate := request.query[key]; !ok || key == "" || duplicate || strings.ContainsAny(key, "[]{}") || strings.HasPrefix(value, "@") || strings.ContainsAny(value, "{}") || rewriteEndpointPlaceholder.MatchString(value) {
+				return args, nil
+			}
+			if field.name == "--field" {
+				if number, err := strconv.Atoi(value); err == nil {
+					value = strconv.Itoa(number)
+				} else if value == "null" {
+					value = ""
+				}
+			}
+			request.query[key] = value
+		}
+		if !safeRelayRequest(request) {
+			return args, nil
+		}
+	}
+	return append([]string{apiQueryEndpoint(request), "--method=GET"}, opts.output...), nil
+}
+
+func apiQueryEndpoint(request ghAPIRequest) string {
+	query := url.Values{}
+	for key, value := range request.query {
+		query.Set(key, value.(string))
+	}
+	if len(query) == 0 {
+		return request.path
+	}
+	return request.path + "?" + query.Encode()
 }
 
 func safeRelayHeader(header string) bool {

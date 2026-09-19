@@ -15,6 +15,18 @@ import (
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 var errInvalidRedirectLocation = errors.New("invalid redirect Location header")
+var errJSONResponseTooLarge = errors.New("octopool response exceeds size limit")
+
+func readJSONResponseBody(body io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errJSONResponseTooLarge, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
 
 type jsonRedirectTransport struct {
 	base http.RoundTripper
@@ -153,7 +165,7 @@ func postJSONRaw(
 
 func writeJSONResponse(stdout io.Writer, resp *http.Response) error {
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, err := readJSONResponseBody(resp.Body, 8<<20)
 	if err != nil {
 		return err
 	}
@@ -175,7 +187,7 @@ func doRaw(ctx context.Context, url string, token string, body map[string]any) (
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	out, err := readJSONResponseBody(resp.Body, 8<<20)
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}

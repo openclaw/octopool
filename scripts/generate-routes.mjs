@@ -34,6 +34,12 @@ const lines = [
   ...patterns.map((pattern) => `\tregexp.MustCompile(\`${pattern}\`),`),
   "}",
   "",
+  "var nativeReadPathPatterns = []*regexp.Regexp{",
+  ...patterns
+    .filter((_pattern, index) => isNativeReadRoute(ROUTES[index]))
+    .map((pattern) => `\tregexp.MustCompile(\`${pattern}\`),`),
+  "}",
+  "",
   "// Only these manifest-owned native reads allow an encoded slash inside a branch parameter.",
   "var nativeReadBranchPathPatterns = []*regexp.Regexp{",
   ...ROUTES.filter((route) => isNativeReadRoute(route) && route.template.includes("{branch}"))

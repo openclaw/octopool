@@ -385,8 +385,16 @@ Shaped human `gh run view` and `gh run watch` reads resolve the run's current po
 `run_attempt`, then request `/actions/runs/{id}/attempts/{attempt}/jobs`. That attempt-qualified
 path is immutable after all returned jobs complete, while the base run and base jobs endpoints
 remain short-lived because a rerun can change both after they previously appeared terminal.
-Before granting the one-hour job-list TTL, Octopool separately verifies that exact attempt's
-run endpoint is completed; a list of currently completed jobs alone is not treated as proof.
+Before granting the one-hour job-list TTL, Octopool verifies that exact attempt is completed;
+a list of currently completed jobs alone is not treated as proof. A fresh cached run-view
+response can supply that proof when its run ID and attempt match and its source identity
+and public-repository guard remain eligible. Both the base run view and the exact attempt
+view qualify, including pooled responses when anonymous metadata is unavailable. The
+existing cache owner and expiry remain authoritative; no separate completion store is created.
+Explicit age bounds apply to this lookup, and live or conditional requests still require
+the direct attempt check. An active run, a different attempt, expired metadata or a revoked
+source cannot extend the jobs' lifetime. Without an eligible cached proof, Octopool keeps
+the existing public-page/anonymous-API check and conservative 60-second fallback.
 
 Equivalent shaped `page=1`, omitted/`latest` filter, and `per_page` values up to 100 share one
 attempt-qualified cache entry, filled from at most three 100-job API pages. Octopool slices

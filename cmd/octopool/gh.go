@@ -27,7 +27,7 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 			return err
 		}
 		if args[0] == "api" {
-			normalized, err := normalizeWorkflowRunsAPIArgs(args[1:])
+			normalized, err := normalizeGHAPIQueryArgs(args[1:])
 			if err != nil {
 				return err
 			}
