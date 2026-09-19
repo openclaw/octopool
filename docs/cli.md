@@ -180,19 +180,20 @@ full user-profile reads retain the normal relay or real-`gh` behavior.
 Native GraphQL delegation prints `octopool: graphql delegated to personal token` on
 stderr. This includes unsupported PR exports, native PR checks, and raw `gh api graphql`;
 relay-backed reads do not print it. When the last observation has fewer than 500 remaining,
-the notice appends `(remaining N/limit, resets HH:MM UTC)`. The shim reads the personal
-credential's rate-limit-exempt REST `/rate_limit` endpoint through native `gh`, using its
-credential-keyed 60-second response cache. It never substitutes the pool's quota. A failed
-or policy-blocked quota probe leaves the delegation notice without guessed numbers.
+the notice labels the remaining count and reset as a REST `/rate_limit` estimate, cached
+for up to 60 seconds and not a retry deadline. The shim reads this endpoint once through
+native `gh` before delegation, using the personal credential's cache. It never substitutes
+the pool's quota. A failed or policy-blocked quota probe leaves the delegation notice
+without guessed numbers.
 
-A raw or native GraphQL rate-limit error, including GraphQL errors returned with HTTP 200, prints
-`octopool: graphql rate limit (remaining N/limit, resets HH:MM UTC); retry after reset, not re-authentication`.
-Subsequent misleading invalid-token/login hints are suppressed; unrelated 403 permission
-errors, REST failures in mixed commands such as `pr diff`, and secondary-rate-limit/backoff
-diagnostics stay unchanged. If the quota probe is
-unavailable, authentication is overridden by a header, or the effective repository host is uncertain, native errors are retained and
-the reset time is identified as unavailable. stdout and native exit codes are preserved,
-and prompts and watches keep streaming stderr.
+A raw or native GraphQL rate-limit error, including GraphQL errors returned with HTTP 200,
+retains the original native error and adds guidance to inspect the failed response's headers
+for retry timing. The diagnostic does not know that response's reset time and does not infer
+it from the separate REST estimate, which can report a full bucket while GraphQL is exhausted.
+No second quota probe runs on failure. Subsequent misleading invalid-token/login hints are
+suppressed; unrelated 403 permission errors, REST failures in mixed commands such as
+`pr diff`, and secondary-rate-limit/backoff diagnostics stay unchanged. stdout and native
+exit codes are preserved, and prompts and watches keep streaming stderr.
 
 Bare `gh api rate_limit` is noncacheable but can use a pooled reader. After successful
 relay output, Octopool prints one fixed stderr notice: this is pooled-reader quota, not

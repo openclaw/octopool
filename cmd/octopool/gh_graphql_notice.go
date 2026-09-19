@@ -18,13 +18,6 @@ type ghGraphQLQuota struct {
 	Reset     int64 `json:"reset"`
 }
 
-func (quota *ghGraphQLQuota) suffix() string {
-	if quota == nil {
-		return ""
-	}
-	return fmt.Sprintf(" (remaining %d/%d, resets %s UTC)", quota.Remaining, quota.Limit, time.Unix(quota.Reset, 0).UTC().Format("15:04"))
-}
-
 func delegatedGHUsesGraphQL(args []string) bool {
 	if len(args) < 2 || rewriteBootstrapInvocation(args) {
 		return false
@@ -167,8 +160,6 @@ func readPersonalGraphQLQuota(ctx context.Context, path string, env []string, po
 // Buffer only bounded diagnostic lines; prompts and watch progress stay live.
 type ghGraphQLStderr struct {
 	writer      io.Writer
-	quota       *ghGraphQLQuota
-	probe       func() *ghGraphQLQuota
 	pending     []byte
 	exhausted   bool
 	longLine    bool
@@ -176,10 +167,10 @@ type ghGraphQLStderr struct {
 }
 
 func newGHGraphQLStderr(writer io.Writer, probe func() *ghGraphQLQuota, graphQLOnly bool) *ghGraphQLStderr {
-	output := &ghGraphQLStderr{writer: writer, probe: probe, quota: probe(), graphQLOnly: graphQLOnly}
+	output := &ghGraphQLStderr{writer: writer, graphQLOnly: graphQLOnly}
 	suffix := ""
-	if output.quota != nil && output.quota.Remaining < 500 {
-		suffix = output.quota.suffix()
+	if quota := probe(); quota != nil && quota.Remaining < 500 {
+		suffix = fmt.Sprintf(" (REST /rate_limit estimate: remaining %d/%d, resets %s UTC; cached up to 60s, not a retry deadline)", quota.Remaining, quota.Limit, time.Unix(quota.Reset, 0).UTC().Format("15:04"))
 	}
 	fmt.Fprintln(writer, "octopool: graphql delegated to personal token"+suffix)
 	return output
@@ -242,22 +233,15 @@ func (output *ghGraphQLStderr) flush() error {
 	graphQLFailure := strings.Contains(lower, "graphql:") || output.graphQLOnly && (strings.Contains(lower, "http 403") || strings.HasPrefix(strings.TrimSpace(lower), "gh:"))
 	if primaryLimit && graphQLFailure && (strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit")) {
 		output.exhausted = true
-		if quota := output.probe(); quota != nil {
-			output.quota = quota
+		if _, err := io.WriteString(output.writer, line); err != nil {
+			return err
 		}
-		suffix := output.quota.suffix()
-		if suffix == "" {
-			if _, err := io.WriteString(output.writer, line); err != nil {
+		if !strings.HasSuffix(line, "\n") {
+			if _, err := io.WriteString(output.writer, "\n"); err != nil {
 				return err
 			}
-			if !strings.HasSuffix(line, "\n") {
-				if _, err := io.WriteString(output.writer, "\n"); err != nil {
-					return err
-				}
-			}
-			suffix = " (reset time unavailable)"
 		}
-		_, err := fmt.Fprintln(output.writer, "octopool: graphql rate limit"+suffix+"; retry after reset, not re-authentication")
+		_, err := fmt.Fprintln(output.writer, "octopool: graphql rate limit; retry time unavailable; inspect the failed response's headers; do not re-authenticate")
 		return err
 	}
 	if output.exhausted && (strings.Contains(lower, "token") && strings.Contains(lower, "invalid") || strings.Contains(lower, "gh auth login")) {

@@ -99,6 +99,9 @@ func TestGraphQLNoticeSkipsEnterpriseDefaultQuota(t *testing.T) {
 
 func TestGraphQLNoticeAndErrors(t *testing.T) {
 	reset := time.Date(2026, 9, 18, 18, 42, 0, 0, time.UTC).Unix()
+	const delegated = "octopool: graphql delegated to personal token\n"
+	const exhausted = "octopool: graphql delegated to personal token (REST /rate_limit estimate: remaining 0/5000, resets 18:42 UTC; cached up to 60s, not a retry deadline)\n"
+	const rateLimited = "octopool: graphql rate limit; retry time unavailable; inspect the failed response's headers; do not re-authenticate\n"
 	for _, test := range []struct {
 		name      string
 		remaining int64
@@ -106,14 +109,15 @@ func TestGraphQLNoticeAndErrors(t *testing.T) {
 		want      string
 		probes    int
 	}{
-		{"healthy", 500, "native warning\n", "octopool: graphql delegated to personal token\nnative warning\n", 1},
-		{"low", 499, "", "octopool: graphql delegated to personal token (remaining 499/5000, resets 18:42 UTC)\n", 1},
-		{"exhausted", 0, "gh: API rate limit exceeded (HTTP 403)\nThe token is invalid.\nTry gh auth login\n", "octopool: graphql delegated to personal token (remaining 0/5000, resets 18:42 UTC)\noctopool: graphql rate limit (remaining 0/5000, resets 18:42 UTC); retry after reset, not re-authentication\n", 2},
-		{"permission", 0, "gh: Resource not accessible (HTTP 403)\n", "octopool: graphql delegated to personal token (remaining 0/5000, resets 18:42 UTC)\ngh: Resource not accessible (HTTP 403)\n", 1},
-		{"secondary", 0, "gh: You have exceeded a secondary rate limit (HTTP 403)\nRetry-After: 60\n", "octopool: graphql delegated to personal token (remaining 0/5000, resets 18:42 UTC)\ngh: You have exceeded a secondary rate limit (HTTP 403)\nRetry-After: 60\n", 1},
-		{"cached_before_exhaustion", 500, "gh: API rate limit exceeded (HTTP 403)\n", "octopool: graphql delegated to personal token\noctopool: graphql rate limit (remaining 500/5000, resets 18:42 UTC); retry after reset, not re-authentication\n", 2},
-		{"graphql200", 0, "GraphQL: API rate limit exceeded", "octopool: graphql delegated to personal token (remaining 0/5000, resets 18:42 UTC)\noctopool: graphql rate limit (remaining 0/5000, resets 18:42 UTC); retry after reset, not re-authentication\n", 2},
-		{"raw_graphql200", 0, "gh: API rate limit exceeded", "octopool: graphql delegated to personal token (remaining 0/5000, resets 18:42 UTC)\noctopool: graphql rate limit (remaining 0/5000, resets 18:42 UTC); retry after reset, not re-authentication\n", 2},
+		{"healthy", 500, "native warning\n", delegated + "native warning\n", 1},
+		{"low", 499, "", "octopool: graphql delegated to personal token (REST /rate_limit estimate: remaining 499/5000, resets 18:42 UTC; cached up to 60s, not a retry deadline)\n", 1},
+		{"exhausted", 0, "gh: API rate limit exceeded (HTTP 403)\nThe token is invalid.\nTry gh auth login\n", exhausted + "gh: API rate limit exceeded (HTTP 403)\n" + rateLimited, 1},
+		{"permission", 0, "gh: Resource not accessible (HTTP 403)\n", exhausted + "gh: Resource not accessible (HTTP 403)\n", 1},
+		{"secondary", 0, "gh: You have exceeded a secondary rate limit (HTTP 403)\nRetry-After: 60\n", exhausted + "gh: You have exceeded a secondary rate limit (HTTP 403)\nRetry-After: 60\n", 1},
+		{"abuse", 0, "gh: Abuse detection rate limit (HTTP 403)\nRetry-After: 90\n", exhausted + "gh: Abuse detection rate limit (HTTP 403)\nRetry-After: 90\n", 1},
+		{"conflicting_rest_quota", 5000, "gh: API rate limit exceeded (HTTP 403)\n", delegated + "gh: API rate limit exceeded (HTTP 403)\n" + rateLimited, 1},
+		{"graphql200", 0, "GraphQL: API rate limit exceeded", exhausted + "GraphQL: API rate limit exceeded\n" + rateLimited, 1},
+		{"raw_graphql200", 0, "gh: API rate limit exceeded", exhausted + "gh: API rate limit exceeded\n" + rateLimited, 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var stderr bytes.Buffer
@@ -144,7 +148,7 @@ func TestGraphQLNoticeProbeUnavailableAndBoundedOutput(t *testing.T) {
 	if _, err := output.Write([]byte("gh: rate limit exceeded (HTTP 403)\n")); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stderr.String(), long) || !strings.Contains(stderr.String(), "reset time unavailable") || len(output.pending) != 0 {
+	if !strings.Contains(stderr.String(), long) || !strings.Contains(stderr.String(), "gh: rate limit exceeded (HTTP 403)\n") || !strings.Contains(stderr.String(), "retry time unavailable") || len(output.pending) != 0 {
 		t.Fatal("lost native output or guessed unavailable quota")
 	}
 }
@@ -184,25 +188,31 @@ func TestGraphQLQuotaProbeUsesNativeCache(t *testing.T) {
 
 func TestGraphQLNoticeNativeExitAndStdout(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
-	for _, args := range [][]string{{"pr", "view", "7", "-Racme/repo", "--json=reviews"}, {"api", "graphql", "-f", "query=query { viewer { login } }"}} {
-		t.Run(args[0], func(t *testing.T) {
+	for _, test := range []struct {
+		name, quota, stdout, nativeError string
+		args                             []string
+	}{
+		{"pr", `{"resources":{"graphql":{"remaining":0,"limit":5000,"reset":2000000000}}}`, "unchanged stdout", "GraphQL: API rate limit exceeded", []string{"pr", "view", "7", "-Racme/repo", "--json=reviews"}},
+		{"api", `{"resources":{"graphql":{"remaining":0,"limit":5000,"reset":2000000000}}}`, "unchanged stdout", "gh: API rate limit exceeded (HTTP 403)", []string{"api", "graphql", "-f", "query=query { viewer { login } }"}},
+		{"conflicting_rest_quota", `{"resources":{"graphql":{"remaining":5000,"limit":5000,"reset":2000000000}}}`, "HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: 1900000000\n\n{\"errors\":[{\"type\":\"RATE_LIMIT\"}]}\n", "gh: API rate limit already exceeded for user ID 42.", []string{"api", "graphql", "--include", "-f", "query=query { viewer { login } }"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			captureRewriteGH(t)
-			t.Setenv("OCTOPOOL_TEST_GRAPHQL_QUOTA", `{"resources":{"graphql":{"remaining":0,"limit":5000,"reset":2000000000}}}`)
-			t.Setenv("OCTOPOOL_TEST_REWRITE_STDOUT", "unchanged stdout")
-			nativeError := "gh: API rate limit exceeded (HTTP 403)"
-			if args[0] == "pr" {
-				nativeError = "GraphQL: API rate limit exceeded"
-			}
-			t.Setenv("OCTOPOOL_TEST_REWRITE_STDERR", nativeError+"\nThe token is invalid.\nTry gh auth login\n")
+			t.Setenv("OCTOPOOL_TEST_GRAPHQL_QUOTA", test.quota)
+			t.Setenv("OCTOPOOL_TEST_REWRITE_STDOUT", test.stdout)
+			t.Setenv("OCTOPOOL_TEST_REWRITE_STDERR", test.nativeError+"\nThe token is invalid.\nTry gh auth login\n")
 			t.Setenv("OCTOPOOL_TEST_REWRITE_EXIT", "7")
 			var stdout, stderr bytes.Buffer
-			err := execRealGH(t.Context(), args, &stdout, &stderr)
+			err := runGH(t.Context(), test.args, &stdout, &stderr)
 			var exit exitCodeError
-			if !errors.As(err, &exit) || exit.Code != 7 || stdout.String() != "unchanged stdout" {
+			if !errors.As(err, &exit) || exit.Code != 7 || stdout.String() != test.stdout {
 				t.Fatalf("stdout=%q err=%v", stdout.String(), err)
 			}
-			if strings.Count(stderr.String(), "graphql delegated to personal token") != 1 || !strings.Contains(stderr.String(), "remaining 0/5000, resets") || strings.Contains(stderr.String(), "token is invalid") || strings.Contains(stderr.String(), "gh auth login") {
+			if strings.Count(stderr.String(), "graphql delegated to personal token") != 1 || !strings.Contains(stderr.String(), test.nativeError+"\n") || !strings.Contains(stderr.String(), "retry time unavailable") || strings.Contains(stderr.String(), "retry after reset") || strings.Contains(stderr.String(), "token is invalid") || strings.Contains(stderr.String(), "gh auth login") {
 				t.Fatal(stderr.String())
+			}
+			if test.name == "conflicting_rest_quota" && strings.Contains(stderr.String(), "resets") {
+				t.Fatal("REST reset replaced the failed response's quota: " + stderr.String())
 			}
 		})
 	}

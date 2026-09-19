@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Preserve native GraphQL rate-limit errors and label cached REST quota estimates without presenting their reset times as retry deadlines.
+
 ## 0.6.5 - 2026-09-19
 
 ### Fixes
