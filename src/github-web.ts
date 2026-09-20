@@ -7,7 +7,8 @@ import { gitRefRequest } from "./github-public-git";
 import { summaryPageRequest } from "./github-public-pages";
 import { githubResponseHeaders } from "./github-response";
 import type { WebRequest } from "./github-web-types";
-import { cancelResponseBody, fetchWebResponse, readWebBody } from "./github-web-transport";
+import { fetchWebResponse, readWebBody } from "./github-web-transport";
+import { cancelResponseBody } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 export async function callGitHubWeb(

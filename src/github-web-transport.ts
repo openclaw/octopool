@@ -1,7 +1,7 @@
 import { requestTimeoutMs } from "./github-limits";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { HttpError } from "./http";
-import { readBodyCapped } from "./response-body";
+import { cancelResponseBody, readBodyCapped } from "./response-body";
 
 export async function fetchWebResponse(
   env: GitHubEgressEnv,
@@ -66,10 +66,6 @@ export async function fetchWebResponse(
     rethrowStringRewriteDenial(error);
     return undefined;
   }
-}
-
-export async function cancelResponseBody(response: Response): Promise<void> {
-  await response.body?.cancel().catch(() => undefined);
 }
 
 export async function fetchPublicPage(

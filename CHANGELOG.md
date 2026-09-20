@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Release discarded API and Actions-log redirect bodies before follow-up downloads, existence-probe completion, or redirect rejection, without changing redirect policy, credential handling, or log bytes.
 - Honor `OCTOPOOL_FRESH=1` on direct request GET reads while preserving explicit cache-control headers, string protection, and raw response behavior.
 - Keep fresh anonymous run-completion proof usable during pooled identity lookup failures, avoiding extra metadata requests and preserving the existing one-hour completed-attempt jobs cache.
 - Reuse eligible bounded-stale responses during transient GitHub server, network, and timeout failures while preserving explicit freshness, cache expiry, quota feedback, and cold-request errors.

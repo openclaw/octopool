@@ -1,3 +1,7 @@
+export async function cancelResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
+
 export async function readBodyCapped(
   response: Response,
   capBytes: number,

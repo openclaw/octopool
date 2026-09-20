@@ -125,56 +125,107 @@ describe("Worker end-to-end relay security boundaries", () => {
     ).toEqual({ identity_id: "primary", backend: "github_identity", status: 200 });
   });
 
-  it("follows an allowed Actions log redirect without forwarding authorization", async () => {
-    await seedPool();
-    const upstream = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
-      const url = new URL(request.url);
-      if (bearer(request) === "test-org-token") {
-        return jsonResponse({ private: false });
-      }
-      if (bearer(request) === "test-primary-token") {
-        expect(url.pathname).toBe(LOG_PATH);
-        return new Response(null, {
-          status: 302,
-          headers: {
-            location: "https://results-receiver.actions.githubusercontent.com/logs/fixture",
-            ...rateHeaders({ remaining: 4_998 }),
-          },
+  it.each([
+    { name: "allowed", chained: false, cancelFails: false },
+    { name: "failed cancellation", chained: false, cancelFails: true },
+    { name: "chained", chained: true, cancelFails: false },
+  ])(
+    "releases $name log redirect bodies without forwarding authorization",
+    async ({ chained, cancelFails }) => {
+      await seedPool();
+      const events: string[] = [];
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (bearer(request) === "test-org-token") {
+          return jsonResponse({ private: false });
+        }
+        if (bearer(request) === "test-primary-token") {
+          expect(url.pathname).toBe(LOG_PATH);
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                events.push("api released");
+                if (cancelFails) throw new Error("synthetic cancellation failure");
+              },
+            }),
+            {
+              status: 302,
+              headers: {
+                location: "https://results-receiver.actions.githubusercontent.com/logs/fixture",
+                ...rateHeaders({ remaining: 4_998 }),
+              },
+            },
+          );
+        }
+        if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
+          return jsonResponse({ id: 42, run_id: 99, status: "completed" });
+        }
+        if (url.pathname === "/repos/openclaw/octopool/actions/runs/99") {
+          return jsonResponse({ id: 99, status: "completed" });
+        }
+        expect(url.hostname).toBe("results-receiver.actions.githubusercontent.com");
+        expect(request.headers.get("authorization")).toBeNull();
+        events.push("download");
+        if (chained) {
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                events.push("download released");
+              },
+            }),
+            {
+              status: 302,
+              headers: {
+                location: "https://results-receiver.actions.githubusercontent.com/logs/next",
+              },
+            },
+          );
+        }
+        return new Response("build log\n", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
         });
-      }
-      if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
-        return jsonResponse({ id: 42, run_id: 99, status: "completed" });
-      }
-      if (url.pathname === "/repos/openclaw/octopool/actions/runs/99") {
-        return jsonResponse({ id: 99, status: "completed" });
-      }
-      expect(url.hostname).toBe("results-receiver.actions.githubusercontent.com");
-      expect(request.headers.get("authorization")).toBeNull();
-      return new Response("build log\n", {
-        status: 200,
-        headers: { "content-type": "text/plain" },
       });
-    });
-    vi.stubGlobal("fetch", upstream);
+      vi.stubGlobal("fetch", upstream);
 
-    const response = await relay(LOG_PATH);
-    expect(response.status).toBe(200);
-    expect(await response.json<RelayEnvelope>()).toMatchObject({
-      status: 200,
-      body: "build log\n",
-      body_encoding: "text",
-      identity: { id: "primary", kind: "pat" },
-      relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
-    });
-    expect(upstream).toHaveBeenCalledTimes(4);
-    expect(
-      await env.DB.prepare("SELECT cache_status, cacheable, status FROM audit_events").first(),
-    ).toEqual({ cache_status: "miss", cacheable: 1, status: 200 });
-  });
+      const response = await relay(LOG_PATH);
+      if (chained) {
+        expect(response.status).toBe(502);
+        expect(await response.json()).toMatchObject({
+          error: { code: "github_log_redirect_denied" },
+        });
+        expect(events).toEqual(["api released", "download", "download released"]);
+        expect(upstream).toHaveBeenCalledTimes(4);
+        return;
+      }
+      expect(response.status).toBe(200);
+      expect(await response.json<RelayEnvelope>()).toMatchObject({
+        status: 200,
+        body: "build log\n",
+        body_encoding: "text",
+        identity: { id: "primary", kind: "pat" },
+        relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
+      });
+      expect(upstream).toHaveBeenCalledTimes(4);
+      expect(events).toEqual(["api released", "download"]);
+      expect(
+        await env.DB.prepare("SELECT cache_status, cacheable, status FROM audit_events").first(),
+      ).toEqual({ cache_status: "miss", cacheable: 1, status: 200 });
+    },
+  );
 
-  it("rejects an Actions log redirect to an untrusted host", async () => {
+  it.each([
+    { location: "https://attacker.example/logs/fixture", code: "github_log_redirect_denied" },
+    {
+      location: "http://results-receiver.actions.githubusercontent.com/logs/fixture",
+      code: "github_log_redirect_denied",
+    },
+    { location: "not a URL", code: "github_log_redirect_denied" },
+    { location: undefined, code: "github_log_redirect_missing" },
+  ])("releases a rejected log redirect ($location)", async ({ location, code }) => {
     await seedPool();
+    let released = false;
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
@@ -188,25 +239,66 @@ describe("Worker end-to-end relay security boundaries", () => {
         return jsonResponse({ id: 99, status: "completed" });
       }
       expect(bearer(request)).toBe("test-primary-token");
-      return new Response(null, {
-        status: 302,
-        headers: { location: "https://attacker.example/logs/fixture" },
-      });
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            released = true;
+          },
+        }),
+        {
+          status: 302,
+          headers: location === undefined ? {} : { location },
+        },
+      );
     });
     vi.stubGlobal("fetch", upstream);
 
     const response = await relay(LOG_PATH);
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({
-      error: { code: "github_log_redirect_denied" },
+      error: { code },
     });
+    expect(released).toBe(true);
     expect(upstream).toHaveBeenCalledTimes(3);
     expect(
       await env.DB.prepare("SELECT identity_id, status, error_code FROM audit_events").first(),
     ).toEqual({
       identity_id: "primary",
       status: 502,
-      error_code: "github_log_redirect_denied",
+      error_code: code,
     });
+  });
+
+  it("releases a denied ordinary API redirect without following it", async () => {
+    await seedPool();
+    let released = false;
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (bearer(request) === "test-org-token") return jsonResponse({ private: false });
+      if (bearer(request) === "test-primary-token") {
+        return new Response(
+          new ReadableStream({
+            cancel() {
+              released = true;
+            },
+          }),
+          {
+            status: 301,
+            headers: { location: "https://api.github.com/repositories/123" },
+          },
+        );
+      }
+      return jsonResponse({ message: "anonymous unavailable" }, 503);
+    });
+    vi.stubGlobal("fetch", upstream);
+    const response = await relay("/repos/openclaw/octopool");
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: "github_redirect_denied" } });
+    expect(released).toBe(true);
+    expect(
+      upstream.mock.calls.some(
+        ([input, init]) => new URL(new Request(input, init).url).pathname === "/repositories/123",
+      ),
+    ).toBe(false);
   });
 });

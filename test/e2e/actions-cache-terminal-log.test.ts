@@ -499,7 +499,23 @@ describe("terminal Actions log cache", () => {
   });
 
   it("refreshes the one-hour no-contact window after an existence probe", async () => {
-    const upstream = terminalLogUpstream("completed");
+    const base = terminalLogUpstream("completed");
+    let released = 0;
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const response = await base(input, init);
+      if (response.status !== 302) return response;
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            released++;
+          },
+        }),
+        {
+          status: response.status,
+          headers: response.headers,
+        },
+      );
+    });
     vi.stubGlobal("fetch", upstream);
     await relay(LOG_PATH);
     const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
@@ -515,6 +531,7 @@ describe("terminal Actions log cache", () => {
     });
     expect(jobMetadataCalls(upstream)).toBe(3);
     expect(logBackendCalls(upstream)).toBe(2);
+    expect(released).toBe(2);
   });
 
   it("refetches an expired R2 log object", async () => {

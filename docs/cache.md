@@ -338,6 +338,11 @@ object metadata: expired objects are treated as misses and removed, so lifecycle
 timing can never cause stale data to be served. R2 read, write, or probe failures never fail
 a relay request: Octopool uses the existing authenticated redirect-validation path instead.
 
+API and log redirect bodies are released before following an allowed log URL or completing
+an existence probe. Rejected redirects, including invalid locations and chained downloads,
+also release their bodies. Cleanup failures preserve the original result; the redirect
+allowlist, credential stripping, quota headers, and log bytes are unchanged.
+
 Operator provisioning is a one-time bucket plus lifecycle setup. The required lifecycle
 rule is: enabled for prefix `github-actions-logs/v1/`, delete objects seven days after
 creation. Apply it with Wrangler (or configure the identical rule in the R2 dashboard):
