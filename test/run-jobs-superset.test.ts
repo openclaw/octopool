@@ -101,6 +101,9 @@ describe("Actions job-list superset", () => {
         status: 200,
         headers: {
           "content-type": "application/json",
+          ETag: '"first-page"',
+          "Last-Modified": "Sun, 20 Sep 2026 00:00:00 GMT",
+          "Content-Length": "1000",
           link: '<https://api.github.com/jobs?page=2>; rel="next"',
         },
         body: { total_count: 250, jobs: jobs(1, 100) },
@@ -128,7 +131,7 @@ describe("Actions job-list superset", () => {
     expect(pages).toEqual(["2", "3"]);
     expect(response.body).toMatchObject({ total_count: 250 });
     expect((response.body as { jobs: unknown[] }).jobs).toHaveLength(250);
-    expect(response.headers).not.toHaveProperty("link");
+    expect(response.headers).toEqual({ "content-type": "application/json" });
   });
 
   it.each([

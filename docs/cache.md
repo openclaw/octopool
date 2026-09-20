@@ -421,6 +421,15 @@ and pagination links. All pages must have consistent valid `total_count` metadat
 merged list must match that count. A remaining `Link: rel="next"` also prevents completion,
 even when the count matches; the first page's link is removed only after a complete merge.
 
+Merged API job lists also discard the first page's `ETag`, `Last-Modified`, and
+`Content-Length` before storage. A page-one `304` cannot validate later pages of the
+cached aggregate. Revalidation recognizes older merged entries with more than 100 jobs
+and ignores their page validators, so an expired or forced refresh fetches every page
+again. Single-page validators, fresh cache hits, and bounded outage stale reads retain
+their existing behavior. No cache-key or TTL change is needed. This protects the complete
+stored aggregate; the current shaped response still returns at most 100 jobs, and watch
+fetches later pages separately.
+
 If a partial rerun exposes count metadata that disagrees with the returned job set, a count
 disagreement alone does not establish another page or prove which successful jobs were
 reused. Octopool rejects that ambiguous shaped response with `pagination_exhausted`, without

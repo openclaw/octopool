@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { historicalHead, runPage } from "../fixtures/actions-ownership";
-import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
+import { GITHUB_EDGE_CACHE_NAMESPACE, githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
+import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 
 type RelayEnvelope = {
   status: number;
@@ -16,6 +18,142 @@ type RelayEnvelope = {
 
 describe("Actions attempt job-list cache", () => {
   beforeEach(seedPool);
+
+  it.each([
+    { count: 100, forced: false },
+    { count: 100, forced: true },
+    { count: 200, forced: false },
+    { count: 200, forced: true },
+  ])("refreshes a legacy $count-job cache entry (forced: $forced)", async ({ count, forced }) => {
+    const request = {
+      pool: "maintainers",
+      method: "GET" as const,
+      path: "/repos/openclaw/octopool/actions/runs/42/jobs",
+      query: { page: "1", per_page: "100" },
+      headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+    };
+    const route = classifyRoute(request, defaultPolicy("openclaw"));
+    const key = await githubCacheKey(request.pool, request, route);
+    const jobs = Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      status: index < 100 ? "completed" : "queued",
+    }));
+    const validators = {
+      ...(forced ? {} : { etag: '"page-one"' }),
+      "last-modified": "Sun, 20 Sep 2026 00:00:00 GMT",
+      ...rateHeaders({ remaining: 59 }),
+    };
+    await seedPublicRepoProof(env, route);
+    // Old writers retained the first page's validators on merged bodies.
+    expect(
+      await writeOwnedGitHubCache(env, key, request, route, {
+        status: 200,
+        headers: validators as Record<string, string>,
+        body: { total_count: count, jobs },
+        body_encoding: "json",
+      }),
+    ).toBe("shared");
+    const pages: number[] = [];
+    let conditionalCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const fetched = new Request(input, init);
+        const url = new URL(fetched.url);
+        if (url.hostname === "github.com") return new Response(null, { status: 404 });
+        expect(bearer(fetched)).toBeUndefined();
+        expect(url.pathname).toBe(request.path);
+        const page = Number(url.searchParams.get("page"));
+        pages.push(page);
+        if (fetched.headers.has("if-none-match") || fetched.headers.has("if-modified-since")) {
+          conditionalCalls++;
+          expect(page).toBe(1);
+          return new Response(null, { status: 304, headers: validators });
+        }
+        return jsonResponse(
+          {
+            total_count: count,
+            jobs: jobs
+              .slice((page - 1) * 100, page * 100)
+              .map((job) => (job.id === 101 ? { ...job, status: "in_progress" } : job)),
+          },
+          200,
+          validators,
+        );
+      }),
+    );
+    expect(
+      (await (await relay(request.path, undefined, request)).json<RelayEnvelope>()).relay.cache,
+    ).toBe("hit");
+    expect(pages).toEqual([]);
+    if (!forced) {
+      await env.DB.prepare(
+        `UPDATE github_cache_entries SET
+          created_at = datetime(created_at, '-61 seconds'),
+          expires_at = datetime(expires_at, '-61 seconds'),
+          stale_expires_at = datetime(stale_expires_at, '-61 seconds')
+        WHERE cache_key = ?`,
+      )
+        .bind(key)
+        .run();
+      await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
+    }
+    const refreshed = await relay(request.path, undefined, {
+      ...request,
+      headers: { ...request.headers, ...(forced ? { "cache-control": "max-age=0" } : {}) },
+    });
+    expect(refreshed.status).toBe(200);
+    expect(pages).toEqual(count === 100 ? [1] : [1, 2]);
+    expect(conditionalCalls).toBe(count === 100 ? 1 : 0);
+    const stored = await env.DB.prepare(
+      "SELECT body_json, response_headers_json FROM github_cache_entries WHERE cache_key = ?",
+    )
+      .bind(key)
+      .first<{ body_json: string; response_headers_json: string }>();
+    const body = JSON.parse(stored!.body_json) as { jobs: { id: number; status: string }[] };
+    expect(body.jobs).toHaveLength(count);
+    if (count > 100) {
+      expect(body.jobs[100]).toEqual({ id: 101, status: "in_progress" });
+      expect(JSON.parse(stored!.response_headers_json)).not.toHaveProperty("etag");
+      expect(JSON.parse(stored!.response_headers_json)).not.toHaveProperty("last-modified");
+    } else {
+      expect(JSON.parse(stored!.response_headers_json)).toHaveProperty(
+        forced ? "last-modified" : "etag",
+        forced ? validators["last-modified"] : '"page-one"',
+      );
+    }
+    if (count > 100 && !forced) {
+      await env.DB.prepare(
+        "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second') WHERE cache_key = ?",
+      )
+        .bind(key)
+        .run();
+      await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const fetched = new Request(input, init);
+          if (new URL(fetched.url).pathname === "/repos/openclaw/octopool") {
+            return jsonResponse({ private: false });
+          }
+          return jsonResponse(
+            { message: "API rate limit exceeded" },
+            429,
+            rateHeaders({ remaining: 0, retryAfter: 60 }),
+          );
+        }),
+      );
+      expect(await (await relay(request.path, undefined, request)).json()).toMatchObject({
+        body: { total_count: count },
+        relay: { cache: "stale" },
+      });
+      const live = await relay(request.path, undefined, {
+        ...request,
+        headers: { ...request.headers, "cache-control": "max-age=0" },
+      });
+      expect(live.status).toBe(424);
+    }
+  });
 
   it.each<{ source: string; attemptPath: boolean; shaped?: boolean; reject?: string }>([
     { source: "anonymous", attemptPath: false },

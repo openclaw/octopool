@@ -64,6 +64,18 @@ export function runJobsSupersetIncomplete(
   );
 }
 
+export function runJobsSupersetHasMergedPages(
+  response: GitHubRelayResponse,
+  view: RunJobsSupersetView | undefined,
+): boolean {
+  return (
+    view !== undefined &&
+    isRecord(response.body) &&
+    Array.isArray(response.body.jobs) &&
+    response.body.jobs.length > MAX_PAGE_SIZE
+  );
+}
+
 export async function completeRunJobsSuperset(
   response: GitHubRelayResponse,
   view: RunJobsSupersetView | undefined,
@@ -128,9 +140,11 @@ export async function completeRunJobsSuperset(
   }
   return {
     ...response,
-    // The first page's next link no longer describes the merged collection.
+    // Page-one validators and framing cannot describe the merged collection.
     headers: Object.fromEntries(
-      Object.entries(response.headers).filter(([key]) => key.toLowerCase() !== "link"),
+      Object.entries(response.headers).filter(
+        ([key]) => !REPRESENTATION_HEADERS.has(key.toLowerCase()),
+      ),
     ),
     body: { ...response.body, total_count: total, jobs },
   };

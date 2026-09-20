@@ -54,6 +54,7 @@ import {
 import {
   completeRunJobsSuperset,
   filterRunJobsSuperset,
+  runJobsSupersetHasMergedPages,
   runJobsSupersetIncomplete,
   runJobsSupersetView,
   type RunJobsSupersetView,
@@ -515,6 +516,8 @@ async function staleRevalidationCandidates(state: ActiveRelay): Promise<Revalida
     if (cached === undefined) {
       continue;
     }
+    // Old merged entries may still carry a validator for only their first page.
+    if (runJobsSupersetHasMergedPages(cached, state.runJobsSuperset)) continue;
     const headers = githubCacheRevalidationHeaders(cached);
     if (headers !== undefined) {
       candidates.push({ cached, headers });
