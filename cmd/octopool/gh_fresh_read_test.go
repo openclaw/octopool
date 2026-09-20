@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -66,16 +68,41 @@ func TestPRViewStableFieldsStayCached(t *testing.T) {
 	}
 }
 
-// OCTOPOOL_FRESH is the escape hatch for raw `gh api`, where the CLI cannot see
-// which fields the caller is about to act on.
-func TestGHAPIFreshEnvForcesLiveRead(t *testing.T) {
-	t.Setenv("OCTOPOOL_FRESH", "1")
-	request, delegate, err := parseGHAPIArgs([]string{"repos/openclaw/octopool/pulls/7"})
-	if err != nil || delegate {
-		t.Fatalf("delegate=%v err=%v", delegate, err)
+func TestGHAPIFreshUserReadSkipsSavedLogin(t *testing.T) {
+	if !jqAvailable() {
+		t.Skip("jq is required")
 	}
-	if request.headers["cache-control"] != "max-age=0" {
-		t.Fatalf("headers = %#v, want cache-control max-age=0", request.headers)
+	isolateTestConfig(t)
+	for _, name := range []string{"OCTOPOOL_TOKEN", "OCTOPOOL_URL", "OCTOPOOL_POOL", "OCTOPOOL_STRING_REWRITE_FILE"} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("OCTOPOOL_FRESH", "1")
+	var health, data atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
+			return
+		}
+		if r.URL.Path == "/v1/pools/maintainers/health" {
+			health.Add(1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		data.Add(1)
+		request := decodeCLIRequest(t, w, r)
+		headers, _ := request["headers"].(map[string]any)
+		if request["path"] != "/user" || headers["cache-control"] != "max-age=0" {
+			t.Errorf("fresh user request=%v", request)
+		}
+		writeCLIEnvelope(t, w, map[string]any{"login": "current-login"})
+	}))
+	t.Cleanup(server.Close)
+	if err := saveAuth(authFile{URL: server.URL, Pool: "maintainers", Token: "test-token", Login: "saved-login"}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err := run(t.Context(), []string{"gh", "api", "user", "--jq", ".login"}, &stdout, &stderr)
+	if err != nil || stdout.String() != "current-login\n" || stderr.Len() != 0 || health.Load() != 0 || data.Load() != 1 {
+		t.Fatalf("err=%v stdout=%q stderr=%q health=%d data=%d", err, stdout.String(), stderr.String(), health.Load(), data.Load())
 	}
 }
 

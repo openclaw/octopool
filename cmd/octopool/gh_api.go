@@ -127,11 +127,8 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	if !strings.HasPrefix(request.path, "/") {
 		request.path = "/" + request.path
 	}
-	if freshReadRequested() {
-		if _, set := request.headers["cache-control"]; !set {
-			request.headers["cache-control"] = "max-age=0"
-		}
-	}
+	// Fresh /user reads must skip the saved-login shortcut.
+	request.headers = relayReadHeaders(request.method, request.headers)
 	return request, request.method != "GET", nil
 }
 

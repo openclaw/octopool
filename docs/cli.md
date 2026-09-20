@@ -760,6 +760,10 @@ octopool stats -client ci-runner
 ### `octopool request --path <p> [--method GET] [--query k=v] [--header k=v] [--route-hint k=v]`
 
 Debug/admin raw wrapper over `POST /v1/github/request`. Prints the full relay envelope.
+GET requests honor `OCTOPOOL_FRESH=1`; an explicit `--header cache-control=<value>`
+overrides that default, regardless of the header name's letter case. The effective
+headers pass through string protection before dispatch. This raw wrapper keeps its
+HTTP error output and does not retry or start native `gh`.
 `--route-hint pr_head_sha=<sha>` or `--route-hint pr_state=closed` can be used for
 state-aware PR subresource cache probes.
 
@@ -1198,7 +1202,8 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_STRING_REWRITE_FILE` — optional local policy JSON; an explicit unreadable or
   missing file fails closed. Defaults to `string-rewrites.json` beside `auth.json`.
 - `OCTOPOOL_FRESH=1` — default every relayed read to `cache-control: max-age=0`, including
-  run metadata and jobs; explicit cache-control headers take precedence. Use it right after
+  direct `octopool request` GET reads, run metadata, and jobs; explicit cache-control headers
+  take precedence. Use it right after
   a `git push` or a merge, when a cached answer could describe the previous state. It can
   cost API quota; leave it off for ordinary reads. Outage fallback cannot exceed the
   requested age bound.

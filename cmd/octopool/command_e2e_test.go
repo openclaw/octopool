@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -65,40 +68,83 @@ func TestCLIEndToEndServiceCommands(t *testing.T) {
 		}
 	})
 
-	t.Run("request forwards options", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
-				return
-			}
-			if r.Method != http.MethodPost || r.URL.Path != "/v1/github/request" {
-				http.Error(w, "unexpected relay request", http.StatusBadRequest)
-				t.Errorf("request = %s %s", r.Method, r.URL.Path)
-				return
-			}
-			body := decodeCommandJSON(t, w, r)
-			query, _ := body["query"].(map[string]any)
-			headers, _ := body["headers"].(map[string]any)
-			hints, _ := body["route_hint"].(map[string]any)
-			if body["pool"] != "maintainers" || body["method"] != "GET" || body["path"] != "/repos/openclaw/octopool" || query["page"] != "2" || headers["accept"] != "application/json" || hints["pr_state"] != "open" {
-				http.Error(w, "unexpected request body", http.StatusBadRequest)
-				t.Errorf("body = %#v", body)
-				return
-			}
-			writeCommandJSON(t, w, map[string]any{"relayed": true})
-		}))
-		t.Cleanup(server.Close)
+	for _, test := range []struct {
+		name, method, fresh string
+		headers             []string
+		wantHeaders         map[string]any
+	}{
+		{"ordinary GET", "GET", "", nil, map[string]any{"accept": "application/json"}},
+		{"fresh GET", "GET", "1", nil, map[string]any{"accept": "application/json", "cache-control": "max-age=0"}},
+		{"fresh lowercase method", "get", "1", nil, map[string]any{"accept": "application/json", "cache-control": "max-age=0"}},
+		{"explicit cache age", "GET", "1", []string{"cache-control=max-age=60"}, map[string]any{"accept": "application/json", "cache-control": "max-age=60"}},
+		{"mixed-case cache age", "GET", "1", []string{"CaChE-CoNtRoL=max-age=60"}, map[string]any{"accept": "application/json", "CaChE-CoNtRoL": "max-age=60"}},
+		{"empty explicit cache control", "GET", "1", []string{"Cache-Control="}, map[string]any{"accept": "application/json", "Cache-Control": ""}},
+		{"non-GET raw request", "POST", "1", nil, map[string]any{"accept": "application/json"}},
+	} {
+		t.Run("request/"+test.name, func(t *testing.T) {
+			const envelope = `{"status":404,"body":{"message":"Not Found"},"body_encoding":"json","relay":{"cache":"miss","route_kind":"repo_view","future":"retained"},"request_id":"synthetic"}`
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveEmptyRewritePolicy(t, w, r, "test-token", "maintainers") {
+					return
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/github/request" {
+					http.Error(w, "unexpected relay request", http.StatusBadRequest)
+					t.Errorf("request = %s %s", r.Method, r.URL.Path)
+					return
+				}
+				body := decodeCommandJSON(t, w, r)
+				query, _ := body["query"].(map[string]any)
+				headers, _ := body["headers"].(map[string]any)
+				hints, _ := body["route_hint"].(map[string]any)
+				if body["pool"] != "maintainers" || body["method"] != strings.ToUpper(test.method) || body["path"] != "/repos/openclaw/octopool" || query["page"] != "2" || !reflect.DeepEqual(headers, test.wantHeaders) || hints["pr_state"] != "open" {
+					http.Error(w, "unexpected request body", http.StatusBadRequest)
+					t.Errorf("body = %#v", body)
+					return
+				}
+				_, _ = w.Write([]byte(envelope))
+			}))
+			t.Cleanup(server.Close)
 
-		result := runCLI(t, bin, server.URL, nil,
-			"request",
-			"--path", "/repos/openclaw/octopool",
-			"--query", "page=2",
-			"--header", "accept=application/json",
-			"--route-hint", "pr_state=open",
-		)
-		if result.err != nil || !strings.Contains(result.stdout, `"relayed": true`) {
-			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
-		}
-	})
+			args := []string{
+				"request",
+				"--path", "/repos/openclaw/octopool",
+				"--method", test.method,
+				"--query", "page=2",
+				"--header", "accept=application/json",
+				"--route-hint", "pr_state=open",
+			}
+			for _, header := range test.headers {
+				args = append(args, "--header", header)
+			}
+			result := runCLI(t, bin, server.URL, map[string]string{"OCTOPOOL_FRESH": test.fresh}, args...)
+			var got, want any
+			if err := json.Unmarshal([]byte(envelope), &want); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(result.stdout), &got); err != nil || result.err != nil || !reflect.DeepEqual(got, want) || result.stderr != "" {
+				t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+			}
+		})
+	}
+
+	for _, code := range []int{503, 424} {
+		t.Run("request raw failure/"+strconv.Itoa(code), func(t *testing.T) {
+			var calls atomic.Int64
+			const body = `{"error":{"code":"fallback_local","message":"synthetic refusal","details":{"reason":"identities_cooling_down"}}}`
+			server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(code)
+				_, _ = w.Write([]byte(body))
+			})
+			result := runCLI(t, bin, server.URL, map[string]string{
+				"OCTOPOOL_FRESH": "1", "OCTOPOOL_RELAY_RETRIES": "2", "OCTOPOOL_NO_FALLBACK": "", "OCTOPOOL_GH_PATH": fakeGH(t),
+			}, "request", "--path", "/repos/acme/repo")
+			want := "error: " + strconv.Itoa(code) + " " + http.StatusText(code) + ": " + body + "\n"
+			if result.err == nil || result.stdout != "" || result.stderr != want || calls.Load() != 1 {
+				t.Fatalf("err=%v stdout=%q stderr=%q calls=%d", result.err, result.stdout, result.stderr, calls.Load())
+			}
+		})
+	}
 
 	t.Run("admin caller", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Honor `OCTOPOOL_FRESH=1` on direct request GET reads while preserving explicit cache-control headers, string protection, and raw response behavior.
 - Reuse eligible bounded-stale responses during transient GitHub server, network, and timeout failures while preserving explicit freshness, cache expiry, quota feedback, and cold-request errors.
 - Route machine-readable run lists filtered by commit or event through the shared REST cache, preserving native filter values, protected dispatch, and freshness controls.
 - Reuse fresh larger shaped Actions run-list pages for small human-readable requests, preserving the first 25 runs, filtered totals, exact fallback, source expiry, and identity checks without another GitHub fetch.

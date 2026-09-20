@@ -227,22 +227,30 @@ func transientRelayFailure(err error) bool {
 	}
 }
 
+func relayReadHeaders(method string, headers map[string]string) map[string]string {
+	if method != "GET" || !freshReadRequested() {
+		return headers
+	}
+	for key := range headers {
+		if strings.EqualFold(key, "cache-control") {
+			return headers
+		}
+	}
+	headers = maps.Clone(headers)
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	headers["cache-control"] = "max-age=0"
+	return headers
+}
+
 func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
 	policy, err := client.stringRewritePolicy(ctx)
 	if err != nil {
 		return relayEnvelope{}, err
 	}
-	headers := request.headers
-	if _, explicit := headers["cache-control"]; freshReadRequested() && !explicit {
-		headers = maps.Clone(headers)
-		if headers == nil {
-			headers = make(map[string]string)
-		}
-		headers["cache-control"] = "max-age=0"
-	}
-	guardedRequest := request
-	guardedRequest.headers = headers
-	if err := policy.guardRequest(guardedRequest); err != nil {
+	request.headers = relayReadHeaders(request.method, request.headers)
+	if err := policy.guardRequest(request); err != nil {
 		return relayEnvelope{}, err
 	}
 	body := map[string]any{
@@ -253,8 +261,8 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	if len(request.query) > 0 {
 		body["query"] = request.query
 	}
-	if len(headers) > 0 {
-		body["headers"] = headers
+	if len(request.headers) > 0 {
+		body["headers"] = request.headers
 	}
 	if len(request.routeHint) > 0 {
 		body["route_hint"] = request.routeHint

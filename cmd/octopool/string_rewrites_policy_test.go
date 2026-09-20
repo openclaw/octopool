@@ -238,6 +238,40 @@ func TestStringRewriteDirectRequestGuard(t *testing.T) {
 		t.Fatal("safe direct request not sent")
 	}
 }
+func TestStringRewriteFreshnessHeadersAtDispatch(t *testing.T) {
+	for _, command := range []string{"request", "gh"} {
+		for _, explicit := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/explicit=%t", command, explicit), func(t *testing.T) {
+				var calls int
+				policy := strings.Replace(rewriteActiveTestPolicy, "internal-model", "max-age=0", 1)
+				rewriteTestServer(t, policy, func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					writeCLIEnvelope(t, w, map[string]any{"ok": true})
+				})
+				t.Setenv("OCTOPOOL_FRESH", "1")
+				args := []string{"request", "--path", "/repos/acme/repo"}
+				header := "Cache-Control=max-age=60"
+				if command == "gh" {
+					args = []string{"gh", "api", "repos/acme/repo"}
+					header = "Cache-Control: max-age=60"
+				}
+				if explicit {
+					args = append(args, "--header", header)
+				}
+				var stdout, stderr bytes.Buffer
+				err := run(t.Context(), args, &stdout, &stderr)
+				if explicit {
+					if err != nil || calls != 1 {
+						t.Fatalf("explicit override: err=%v calls=%d", err, calls)
+					}
+				} else if !errors.Is(err, errRewriteBlocked) || calls != 0 || stdout.Len() != 0 {
+					t.Fatalf("generated freshness header escaped policy: err=%v calls=%d stdout=%q", err, calls, stdout.String())
+				}
+			})
+		}
+	}
+}
+
 func TestStringRewritePolicyChangeBeforeFallback(t *testing.T) {
 	var body *atomic.Value
 	body, _ = rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {

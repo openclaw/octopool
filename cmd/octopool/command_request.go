@@ -36,16 +36,18 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	requestMethod := strings.ToUpper(*method)
+	headers := relayReadHeaders(requestMethod, valuesMap(headerValues))
 	body := map[string]any{
 		"pool":   *requestFlags.pool,
-		"method": strings.ToUpper(*method),
+		"method": requestMethod,
 		"path":   *path,
 	}
 	if len(queryValues) > 0 {
 		body["query"] = valuesMap(queryValues)
 	}
-	if len(headerValues) > 0 {
-		body["headers"] = valuesMap(headerValues)
+	if len(headers) > 0 {
+		body["headers"] = headers
 	}
 	if len(routeHintValues) > 0 {
 		body["route_hint"] = valuesMap(routeHintValues)
@@ -55,14 +57,14 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if len(policy.Rules) != 0 && strings.ToUpper(*method) != "GET" {
+	if len(policy.Rules) != 0 && requestMethod != "GET" {
 		return errRewriteBlocked
 	}
 	query := map[string]any{}
 	for key, value := range valuesMap(queryValues) {
 		query[key] = value
 	}
-	if err := policy.guardRequest(ghAPIRequest{method: strings.ToUpper(*method), path: *path, query: query, headers: valuesMap(headerValues), routeHint: valuesMap(routeHintValues)}); err != nil {
+	if err := policy.guardRequest(ghAPIRequest{method: requestMethod, path: *path, query: query, headers: headers, routeHint: valuesMap(routeHintValues)}); err != nil {
 		return err
 	}
 	return postJSON(ctx, stdout, apiURL(*requestFlags.baseURL, "/v1/github/request"), token, body)
