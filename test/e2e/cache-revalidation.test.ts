@@ -17,6 +17,7 @@ import { loadIdentities } from "../../src/db";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import { ownedWork } from "./owned-work";
+import { exactRun, historicalHead, runPage } from "../fixtures/actions-ownership";
 
 const RUN_PATH = "/repos/openclaw/octopool/actions/runs/123";
 
@@ -27,6 +28,178 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end cache revalidation", () => {
+  it.each<{
+    scenario: string;
+    status: number;
+    headers: Record<string, string>;
+    attempts: number;
+    jobs?: boolean;
+    fresh?: boolean;
+    privateRepo?: boolean;
+  }>([
+    {
+      scenario: "depleted core quota",
+      status: 403,
+      headers: { "x-ratelimit-remaining": "0" },
+      attempts: 1,
+    },
+    { scenario: "429 response", status: 429, headers: {}, attempts: 1 },
+    {
+      scenario: "explicit retry window",
+      status: 403,
+      headers: { "retry-after": "30" },
+      attempts: 1,
+    },
+    {
+      scenario: "forced-fresh jobs",
+      status: 403,
+      headers: { "x-ratelimit-remaining": "0" },
+      attempts: 1,
+      jobs: true,
+      fresh: true,
+    },
+    {
+      scenario: "upstream permission refusal",
+      status: 403,
+      headers: { "x-ratelimit-remaining": "58" },
+      attempts: 2,
+    },
+    { scenario: "transient server failure", status: 503, headers: {}, attempts: 2 },
+    {
+      scenario: "repository becomes private",
+      status: 429,
+      headers: {},
+      attempts: 1,
+      privateRepo: true,
+    },
+  ])("avoids a repeated anonymous throttled request: $scenario", async (test) => {
+    await seedPool();
+    const path = RUN_PATH + (test.jobs ? "/jobs" : "");
+    const body = test.jobs
+      ? { total_count: 1, jobs: [{ id: 42, status: "completed" }] }
+      : { id: 123, status: "completed" };
+    let phase: "warm" | "throttled" | "next" = "warm";
+    const anonymous: boolean[] = [];
+    let canceled = 0;
+    let pooled = 0;
+    let visibilityChecks = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        if (bearer(request) === "test-org-token") {
+          visibilityChecks++;
+          return jsonResponse({ private: test.privateRepo === true });
+        }
+        if (bearer(request) === "test-primary-token") {
+          pooled++;
+          return jsonResponse(body, 200, rateHeaders({ remaining: 4_999 }));
+        }
+        expect(bearer(request)).toBeUndefined();
+        if (phase !== "throttled") return jsonResponse(body, 200, apiHeaders('"before"'));
+        anonymous.push(request.headers.has("if-none-match"));
+        return new Response(
+          new ReadableStream({
+            cancel() {
+              canceled++;
+            },
+          }),
+          {
+            status: test.status,
+            headers: { ...rateHeaders({ remaining: 58 }), ...test.headers },
+          },
+        );
+      }),
+    );
+    expect((await relay(path)).status).toBe(200);
+    await expireCacheEntry(test.jobs ? "run_jobs" : "run_view");
+    phase = "throttled";
+    const response = await relay(path, undefined, {
+      headers: test.fresh ? { "cache-control": "max-age=0" } : {},
+    });
+    expect(anonymous).toEqual(test.attempts === 1 ? [true] : [true, false]);
+    expect(canceled).toBe(test.attempts);
+    expect(visibilityChecks).toBe(1);
+    if (test.privateRepo) {
+      expect(response.status).toBe(424);
+      expect(await response.json()).toMatchObject({
+        error: { details: { reason: "repo_not_public" } },
+      });
+      expect(pooled).toBe(0);
+      return;
+    }
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      body,
+      identity: { id: "primary" },
+      relay: { cache: "miss" },
+    });
+    expect(pooled).toBe(1);
+    expect((await poolCoordinatorStub(env, POOL).snapshot()).cooldowns).toEqual([]);
+    phase = "next";
+    const next = await relay(path, undefined, { headers: { "cache-control": "max-age=0" } });
+    expect(next.status).toBe(200);
+    expect(await next.json()).toMatchObject({ body, relay: { backend: "web", cache: "miss" } });
+    expect(pooled).toBe(1);
+  });
+
+  it.each([false, true])(
+    "retains the public HTML alternative and its policy guard after throttling (denied: %s)",
+    async (denied) => {
+      await seedPool();
+      const path = "/repos/openclaw/Peekaboo/actions/runs/42";
+      const options = { headers: { "x-octopool-public-shape": "actions-summary-v1" } };
+      let warm = true;
+      let anonymous = 0;
+      let pages = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          expect(bearer(request)).toBeUndefined();
+          if (new URL(request.url).hostname === "github.com") {
+            if (warm) return new Response(null, { status: 404 });
+            pages++;
+            return new Response(runPage(42, historicalHead));
+          }
+          if (warm) return jsonResponse(exactRun(42), 200, apiHeaders('"before"'));
+          anonymous++;
+          expect(request.headers.get("if-none-match")).toBe('"before"');
+          return new Response(null, { status: 429 });
+        }),
+      );
+      expect((await relay(path, undefined, options)).status).toBe(200);
+      await expireCacheEntry("run_view");
+      warm = false;
+      if (denied) {
+        const policy = await callWorker("/v1/admin/string-rewrites", {
+          method: "PUT",
+          headers: { authorization: "Bearer test-admin-token", "content-type": "application/json" },
+          body: JSON.stringify({
+            schema_version: 1,
+            expected_revision: 1,
+            rules: [{ pattern: "^https://github[.]com/openclaw/Peekaboo", replacement: "public" }],
+          }),
+        });
+        expect(policy.status).toBe(200);
+      }
+      const response = await relay(path, undefined, options);
+      expect(anonymous).toBe(1);
+      if (denied) {
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ error: { code: "string_rewrite_denied" } });
+        expect(pages).toBe(0);
+      } else {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          body: { id: 42, head_sha: historicalHead },
+          relay: { backend: "web", cache: "miss" },
+        });
+        expect(pages).toBe(1);
+      }
+    },
+  );
+
   it.each([
     { failure: "http", status: 500, maxAge: undefined, stale: true },
     { failure: "http", status: 502, maxAge: undefined, stale: true },

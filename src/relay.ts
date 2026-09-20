@@ -121,6 +121,7 @@ type ActiveRelay = RelayBase & {
   cacheable: boolean;
   identity: Identity | undefined;
   paginatedIdentityRateRecorded: boolean;
+  anonymousRateLimited: boolean;
 };
 
 type RelaySuccess = {
@@ -276,6 +277,7 @@ async function prepareRelay(
     cacheable: cacheKey !== undefined,
     identity: undefined,
     paginatedIdentityRateRecorded: false,
+    anonymousRateLimited: false,
   };
 }
 
@@ -557,7 +559,11 @@ async function callRevalidationAPI(
       const { response, observedAt } = await observeAnonymousPublicRepo(
         state.env,
         state.route,
-        () => callAnonymousGitHubAPI(state.env, request, state.route),
+        async () => {
+          const attempt = await callAnonymousGitHubAPI(state.env, request, state.route);
+          if (attempt.rateLimited) state.anonymousRateLimited = true;
+          return attempt.response;
+        },
       );
       return response === undefined
         ? undefined
@@ -704,10 +710,15 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
     return undefined;
   }
   // Caller conditionals bypass storage, but must still use anonymous visibility.
-  const { response, observedAt } = await observeAnonymousPublicRepo(state.env, state.route, () =>
-    state.cacheKey === undefined
-      ? callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route)
-      : callGitHubWeb(state.env, state.cacheRequest, state.route),
+  const { response, observedAt } = await observeAnonymousPublicRepo(
+    state.env,
+    state.route,
+    async () =>
+      state.cacheKey === undefined
+        ? (await callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route)).response
+        : callGitHubWeb(state.env, state.cacheRequest, state.route, {
+            skipAnonymousAPI: state.anonymousRateLimited,
+          }),
   );
   if (response === undefined) {
     if (isIssueEventRoute(state.route.kind)) {

@@ -6,6 +6,10 @@
 
 - Relay machine-readable run lists filtered by `--created` through the shared cache, preserving GitHub date/range syntax, explicit freshness, and guarded native fallback.
 
+### Fixes
+
+- Avoid repeating an anonymous API request after rate-limited cache revalidation, retaining public HTML fallback, live visibility and identity checks, and normal anonymous attempts on later requests.
+
 ## 0.6.9 - 2026-09-20
 
 ### Fixes

@@ -33,6 +33,15 @@ header; identity-backed entries are always API-origin. A `304` reruns cache-hit 
 then republishes the stored body with TTLs recomputed from that body. Web-origin validators
 are never sent across transports.
 
+If token-free API revalidation reports a rate limit (`429`, exhausted `403`, or a valid
+`Retry-After` classified by the existing fallback policy), that request skips a second
+anonymous API attempt in its normal web fallback. Public HTML alternatives remain available,
+and pooled reads still require the live public-repository guard and identity selection.
+The observation lasts only for the current relay request; later requests try the anonymous
+API normally. Persisted anonymous rate snapshots remain advisory. Ordinary permission
+refusals, transport/server failures without rate-limit evidence, and policy denials keep
+their existing handling.
+
 ### Cache key
 
 SHA-256 (base64url) over a stable, sorted JSON of: pool, method, path, normalized

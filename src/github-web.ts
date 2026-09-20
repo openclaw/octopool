@@ -6,6 +6,8 @@ import { mediaFormat, mediaWebRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
 import { summaryPageRequest } from "./github-public-pages";
 import { githubResponseHeaders } from "./github-response";
+import { rateFromHeaders } from "./github-rate";
+import { githubResponseLocalFallbackReason } from "./local-fallback";
 import type { WebRequest } from "./github-web-types";
 import { fetchWebResponse, readWebBody } from "./github-web-transport";
 import { cancelResponseBody } from "./response-body";
@@ -15,6 +17,7 @@ export async function callGitHubWeb(
   env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
+  options: { skipAnonymousAPI?: boolean } = {},
 ): Promise<GitHubRelayResponse | undefined> {
   let requests = webRequests(env, request, route);
   if (requests.length === 0) {
@@ -30,6 +33,7 @@ export async function callGitHubWeb(
     ];
   }
   for (const web of requests) {
+    if (options.skipAnonymousAPI && web.usesApiQuota) continue;
     const timeoutMs = requestTimeoutMs(env);
     const fetched = await fetchWebResponse(env, web.url, web.headers, timeoutMs);
     if (fetched === undefined) {
@@ -62,14 +66,19 @@ export async function callGitHubWeb(
   return undefined;
 }
 
+type AnonymousGitHubAPIResult = {
+  response?: GitHubRelayResponse;
+  rateLimited?: true;
+};
+
 export async function callAnonymousGitHubAPI(
   env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
-): Promise<GitHubRelayResponse | undefined> {
+): Promise<AnonymousGitHubAPIResult> {
   const api = webRequests(env, request, route).find((candidate) => candidate.usesApiQuota);
   if (api === undefined) {
-    return undefined;
+    return {};
   }
   const fetched = await fetchWebResponse(
     env,
@@ -78,22 +87,30 @@ export async function callAnonymousGitHubAPI(
     requestTimeoutMs(env),
   );
   if (fetched === undefined) {
-    return undefined;
+    return {};
   }
   const { response, url: responseURL } = fetched;
   await storePublicAPIRate(env, route.resource, response.headers);
   if (response.status === 304) {
     return {
-      status: 304,
-      headers: githubResponseHeaders(response.headers),
-      body: null,
-      body_encoding: "text",
-      backend: "github",
+      response: {
+        status: 304,
+        headers: githubResponseHeaders(response.headers),
+        body: null,
+        body_encoding: "text",
+        backend: "github",
+      },
     };
   }
   if (response.status < 200 || response.status >= 300) {
     await cancelResponseBody(response);
-    return undefined;
+    const reason = githubResponseLocalFallbackReason(
+      response.status,
+      rateFromHeaders(githubResponseHeaders(response.headers)),
+    );
+    return reason === "github_rate_limited" || reason === "github_identity_depleted"
+      ? { rateLimited: true }
+      : {};
   }
   try {
     const body = await readWebBody(response, api.capBytes);
@@ -103,10 +120,10 @@ export async function callAnonymousGitHubAPI(
       response.status,
       responseURL,
     );
-    return payload === undefined ? undefined : { ...payload, backend: "github" };
+    return payload === undefined ? {} : { response: { ...payload, backend: "github" } };
   } catch (error) {
     rethrowStringRewriteDenial(error);
-    return undefined;
+    return {};
   }
 }
 

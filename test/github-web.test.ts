@@ -175,7 +175,7 @@ describe("github web provider", () => {
       });
       const response =
         entryPoint === "anonymous revalidation"
-          ? await callAnonymousGitHubAPI(env(), request, classifyRoute(request, policy))
+          ? (await callAnonymousGitHubAPI(env(), request, classifyRoute(request, policy))).response
           : await fetchPublicPage("https://github.com/openclaw/octopool/actions", 1024, env());
 
       expect(response).toBeUndefined();
