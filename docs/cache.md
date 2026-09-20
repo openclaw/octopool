@@ -468,6 +468,18 @@ age bound retain this outage fallback; an explicit bound must also be satisfied.
 Otherwise the existing typed failure/local-fallback flow applies. Stale serves still
 run the public-repo guard and active-identity check before returning.
 
+Transient GitHub server responses (`500`, `502`–`504`, and `520`–`524`) and recognized
+fetch/response-stream network or timeout failures can also use that existing stale
+window. This does not renew the cached body's timestamps, extend retention, or bypass
+an explicit age bound. HTTP response quota observations are still recorded for the
+selected pooled identity; transport failures do not invent quota or cooldown feedback.
+Without an eligible cached body, the original response or error is preserved. Terminal
+HTTP responses, response-size refusals, policy denials, and local response-body ownership
+errors retain their existing behavior.
+The same recovery applies when a later page of a shaped jobs collection is unavailable:
+only a complete eligible cached aggregate can replace the failed refresh. Otherwise the
+existing `pagination_exhausted` refusal remains; partial pages are never published.
+
 Cache publication is awaited before returning a miss response. D1 grants renewable
 publication authority: `(protocol epoch, resource key, global AUTOINCREMENT ID, random token)`.
 The capability comes only from a successfully committed `RETURNING` result. D1's execution

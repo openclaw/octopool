@@ -1,5 +1,11 @@
 import { isRecord } from "./object";
 
+const TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524]);
+
+export function isTransientGitHubStatus(status: number): boolean {
+  return TRANSIENT_STATUSES.has(status);
+}
+
 const RESPONSE_HEADERS = [
   "etag",
   "last-modified",

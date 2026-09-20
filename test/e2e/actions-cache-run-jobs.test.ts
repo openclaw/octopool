@@ -20,6 +20,94 @@ describe("Actions attempt job-list cache", () => {
   beforeEach(seedPool);
 
   it.each([
+    { identity: false, network: false, fresh: false },
+    { identity: false, network: true, fresh: false },
+    { identity: true, network: false, fresh: false },
+    { identity: true, network: true, fresh: false },
+    { identity: false, network: false, fresh: true },
+    { identity: false, network: true, fresh: true },
+    { identity: true, network: false, fresh: true },
+    { identity: true, network: true, fresh: true },
+  ])(
+    "recovers a complete cached aggregate after a later-page outage (identity:$identity, network:$network, fresh:$fresh)",
+    async ({ identity, network, fresh }) => {
+      const path = "/repos/openclaw/octopool/actions/runs/42/jobs";
+      const options = {
+        query: { per_page: "100" },
+        headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+      };
+      const jobs = Array.from({ length: 200 }, (_, index) => ({ id: index + 1, status: "queued" }));
+      let failing = false;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          const token = bearer(request);
+          if (token === "test-org-token") return jsonResponse({ private: false });
+          const url = new URL(request.url);
+          if (url.hostname === "github.com") return new Response(null, { status: 404 });
+          expect(url.pathname).toBe(path);
+          if (identity && token === undefined) return jsonResponse({}, 503);
+          const page = Number(url.searchParams.get("page"));
+          if (failing && page === 2) {
+            if (network) throw new Error("Synthetic page transport failure");
+            return jsonResponse({}, 503);
+          }
+          return jsonResponse(
+            {
+              total_count: 200,
+              jobs: jobs
+                .slice((page - 1) * 100, page * 100)
+                .map((job) => (failing && job.id === 1 ? { ...job, status: "in_progress" } : job)),
+            },
+            200,
+            rateHeaders({ remaining: 4_999 }),
+          );
+        }),
+      );
+      expect((await relay(path, undefined, options)).status).toBe(200);
+      await env.DB.prepare(
+        "UPDATE github_cache_entries SET created_at = datetime('now', '-180 seconds'), expires_at = datetime('now', '-1 second') WHERE path = ?",
+      )
+        .bind(path)
+        .run();
+      const before = await env.DB.prepare(
+        "SELECT cache_key, created_at, expires_at, stale_expires_at, body_json FROM github_cache_entries WHERE path = ?",
+      )
+        .bind(path)
+        .first<{ cache_key: string; body_json: string }>();
+      expect(before).not.toBeNull();
+      await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, before!.cache_key);
+      failing = true;
+      const response = await relay(path, undefined, {
+        ...options,
+        headers: { ...options.headers, ...(fresh ? { "cache-control": "max-age=0" } : {}) },
+      });
+      const wire = await response.json<RelayEnvelope>();
+      if (fresh) {
+        expect(response.status).toBe(424);
+        expect(wire).toMatchObject({
+          error: { code: "fallback_local", details: { reason: "pagination_exhausted" } },
+        });
+      } else {
+        expect(response.status).toBe(200);
+        expect(wire).toMatchObject({
+          status: 200,
+          body: { total_count: 200, jobs: expect.arrayContaining([jobs[0]]) },
+          relay: { cache: "stale", stale_ok: true },
+        });
+      }
+      expect(
+        await env.DB.prepare(
+          "SELECT cache_key, created_at, expires_at, stale_expires_at, body_json FROM github_cache_entries WHERE path = ?",
+        )
+          .bind(path)
+          .first(),
+      ).toEqual(before);
+    },
+  );
+
+  it.each([
     { count: 100, forced: false },
     { count: 100, forced: true },
     { count: 200, forced: false },

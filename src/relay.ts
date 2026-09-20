@@ -19,9 +19,10 @@ import { coalesceGitHubCacheMiss } from "./cache-coalesce";
 import { cacheResponseEligible } from "./cache-policy";
 import type { CacheFillOutcome, OwnedCacheFill } from "./cache-fill";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
-import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";
+import { callGitHub, callPublicGitHub, GitHubTransportError, probeGitHubLog } from "./github";
 import { githubToken, IdentityCredentialError } from "./github-auth";
-import { supportsAnonymousGitHubAPI } from "./github-public-api";
+import { storePublicAPIRate, supportsAnonymousGitHubAPI } from "./github-public-api";
+import { isTransientGitHubStatus } from "./github-response";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
@@ -53,6 +54,7 @@ import {
 } from "./run-list-superset";
 import {
   completeRunJobsSuperset,
+  RunJobsUnavailableError,
   filterRunJobsSuperset,
   runJobsSupersetHasMergedPages,
   runJobsSupersetIncomplete,
@@ -707,10 +709,20 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
     }
     return undefined;
   }
-  const completed =
-    response.backend === "github"
-      ? await completeRunJobsSuperset(response, state.runJobsSuperset, anonymousRunJobsPage(state))
-      : response;
+  let completed = response;
+  if (response.backend === "github") {
+    try {
+      completed = await completeRunJobsSuperset(
+        response,
+        state.runJobsSuperset,
+        anonymousRunJobsPage(state),
+      );
+    } catch (error) {
+      if (!(error instanceof RunJobsUnavailableError)) throw error;
+      const stale = await serveStaleRelayCache(state, "github_unavailable");
+      if (stale !== undefined) return stale;
+    }
+  }
   const github = sanitizeGitHubResponse(state.route, completed);
   if (response.status === 304 || !anonymousGitHubResponseProvesPublicRepo(state.route)) {
     await ensurePublicGitHubRepo(state.env, state.route);
@@ -723,16 +735,23 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
 }
 
 async function callPublicBackend(state: ActiveRelay): Promise<Response> {
-  const github = sanitizeGitHubResponse(
-    state.route,
-    await callPublicGitHub(state.env, state.cacheRequest, state.route),
-  );
+  let fetched: GitHubRelayResponse;
+  try {
+    fetched = await callPublicGitHub(state.env, state.cacheRequest, state.route);
+  } catch (error) {
+    const stale = await recoverGitHubTransportFailure(state, error);
+    if (stale !== undefined) return stale;
+    throw error instanceof GitHubTransportError ? error.failure : error;
+  }
+  const github = sanitizeGitHubResponse(state.route, fetched);
   const fallbackReason = githubResponseLocalFallbackReason(
     github.status,
     rateFromHeaders(github.headers),
     github.secondaryRateLimited,
   );
   if (fallbackReason === undefined) {
+    const stale = await recoverGitHubServerResponse(state, github);
+    if (stale !== undefined) return stale;
     return finalizeRelaySuccess(state, { github, backend: "github_public" });
   }
   if (fallbackReason === "github_rate_limited" || fallbackReason === "github_identity_depleted") {
@@ -799,17 +818,29 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     const terminalLog = await revalidateCachedTerminalLog(state, identity, selection.reason, token);
     if (terminalLog !== undefined) return terminalLog;
     if (state.failedIdentityIds.has(identity.id)) continue;
-    const firstPage = sanitizeGitHubResponse(
-      state.route,
-      await callGitHub(state.env, token, state.cacheRequest, state.route),
-    );
+    let fetched: GitHubRelayResponse;
+    try {
+      fetched = await callGitHub(state.env, token, state.cacheRequest, state.route);
+    } catch (error) {
+      const stale = await recoverGitHubTransportFailure(state, error);
+      if (stale !== undefined) return stale;
+      throw error instanceof GitHubTransportError ? error.failure : error;
+    }
+    const firstPage = sanitizeGitHubResponse(state.route, fetched);
     const observedAt = Date.now();
     state.paginatedIdentityRateRecorded = false;
-    const github = await completeRunJobsSuperset(
-      firstPage,
-      state.runJobsSuperset,
-      identityRunJobsPage(state, identity, firstPage),
-    );
+    let github = firstPage;
+    try {
+      github = await completeRunJobsSuperset(
+        firstPage,
+        state.runJobsSuperset,
+        identityRunJobsPage(state, identity, firstPage),
+      );
+    } catch (error) {
+      if (!(error instanceof RunJobsUnavailableError)) throw error;
+      const stale = await serveStaleRelayCache(state, "github_unavailable");
+      if (stale !== undefined) return stale;
+    }
     const rate = rateFromHeaders(github.headers);
     const identityFallback = githubResponseLocalFallbackReason(
       github.status,
@@ -822,6 +853,8 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
       await state.coordinator.recordResult(coordinatorResult(state, identity, github, rate));
       continue;
     }
+    const stale = await recoverGitHubServerResponse(state, github, identity);
+    if (stale !== undefined) return stale;
     return finalizeRelaySuccess(state, {
       github,
       observedAt,
@@ -838,6 +871,31 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
   throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
     reason: fallbackReason,
   });
+}
+
+async function recoverGitHubTransportFailure(
+  state: ActiveRelay,
+  error: unknown,
+): Promise<Response | undefined> {
+  if (error instanceof GitHubTransportError) {
+    return serveStaleRelayCache(state, "github_unavailable");
+  }
+  return undefined;
+}
+
+async function recoverGitHubServerResponse(
+  state: ActiveRelay,
+  github: GitHubRelayResponse,
+  identity?: Identity,
+): Promise<Response | undefined> {
+  if (!isTransientGitHubStatus(github.status)) {
+    return undefined;
+  }
+  const stale = await serveStaleRelayCache(state, "github_unavailable");
+  if (stale !== undefined && identity !== undefined) {
+    state.ctx.waitUntil(state.coordinator.recordResult(coordinatorResult(state, identity, github)));
+  }
+  return stale;
 }
 
 async function acquireIdentityToken(
@@ -1025,7 +1083,11 @@ async function recordFirstPaginatedIdentityRate(
 function anonymousRunJobsPage(
   state: ActiveRelay,
 ): (request: RelayRequest) => Promise<GitHubRelayResponse | undefined> {
-  return (request) => callAnonymousGitHubAPI(state.env, request, state.route);
+  return async (request) => {
+    const response = await callPublicGitHub(state.env, request, state.route);
+    await storePublicAPIRate(state.env, state.route.resource, new Headers(response.headers));
+    return sanitizeGitHubResponse(state.route, response);
+  };
 }
 
 function identityRunJobsPage(
@@ -1359,6 +1421,7 @@ function staleFallbackReason(reason: string): boolean {
     case "identity_pool_depleted":
     case "no_identity":
     case "web_only_unavailable":
+    case "github_unavailable":
       return true;
     default:
       return false;

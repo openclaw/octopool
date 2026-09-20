@@ -27,6 +27,117 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end cache revalidation", () => {
+  it.each([
+    { failure: "http", status: 500, maxAge: undefined, stale: true },
+    { failure: "http", status: 502, maxAge: undefined, stale: true },
+    { failure: "http", status: 503, maxAge: undefined, stale: true },
+    { failure: "http", status: 504, maxAge: undefined, stale: true },
+    { failure: "network", status: 200, maxAge: undefined, stale: true },
+    { failure: "runtime", status: 200, maxAge: undefined, stale: true },
+    { failure: "timeout", status: 200, maxAge: undefined, stale: true },
+    { failure: "body", status: 200, maxAge: undefined, stale: true },
+    { failure: "http", status: 503, maxAge: 0, stale: false },
+    { failure: "http", status: 503, maxAge: 20, stale: false },
+    { failure: "network", status: 200, maxAge: 0, stale: false },
+    { failure: "runtime", status: 200, maxAge: 0, stale: false },
+    { failure: "unknown", status: 200, maxAge: undefined, stale: false },
+    { failure: "locked", status: 200, maxAge: undefined, stale: false },
+    { failure: "http", status: 404, maxAge: undefined, stale: false },
+    { failure: "http", status: 422, maxAge: undefined, stale: false },
+    { failure: "http", status: 501, maxAge: undefined, stale: false },
+    { failure: "http", status: 503, maxAge: undefined, stale: true, path: "/users/octocat" },
+    { failure: "network", status: 200, maxAge: undefined, stale: true, path: "/users/octocat" },
+    { failure: "http", status: 503, maxAge: 0, stale: false, path: "/users/octocat" },
+  ])(
+    "handles $failure/$status with cache bound $maxAge (stale: $stale, path: $path)",
+    async ({ failure, status, maxAge, stale, path = RUN_PATH }) => {
+      await seedPool();
+      let failing = false;
+      const routeKind = path === RUN_PATH ? "run_view" : "user_view";
+      const warmBody =
+        path === RUN_PATH ? { id: 123, status: "in_progress" } : { id: 8, login: "octocat" };
+      const cacheMetadata = () =>
+        env.DB.prepare(
+          "SELECT created_at, expires_at, stale_expires_at FROM github_cache_entries WHERE route_kind = ?",
+        )
+          .bind(routeKind)
+          .first();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          if (bearer(request) === "test-org-token") return jsonResponse({ private: false });
+          expect(request.url).toBe(`https://api.github.com${path}`);
+          if (!failing) return jsonResponse(warmBody);
+          if (failure === "network") throw new TypeError("Synthetic network failure");
+          if (failure === "runtime") throw new Error("Synthetic platform transport failure");
+          if (failure === "timeout") throw new DOMException("Synthetic timeout", "TimeoutError");
+          if (failure === "unknown") {
+            const response = jsonResponse(warmBody);
+            Object.defineProperty(response, "headers", {
+              get() {
+                throw new Error("Synthetic post-fetch header failure");
+              },
+            });
+            return response;
+          }
+          if (failure === "locked") {
+            const response = jsonResponse({ id: 123, status: "completed" });
+            response.body!.getReader();
+            return response;
+          }
+          if (failure === "body") {
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.error(new TypeError("Synthetic response stream failure"));
+                },
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return jsonResponse(
+            { message: "upstream failure" },
+            status,
+            rateHeaders({ remaining: 4_999 }),
+          );
+        }),
+      );
+      expect((await relay(path)).status).toBe(200);
+      await expireCacheEntry(routeKind);
+      const cached = await cacheMetadata();
+      failing = true;
+      const response = await relay(path, undefined, {
+        headers: maxAge === undefined ? {} : { "cache-control": `max-age=${maxAge}` },
+      });
+      const wire = await response.json();
+      if (stale) {
+        expect(response.status).toBe(200);
+        expect(wire).toMatchObject({
+          status: 200,
+          body: warmBody,
+          relay: { cache: "stale", stale_ok: true },
+        });
+        expect(await cacheMetadata()).toEqual(cached);
+      } else if (failure === "http") {
+        expect(response.status).toBe(200);
+        expect(wire).toMatchObject({ status });
+        expect(wire).toHaveProperty(
+          "body",
+          path === RUN_PATH ? { message: "upstream failure" } : {},
+        );
+      } else {
+        expect(response.status).toBe(500);
+        expect(wire).toMatchObject({ error: { code: "internal_error" } });
+      }
+      if (failure === "http" && path === RUN_PATH) {
+        expect((await poolCoordinatorStub(env, POOL).snapshot()).rates).toEqual([
+          expect.objectContaining({ identity_id: "primary", remaining: 4_999 }),
+        ]);
+      }
+    },
+  );
+
   it.each([true, false])(
     "reuses a fresh identity entry before upstream reads (validator: %s)",
     async (validator) => {

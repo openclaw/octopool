@@ -7,6 +7,12 @@ import { HttpError } from "./http";
 import { readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
+export class GitHubTransportError extends Error {
+  constructor(readonly failure: unknown) {
+    super("GitHub transport unavailable");
+  }
+}
+
 export type GitHubLogProbe =
   | { kind: "exists"; status: number; headers: Record<string, string> }
   | { kind: "deleted"; response: GitHubRelayResponse }
@@ -34,7 +40,7 @@ export async function probeGitHubLog(
   token: string,
   request: RelayRequest,
 ): Promise<GitHubLogProbe> {
-  const response = await env.githubEgress.fetch(githubUrl(request), {
+  const response = await fetchGitHubResponse(env, githubUrl(request), {
     method: "GET",
     headers: githubHeaders(token, request.headers),
     redirect: "manual",
@@ -60,7 +66,7 @@ async function callGitHubAPI(
 ): Promise<GitHubRelayResponse> {
   const url = githubUrl(request);
   const timeoutMs = requestTimeoutMs(env);
-  const response = await env.githubEgress.fetch(url, {
+  const response = await fetchGitHubResponse(env, url, {
     method: "GET",
     headers: githubHeaders(token, request.headers),
     redirect: "manual",
@@ -98,7 +104,7 @@ async function fetchGitHubLogRedirect(
   timeoutMs: number,
 ): Promise<GitHubRelayResponse> {
   const url = githubLogRedirectURL(response);
-  const redirected = await env.githubEgress.fetch(url.toString(), {
+  const redirected = await fetchGitHubResponse(env, url.toString(), {
     method: "GET",
     redirect: "manual",
     signal: AbortSignal.timeout(timeoutMs),
@@ -189,12 +195,40 @@ function githubHeaders(
   return headers;
 }
 
-function readGitHubBody(response: Response, capBytes: number): Promise<Uint8Array> {
-  return readBodyCapped(
-    response,
-    capBytes,
-    () => new HttpError(502, "github_response_too_large", "GitHub response exceeded relay cap"),
-  );
+async function fetchGitHubResponse(
+  env: GitHubEgressEnv,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  try {
+    return await env.githubEgress.fetch(url, init);
+  } catch (error) {
+    throw classifyGitHubTransportError(error);
+  }
+}
+
+async function readGitHubBody(response: Response, capBytes: number): Promise<Uint8Array> {
+  const unread = !response.bodyUsed && !response.body?.locked;
+  try {
+    return await readBodyCapped(
+      response,
+      capBytes,
+      () => new HttpError(502, "github_response_too_large", "GitHub response exceeded relay cap"),
+    );
+  } catch (error) {
+    // An already-owned body is a local lifecycle error, not an upstream outage.
+    throw unread ? classifyGitHubTransportError(error) : error;
+  }
+}
+
+function classifyGitHubTransportError(error: unknown): unknown {
+  // Workerd reports socket and response-stream failures as plain Error.
+  return (error instanceof Error && error.constructor === Error) ||
+    error instanceof TypeError ||
+    (error instanceof DOMException &&
+      (error.name === "TimeoutError" || error.name === "AbortError"))
+    ? new GitHubTransportError(error)
+    : error;
 }
 
 function decodeBody(
