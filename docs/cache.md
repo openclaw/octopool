@@ -393,10 +393,16 @@ visible matching card count while older API matches still exist. Underfilled can
 therefore go directly to the exact anonymous API/pool fallback chain.
 
 Before fetching a missing or expired canonical page, the relay checks for a fresh exact
-filtered entry. Exact entries preserve GitHub's total count and may legitimately contain
+filtered entry, then a fresh shaped 100-run entry with the same pool, route path, media,
+API version, and eligible source identity. A larger entry must contain at least 25 runs;
+only its first 25 participate in the smaller page's filtering, derived total, and underfill
+check. Reuse keeps the source expiry and requested maximum age without publishing a
+25-run alias or refreshing either entry. Unshaped REST entries remain separate.
+Exact entries preserve GitHub's total count and may legitimately contain
 fewer runs than the requested limit. A failed exact lookup leaves the canonical fill
 unchanged, including ordinary storage/configuration failures; explicit policy and visibility
-denials still propagate. Anonymous exact entries are checked before loading pooled identities.
+denials still propagate. Larger-page lookups follow the same optional-probe rules.
+Both probes check anonymous entries before loading pooled identities.
 Coalesced and revalidation recovery hits apply the same completeness check as
 ordinary fresh hits. During an outage, an underfilled canonical page cannot become an
 empty or partial success: the relay uses an eligible exact stale entry or retains the

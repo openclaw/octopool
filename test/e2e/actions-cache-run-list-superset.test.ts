@@ -24,6 +24,220 @@ describe("Actions run-list superset", () => {
 
   it.each<{
     scenario: string;
+    expected: "hit" | "miss" | "exact" | "denied";
+    identity?: boolean;
+    workflow?: boolean;
+    filter?: "branch" | "status" | "late";
+    constraint?:
+      | "expired"
+      | "age"
+      | "live"
+      | "revoked"
+      | "scope"
+      | "media"
+      | "version"
+      | "raw"
+      | "conditional"
+      | "short"
+      | "probe"
+      | "visibility"
+      | "identity-outage";
+  }>([
+    { scenario: "anonymous page", expected: "hit" },
+    { scenario: "pooled page", identity: true, expected: "hit" },
+    { scenario: "workflow page", workflow: true, expected: "hit" },
+    { scenario: "branch prefix", filter: "branch", expected: "hit" },
+    { scenario: "status prefix", filter: "status", expected: "hit" },
+    { scenario: "matches beyond the prefix", filter: "late", expected: "exact" },
+    { scenario: "expired source", constraint: "expired", expected: "miss" },
+    { scenario: "explicit age limit", constraint: "age", expected: "miss" },
+    { scenario: "forced live read", constraint: "live", expected: "miss" },
+    {
+      scenario: "revoked source identity",
+      identity: true,
+      constraint: "revoked",
+      expected: "miss",
+    },
+    { scenario: "removed source scope", identity: true, constraint: "scope", expected: "miss" },
+    { scenario: "different media", constraint: "media", expected: "miss" },
+    { scenario: "different API version", constraint: "version", expected: "miss" },
+    { scenario: "unshaped REST source", constraint: "raw", expected: "miss" },
+    { scenario: "conditional read", constraint: "conditional", expected: "miss" },
+    { scenario: "short source page", constraint: "short", expected: "miss" },
+    { scenario: "optional probe failure", constraint: "probe", expected: "miss" },
+    { scenario: "visibility denial", constraint: "visibility", expected: "denied" },
+    {
+      scenario: "anonymous hit during identity outage",
+      constraint: "identity-outage",
+      expected: "hit",
+    },
+  ])(
+    "reuses a larger shaped page without changing the small-page contract: $scenario",
+    async (test) => {
+      const path = test.workflow
+        ? "/repos/openclaw/octopool/actions/workflows/ci.yml/runs"
+        : RUNS_PATH;
+      const runs = Array.from({ length: test.constraint === "short" ? 20 : 100 }, (_, i) =>
+        run(
+          i + 1,
+          i < 25 ? (i % 2 === 0 ? "main" : "other") : "late",
+          "completed",
+          i % 2 === 0 ? "success" : "failure",
+        ),
+      );
+      let warming = true;
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (bearer(request) === "test-org-token")
+          return jsonResponse({ private: test.constraint === "visibility" && !warming });
+        if (url.hostname === "github.com") return jsonResponse({}, 404);
+        if (test.identity && warming && bearer(request) !== "test-primary-token")
+          return jsonResponse({}, 503);
+        const filtered = runs.filter(
+          (item) =>
+            (!url.searchParams.has("branch") ||
+              item.head_branch === url.searchParams.get("branch")) &&
+            (!url.searchParams.has("status") || item.conclusion === url.searchParams.get("status")),
+        );
+        return jsonResponse(
+          {
+            total_count: 2000,
+            workflow_runs: filtered.slice(0, Number(url.searchParams.get("per_page") ?? 30)),
+          },
+          200,
+          {
+            etag: '"source-page"',
+            link: '<https://api.github.com/next>; rel="next"',
+          },
+        );
+      });
+      vi.stubGlobal("fetch", upstream);
+      const shape = { "x-octopool-public-shape": "actions-summary-v1" };
+      const warm = await relay(path, undefined, {
+        query: { page: "1", per_page: "100" },
+        headers: test.constraint === "raw" ? {} : shape,
+      });
+      expect(warm.status).toBe(200);
+      const source = await env.DB.prepare("SELECT * FROM github_cache_entries").first<{
+        cache_key: string;
+        expires_at: string;
+      }>();
+      expect(source).not.toBeNull();
+      const key = source!.cache_key;
+      if (test.constraint === "expired" || test.constraint === "age") {
+        await env.DB.prepare(
+          `UPDATE github_cache_entries SET created_at = datetime('now', '-180 seconds'), expires_at = datetime('now', '${test.constraint === "expired" ? "-1 second" : "+30 seconds"}') WHERE cache_key = ?`,
+        )
+          .bind(key)
+          .run();
+      }
+      if (test.constraint === "revoked")
+        await env.DB.prepare(
+          "UPDATE identities SET status = 'disabled' WHERE id = 'primary'",
+        ).run();
+      if (test.constraint === "scope")
+        await env.DB.prepare("DELETE FROM identity_scopes WHERE identity_id = 'primary'").run();
+      if (test.constraint === "identity-outage")
+        await env.DB.prepare("ALTER TABLE identities RENAME TO unavailable_identities").run();
+      if (test.constraint === "visibility") {
+        await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+        await deleteEdgeJSON(PUBLIC_PROOF_EDGE_NAMESPACE, "openclaw/octopool");
+      }
+      await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
+      const before = await env.DB.prepare("SELECT * FROM github_cache_entries").all();
+      warming = false;
+      upstream.mockClear();
+      const query = {
+        limit: "2",
+        ...(test.filter === "branch" ? { branch: "main" } : {}),
+        ...(test.filter === "status" ? { status: "failure" } : {}),
+        ...(test.filter === "late" ? { branch: "late" } : {}),
+      };
+      const options = {
+        query,
+        headers: {
+          ...shape,
+          ...(test.constraint === "age" ? { "cache-control": "max-age=30" } : {}),
+          ...(test.constraint === "live" ? { "cache-control": "max-age=0" } : {}),
+          ...(test.constraint === "media" ? { accept: "application/vnd.github.raw+json" } : {}),
+          ...(test.constraint === "version" ? { "x-github-api-version": "2022-11-28" } : {}),
+          ...(test.constraint === "conditional" ? { "if-none-match": '"other"' } : {}),
+        },
+      };
+      let failedProbes = 0;
+      const db = observePublicationD1(env.DB, {
+        before: async (sql, values) => {
+          if (sql === queries.readGitHubCache && values[0] === key) {
+            failedProbes++;
+            throw new Error("synthetic larger-page cache read failure");
+          }
+        },
+      });
+      const response =
+        test.constraint === "probe"
+          ? await requestWithEnv({ DB: db }, path, options)
+          : await relay(path, undefined, options);
+      if (test.constraint === "probe") expect(failedProbes).toBe(1);
+      if (test.expected === "denied") {
+        expect(response.status).toBe(424);
+        expect(await response.json()).toMatchObject({
+          error: { details: { reason: "repo_not_public" } },
+        });
+        expect(upstream).toHaveBeenCalledOnce();
+        return;
+      }
+      expect(response.status).toBe(200);
+      const result = await response.json<RelayEnvelope>();
+      expect(result.relay.cache).toBe(
+        test.constraint === "conditional" ? "bypass" : test.expected === "hit" ? "hit" : "miss",
+      );
+      expect(runIDs(result.body)).toEqual(
+        test.filter === "late"
+          ? [26, 27]
+          : test.filter === "branch"
+            ? [1, 3]
+            : test.filter === "status"
+              ? [2, 4]
+              : [1, 2],
+      );
+      if (test.expected === "hit") {
+        expect(result.body).toMatchObject({
+          total_count: test.filter === "branch" ? 13 : test.filter === "status" ? 12 : 25,
+        });
+        expect(result.relay).toMatchObject({ cache_expires_at: source!.expires_at });
+        expect(result.headers).not.toHaveProperty("etag");
+        expect(result.headers).not.toHaveProperty("link");
+        expect(upstream).not.toHaveBeenCalled();
+        // A derived hit neither publishes an alias nor refreshes its source receipt or TTL.
+        expect((await env.DB.prepare("SELECT * FROM github_cache_entries").all()).results).toEqual(
+          before.results,
+        );
+      } else {
+        expect(upstream).toHaveBeenCalled();
+        if (test.expected === "exact") {
+          expect(result.body).toMatchObject({ total_count: 2000 });
+          const urls = upstream.mock.calls.map(
+            ([input, init]) => new URL(new Request(input, init).url),
+          );
+          expect(urls).toHaveLength(1);
+          expect(urls[0]!.searchParams.get("branch")).toBe("late");
+        }
+        if (test.constraint === "probe") {
+          expect((await relay(path, undefined, options)).status).toBe(200);
+          const rows = await env.DB.prepare("SELECT query_json FROM github_cache_entries").all<{
+            query_json: string;
+          }>();
+          expect(rows.results.some((row) => JSON.parse(row.query_json).per_page === "25")).toBe(
+            true,
+          );
+        }
+      }
+    },
+  );
+
+  it.each<{
+    scenario: string;
     identity?: boolean;
     missingCanonical?: boolean;
     exact: "fresh" | "stale" | "missing" | "revoked" | "short";

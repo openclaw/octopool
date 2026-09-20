@@ -133,6 +133,33 @@ export function filterRunListSuperset(
   };
 }
 
+export function largerRunListCacheRequest(
+  view: RunListSupersetView | undefined,
+): RelayRequest | undefined {
+  if (view?.cacheRequest.query?.per_page !== String(PUBLIC_PAGE_SIZE)) return undefined;
+  return { ...view.cacheRequest, query: { page: "1", per_page: String(MAX_PAGE_SIZE) } };
+}
+
+export function projectLargerRunListPage(
+  response: GitHubRelayResponse,
+): GitHubRelayResponse | undefined {
+  if (
+    !isRecord(response.body) ||
+    !Array.isArray(response.body.workflow_runs) ||
+    response.body.workflow_runs.length < PUBLIC_PAGE_SIZE
+  )
+    return undefined;
+  // Preserve the small canonical page's totals and underfill behavior: older
+  // matches outside this prefix must not satisfy a filtered small-page request.
+  return {
+    ...response,
+    body: {
+      ...response.body,
+      workflow_runs: response.body.workflow_runs.slice(0, PUBLIC_PAGE_SIZE),
+    },
+  };
+}
+
 export function runListSupersetUnderfilled(
   response: GitHubRelayResponse,
   view: RunListSupersetView | undefined,
