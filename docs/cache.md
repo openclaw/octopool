@@ -421,6 +421,8 @@ response can supply that proof when its run ID and attempt match and its source 
 and public-repository guard remain eligible. Both the base run view and the exact attempt
 view qualify, including pooled responses when anonymous metadata is unavailable. The
 existing cache owner and expiry remain authoritative; no separate completion store is created.
+Anonymous proof is checked before loading pooled identities, so an identity lookup outage
+does not discard usable public metadata. Pooled proof still requires an eligible source identity.
 Explicit age bounds apply to this lookup, and live or conditional requests still require
 the direct attempt check. An active run, a different attempt, expired metadata or a revoked
 source cannot extend the jobs' lifetime. Without an eligible cached proof, Octopool keeps

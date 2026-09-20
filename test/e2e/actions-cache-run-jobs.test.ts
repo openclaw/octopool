@@ -243,13 +243,22 @@ describe("Actions attempt job-list cache", () => {
     }
   });
 
-  it.each<{ source: string; attemptPath: boolean; shaped?: boolean; reject?: string }>([
+  it.each<{
+    source: string;
+    attemptPath: boolean;
+    shaped?: boolean;
+    reject?: string;
+    identityOutage?: boolean;
+  }>([
     { source: "anonymous", attemptPath: false },
     { source: "anonymous", attemptPath: true },
     { source: "pooled", attemptPath: false },
     { source: "pooled", attemptPath: true },
     { source: "anonymous", attemptPath: false, shaped: true },
     { source: "pooled", attemptPath: true, shaped: true },
+    { source: "anonymous", attemptPath: false, identityOutage: true },
+    { source: "anonymous", attemptPath: true, shaped: true, identityOutage: true },
+    { source: "pooled", attemptPath: true, identityOutage: true, reject: "identity lookup outage" },
     ...[
       "different attempt",
       "active",
@@ -259,8 +268,8 @@ describe("Actions attempt job-list cache", () => {
       "revoked identity",
     ].map((reject) => ({ source: "pooled", attemptPath: false, reject })),
   ])(
-    "checks $source run proof (attempt: $attemptPath, shaped: $shaped, rejection: $reject)",
-    async ({ source, attemptPath, shaped, reject }) => {
+    "checks $source run proof (attempt: $attemptPath, shaped: $shaped, rejection: $reject, identity outage: $identityOutage)",
+    async ({ source, attemptPath, shaped, reject, identityOutage }) => {
       const runPath = "/repos/openclaw/octopool/actions/runs/42";
       const attempt = `${runPath}/attempts/2`;
       let warmingRun = true;
@@ -309,6 +318,9 @@ describe("Actions attempt job-list cache", () => {
         await env.DB.prepare(
           "UPDATE identities SET status = 'disabled' WHERE id = 'primary'",
         ).run();
+      }
+      if (identityOutage) {
+        await env.DB.prepare("ALTER TABLE identities RENAME TO unavailable_identities").run();
       }
       warmingRun = false;
       upstream.mockClear();

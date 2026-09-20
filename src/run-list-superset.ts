@@ -1,12 +1,12 @@
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-public-utils";
+import { transformedGitHubHeaders } from "./github-response";
 import { isRecord } from "./object";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const PUBLIC_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 30;
-const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length", "link"]);
 const SUPPORTED_RUN_STATUSES = new Set([
   "completed",
   "action_required",
@@ -120,11 +120,7 @@ export function filterRunListSuperset(
   const filtered = filterRuns(response.body.workflow_runs, view);
   return {
     ...response,
-    headers: Object.fromEntries(
-      Object.entries(response.headers).filter(
-        ([key]) => !REPRESENTATION_HEADERS.has(key.toLowerCase()),
-      ),
-    ),
+    headers: transformedGitHubHeaders(response.headers),
     body: {
       ...response.body,
       ...(options.preserveTotalCount === true ? {} : { total_count: filtered.length }),
