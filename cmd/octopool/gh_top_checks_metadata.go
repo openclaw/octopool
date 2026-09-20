@@ -44,42 +44,51 @@ func verifiedPRCheckMetadata(ctx context.Context, client ghRelayClient, repo, sh
 	if len(needed) == 0 {
 		return metadata, nil
 	}
-	runs, err := relayCompleteCollection(ctx, client, ghAPIRequest{
-		method: "GET", path: repoPath(repo, "actions", "runs"), headers: headers,
-		query: map[string]any{"head_sha": sha},
-	}, "workflow_runs")
+	var names map[int64]string
+	err := relayReadPair(ctx, func(ctx context.Context) error {
+		runs, err := relayCompleteCollection(ctx, client, ghAPIRequest{
+			method: "GET", path: repoPath(repo, "actions", "runs"), headers: headers,
+			query: map[string]any{"head_sha": sha},
+		}, "workflow_runs")
+		if err != nil {
+			return err
+		}
+		for _, raw := range runs {
+			run := raw.(map[string]any)
+			if firstString(run, "head_sha") != sha {
+				return localFallbackError{Reason: "workflow run response did not match pull request head"}
+			}
+			runID, _ := prCheckID(run["id"]) // Already validated by the raw collector.
+			suiteID, suiteOK := prCheckID(run["check_suite_id"])
+			workflowID, workflowOK := prCheckID(run["workflow_id"])
+			if !suiteOK || !workflowOK {
+				return localFallbackError{Reason: "workflow run response did not include suite and workflow identity"}
+			}
+			if _, exists := metadata[suiteID]; exists {
+				return localFallbackError{Reason: "ambiguous workflow runs for check suite"}
+			}
+			metadata[suiteID] = prCheckMetadata{runID: runID, workflowID: workflowID, event: firstString(run, "event")}
+		}
+		return nil
+	}, func(ctx context.Context) error {
+		// The raw catalogue includes inactive workflows; the public workflow-list
+		// projection is incomplete and cannot establish these associations.
+		workflows, err := relayCompleteCollection(ctx, client, ghAPIRequest{
+			method: "GET", path: repoPath(repo, "actions", "workflows"), headers: headers,
+		}, "workflows")
+		if err != nil {
+			return err
+		}
+		names = make(map[int64]string, len(workflows))
+		for _, raw := range workflows {
+			workflow := raw.(map[string]any)
+			id, _ := prCheckID(workflow["id"])
+			names[id] = firstString(workflow, "name")
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	for _, raw := range runs {
-		run := raw.(map[string]any)
-		if firstString(run, "head_sha") != sha {
-			return nil, localFallbackError{Reason: "workflow run response did not match pull request head"}
-		}
-		runID, _ := prCheckID(run["id"]) // Already validated by the raw collector.
-		suiteID, suiteOK := prCheckID(run["check_suite_id"])
-		workflowID, workflowOK := prCheckID(run["workflow_id"])
-		if !suiteOK || !workflowOK {
-			return nil, localFallbackError{Reason: "workflow run response did not include suite and workflow identity"}
-		}
-		if _, exists := metadata[suiteID]; exists {
-			return nil, localFallbackError{Reason: "ambiguous workflow runs for check suite"}
-		}
-		metadata[suiteID] = prCheckMetadata{runID: runID, workflowID: workflowID, event: firstString(run, "event")}
-	}
-	// The raw catalogue includes inactive workflows; the public workflow-list
-	// projection is incomplete and cannot establish these associations.
-	workflows, err := relayCompleteCollection(ctx, client, ghAPIRequest{
-		method: "GET", path: repoPath(repo, "actions", "workflows"), headers: headers,
-	}, "workflows")
-	if err != nil {
-		return nil, err
-	}
-	names := make(map[int64]string, len(workflows))
-	for _, raw := range workflows {
-		workflow := raw.(map[string]any)
-		id, _ := prCheckID(workflow["id"])
-		names[id] = firstString(workflow, "name")
 	}
 	for suiteID := range needed {
 		association, found := metadata[suiteID]

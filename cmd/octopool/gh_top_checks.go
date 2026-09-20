@@ -174,52 +174,28 @@ func prCheckItemsForSHAWithHeaders(ctx context.Context, client ghRelayClient, re
 }
 
 func prCheckContextsForSHA(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string) ([]prCheckContext, error) {
-	type collectionResult struct {
-		key   string
-		items []any
-		err   error
+	var checks, statuses []any
+	err := relayReadPair(ctx, func(ctx context.Context) error {
+		var err error
+		checks, err = relayCompleteCollection(ctx, client, ghAPIRequest{
+			method: "GET", path: repoPath(repo, "commits", sha, "check-runs"), headers: headers,
+		}, "check_runs")
+		return err
+	}, func(ctx context.Context) error {
+		var err error
+		statuses, err = relayCompleteCollection(ctx, client, ghAPIRequest{
+			method: "GET", path: repoPath(repo, "commits", sha, "status"), headers: headers,
+		}, "statuses")
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	child, cancel := context.WithCancel(ctx)
-	defer cancel()
-	results := make(chan collectionResult, 2)
-	collect := func(path, key string) {
-		items, err := relayCompleteCollection(child, client, ghAPIRequest{
-			method: "GET", path: repoPath(repo, "commits", sha, path), headers: headers,
-		}, key)
-		results <- collectionResult{key, items, err}
-	}
-	go collect("check-runs", "check_runs")
-	go collect("status", "statuses")
-	var checks, statuses collectionResult
-	var terminal error
-	for range 2 {
-		result := <-results
-		if terminal == nil && terminalRelayFailure(result.err) {
-			// Retain the actual failure before cancellation can produce a sibling
-			// policy error. Both collectors must settle before output or fallback.
-			terminal = result.err
-			cancel()
-		}
-		if result.key == "check_runs" {
-			checks = result
-		} else {
-			statuses = result
-		}
-	}
-	if terminal != nil {
-		return nil, terminal
-	}
-	if checks.err != nil {
-		return nil, checks.err
-	}
-	if statuses.err != nil {
-		return nil, statuses.err
-	}
-	items := make([]prCheckContext, 0, len(checks.items)+len(statuses.items))
-	for _, raw := range checks.items {
+	items := make([]prCheckContext, 0, len(checks)+len(statuses))
+	for _, raw := range checks {
 		items = append(items, prCheckContext{raw: raw.(map[string]any)})
 	}
-	return append(items, statusItems(statuses.items)...), nil
+	return append(items, statusItems(statuses)...), nil
 }
 
 func statusItems(items []any) []prCheckContext {

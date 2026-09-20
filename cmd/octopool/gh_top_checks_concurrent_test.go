@@ -59,17 +59,30 @@ func prCheckReadResponse(t *testing.T, body any) *http.Response {
 }
 
 func TestPRCheckCollectionsOverlap(t *testing.T) {
-	for _, command := range []string{"checks", "view"} {
-		t.Run(command, func(t *testing.T) {
+	for _, test := range []struct{ command, phase string }{
+		{"checks", "contexts"}, {"view", "contexts"},
+		{"checks", "metadata"}, {"view", "metadata"},
+	} {
+		t.Run(test.command+"/"+test.phase, func(t *testing.T) {
 			f := newPRChecksFixture()
-			f.checks[0].(map[string]any)["app"] = map[string]any{"id": 999, "slug": "third-party"}
+			firstPath, secondPath := "/check-runs", "/status"
+			if test.phase == "metadata" {
+				firstPath, secondPath = "/actions/runs", "/actions/workflows"
+				for i := 0; i < 100; i++ {
+					f.runs = append(f.runs, map[string]any{"id": 1000 + i, "head_sha": metadataHead, "check_suite_id": 1000 + i, "workflow_id": 401, "event": "push"})
+					f.workflows = append(f.workflows, map[string]any{"id": 1000 + i, "name": "unrelated", "state": "active", "path": ".github/workflows/other.yml"})
+				}
+			} else {
+				f.checks[0].(map[string]any)["app"] = map[string]any{"id": 999, "slug": "third-party"}
+			}
 			f.statuses = []any{map[string]any{"id": 2, "context": "legacy", "state": "success"}}
 			entered := make(chan string, 2)
 			release := make(chan struct{})
 			unblock := sync.OnceFunc(func() { close(release) })
 			policies := prCheckReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				path := body["path"].(string)
-				if strings.HasSuffix(path, "/check-runs") || strings.HasSuffix(path, "/status") {
+				query, _ := body["query"].(map[string]any)
+				if (strings.HasSuffix(path, firstPath) || strings.HasSuffix(path, secondPath)) && query["page"] == "1" {
 					entered <- path
 					select {
 					case <-release:
@@ -80,11 +93,14 @@ func TestPRCheckCollectionsOverlap(t *testing.T) {
 				return prCheckReadResponse(t, f.response(t, body)), nil
 			})
 			field := "name"
-			if command == "view" {
+			if test.phase == "metadata" {
+				field = "name,workflow,event"
+			}
+			if test.command == "view" {
 				field = "statusCheckRollup"
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			done := startPRCheckRead(ctx, []string{"pr", command, "7", "-R", "acme/repo", "--json", field})
+			done := startPRCheckRead(ctx, []string{"pr", test.command, "7", "-R", "acme/repo", "--json", field})
 			defer func() { cancel(); unblock(); <-done }()
 			seen := map[string]bool{}
 			for range 2 {
@@ -92,7 +108,7 @@ func TestPRCheckCollectionsOverlap(t *testing.T) {
 				case path := <-entered:
 					seen[path] = true
 				case <-ctx.Done():
-					t.Fatal("check-runs and statuses did not overlap")
+					t.Fatalf("%s and %s did not overlap", firstPath, secondPath)
 				}
 			}
 			if len(seen) != 2 {
@@ -103,8 +119,12 @@ func TestPRCheckCollectionsOverlap(t *testing.T) {
 			if result.err != nil || result.stderr != "" {
 				t.Fatalf("read failed: %+v", result)
 			}
-			if command == "checks" {
-				if result.stdout != "[{\"name\":\"unit\"},{\"name\":\"legacy\"}]\n" {
+			if test.command == "checks" {
+				want := "[{\"name\":\"unit\"},{\"name\":\"legacy\"}]\n"
+				if test.phase == "metadata" {
+					want = "[{\"event\":\"pull_request\",\"name\":\"unit\",\"workflow\":\"CI\"},{\"event\":\"\",\"name\":\"legacy\",\"workflow\":\"\"}]\n"
+				}
+				if result.stdout != want {
 					t.Fatalf("checks output changed: %s", result.stdout)
 				}
 			} else {
@@ -116,31 +136,48 @@ func TestPRCheckCollectionsOverlap(t *testing.T) {
 				if len(rows) != 2 || rows[0]["__typename"] != "CheckRun" || rows[0]["name"] != "unit" || rows[1]["__typename"] != "StatusContext" || rows[1]["context"] != "legacy" {
 					t.Fatalf("rollup lost check-before-status order: %s", result.stdout)
 				}
+				if test.phase == "metadata" && rows[0]["workflowName"] != "CI" {
+					t.Fatalf("rollup lost verified workflow name: %s", result.stdout)
+				}
 			}
 			if policies.Load() != int64(1+len(f.requests)) || f.calls("/check-runs") != 1 || f.calls("/status") != 1 {
 				t.Fatalf("policy/data budget changed: policies=%d data=%v", policies.Load(), f.requests)
+			}
+			wantMetadataPages := 0
+			if test.phase == "metadata" {
+				wantMetadataPages = 2
+			}
+			if f.calls("/actions/runs") != wantMetadataPages || f.calls("/actions/workflows") != wantMetadataPages {
+				t.Fatalf("metadata pagination/lazy skipping changed: data=%v", f.requests)
 			}
 		})
 	}
 }
 
-func TestPRCheckCollectionsStatusDenialOverridesCheckFailure(t *testing.T) {
-	for _, failure := range []string{"fallback", "decode"} {
+func TestPRCheckCollectionsDenialOverridesEarlierFailure(t *testing.T) {
+	for _, failure := range []string{"fallback", "decode", "run-identity"} {
 		t.Run(failure, func(t *testing.T) {
 			f := newPRChecksFixture()
-			checksReturned := make(chan struct{})
+			firstPath, secondPath := "/check-runs", "/status"
+			if failure == "run-identity" {
+				firstPath, secondPath = "/actions/runs", "/actions/workflows"
+				f.runs[0].(map[string]any)["head_sha"] = strings.Repeat("f", 40)
+			}
+			firstReturned := make(chan struct{})
 			prCheckReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				switch path := body["path"].(string); {
-				case strings.HasSuffix(path, "/check-runs"):
-					defer close(checksReturned)
+				case strings.HasSuffix(path, firstPath):
+					defer close(firstReturned)
 					var value any = map[string]any{"total_count": 1, "check_runs": []any{}}
 					if failure == "decode" {
 						value = []any{}
+					} else if failure == "run-identity" {
+						value = f.response(t, body)
 					}
 					return prCheckReadResponse(t, value), nil
-				case strings.HasSuffix(path, "/status"):
+				case strings.HasSuffix(path, secondPath):
 					select {
-					case <-checksReturned:
+					case <-firstReturned:
 					case <-request.Context().Done():
 						return nil, request.Context().Err()
 					}
@@ -156,19 +193,23 @@ func TestPRCheckCollectionsStatusDenialOverridesCheckFailure(t *testing.T) {
 			err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name"}, &stdout, &stderr)
 			var relay *relayResponseError
 			if !errors.As(err, &relay) || relay.Status != http.StatusForbidden || relay.Code != "string_rewrite_denied" || stdout.Len() != 0 || stderr.Len() != 0 {
-				t.Fatalf("status denial was hidden: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+				t.Fatalf("peer denial was hidden: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {
-				t.Fatal("status denial started native gh")
+				t.Fatal("peer denial started native gh")
 			}
 		})
 	}
 }
 
 func TestPRCheckCollectionsCancelAndJoin(t *testing.T) {
-	for _, mode := range []string{"checks-denial", "caller"} {
+	for _, mode := range []string{"checks-denial", "caller", "metadata-denial"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newPRChecksFixture()
+			firstPath, secondPath := "/check-runs", "/status"
+			if mode == "metadata-denial" {
+				firstPath, secondPath = "/actions/runs", "/actions/workflows"
+			}
 			started := make(chan struct{}, 2)
 			canceled := make(chan struct{}, 2)
 			release := make(chan struct{})
@@ -176,10 +217,10 @@ func TestPRCheckCollectionsCancelAndJoin(t *testing.T) {
 			var settled atomic.Int64
 			prCheckReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				path := body["path"].(string)
-				if !strings.HasSuffix(path, "/check-runs") && !strings.HasSuffix(path, "/status") {
+				if !strings.HasSuffix(path, firstPath) && !strings.HasSuffix(path, secondPath) {
 					return prCheckReadResponse(t, f.response(t, body)), nil
 				}
-				if mode == "checks-denial" && strings.HasSuffix(path, "/check-runs") {
+				if mode != "caller" && strings.HasSuffix(path, firstPath) {
 					select {
 					case <-started:
 					case <-request.Context().Done():
@@ -235,7 +276,7 @@ func TestPRCheckCollectionsCancelAndJoin(t *testing.T) {
 			if settledAtReturn != int64(wantCanceled) || result.stdout != "" || result.stderr != "" {
 				t.Fatalf("canceled acquisition leaked work or output: settled=%d result=%+v", settledAtReturn, result)
 			}
-			if mode == "checks-denial" {
+			if mode != "caller" {
 				var relay *relayResponseError
 				if !errors.As(result.err, &relay) || relay.Status != http.StatusUnauthorized || relay.Code != "invalid_auth" {
 					t.Fatalf("initiating denial was replaced: %v", result.err)

@@ -321,7 +321,7 @@ func TestPRChecksMetadataCollectionBudgets(t *testing.T) {
 			}
 			wantRuns, wantCatalogue := (count+99)/100, (count+99)/100
 			if scenario == "1001-runs" {
-				wantRuns, wantCatalogue = 1, 0
+				wantRuns, wantCatalogue = 1, 1
 			}
 			if scenario == "1001-workflows" {
 				wantRuns, wantCatalogue = 1, 1

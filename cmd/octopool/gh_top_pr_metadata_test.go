@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -655,11 +656,22 @@ func TestPRChecksMetadataPolicyRefresh(t *testing.T) {
 				}
 			}
 			var replacePolicy func()
+			runsStarted := make(chan struct{})
 			policy, _ := rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
 				req := decodeCLIRequest(t, w, r)
 				path := req["path"].(string)
 				body := f.response(t, req)
-				if stage == "before-runs" && strings.HasSuffix(path, "/status") || stage == "before-catalogue" && strings.HasSuffix(path, "/actions/runs") || stage == "before-catalogue-page-2" && strings.HasSuffix(path, "/actions/workflows") && f.calls("/actions/workflows") == 1 || stage == "before-fallback" && strings.HasSuffix(path, "/actions/workflows") {
+				if strings.HasSuffix(path, "/actions/runs") {
+					close(runsStarted)
+				}
+				if (stage == "before-catalogue-page-2" || stage == "before-fallback") && strings.HasSuffix(path, "/actions/workflows") {
+					select {
+					case <-runsStarted:
+					case <-r.Context().Done():
+						return
+					}
+				}
+				if (stage == "before-runs" || stage == "before-catalogue") && strings.HasSuffix(path, "/status") || stage == "before-catalogue-page-2" && strings.HasSuffix(path, "/actions/workflows") && f.calls("/actions/workflows") == 1 || stage == "before-fallback" && strings.HasSuffix(path, "/actions/workflows") {
 					replacePolicy()
 					if stage == "before-fallback" {
 						body = map[string]any{"total_count": 0, "workflows": []any{}}
@@ -668,7 +680,11 @@ func TestPRChecksMetadataPolicyRefresh(t *testing.T) {
 				writeCLIEnvelope(t, w, body)
 			})
 			replacePolicy = func() {
-				policy.Store(`{"schema_version":1,"revision":2,"updated_at":"2026-09-01T00:00:00Z","rules":[{"pattern":"acme","replacement":"blocked"}]}`)
+				pattern := "acme"
+				if stage == "before-catalogue" {
+					pattern = "workflows"
+				}
+				policy.Store(fmt.Sprintf(`{"schema_version":1,"revision":2,"updated_at":"2026-09-01T00:00:00Z","rules":[{"pattern":%q,"replacement":"blocked"}]}`, pattern))
 			}
 			capture := captureRewriteGH(t)
 			var out bytes.Buffer
@@ -686,7 +702,11 @@ func TestPRChecksMetadataPolicyRefresh(t *testing.T) {
 			if stage == "before-catalogue-page-2" || stage == "before-fallback" {
 				wantCatalogue = 1
 			}
-			if f.calls("/actions/runs") != wantRuns || f.calls("/actions/workflows") != wantCatalogue {
+			if stage == "before-catalogue" {
+				if !errors.Is(err, errRewriteBlocked) || f.calls("/actions/workflows") != 0 || f.calls("/actions/runs") > 1 {
+					t.Errorf("fresh catalogue policy must block before data and may cancel its runs peer: err=%v data=%v", err, f.requests)
+				}
+			} else if f.calls("/actions/runs") != wantRuns || f.calls("/actions/workflows") != wantCatalogue {
 				t.Errorf("policy-boundary requests runs=%d catalogue=%d", f.calls("/actions/runs"), f.calls("/actions/workflows"))
 			}
 		})

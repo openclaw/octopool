@@ -235,6 +235,38 @@ func terminalRelayFailure(err error) bool {
 	return errors.As(err, &relay)
 }
 
+func relayReadPair(ctx context.Context, first, second func(context.Context) error) error {
+	type readResult struct {
+		index int
+		err   error
+	}
+	child, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan readResult, 2)
+	for index, read := range [2]func(context.Context) error{first, second} {
+		go func() { results <- readResult{index, read(child)} }()
+	}
+	var failures [2]error
+	var terminal error
+	for range 2 {
+		result := <-results
+		if terminal == nil && terminalRelayFailure(result.err) {
+			// Retain the actual failure before cancellation can produce a sibling
+			// policy error. Both reads must settle before output or fallback.
+			terminal = result.err
+			cancel()
+		}
+		failures[result.index] = result.err
+	}
+	if terminal != nil {
+		return terminal
+	}
+	if failures[0] != nil {
+		return failures[0]
+	}
+	return failures[1]
+}
+
 func relayReadHeaders(method string, headers map[string]string) map[string]string {
 	if method != "GET" || !freshReadRequested() {
 		return headers
