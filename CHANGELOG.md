@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- Release discarded API and Actions-log redirect bodies before follow-up downloads, existence-probe completion, or redirect rejection, without changing redirect policy, credential handling, or log bytes.
+- Reuse complete short or empty shaped Actions run-list pages for smaller requests, avoiding redundant GitHub fetches while retaining count, pagination, freshness, and filtered-fallback checks.
 - Honor `OCTOPOOL_FRESH=1` on direct request GET reads while preserving explicit cache-control headers, string protection, and raw response behavior.
 - Keep fresh anonymous run-completion proof usable during pooled identity lookup failures, avoiding extra metadata requests and preserving the existing one-hour completed-attempt jobs cache.
 - Reuse eligible bounded-stale responses during transient GitHub server, network, and timeout failures while preserving explicit freshness, cache expiry, quota feedback, and cold-request errors.
@@ -13,6 +13,7 @@
 - Honor explicit cache-age limits for completed Actions logs, checking upstream existence before forced-fresh reads while reusing unchanged log bytes.
 - Stop run and PR-check watches immediately on oversized relay responses, avoiding repeated downloads and backoff delays.
 - Stop first-page validators from refreshing complete Actions job aggregates without checking later pages, including entries cached by older Workers; single-page validation and existing cache lifetimes remain unchanged.
+- Release discarded API and Actions-log redirect bodies before follow-up downloads, existence-probe completion, or redirect rejection, without changing redirect policy, credential handling, or log bytes.
 
 ## 0.6.7 - 2026-09-19
 

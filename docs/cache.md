@@ -399,8 +399,10 @@ therefore go directly to the exact anonymous API/pool fallback chain.
 
 Before fetching a missing or expired canonical page, the relay checks for a fresh exact
 filtered entry, then a fresh shaped 100-run entry with the same pool, route path, media,
-API version, and eligible source identity. A larger entry must contain at least 25 runs;
-only its first 25 participate in the smaller page's filtering, derived total, and underfill
+API version, and eligible source identity. A larger entry must contain at least 25 runs,
+or be a complete shorter API page whose `total_count` exactly matches its returned runs
+and which has no pagination `Link` header. This includes a confirmed empty list. Only its
+first 25 participate in the smaller page's filtering, derived total, and underfill
 check. Reuse keeps the source expiry and requested maximum age without publishing a
 25-run alias or refreshing either entry. Unshaped REST entries remain separate.
 Exact entries preserve GitHub's total count and may legitimately contain
