@@ -139,10 +139,11 @@ export function largerRunListCacheRequest(
 export function projectLargerRunListPage(
   response: GitHubRelayResponse,
 ): GitHubRelayResponse | undefined {
+  if (!isRecord(response.body) || !Array.isArray(response.body.workflow_runs)) return undefined;
   if (
-    !isRecord(response.body) ||
-    !Array.isArray(response.body.workflow_runs) ||
-    response.body.workflow_runs.length < PUBLIC_PAGE_SIZE
+    response.body.workflow_runs.length < PUBLIC_PAGE_SIZE &&
+    (response.body.total_count !== response.body.workflow_runs.length ||
+      Object.keys(response.headers).some((key) => key.toLowerCase() === "link"))
   )
     return undefined;
   // Preserve the small canonical page's totals and underfill behavior: older
