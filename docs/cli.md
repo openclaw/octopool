@@ -504,6 +504,9 @@ Equal starts have no promised winner; creation time and numeric ID are not tiebr
 JSON retains that aggregation order, not human-table presentation order.
 Native `gh run watch` and `gh pr checks --watch` polling also stays
 on the relay, floors intervals at 30 seconds, and backs off to 120 seconds.
+Both watches stop immediately if a relay response exceeds the CLI's size limit,
+including after progress is printed; they do not repeat the download or wait through
+polling backoff for this failure.
 
 Supported `gh run watch` commands keep polling on the relay, including under active rewrite
 rules. Relay failures, including

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Stop run and PR-check watches immediately on oversized relay responses, avoiding repeated downloads and backoff delays.
+
 ## 0.6.7 - 2026-09-19
 
 ### Fixes

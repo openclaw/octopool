@@ -91,7 +91,7 @@ func retryWatchTick(ctx context.Context, backoff *watchBackoff, poll func() erro
 		if shouldRunRealGH(err) {
 			return err
 		}
-		if errors.Is(err, errRewritePolicy) || errors.Is(err, errRewriteBlocked) || errors.Is(err, errOctopoolNotLoggedIn) {
+		if errors.Is(err, errRewritePolicy) || errors.Is(err, errRewriteBlocked) || errors.Is(err, errOctopoolNotLoggedIn) || errors.Is(err, errJSONResponseTooLarge) {
 			return err
 		}
 		// The relay client already exhausted its typed response retry policy.
