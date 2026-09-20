@@ -21,6 +21,9 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 	}
 	switch args[0] {
 	case "list":
+		if (opts.read.has("--commit") || opts.read.has("--event")) && !machineReadable(opts) {
+			return ghDelegated()
+		}
 		repo, ok, err := repoOnly(opts)
 		if err != nil {
 			return ghFailed(err)
@@ -34,6 +37,12 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 		}
 		if opts.status != "" {
 			query["status"] = opts.status
+		}
+		if commit := opts.read.values["--commit"].raw; commit != "" {
+			query["head_sha"] = commit
+		}
+		if event := opts.read.values["--event"].raw; event != "" {
+			query["event"] = event
 		}
 		path := repoPath(repo, "actions", "runs")
 		if opts.workflow != "" {

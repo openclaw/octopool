@@ -46,6 +46,8 @@ import { capabilitiesForRouteKind, isIssueEventRoute, isNativeReadRoute } from "
 import {
   exactRunListRequest,
   filterRunListSuperset,
+  largerRunListCacheRequest,
+  projectLargerRunListPage,
   runListShapeView,
   runListSupersetUnderfilled,
   runListSupersetView,
@@ -314,6 +316,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   }
   const exactCached = await serveExactRunListCache(state, "hit");
   if (exactCached !== undefined) return exactCached;
+  const largerPage = await readLargerRunListCache(state);
+  if (largerPage !== undefined) return serveFreshCachedRelayResponse(state, largerPage);
 
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
@@ -1185,6 +1189,35 @@ async function serveStaleRelayCache(
     );
   }
   return serveExactRunListCache(state, "stale", { staleReason });
+}
+
+async function readLargerRunListCache(
+  state: ActiveRelay,
+): Promise<CachedGitHubResponse | undefined> {
+  if (!state.cacheEnabled || state.runListExactFallback || state.maxAgeSeconds === 0)
+    return undefined;
+  const request = largerRunListCacheRequest(state.runListSuperset);
+  if (request === undefined) return undefined;
+  const probe = async (identity?: Identity) => {
+    const key = await githubCacheKey(request.pool, request, state.route, identity);
+    const cached = await readCacheEntry(state, key, identity);
+    if (cached === undefined) return undefined;
+    const projected = projectLargerRunListPage(cached);
+    return projected === undefined ? undefined : { ...cached, ...projected };
+  };
+  try {
+    const anonymous = await probe();
+    if (anonymous !== undefined) return anonymous;
+    for (const identity of await loadIdentities(state.env, request.pool, state.route)) {
+      const cached = await probe(identity);
+      if (cached !== undefined) return cached;
+    }
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
+  }
+  // Optional reuse never changes the canonical fill or publishes an alias.
+  return undefined;
 }
 
 async function serveExactRunListCache(
