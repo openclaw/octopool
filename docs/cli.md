@@ -445,8 +445,10 @@ enum comparisons. Replace `.mergeable == true` with `.mergeable == "MERGEABLE"` 
 Do not rely on truthiness: all three enum strings are truthy in `jq`.
 Machine `gh run list/view --json` exports use canonical, unshaped REST reads through the
 shared cache, not public-page reconstructions. Human run lists/views and watch retain their
-page-backed paths. Machine run lists also support `--commit`/`-c` and `--event`/`-e`,
-including attached short values, through the same cache and explicit freshness controls.
+page-backed paths. Machine run lists also support `--commit`/`-c`, `--event`/`-e`, and
+`--created`, including attached short values, through the same cache and explicit freshness
+controls. Creation dates, ranges, and comparison expressions pass unchanged to GitHub's
+`created` filter; the CLI does not parse or normalize dates locally.
 Repeated values use the last occurrence; an empty final value removes that filter.
 Run lists using these filters without `--json` retain native `gh` delegation.
 The existing 13 list and 15 view fields are unchanged. Run `name` is the

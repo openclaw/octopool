@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-func TestRunListCommitEventFiltersUseREST(t *testing.T) {
+func TestRunListFiltersUseREST(t *testing.T) {
 	for _, active := range []bool{false, true} {
 		for _, test := range []struct {
 			name     string
@@ -28,6 +28,11 @@ func TestRunListCommitEventFiltersUseREST(t *testing.T) {
 			{"event", []string{"--event=pull_request"}, map[string]any{"event": "pull_request"}, false, false},
 			{"short event", []string{"-e", "pull_request"}, map[string]any{"event": "pull_request"}, false, false},
 			{"attached event", []string{"-epull_request"}, map[string]any{"event": "pull_request"}, false, false},
+			{"created date", []string{"--created", "2026-09-20"}, map[string]any{"created": "2026-09-20"}, false, false},
+			{"created range", []string{"--created=2026-09-01..2026-09-20"}, map[string]any{"created": "2026-09-01..2026-09-20"}, false, false},
+			{"created comparison and workflow", []string{"--created", ">=2026-09-20T12:00:00Z", "--event", "push", "--workflow", "ci.yml"}, map[string]any{"created": ">=2026-09-20T12:00:00Z", "event": "push"}, true, true},
+			{"created last value wins", []string{"--created=old", "--created", "2026-09-20"}, map[string]any{"created": "2026-09-20"}, false, false},
+			{"empty created removes filter", []string{"--created=2026-09-20", "--created="}, map[string]any{}, false, false},
 			{"workflow and fresh", []string{"--commit=" + runExportHead, "-e=pull_request", "--workflow", "ci.yml"}, map[string]any{"head_sha": runExportHead, "event": "pull_request"}, true, true},
 			{"last aliases win", []string{"--commit=old", "-c", runExportHead, "-epush", "--event", "pull_request"}, map[string]any{"head_sha": runExportHead, "event": "pull_request"}, false, false},
 			{"empty last values remove filters", []string{"-c", runExportHead, "--commit=", "--event=push", "-e", ""}, map[string]any{}, false, false},
@@ -78,7 +83,7 @@ func TestRunListCommitEventFiltersUseREST(t *testing.T) {
 }
 
 func TestRunListFiltersPreserveNativeAndProtectionBoundaries(t *testing.T) {
-	for _, flags := range [][]string{{"--commit", runExportHead}, {"--event", "pull_request"}, {"--commit", runExportHead, "--json", "databaseId", "--limit", "101"}, {"--event", "pull_request", "--json", "databaseId", "--created", "2026-01-01"}} {
+	for _, flags := range [][]string{{"--commit", runExportHead}, {"--event", "pull_request"}, {"--created", "2026-09-20"}, {"--commit", runExportHead, "--json", "databaseId", "--limit", "101"}, {"--created", "2026-09-20", "--json", "databaseId", "--user", "octocat"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
 			var calls int
 			rewriteTestServer(t, rewriteActiveTestPolicy, func(http.ResponseWriter, *http.Request) { calls++ })
@@ -99,7 +104,7 @@ func TestRunListFiltersPreserveNativeAndProtectionBoundaries(t *testing.T) {
 			}
 		})
 	}
-	for _, flag := range []string{"--commit", "--event"} {
+	for _, flag := range []string{"--commit", "--event", "--created"} {
 		t.Run("overwritten protected "+flag, func(t *testing.T) {
 			rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 			capture := captureRewriteGH(t)
@@ -149,7 +154,7 @@ func TestRunListFilterFallbackRetainsFilters(t *testing.T) {
 				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 			}
 			var stdout, stderr bytes.Buffer
-			err := run(t.Context(), []string{"gh", "run", "list", "-R", "acme/repo", "--json", "databaseId", "-c" + runExportHead, "--event", "pull_request"}, &stdout, &stderr)
+			err := run(t.Context(), []string{"gh", "run", "list", "-R", "acme/repo", "--json", "databaseId", "-c" + runExportHead, "--event", "pull_request", "--created", ">=2026-09-20"}, &stdout, &stderr)
 			if calls != 1 {
 				t.Fatalf("relay calls=%d", calls)
 			}
@@ -165,7 +170,7 @@ func TestRunListFilterFallbackRetainsFilters(t *testing.T) {
 					t.Fatal(err)
 				}
 				native := readRewriteCapture(t, capture)
-				want := []string{"run", "list", "--repo=acme/repo", "--json", "databaseId", "-c" + runExportHead, "--event", "pull_request"}
+				want := []string{"run", "list", "--repo=acme/repo", "--json", "databaseId", "-c" + runExportHead, "--event", "pull_request", "--created", ">=2026-09-20"}
 				if !slices.Equal(native.Args, want) {
 					t.Fatalf("native filters changed: %v", native.Args)
 				}

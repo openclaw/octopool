@@ -21,7 +21,7 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 	}
 	switch args[0] {
 	case "list":
-		if (opts.read.has("--commit") || opts.read.has("--event")) && !machineReadable(opts) {
+		if (opts.read.has("--commit") || opts.read.has("--event") || opts.read.has("--created")) && !machineReadable(opts) {
 			return ghDelegated()
 		}
 		repo, ok, err := repoOnly(opts)
@@ -43,6 +43,9 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 		}
 		if event := opts.read.values["--event"].raw; event != "" {
 			query["event"] = event
+		}
+		if created := opts.read.values["--created"].raw; created != "" {
+			query["created"] = created
 		}
 		path := repoPath(repo, "actions", "runs")
 		if opts.workflow != "" {

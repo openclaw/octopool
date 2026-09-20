@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Relay machine-readable run lists filtered by `--created` through the shared cache, preserving GitHub date/range syntax, explicit freshness, and guarded native fallback.
+
 ## 0.6.9 - 2026-09-20
 
 ### Fixes

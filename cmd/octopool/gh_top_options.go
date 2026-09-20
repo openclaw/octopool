@@ -40,7 +40,7 @@ func topReadSpecs(command string) map[string]readOptionSpec {
 	case "pr list", "issue list":
 		values += " --limit,-L --state --author --assignee --label"
 	case "run list":
-		values += " --limit,-L --branch --workflow --status --commit,-c --event,-e"
+		values += " --limit,-L --branch --workflow --status --commit,-c --event,-e --created"
 	case "run view":
 		values += " --attempt"
 	case "pr checks":
