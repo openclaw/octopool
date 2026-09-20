@@ -309,6 +309,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   if (cached !== undefined) {
     return serveFreshCachedRelayResponse(state, cached);
   }
+  const exactCached = await serveExactRunListCache(state, "hit");
+  if (exactCached !== undefined) return exactCached;
 
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
@@ -440,11 +442,7 @@ async function attemptStaleRelayCacheRevalidation(
     if (state.cacheFill === undefined) {
       const coalesced = await coalesceRelayCacheMiss(state);
       if (coalesced !== undefined) {
-        return serveCachedGitHubResponse(
-          state.env,
-          state.ctx,
-          cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
-        );
+        return serveFreshCachedRelayResponse(state, coalesced, { coalesced: true });
       }
       if (state.cacheFill === undefined) {
         return restoreSharedCacheFill(state);
@@ -484,7 +482,7 @@ async function attemptStaleRelayCacheRevalidation(
   const identity = findIdentity(identities, selection.identityId);
   const identityCacheKey = await githubCacheKey(
     state.request.pool,
-    state.request,
+    state.cacheRequest,
     state.route,
     identity,
   );
@@ -492,11 +490,7 @@ async function attemptStaleRelayCacheRevalidation(
   await switchRelayCacheKey(state, identityCacheKey);
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
-    return serveCachedGitHubResponse(
-      state.env,
-      state.ctx,
-      cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
-    );
+    return serveFreshCachedRelayResponse(state, coalesced, { coalesced: true });
   }
   if (state.cacheFill === undefined) {
     return restoreSharedCacheFill(state);
@@ -663,11 +657,7 @@ async function restoreSharedCacheFill(state: ActiveRelay): Promise<Response | un
   if (coalesced === undefined) {
     return undefined;
   }
-  return serveCachedGitHubResponse(
-    state.env,
-    state.ctx,
-    cachedResponseParams(state, coalesced, "hit", { coalesced: true }),
-  );
+  return serveFreshCachedRelayResponse(state, coalesced, { coalesced: true });
 }
 
 async function guardRevalidationPublicRepo(state: ActiveRelay): Promise<boolean> {
@@ -1120,13 +1110,77 @@ async function serveStaleRelayCache(
     ) {
       continue;
     }
+    if (!state.runListExactFallback && runListSupersetUnderfilled(cached, state.runListSuperset)) {
+      continue;
+    }
     return serveCachedGitHubResponse(
       state.env,
       state.ctx,
       cachedResponseParams(state, cached, "stale", { staleReason }),
     );
   }
-  return undefined;
+  return serveExactRunListCache(state, "stale", { staleReason });
+}
+
+async function serveExactRunListCache(
+  state: ActiveRelay,
+  cacheStatus: "hit" | "stale",
+  extras: { staleReason?: string } = {},
+): Promise<Response | undefined> {
+  const view = state.runListSuperset;
+  if (
+    !state.cacheEnabled ||
+    state.runListExactFallback ||
+    state.maxAgeSeconds === 0 ||
+    view === undefined ||
+    (view.branch === undefined && view.status === undefined)
+  )
+    return undefined;
+  const request = exactRunListRequest(state.request, state.route);
+  const probe = async (identity?: Identity) => {
+    const key = await githubCacheKey(request.pool, request, state.route, identity);
+    const cached =
+      cacheStatus === "hit"
+        ? await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds)
+        : await readStaleGitHubCache(state.env, key, state.route, state.maxAgeSeconds);
+    if (
+      cached === undefined ||
+      !(await cachedResponseAvailable(
+        state.env,
+        request.pool,
+        state.route,
+        cached,
+        identity,
+        cacheStatus === "stale",
+      ))
+    )
+      return undefined;
+    return { key, cached, identity };
+  };
+  let candidate: Awaited<ReturnType<typeof probe>>;
+  try {
+    candidate = await probe();
+    if (candidate === undefined) {
+      for (const identity of await loadIdentities(state.env, request.pool, state.route)) {
+        candidate = await probe(identity);
+        if (candidate !== undefined) break;
+      }
+    }
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
+    return undefined;
+  }
+  if (candidate === undefined) return undefined;
+  // Only an eligible hit changes the request or settles its canonical fill owner.
+  await switchToExactRunList(state);
+  state.identity = candidate.identity;
+  await switchRelayCacheKey(state, candidate.key);
+  return serveCachedGitHubResponse(
+    state.env,
+    state.ctx,
+    cachedResponseParams(state, candidate.cached, cacheStatus, extras),
+  );
 }
 
 function staleCacheCandidates(

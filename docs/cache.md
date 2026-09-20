@@ -45,6 +45,13 @@ Default pagination
 media types and non-default query values still produce distinct entries. The key is
 pool-scoped, so pools never share cache entries.
 
+Shaped Actions run lists with non-default JSON media carry
+`query_semantics: actions-run-list-filter-v1`. Older pooled revalidation could publish
+an unfiltered canonical body under a filtered request key; this marker retires those
+entries and validators across shared, identity, edge, stale and coalesced reads.
+Default-JSON shaped lists and unshaped REST keys remain warm. New revalidation always
+keys the normalized request it actually fetches and publishes.
+
 Non-default JSON `Accept` variants also carry `body_codec: lossless-v1`, using the
 same normalization as the vary headers. Raw blob/contents/README, octet-stream,
 diff/patch, and other custom media cannot reuse old opaque bodies or validators in
@@ -378,6 +385,17 @@ otherwise Octopool discards the page and falls back to exact anonymous API JSON.
 Branch/status-filtered public pages are never treated as exact: GitHub can report only the
 visible matching card count while older API matches still exist. Underfilled canonical filters
 therefore go directly to the exact anonymous API/pool fallback chain.
+
+Before fetching a missing or expired canonical page, the relay checks for a fresh exact
+filtered entry. Exact entries preserve GitHub's total count and may legitimately contain
+fewer runs than the requested limit. A failed exact lookup leaves the canonical fill
+unchanged, including ordinary storage/configuration failures; explicit policy and visibility
+denials still propagate. Anonymous exact entries are checked before loading pooled identities.
+Coalesced and revalidation recovery hits apply the same completeness check as
+ordinary fresh hits. During an outage, an underfilled canonical page cannot become an
+empty or partial success: the relay uses an eligible exact stale entry or retains the
+normal typed failure. Both cache paths keep the existing identity, public-visibility,
+retention and explicit maximum-age checks; `max-age=0` still requires upstream validation.
 
 ## Actions attempt job-list superset
 

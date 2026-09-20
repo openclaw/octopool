@@ -1,7 +1,13 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 import { historicalHead, runCard } from "../fixtures/actions-ownership";
+import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
+import { deleteEdgeJSON } from "../../src/edge-cache";
+import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";
+import { queries } from "../../src/generated/sql";
+import { observePublicationD1 } from "./publication-d1-observer";
+import { requestWithEnv } from "./identity-routing-support";
 
 type RelayEnvelope = {
   status: number;
@@ -15,6 +21,217 @@ const RUNS_PATH = "/repos/openclaw/octopool/actions/runs";
 
 describe("Actions run-list superset", () => {
   beforeEach(seedPool);
+
+  it.each<{
+    scenario: string;
+    identity?: boolean;
+    missingCanonical?: boolean;
+    exact: "fresh" | "stale" | "missing" | "revoked" | "short";
+    statusFilter?: boolean;
+    workflow?: boolean;
+    maxAge?: number;
+    backendAvailable?: boolean;
+    identityUnavailable?: boolean;
+    probeFailure?: "fresh" | "stale";
+    privateRepo?: boolean;
+    expected: "hit" | "stale" | "miss" | "denied";
+  }>([
+    { scenario: "fresh anonymous exact entry", exact: "fresh", expected: "hit" },
+    {
+      scenario: "identity outage with anonymous hit",
+      exact: "fresh",
+      identityUnavailable: true,
+      expected: "hit",
+    },
+    {
+      scenario: "identity outage with anonymous fill",
+      exact: "missing",
+      identityUnavailable: true,
+      backendAvailable: true,
+      expected: "miss",
+    },
+    {
+      scenario: "optional fresh exact probe failure",
+      exact: "fresh",
+      probeFailure: "fresh",
+      backendAvailable: true,
+      expected: "hit",
+    },
+    {
+      scenario: "optional stale exact probe failure",
+      exact: "stale",
+      probeFailure: "stale",
+      expected: "denied",
+    },
+    {
+      scenario: "visibility denial from exact proof",
+      exact: "fresh",
+      privateRepo: true,
+      backendAvailable: true,
+      expected: "denied",
+    },
+    {
+      scenario: "fresh exact while upstream is healthy",
+      exact: "fresh",
+      backendAvailable: true,
+      expected: "hit",
+    },
+    { scenario: "fresh pooled exact entry", identity: true, exact: "fresh", expected: "hit" },
+    {
+      scenario: "missing canonical entry",
+      missingCanonical: true,
+      exact: "fresh",
+      expected: "hit",
+    },
+    { scenario: "status filter", statusFilter: true, exact: "fresh", expected: "hit" },
+    { scenario: "legitimately short exact result", exact: "short", expected: "hit" },
+    { scenario: "stale anonymous exact entry", exact: "stale", expected: "stale" },
+    {
+      scenario: "stale exact entry without canonical data",
+      missingCanonical: true,
+      exact: "stale",
+      expected: "stale",
+    },
+    {
+      scenario: "stale pooled workflow entry",
+      identity: true,
+      workflow: true,
+      exact: "stale",
+      expected: "stale",
+    },
+    { scenario: "missing exact entry", exact: "missing", expected: "denied" },
+    { scenario: "revoked exact identity", identity: true, exact: "revoked", expected: "denied" },
+    { scenario: "explicit live read", exact: "fresh", maxAge: 0, expected: "denied" },
+    {
+      scenario: "stale entry beyond requested age",
+      exact: "stale",
+      maxAge: 30,
+      expected: "denied",
+    },
+  ])("selects complete filtered cache data: $scenario", async (test) => {
+    const path = test.workflow
+      ? "/repos/openclaw/octopool/actions/workflows/ci.yml/runs"
+      : RUNS_PATH;
+    const filter: Record<string, string> = test.statusFilter
+      ? { status: "failure" }
+      : { branch: "target" };
+    const query = { ...filter, limit: "2" };
+    const exactRuns = [run(101, "target", "completed", "failure")];
+    if (test.exact !== "short") exactRuns.push(run(102, "target", "completed", "failure"));
+    const total = test.exact === "short" ? 1 : 10;
+    let outage = false;
+    let privateNow = false;
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      const token = bearer(request);
+      if (token === "test-org-token") return jsonResponse({ private: privateNow });
+      if (url.hostname === "github.com") return jsonResponse({}, 404);
+      expect(url.pathname).toBe(path);
+      if (outage) {
+        return token === "test-primary-token"
+          ? jsonResponse({ message: "rate limited" }, 429, rateHeaders({ remaining: 0 }))
+          : jsonResponse({ message: "unavailable" }, 503);
+      }
+      const filtered = url.searchParams.has("branch") || url.searchParams.has("status");
+      if (!filtered) {
+        return jsonResponse({
+          total_count: 200,
+          workflow_runs: Array.from({ length: 25 }, (_, i) => run(i + 1, "other", "queued", null)),
+        });
+      }
+      if (test.identity && token !== "test-primary-token") return jsonResponse({}, 503);
+      return jsonResponse({ total_count: total, workflow_runs: exactRuns });
+    });
+    vi.stubGlobal("fetch", upstream);
+    const headers = { "x-octopool-public-shape": "actions-summary-v1" };
+    const warm = await relay(path, undefined, { query, headers });
+    expect(warm.status).toBe(200);
+    expect(runIDs((await warm.json<RelayEnvelope>()).body)).toEqual(exactRuns.map((run) => run.id));
+
+    const rows = await env.DB.prepare(
+      "SELECT cache_key, query_json FROM github_cache_entries",
+    ).all<{ cache_key: string; query_json: string }>();
+    expect(rows.results).toHaveLength(2);
+    let exactKey = "";
+    for (const row of rows.results) {
+      const savedQuery = JSON.parse(row.query_json) as Record<string, string>;
+      const exact = savedQuery.branch !== undefined || savedQuery.status !== undefined;
+      if (exact) exactKey = row.cache_key;
+      if ((!exact && test.missingCanonical) || (exact && test.exact === "missing")) {
+        await env.DB.prepare("DELETE FROM github_cache_entries WHERE cache_key = ?")
+          .bind(row.cache_key)
+          .run();
+      } else if (!exact || ["stale", "revoked"].includes(test.exact)) {
+        await env.DB.prepare(
+          "UPDATE github_cache_entries SET created_at = datetime('now', '-180 seconds'), expires_at = datetime('now', '-1 second'), stale_expires_at = datetime('now', '+5 minutes') WHERE cache_key = ?",
+        )
+          .bind(row.cache_key)
+          .run();
+      }
+      await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, row.cache_key);
+    }
+    if (test.exact === "revoked") {
+      await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'primary'").run();
+    }
+    if (test.identityUnavailable) {
+      await env.DB.prepare("ALTER TABLE identities RENAME TO unavailable_identities").run();
+    }
+    if (test.privateRepo) {
+      await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+      await deleteEdgeJSON(PUBLIC_PROOF_EDGE_NAMESPACE, "openclaw/octopool");
+      privateNow = true;
+    }
+    outage = !test.backendAvailable;
+    upstream.mockClear();
+    const options = {
+      query,
+      headers: {
+        ...headers,
+        ...(test.maxAge === undefined ? {} : { "cache-control": `max-age=${test.maxAge}` }),
+      },
+    };
+    let probeFailures = 0;
+    const db = observePublicationD1(env.DB, {
+      before: async (sql, values) => {
+        const target =
+          test.probeFailure === "fresh" ? queries.readGitHubCache : queries.readGitHubCacheAny;
+        if (
+          sql === target &&
+          values[0] === exactKey &&
+          (test.probeFailure === "stale" || probeFailures === 0)
+        ) {
+          probeFailures++;
+          throw new Error("synthetic optional exact-cache read failure");
+        }
+      },
+    });
+    const response = test.probeFailure
+      ? await requestWithEnv({ DB: db }, path, options)
+      : await relay(path, undefined, options);
+    if (test.probeFailure) expect(probeFailures).toBeGreaterThan(0);
+    if (test.expected === "denied") {
+      expect(response.status).toBe(424);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "fallback_local",
+          ...(test.privateRepo
+            ? { details: { reason: "repo_not_public" } }
+            : test.probeFailure
+              ? { details: { reason: "github_rate_limited" } }
+              : {}),
+        },
+      });
+      if (test.privateRepo) expect(upstream).toHaveBeenCalledOnce();
+    } else {
+      expect(response.status).toBe(200);
+      const result = await response.json<RelayEnvelope>();
+      expect(runIDs(result.body)).toEqual(exactRuns.map((run) => run.id));
+      expect(result.body).toMatchObject({ total_count: total });
+      expect(result.relay.cache).toBe(test.expected);
+      if (test.expected === "hit" && !test.probeFailure) expect(upstream).not.toHaveBeenCalled();
+    }
+  });
 
   it("owns misleading metadata through canonical fill, filtering, hits, and active TTL", async () => {
     const urls: string[] = [];

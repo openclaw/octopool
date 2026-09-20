@@ -95,6 +95,12 @@ export async function githubCacheKey(
     ["run_view", "run_list", "workflow_run_list"].includes(route.kind)
       ? { representation: "actions-summary-metadata-v3" }
       : {}),
+    // Pooled revalidation previously published canonical lists under filtered keys.
+    ...(request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.actionsSummary &&
+    ["run_list", "workflow_run_list"].includes(route.kind) &&
+    !defaultGitHubJSONAccept(request.headers?.accept)
+      ? { query_semantics: "actions-run-list-filter-v1" }
+      : {}),
     ...(request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.releaseSummary &&
     ["release_view", "release_latest"].includes(route.kind)
       ? { representation: "release-summary-raw-v2" }

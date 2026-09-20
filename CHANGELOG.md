@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Reuse exact filtered workflow-list caches before fetching a missing canonical page, and preserve matching runs through outage fallback, pooled revalidation and coalesced reads.
+- Keep pooled cache publication aligned with its normalized upstream query and retire affected custom-media workflow-list entries that could contain unfiltered results.
 - Reuse fresh, guarded run metadata to prove completion of the same Actions attempt, preserving the existing one-hour jobs cache when anonymous metadata is unavailable.
 - Route explicit REST GET scalar query fields through the shared cache while preserving native typed values, protected dispatch, and fallback for complex inputs.
 - Recover interrupted relay reads and transient Cloudflare gateway failures within the existing retry budget, without retrying policy denials or spending local GitHub quota on transport failures.
@@ -13,6 +15,7 @@
 ### Upgrade notes
 
 - Upgrade the CLI for query-field coverage and HTTP recovery. Deploy the Worker for completion-proof reuse and HTTP stream cleanup. No schema migration or cache lifetime change is required.
+- Deploy the Worker for filtered workflow-list recovery. Only shaped run-list keys with non-default JSON media become cold; ordinary JSON and raw REST caches remain warm.
 
 ## 0.6.6 - 2026-09-19
 

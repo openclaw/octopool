@@ -4,8 +4,36 @@ import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/polic
 import { runListSupersetView } from "../src/run-list-superset";
 import { legacyActionsKey } from "./fixtures/actions-legacy-cache";
 import { currentV2ActionsKeys } from "./fixtures/actions-current-v2-cache";
+import { filteredRunListLegacyKeys } from "./fixtures/filtered-run-list-legacy-keys";
 
 describe("Actions summary cache generation", () => {
+  it.each(filteredRunListLegacyKeys)(
+    "retires only custom-media shaped list keys: $path $shape $query",
+    async (fixture) => {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: fixture.path,
+        query: fixture.query,
+        headers: {
+          ...(fixture.shape === "unshaped"
+            ? {}
+            : { "x-octopool-public-shape": "actions-summary-v1" }),
+          ...(fixture.shape === "default" ? {} : { accept: "application/json; charset=utf-8" }),
+        },
+      });
+      const route = classifyRoute(request, defaultPolicy("openclaw"));
+      const keys = [
+        await githubCacheKey(request.pool, request, route),
+        await githubCacheKey(request.pool, request, route, { kind: "pat", id: "primary" }),
+      ];
+      for (const [index, old] of [fixture.shared, fixture.identity].entries()) {
+        if (fixture.shape === "parameterized") expect(keys[index]).not.toBe(old);
+        else expect(keys[index]).toBe(old);
+      }
+    },
+  );
+
   it.each(currentV2ActionsKeys)(
     "retires current-v2 $name shared and identity keys",
     async (fixture) => {

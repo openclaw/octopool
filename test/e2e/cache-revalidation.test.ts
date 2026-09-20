@@ -623,6 +623,164 @@ describe("Worker end-to-end cache revalidation", () => {
     ).toHaveLength(0);
   });
 
+  it.each(["limit", "per_page"])(
+    "keeps filtered run lists complete after coalescing pooled revalidation (%s)",
+    async (pageSizeField) => {
+      await seedPool();
+      const path = "/repos/openclaw/octopool/actions/runs";
+      // A JSON media parameter keeps this request on the pooled API transport.
+      const headers = {
+        accept: "application/json; charset=utf-8",
+        "x-octopool-public-shape": "actions-summary-v1",
+      };
+      const canonical = {
+        pool: POOL,
+        method: "GET" as const,
+        path,
+        query: { page: "1", per_page: "25" },
+        headers,
+      };
+      const route = classifyRoute(canonical, defaultPolicy("openclaw"));
+      const identity = (await loadIdentities(env, POOL, route))[0]!;
+      const key = await githubCacheKey(POOL, canonical, route, identity);
+      await seedPublicRepoProof(env, route);
+      expect(
+        await writeOwnedGitHubCache(
+          env,
+          key,
+          canonical,
+          route,
+          {
+            status: 200,
+            headers: apiHeaders('"canonical-v1"') as Record<string, string>,
+            body: canonicalRunListBody(),
+            body_encoding: "json",
+          },
+          identity,
+        ),
+      ).toBe("shared");
+      await expireCacheEntry("run_list");
+
+      const revalidationEntered = ownedWork.gate();
+      const secondPastFreshScan = ownedWork.gate();
+      const revalidation = ownedWork.gate();
+      let publicChecks = 0;
+      let conditionalCalls = 0;
+      let exactCalls = 0;
+      const exactBody = {
+        total_count: 3,
+        workflow_runs: [101, 102].map((id) => ({
+          id,
+          head_branch: "target",
+          status: "completed",
+          conclusion: "success",
+        })),
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          const url = new URL(request.url);
+          if (bearer(request) === "test-org-token") {
+            if (++publicChecks === 2) secondPastFreshScan.release();
+            return jsonResponse({ private: false });
+          }
+          expect(bearer(request)).toBe("test-primary-token");
+          expect(url.pathname).toBe(path);
+          if (url.searchParams.get("branch") === "target") {
+            exactCalls++;
+            expect(url.searchParams.get("per_page")).toBe("2");
+            return jsonResponse(exactBody, 200, apiHeaders('"exact-v1"'));
+          }
+          expect(request.headers.get("if-none-match")).toBe('"canonical-v1"');
+          conditionalCalls++;
+          revalidationEntered.release();
+          await revalidation.promise;
+          return new Response(null, { status: 304, headers: apiHeaders('"canonical-v1"') });
+        }),
+      );
+
+      const options = { query: { branch: "target", [pageSizeField]: "2" }, headers };
+      const requests = [relay(path, undefined, options)];
+      try {
+        await revalidationEntered.promise;
+        requests.push(relay(path, undefined, options));
+        // The second request has missed fresh identity cache and entered revalidation.
+        await secondPastFreshScan.promise;
+        revalidation.release();
+        const responses = await Promise.all(
+          requests.map(async (request) => (await request).json()),
+        );
+        expect(responses).toEqual([
+          expect.objectContaining({ body: exactBody }),
+          expect.objectContaining({ body: exactBody }),
+        ]);
+        expect(conditionalCalls).toBe(1);
+        expect(exactCalls).toBe(1);
+      } finally {
+        revalidation.release();
+        await Promise.allSettled(requests);
+      }
+    },
+  );
+
+  it("rejects legacy filtered run-list entries containing a canonical body during an outage", async () => {
+    await seedPool();
+    const request = {
+      pool: POOL,
+      method: "GET" as const,
+      path: "/repos/openclaw/octopool/actions/runs",
+      query: { page: "1", per_page: "25" },
+      headers: {
+        accept: "application/json; charset=utf-8",
+        "x-octopool-public-shape": "actions-summary-v1",
+      },
+    };
+    const route = classifyRoute(request, defaultPolicy("openclaw"));
+    const identity = (await loadIdentities(env, POOL, route))[0]!;
+    await seedPublicRepoProof(env, route);
+    // Captured before retirement: the old writer stored its canonical body/query
+    // under both the canonical key and branch=target&per_page=2's exact key.
+    for (const key of [
+      "GhPsgPpelA5QOLajBiXGCgTUaCUfheCcw8lA13ysQmk",
+      "Z3AMVklaYXj1u4QyCOKXGmaBVgTMDGH822vWBw-slTs",
+    ]) {
+      expect(
+        await writeOwnedGitHubCache(
+          env,
+          key,
+          request,
+          route,
+          {
+            status: 200,
+            headers: apiHeaders('"legacy-canonical"') as Record<string, string>,
+            body: canonicalRunListBody(),
+            body_encoding: "json",
+          },
+          identity,
+        ),
+      ).toBe("shared");
+    }
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const fetched = new Request(input, init);
+      if (bearer(fetched) === "test-org-token") return jsonResponse({ private: false });
+      return jsonResponse(
+        { message: "API rate limit exceeded" },
+        429,
+        rateHeaders({ remaining: 0, retryAfter: 60 }),
+      );
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    const response = await relay(request.path, undefined, {
+      headers: request.headers,
+      query: { branch: "target", per_page: "2" },
+    });
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({ error: { code: "fallback_local" } });
+    expect(upstream).toHaveBeenCalled();
+  });
+
   it("publishes a 304 refresh to coalesced waiters", async () => {
     await seedPool();
     let revalidationStarted!: () => void;
@@ -704,6 +862,18 @@ describe("Worker end-to-end cache revalidation", () => {
     }
   });
 });
+
+function canonicalRunListBody() {
+  return {
+    total_count: 200,
+    workflow_runs: Array.from({ length: 25 }, (_, index) => ({
+      id: 201 + index,
+      head_branch: "main",
+      status: "completed",
+      conclusion: "success",
+    })),
+  };
+}
 
 async function expireCacheEntry(routeKind: string): Promise<void> {
   const row = await env.DB.prepare(
