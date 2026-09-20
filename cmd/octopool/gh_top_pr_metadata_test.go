@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -27,10 +28,13 @@ func TestRunGHPRViewMetadataUnderActivePolicy(t *testing.T) {
 			t.Setenv("OCTOPOOL_FRESH", test.fresh)
 			prCalls := 0
 			paths := []string{}
+			var pathsMu sync.Mutex
 			rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
 				request := decodeCLIRequest(t, w, r)
 				path := request["path"].(string)
+				pathsMu.Lock()
 				paths = append(paths, path)
+				pathsMu.Unlock()
 				headers, _ := request["headers"].(map[string]any)
 				immutableOrDescriptive := path == "/users/contributor" || strings.HasSuffix(path, "/files")
 				if (!immutableOrDescriptive || test.fresh == "1") && headers["cache-control"] != "max-age=0" {

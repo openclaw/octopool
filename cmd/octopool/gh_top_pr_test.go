@@ -7,6 +7,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -335,9 +336,12 @@ func TestRunGHPRChecksFreshUsesCurrentHead(t *testing.T) {
 			f := newPRChecksFixture()
 			f.checks = []any{prChecksCheck(1, "unit", "queued", "")}
 			var paths []string
+			var pathsMu sync.Mutex
 			relayTestServer(t, func(request map[string]any) any {
 				path := request["path"].(string)
+				pathsMu.Lock()
 				paths = append(paths, path)
+				pathsMu.Unlock()
 				headers, _ := request["headers"].(map[string]any)
 				if headers["cache-control"] != "max-age=0" {
 					t.Errorf("fresh %s headers=%v, want max-age=0", path, headers)
@@ -381,8 +385,11 @@ func TestRunGHPRChecksFreshUsesCurrentHead(t *testing.T) {
 				"/repos/acme/repo/actions/runs",
 				"/repos/acme/repo/actions/workflows",
 			}
-			if !reflect.DeepEqual(paths, wantPaths) {
-				t.Fatalf("fresh checks paths=%v, want %v", paths, wantPaths)
+			if len(paths) != len(wantPaths) || paths[0] != wantPaths[0] || !reflect.DeepEqual(paths[3:], wantPaths[3:]) {
+				t.Fatalf("fresh head must precede both collections, then Actions metadata: paths=%v", paths)
+			}
+			if !(paths[1] == wantPaths[1] && paths[2] == wantPaths[2] || paths[1] == wantPaths[2] && paths[2] == wantPaths[1]) {
+				t.Fatalf("expected one check-runs and one status read at the fresh head: paths=%v", paths)
 			}
 		})
 	}

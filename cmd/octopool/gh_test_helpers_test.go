@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -129,6 +130,7 @@ func nativeOptionsResponse(t *testing.T, request map[string]any) any {
 
 // REST fixtures for the shared checks/rollup owners; no production hooks.
 type prChecksFixture struct {
+	mu                                sync.Mutex
 	checks, statuses, runs, workflows []any
 	requests                          []map[string]any
 	head                              map[string]any
@@ -168,6 +170,8 @@ func prChecksCheck(id int64, name, status, conclusion string) map[string]any {
 
 func (f *prChecksFixture) response(t *testing.T, request map[string]any) any {
 	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.requests = append(f.requests, request)
 	path, _ := request["path"].(string)
 	if path == "/repos/acme/repo/pulls/7" {
@@ -210,6 +214,8 @@ func (f *prChecksFixture) response(t *testing.T, request map[string]any) any {
 }
 
 func (f *prChecksFixture) calls(suffix string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	n := 0
 	for _, request := range f.requests {
 		if strings.HasSuffix(request["path"].(string), suffix) {

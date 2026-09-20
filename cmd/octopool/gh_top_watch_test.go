@@ -1160,8 +1160,6 @@ func TestPRChecksFreshMetadataPagesAndMaps(t *testing.T) {
 		if headers["cache-control"] != "max-age=0" {
 			t.Errorf("fresh acquisition page must bypass cache: %v", r)
 		}
-		f.runs[0].(map[string]any)["event"] = []string{"push", "pull_request"}[generation]
-		f.workflows[0].(map[string]any)["name"] = []string{"Old CI", "New CI"}[generation]
 		return f.response(t, r)
 	})
 	client, err := newGHRelayClient()
@@ -1169,6 +1167,8 @@ func TestPRChecksFreshMetadataPagesAndMaps(t *testing.T) {
 		t.Fatal(err)
 	}
 	for generation = 0; generation < 2; generation++ {
+		f.runs[0].(map[string]any)["event"] = []string{"push", "pull_request"}[generation]
+		f.workflows[0].(map[string]any)["name"] = []string{"Old CI", "New CI"}[generation]
 		items, err := prCheckItemsForSHAFresh(t.Context(), client, "acme/repo", metadataHead)
 		if err != nil {
 			t.Fatal(err)

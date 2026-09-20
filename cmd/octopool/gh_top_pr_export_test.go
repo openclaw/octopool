@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -236,8 +237,11 @@ func TestRunGHPRDetailExportDirectDelegationControls(t *testing.T) {
 func TestRunGHPRDetailExportRemainingProjectionControl(t *testing.T) {
 	checks := newPRChecksFixture()
 	var paths []string
+	var pathsMu sync.Mutex
 	relayTestServer(t, func(req map[string]any) any {
+		pathsMu.Lock()
 		paths = append(paths, req["path"].(string))
+		pathsMu.Unlock()
 		return prDetailExportResponse(t, checks, req)
 	})
 	capture := captureRewriteGH(t)

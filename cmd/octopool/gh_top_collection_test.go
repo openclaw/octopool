@@ -215,6 +215,9 @@ func TestGHPRChecksWatchRejectsRepeatedCollectionIDs(t *testing.T) {
 		if strings.HasSuffix(path, "/pulls/1") {
 			return map[string]any{"head": map[string]any{"sha": metadataHead, "ref": "feature"}}
 		}
+		if strings.HasSuffix(path, "/status") {
+			return map[string]any{"total_count": 0, "statuses": []any{}}
+		}
 		if !strings.HasSuffix(path, "/check-runs") {
 			t.Fatalf("unexpected path %s", path)
 		}

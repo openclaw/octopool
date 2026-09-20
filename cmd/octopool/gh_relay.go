@@ -227,6 +227,14 @@ func transientRelayFailure(err error) bool {
 	}
 }
 
+func terminalRelayFailure(err error) bool {
+	if errors.Is(err, errRewritePolicy) || errors.Is(err, errRewriteBlocked) || errors.Is(err, errOctopoolNotLoggedIn) || errors.Is(err, errJSONResponseTooLarge) {
+		return true
+	}
+	var relay *relayResponseError
+	return errors.As(err, &relay)
+}
+
 func relayReadHeaders(method string, headers map[string]string) map[string]string {
 	if method != "GET" || !freshReadRequested() {
 		return headers

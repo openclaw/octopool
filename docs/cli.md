@@ -502,6 +502,15 @@ or 21 without Actions associations; an actual empty result takes 3. These are no
 on policy reads, transport attempts, retries, or an entire watch session. Every data
 operation retains authoritative policy checks through the relay client.
 
+Check-run and status collections for the same SHA are acquired concurrently, with
+pages within each collection still read in order. This also applies to PR rollups and
+fresh watch confirmation. Successful reads use the same logical operation budget;
+a failed read can overlap requests from the other bounded collection. A terminal
+policy, authentication, response-size, or relay failure cancels the other collection, and both settle
+before output or native fallback. The initiating terminal failure takes precedence over
+sibling cancellation or fallback; otherwise check-run errors retain precedence over
+status errors. Result assembly remains check-runs before statuses.
+
 Successful nonempty `pr checks --json` / `--jq` exports return 0 regardless of check
 outcomes; export or writer errors still fail. An empty result fails before any JSON or
 jq output, with `no checks reported on the '<head branch>' branch` on stderr and exit 1.
