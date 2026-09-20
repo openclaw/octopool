@@ -67,7 +67,7 @@ var fieldMapGist = map[string][]string{
 var supportedPRFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
-	"additions", "deletions", "changedFiles", "mergeable", "merged", "files", "commits", "comments",
+	"additions", "deletions", "changedFiles", "mergeable", "mergeCommit", "merged", "files", "commits", "comments",
 	"reviews", "headRepository", "headRepositoryOwner", "assignees", "statusCheckRollup",
 )
 

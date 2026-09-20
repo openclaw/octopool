@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Route PR views requesting `mergeCommit` through the shared relay with fresh merge metadata, preserving native object/null output and avoiding personal-token GraphQL delegation for supported field combinations.
+
 ## 0.6.8 - 2026-09-20
 
 ### Fixes

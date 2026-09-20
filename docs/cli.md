@@ -387,9 +387,14 @@ states and human-format output remain unchanged. Unsupported issue fields such a
 `--jq`: REST `true` becomes `"MERGEABLE"`, `false` becomes `"CONFLICTING"`, and null or
 absent values become `"UNKNOWN"`. This uses only REST `mergeable`, not `mergeable_state`,
 draft/lifecycle status, checks, or merge policy. Raw `gh api` REST reads retain their
-boolean, null, or absent `mergeable` values. `mergeCommit` and `mergeStateStatus` remain
-unsupported and delegate to real `gh`, including when requested alongside `mergeable`;
-`gh pr list --json mergeable` also delegates.
+boolean, null, or absent `mergeable` values.
+`gh pr view --json mergeCommit` reads fresh REST metadata and returns `{"oid":"<sha>"}`
+for a merged PR or `null` for an unmerged PR. An open or closed-unmerged PR's synthetic
+test merge SHA is never exported as its merged commit. Missing merge status or an
+invalid merged-commit SHA requests guarded native fallback before printing output.
+Raw `gh api` reads retain `merge_commit_sha`. `mergeStateStatus` remains unsupported
+and delegates to real `gh`, including alongside `mergeable` or `mergeCommit`;
+`gh pr list --json mergeable` and `gh pr list --json mergeCommit` also delegate.
 PR views also relay `headRepository`, `headRepositoryOwner`, `assignees`, and
 `statusCheckRollup` to reduce local GitHub quota usage through shared transports and
 eligible caching, including under active string rewrite protection. Fork metadata

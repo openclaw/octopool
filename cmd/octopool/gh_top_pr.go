@@ -26,7 +26,7 @@ func needsLivePRRead(fields []string) bool {
 	for _, field := range fields {
 		switch field {
 		case "headRefOid", "baseRefOid", "state", "merged", "mergedAt", "mergeable",
-			"mergeStateStatus", "closedAt", "statusCheckRollup":
+			"mergeCommit", "mergeStateStatus", "closedAt", "statusCheckRollup":
 			return true
 		}
 	}
@@ -196,6 +196,20 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	users := map[string]map[string]any{}
 	for _, field := range opts.json {
 		switch field {
+		case "mergeCommit":
+			merged, ok := pr["merged"].(bool)
+			if !ok {
+				return localFallbackError{Reason: "pull request response did not include merged status"}
+			}
+			pr[field] = nil
+			if merged {
+				// Unmerged PRs can have a synthetic test merge SHA; native gh returns null.
+				sha := firstString(pr, "merge_commit_sha")
+				if !rewriteCommitSHA.MatchString(sha) {
+					return localFallbackError{Reason: "pull request response did not include merge commit identity"}
+				}
+				pr[field] = map[string]any{"oid": sha}
+			}
 		case "author":
 			author, present := pr["user"]
 			if !present {

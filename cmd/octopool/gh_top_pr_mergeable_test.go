@@ -127,10 +127,10 @@ func TestRunGHAPIPRMergeablePreservesREST(t *testing.T) {
 }
 
 var prMergeableDelegationArgs = [][]string{
-	{"pr", "view", "7", "--repo", "openclaw/octopool", "--json", "mergeCommit"},
 	{"pr", "view", "7", "--repo", "openclaw/octopool", "--json", "mergeStateStatus"},
-	{"pr", "view", "7", "--repo", "openclaw/octopool", "--json", "mergeable,mergeCommit"},
 	{"pr", "view", "7", "--repo", "openclaw/octopool", "--json", "mergeable,mergeStateStatus"},
+	{"pr", "view", "7", "--repo", "openclaw/octopool", "--json", "mergeCommit,mergeStateStatus"},
+	{"pr", "list", "--repo", "openclaw/octopool", "--json", "mergeCommit"},
 	{"pr", "list", "--repo", "openclaw/octopool", "--json", "mergeable"},
 }
 
