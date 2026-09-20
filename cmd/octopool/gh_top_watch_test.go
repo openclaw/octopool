@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"os"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -886,6 +888,63 @@ func TestWatchTickRetriesThreeConsecutiveErrors(t *testing.T) {
 	}
 	if want := []time.Duration{30 * time.Second, 60 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
 		t.Fatalf("sleeps=%v want=%v", *sleeps, want)
+	}
+}
+
+func TestGHWatchSizeLimitIsTerminalBeforeAndAfterProgress(t *testing.T) {
+	for _, command := range [][]string{
+		{"gh", "run", "watch", "42", "-R", "acme/repo"},
+		{"gh", "pr", "checks", "7", "--watch", "-R", "acme/repo"},
+	} {
+		for _, phase := range []string{"initial read", "after progress"} {
+			t.Run(command[1]+"/"+phase, func(t *testing.T) {
+				sleeps := recordWatchSleeps(t)
+				var oversizedCalls atomic.Int64
+				oversized := strings.Repeat(" ", (8<<20)+1)
+				rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+					var request struct {
+						Path    string            `json:"path"`
+						Headers map[string]string `json:"headers"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Error(err)
+						return
+					}
+					if phase == "initial read" || request.Headers["cache-control"] == "max-age=0" {
+						oversizedCalls.Add(1)
+						_, _ = io.WriteString(w, oversized)
+						return
+					}
+					var body any
+					switch request.Path {
+					case "/repos/acme/repo/actions/runs/42":
+						body = map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 1}
+					case "/repos/acme/repo/pulls/7":
+						body = map[string]any{"head": map[string]any{"sha": "abc1234", "ref": "feature"}}
+					case "/repos/acme/repo/commits/abc1234/check-runs":
+						body = map[string]any{"total_count": 1, "check_runs": []map[string]any{{"id": 1, "head_sha": "abc1234", "app": map[string]any{"id": 999, "slug": "third-party"}, "check_suite": map[string]any{"id": 201}, "name": "CI", "status": "completed", "conclusion": "success"}}}
+					case "/repos/acme/repo/commits/abc1234/status":
+						body = map[string]any{"total_count": 0, "statuses": []any{}}
+					default:
+						t.Errorf("unexpected watch request %s", request.Path)
+						return
+					}
+					writeCLIEnvelope(t, w, body)
+				})
+				t.Setenv("OCTOPOOL_FRESH", "")
+				t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+				var stdout, stderr bytes.Buffer
+				err := run(t.Context(), command, &stdout, &stderr)
+				if !errors.Is(err, errJSONResponseTooLarge) || oversizedCalls.Load() != 1 || len(*sleeps) != 0 || stderr.Len() != 0 {
+					t.Fatalf("err=%v oversized responses=%d sleeps=%v stderr=%q", err, oversizedCalls.Load(), *sleeps, stderr.String())
+				}
+				progress := strings.Contains(stdout.String(), "Watching run") || strings.Contains(stdout.String(), "checks:")
+				if progress != (phase == "after progress") || strings.Contains(stdout.String(), "completed with") {
+					t.Fatalf("unexpected watch output: %q", stdout.String())
+				}
+			})
+		}
 	}
 }
 

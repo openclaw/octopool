@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Honor explicit cache-age limits for completed Actions logs, checking upstream existence before forced-fresh reads while reusing unchanged log bytes.
+- Stop run and PR-check watches immediately on oversized relay responses, avoiding repeated downloads and backoff delays.
 - Stop first-page validators from refreshing complete Actions job aggregates without checking later pages, including entries cached by older Workers; single-page validation and existing cache lifetimes remain unchanged.
 
 ## 0.6.7 - 2026-09-19
