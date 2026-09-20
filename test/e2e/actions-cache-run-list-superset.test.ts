@@ -28,6 +28,9 @@ describe("Actions run-list superset", () => {
     identity?: boolean;
     workflow?: boolean;
     filter?: "branch" | "status" | "late";
+    page?: { size: number; total?: number | string; link?: string };
+    expectedIDs?: number[];
+    expectedTotal?: number;
     constraint?:
       | "expired"
       | "age"
@@ -38,7 +41,6 @@ describe("Actions run-list superset", () => {
       | "version"
       | "raw"
       | "conditional"
-      | "short"
       | "probe"
       | "visibility"
       | "identity-outage";
@@ -63,7 +65,70 @@ describe("Actions run-list superset", () => {
     { scenario: "different API version", constraint: "version", expected: "miss" },
     { scenario: "unshaped REST source", constraint: "raw", expected: "miss" },
     { scenario: "conditional read", constraint: "conditional", expected: "miss" },
-    { scenario: "short source page", constraint: "short", expected: "miss" },
+    { scenario: "incomplete short page", page: { size: 20, total: 2000 }, expected: "miss" },
+    {
+      scenario: "complete short page",
+      page: { size: 9, total: 9 },
+      expected: "hit",
+      expectedTotal: 9,
+    },
+    {
+      scenario: "complete short workflow page",
+      workflow: true,
+      page: { size: 9, total: 9 },
+      expected: "hit",
+      expectedTotal: 9,
+    },
+    {
+      scenario: "complete short pooled page",
+      identity: true,
+      page: { size: 9, total: 9 },
+      expected: "hit",
+      expectedTotal: 9,
+    },
+    {
+      scenario: "complete empty page",
+      page: { size: 0, total: 0 },
+      expected: "hit",
+      expectedIDs: [],
+      expectedTotal: 0,
+    },
+    {
+      scenario: "complete empty workflow page",
+      workflow: true,
+      page: { size: 0, total: 0 },
+      expected: "hit",
+      expectedIDs: [],
+      expectedTotal: 0,
+    },
+    {
+      scenario: "complete short filtered page",
+      filter: "branch",
+      page: { size: 9, total: 9 },
+      expected: "hit",
+      expectedTotal: 5,
+    },
+    {
+      scenario: "complete empty filtered underfill",
+      filter: "late",
+      page: { size: 0, total: 0 },
+      expected: "exact",
+      expectedIDs: [],
+      expectedTotal: 0,
+    },
+    {
+      scenario: "short page with pagination link",
+      page: { size: 9, total: 9, link: '<https://api.github.com/next>; rel="next"' },
+      expected: "miss",
+    },
+    { scenario: "short page without total", page: { size: 9 }, expected: "miss" },
+    { scenario: "short page with string total", page: { size: 9, total: "9" }, expected: "miss" },
+    {
+      scenario: "complete short page forced live",
+      page: { size: 9, total: 9 },
+      constraint: "live",
+      expected: "miss",
+    },
     { scenario: "optional probe failure", constraint: "probe", expected: "miss" },
     { scenario: "visibility denial", constraint: "visibility", expected: "denied" },
     {
@@ -77,7 +142,12 @@ describe("Actions run-list superset", () => {
       const path = test.workflow
         ? "/repos/openclaw/octopool/actions/workflows/ci.yml/runs"
         : RUNS_PATH;
-      const runs = Array.from({ length: test.constraint === "short" ? 20 : 100 }, (_, i) =>
+      const page = test.page ?? {
+        size: 100,
+        total: 2000,
+        link: '<https://api.github.com/next>; rel="next"',
+      };
+      const runs = Array.from({ length: page.size }, (_, i) =>
         run(
           i + 1,
           i < 25 ? (i % 2 === 0 ? "main" : "other") : "late",
@@ -102,13 +172,13 @@ describe("Actions run-list superset", () => {
         );
         return jsonResponse(
           {
-            total_count: 2000,
+            total_count: page.total,
             workflow_runs: filtered.slice(0, Number(url.searchParams.get("per_page") ?? 30)),
           },
           200,
           {
             etag: '"source-page"',
-            link: '<https://api.github.com/next>; rel="next"',
+            ...(page.link === undefined ? {} : { Link: page.link }),
           },
         );
       });
@@ -193,17 +263,20 @@ describe("Actions run-list superset", () => {
         test.constraint === "conditional" ? "bypass" : test.expected === "hit" ? "hit" : "miss",
       );
       expect(runIDs(result.body)).toEqual(
-        test.filter === "late"
-          ? [26, 27]
-          : test.filter === "branch"
-            ? [1, 3]
-            : test.filter === "status"
-              ? [2, 4]
-              : [1, 2],
+        test.expectedIDs ??
+          (test.filter === "late"
+            ? [26, 27]
+            : test.filter === "branch"
+              ? [1, 3]
+              : test.filter === "status"
+                ? [2, 4]
+                : [1, 2]),
       );
       if (test.expected === "hit") {
         expect(result.body).toMatchObject({
-          total_count: test.filter === "branch" ? 13 : test.filter === "status" ? 12 : 25,
+          total_count:
+            test.expectedTotal ??
+            (test.filter === "branch" ? 13 : test.filter === "status" ? 12 : 25),
         });
         expect(result.relay).toMatchObject({ cache_expires_at: source!.expires_at });
         expect(result.headers).not.toHaveProperty("etag");
@@ -216,7 +289,7 @@ describe("Actions run-list superset", () => {
       } else {
         expect(upstream).toHaveBeenCalled();
         if (test.expected === "exact") {
-          expect(result.body).toMatchObject({ total_count: 2000 });
+          expect(result.body).toMatchObject({ total_count: test.expectedTotal ?? 2000 });
           const urls = upstream.mock.calls.map(
             ([input, init]) => new URL(new Request(input, init).url),
           );
