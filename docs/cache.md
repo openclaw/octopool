@@ -327,6 +327,12 @@ retention timestamp, while `404` purges the object and returns GitHub's deletion
 Thus a deletion can remain cached for at most the bounded one-hour no-log-probe window, not
 the full retention period.
 
+An explicit `cache-control: max-age=N` also bounds this no-log-probe window. A log older
+than that bound requires the same authenticated existence check before reuse;
+`max-age=0` always checks, even immediately after a fill. Larger bounds never extend
+the one-hour default. A failed check retains the existing backend/fallback behavior
+instead of serving an unvalidated cached success.
+
 Objects untouched and unconfirmed for seven days expire. Reads enforce that lifetime from
 object metadata: expired objects are treated as misses and removed, so lifecycle cleanup
 timing can never cause stale data to be served. R2 read, write, or probe failures never fail

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Honor explicit cache-age limits for completed Actions logs, checking upstream existence before forced-fresh reads while reusing unchanged log bytes.
 - Stop run and PR-check watches immediately on oversized relay responses, avoiding repeated downloads and backoff delays.
 
 ## 0.6.7 - 2026-09-19

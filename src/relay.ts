@@ -256,7 +256,7 @@ async function prepareRelay(
     terminalLogCacheKey: undefined,
     terminalLogCached: undefined,
     cacheEnabled,
-    maxAgeSeconds: cacheEnabled ? requestCacheMaxAgeSeconds(base.request) : undefined,
+    maxAgeSeconds: requestCacheMaxAgeSeconds(base.request),
     sharedCacheKey: cacheKey,
     cacheKey,
     attemptedIdentityCacheKeys: [],
@@ -293,7 +293,7 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
       const cached = await readTerminalLogCache(state.env, key);
       if (cached !== undefined) {
         await ensurePublicGitHubRepo(state.env, state.route, cached.created_at);
-        if (terminalLogNeedsRevalidation(cached)) {
+        if (terminalLogNeedsRevalidation(cached, state.maxAgeSeconds)) {
           state.terminalLogCached = cached;
         } else {
           return serveCachedGitHubResponse(
