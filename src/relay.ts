@@ -1631,12 +1631,14 @@ async function cachedRunAttemptCompleted(
     if (state.request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.actionsJobs) {
       delete headers["x-octopool-public-shape"];
     }
-    const identities = await loadIdentities(state.env, state.request.pool, state.route);
-    // Both run-view forms can prove completion, but only for the jobs' exact attempt.
-    for (const path of [attemptRequest.path.replace(/\/attempts\/\d+$/, ""), attemptRequest.path]) {
-      const request = { ...attemptRequest, path, headers };
-      const route = classifyRoute(request, state.policy);
-      for (const identity of [undefined, ...identities]) {
+    const probe = async (identity?: Identity) => {
+      // Both run-view forms can prove completion, but only for the jobs' exact attempt.
+      for (const path of [
+        attemptRequest.path.replace(/\/attempts\/\d+$/, ""),
+        attemptRequest.path,
+      ]) {
+        const request = { ...attemptRequest, path, headers };
+        const route = classifyRoute(request, state.policy);
         const key = await githubCacheKey(request.pool, request, route, identity);
         const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
         if (
@@ -1647,6 +1649,11 @@ async function cachedRunAttemptCompleted(
           return true;
         }
       }
+      return false;
+    };
+    if (await probe()) return true;
+    for (const identity of await loadIdentities(state.env, state.request.pool, state.route)) {
+      if (await probe(identity)) return true;
     }
   } catch (error) {
     rethrowStringRewriteDenial(error);

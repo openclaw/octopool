@@ -3,13 +3,12 @@ import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-publ
 import { isRecord } from "./object";
 import { rethrowStringRewriteDenial } from "./github-egress";
 import { GitHubTransportError } from "./github";
-import { isTransientGitHubStatus } from "./github-response";
+import { isTransientGitHubStatus, transformedGitHubHeaders } from "./github-response";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const MAX_PAGE_SIZE = 100;
 const MAX_API_JOBS = 300;
 const DEFAULT_PAGE_SIZE = 30;
-const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length", "link"]);
 
 export class RunJobsUnavailableError extends Error {
   constructor() {
@@ -153,11 +152,7 @@ export async function completeRunJobsSuperset(
   return {
     ...response,
     // Page-one validators and framing cannot describe the merged collection.
-    headers: Object.fromEntries(
-      Object.entries(response.headers).filter(
-        ([key]) => !REPRESENTATION_HEADERS.has(key.toLowerCase()),
-      ),
-    ),
+    headers: transformedGitHubHeaders(response.headers),
     body: { ...response.body, total_count: total, jobs },
   };
 }
@@ -184,11 +179,7 @@ export function filterRunJobsSuperset(
   }
   return {
     ...response,
-    headers: Object.fromEntries(
-      Object.entries(response.headers).filter(
-        ([key]) => !REPRESENTATION_HEADERS.has(key.toLowerCase()),
-      ),
-    ),
+    headers: transformedGitHubHeaders(response.headers),
     body: {
       ...response.body,
       jobs: response.body.jobs.slice(0, view.limit),
