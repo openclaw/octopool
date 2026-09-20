@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +28,7 @@ func (writer *quotaNoticeWriter) Write(p []byte) (int, error) {
 func (writer *quotaNoticeWriter) WriteString(s string) (int, error) { return writer.Write([]byte(s)) }
 
 func TestGHRelayQuotaNotice(t *testing.T) {
-	for _, mode := range []string{"success", "leading_slash", "paginate", "pagination_fallback", "output_failure", "newline_failure", "short_write", "github_error", "relay_error", "fallback", "native_include", "other_path"} {
+	for _, mode := range []string{"success", "leading_slash", "paginate", "pagination_fallback", "output_failure", "newline_failure", "paginate_newline_failure", "short_write", "github_error", "relay_error", "fallback", "native_include", "other_path"} {
 		t.Run(mode, func(t *testing.T) {
 			data := 0
 			rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +40,7 @@ func TestGHRelayQuotaNotice(t *testing.T) {
 					writeCLIFallback(t, w, "unsupported_route")
 				case "github_error":
 					writeRawCLIEnvelope(t, w, 403, "json", map[string]any{"message": "synthetic failure"})
-				case "paginate":
+				case "paginate", "paginate_newline_failure":
 					_ = json.NewEncoder(w).Encode(relayEnvelope{Status: 200, Body: json.RawMessage(`{"remaining":42}`), BodyEncoding: "json", Headers: map[string]string{"link": ""}})
 				default:
 					writeCLIEnvelope(t, w, map[string]any{"remaining": 42})
@@ -57,7 +58,7 @@ func TestGHRelayQuotaNotice(t *testing.T) {
 			if mode == "native_include" {
 				args = append(args, "--include")
 			}
-			if mode == "paginate" || mode == "pagination_fallback" {
+			if mode == "paginate" || mode == "pagination_fallback" || mode == "paginate_newline_failure" {
 				args = append(args, "--paginate")
 			}
 			var stdout bytes.Buffer
@@ -66,7 +67,7 @@ func TestGHRelayQuotaNotice(t *testing.T) {
 			if mode == "output_failure" {
 				output = mergeFailWriter{}
 			}
-			if mode == "newline_failure" || mode == "short_write" {
+			if mode == "newline_failure" || mode == "paginate_newline_failure" || mode == "short_write" {
 				output = quotaEdgeWriter{short: mode == "short_write"}
 			}
 			err := runGH(t.Context(), args, output, stderr)
@@ -74,9 +75,12 @@ func TestGHRelayQuotaNotice(t *testing.T) {
 			if strings.Count(stderr.String(), ghRelayQuotaNotice) != map[bool]int{false: 0, true: 1}[wantNotice] {
 				t.Fatal("quota notice escaped successful relay boundary")
 			}
-			wantError := mode == "output_failure" || mode == "github_error" || mode == "relay_error"
+			wantError := mode == "output_failure" || mode == "newline_failure" || mode == "paginate_newline_failure" || mode == "short_write" || mode == "github_error" || mode == "relay_error"
 			if (err != nil) != wantError {
 				t.Fatalf("unexpected result: %v", err)
+			}
+			if (mode == "output_failure" || mode == "newline_failure" || mode == "paginate_newline_failure") && !errors.Is(err, errMergeWriter) || mode == "short_write" && !errors.Is(err, io.ErrShortWrite) {
+				t.Fatalf("output failure lost its cause: %v", err)
 			}
 			if wantNotice || mode == "other_path" {
 				if stdout.String() != "{\"remaining\":42}\n" {

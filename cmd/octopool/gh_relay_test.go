@@ -47,24 +47,26 @@ func TestEnvelopeBodyBytesRejectsGitHubErrorStatus(t *testing.T) {
 }
 
 func TestRawRelayOutputWriteErrors(t *testing.T) {
-	envelope := relayEnvelope{Status: 200, BodyEncoding: "text", Body: []byte(`"hello"`)}
 	wantError := errors.New("output closed")
-	for _, test := range []struct {
-		name string
-		out  relayBodyTestWriter
-		want error
-	}{
-		{"write error", relayBodyTestWriter{err: wantError}, wantError},
-		{"short write", relayBodyTestWriter{n: 1}, io.ErrShortWrite},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if err := writeGHBody(t.Context(), test.out, envelope, ""); !errors.Is(err, test.want) {
-				t.Errorf("direct output error = %v, want %v", err, test.want)
-			}
-			if err := writeGHAPIPages(t.Context(), test.out, []relayEnvelope{envelope}, "", false); !errors.Is(err, test.want) {
-				t.Errorf("paginated output error = %v, want %v", err, test.want)
-			}
-		})
+	for _, encoding := range []string{"text", "json"} {
+		envelope := relayEnvelope{Status: 200, BodyEncoding: encoding, Body: []byte(`"hello"`)}
+		for _, test := range []struct {
+			name string
+			out  relayBodyTestWriter
+			want error
+		}{
+			{"write error", relayBodyTestWriter{err: wantError}, wantError},
+			{"short write", relayBodyTestWriter{n: 1}, io.ErrShortWrite},
+		} {
+			t.Run(encoding+"/"+test.name, func(t *testing.T) {
+				if err := writeGHBody(t.Context(), test.out, envelope, ""); !errors.Is(err, test.want) {
+					t.Errorf("direct output error = %v, want %v", err, test.want)
+				}
+				if err := writeGHAPIPages(t.Context(), test.out, []relayEnvelope{envelope}, "", false); !errors.Is(err, test.want) {
+					t.Errorf("paginated output error = %v, want %v", err, test.want)
+				}
+			})
+		}
 	}
 }
 

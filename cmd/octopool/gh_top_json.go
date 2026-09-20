@@ -12,11 +12,14 @@ func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) e
 	if jq != "" {
 		return runJQ(ctx, stdout, data, jq)
 	}
-	_, err := stdout.Write(data)
-	if len(data) > 0 && !bytes.HasSuffix(data, []byte("\n")) {
-		_, _ = fmt.Fprintln(stdout)
+	if _, err := io.Copy(stdout, bytes.NewReader(data)); err != nil {
+		return err
 	}
-	return err
+	if len(data) > 0 && !bytes.HasSuffix(data, []byte("\n")) {
+		_, err := io.Copy(stdout, bytes.NewReader([]byte("\n")))
+		return err
+	}
+	return nil
 }
 
 func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {

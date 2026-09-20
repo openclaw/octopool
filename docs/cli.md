@@ -131,6 +131,8 @@ Use `--json` for scripts.
 
 Relays a read-only `gh api` call through Octopool's cache and pool. Prints the GitHub
 response body exactly like `gh api`, optionally piping it through `jq -r -- <expr>`.
+Incomplete output, including a failed final newline write, returns an error without
+retrying the read or delegating to native `gh`.
 The expression is always a filter, never a jq command-line option.
 On Windows, relay-backed `--jq` requires native jq 1.7 or newer and adds `--binary`
 to retain native `gh` LF output terminators and preserve literal string bytes,

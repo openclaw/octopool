@@ -65,9 +65,7 @@ func relayPRChecks(ctx context.Context, stdout io.Writer, repo, number string, o
 	if err != nil {
 		return err
 	}
-	// Export success is independent of check outcomes. Include the terminator in
-	// the write so a writer failure cannot be lost on a second newline write.
-	return writeBytes(ctx, stdout, append(raw, '\n'), opts.jq)
+	return writeBytes(ctx, stdout, raw, opts.jq)
 }
 
 func (row prCheckRow) export(fields []string) map[string]any {
