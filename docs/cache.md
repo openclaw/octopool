@@ -361,6 +361,23 @@ counts upstream requests, including visibility and log-existence probes.
 Requests carrying `If-None-Match` or `If-Modified-Since` skip the completion lookup and
 all R2 reads and writes, preserving the normal conditional-request bypass path.
 
+## Workflow metadata reuse
+
+A raw, queryless numeric workflow view can reuse its matching object from a fresh raw
+`page=1&per_page=100` workflow-list cache entry. This avoids fetching the same workflow
+metadata again when a machine-readable run list hydrates workflow names before a run
+view. Reuse requires one unambiguous numeric ID and API URL match; the complete REST
+object is returned unchanged. A missing item never proves that the workflow is absent,
+and a cold catalogue is not fetched just to answer a view.
+
+The lookup preserves the pool, API version, JSON media key, source expiry, requested
+maximum age, current identity eligibility, and public-repository guard. Anonymous entries
+are checked before loading pooled identities. It publishes no view alias and does not
+refresh the source. List validators, lengths, and pagination links are omitted from the
+derived view. Shaped/HTML metadata, custom media, filename selectors, query parameters,
+conditionals, and forced-live reads retain their existing paths. Optional lookup failures
+continue through the ordinary view fill; policy and visibility denials still propagate.
+
 ## Actions run-list superset
 
 Machine run JSON does not request this shaped superset. It uses existing unshaped REST

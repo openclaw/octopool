@@ -22,7 +22,11 @@ import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub, GitHubTransportError, probeGitHubLog } from "./github";
 import { githubToken, IdentityCredentialError } from "./github-auth";
 import { storePublicAPIRate, supportsAnonymousGitHubAPI } from "./github-public-api";
-import { isTransientGitHubStatus } from "./github-response";
+import {
+  defaultGitHubJSONAccept,
+  isTransientGitHubStatus,
+  transformedGitHubHeaders,
+} from "./github-response";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
@@ -318,6 +322,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   if (exactCached !== undefined) return exactCached;
   const largerPage = await readLargerRunListCache(state);
   if (largerPage !== undefined) return serveFreshCachedRelayResponse(state, largerPage);
+  const workflow = await readWorkflowCatalogueCache(state);
+  if (workflow !== undefined) return serveFreshCachedRelayResponse(state, workflow);
 
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
@@ -1189,6 +1195,67 @@ async function serveStaleRelayCache(
     );
   }
   return serveExactRunListCache(state, "stale", { staleReason });
+}
+
+async function readWorkflowCatalogueCache(
+  state: ActiveRelay,
+): Promise<CachedGitHubResponse | undefined> {
+  if (
+    !state.cacheEnabled ||
+    state.maxAgeSeconds === 0 ||
+    state.route.kind !== "workflow_view" ||
+    Object.keys(state.request.query ?? {}).length !== 0 ||
+    state.request.headers?.["x-octopool-public-shape"] !== undefined ||
+    !defaultGitHubJSONAccept(state.request.headers?.accept)
+  )
+    return undefined;
+  const match = /^(.*\/actions\/workflows)\/([1-9][0-9]*)$/.exec(state.request.path);
+  if (match === null || !Number.isSafeInteger(Number(match[2]))) return undefined;
+  const request: RelayRequest = {
+    ...state.request,
+    path: match[1]!,
+    query: { page: "1", per_page: "100" },
+  };
+  const route = classifyRoute(request, state.policy);
+  const expectedURL = `https://api.github.com${state.request.path}`;
+  const probe = async (identity?: Identity) => {
+    const key = await githubCacheKey(request.pool, request, route, identity);
+    const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
+    if (
+      cached === undefined ||
+      cached.status !== 200 ||
+      cached.body_encoding !== "json" ||
+      !isRecord(cached.body) ||
+      !Array.isArray(cached.body.workflows)
+    )
+      return undefined;
+    const matches = cached.body.workflows.filter(
+      (item) => isRecord(item) && (String(item.id) === match[2] || item.url === expectedURL),
+    );
+    const item = matches[0];
+    if (
+      matches.length !== 1 ||
+      !isRecord(item) ||
+      item.id !== Number(match[2]) ||
+      item.url !== expectedURL ||
+      !(await cachedResponseAvailable(state.env, request.pool, route, cached, identity))
+    )
+      return undefined;
+    return { ...cached, body: item, headers: transformedGitHubHeaders(cached.headers) };
+  };
+  try {
+    const anonymous = await probe();
+    if (anonymous !== undefined) return anonymous;
+    for (const identity of await loadIdentities(state.env, request.pool, route)) {
+      const cached = await probe(identity);
+      if (cached !== undefined) return cached;
+    }
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
+  }
+  // A missing catalogue item proves nothing; keep the normal view fill and its owner.
+  return undefined;
 }
 
 async function readLargerRunListCache(
