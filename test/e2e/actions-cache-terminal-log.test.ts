@@ -200,37 +200,44 @@ describe("terminal Actions log cache", () => {
     },
   );
 
-  it("caches a fresh completed job and reuses its log after another fresh proof", async () => {
-    const upstream = terminalLogUpstream("completed");
-    vi.stubGlobal("fetch", upstream);
+  it.each([undefined, "max-age=60"])(
+    "reuses a fresh completed log within %s",
+    async (cacheControl) => {
+      const upstream = terminalLogUpstream("completed");
+      vi.stubGlobal("fetch", upstream);
 
-    const first = await relay(LOG_PATH);
-    expect(await first.json<RelayEnvelope>()).toMatchObject({
-      status: 200,
-      body: "build log\n",
-      body_encoding: "text",
-      relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
-    });
-    const second = await relay(LOG_PATH);
-    expect(await second.json<RelayEnvelope>()).toMatchObject({
-      status: 200,
-      body: "build log\n",
-      body_encoding: "text",
-      relay: { cache: "hit", cacheable: true, route_kind: "job_logs" },
-    });
-    expect(jobMetadataCalls(upstream)).toBe(2);
-    expect(logBackendCalls(upstream)).toBe(1);
-    expect(
-      await env.DB.prepare(
-        "SELECT cache_status, cacheable FROM audit_events ORDER BY rowid ASC",
-      ).all(),
-    ).toMatchObject({
-      results: [
-        { cache_status: "miss", cacheable: 1 },
-        { cache_status: "hit", cacheable: 1 },
-      ],
-    });
-  });
+      const first = await relay(LOG_PATH);
+      expect(await first.json<RelayEnvelope>()).toMatchObject({
+        status: 200,
+        body: "build log\n",
+        body_encoding: "text",
+        relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
+      });
+      const second = await relay(
+        LOG_PATH,
+        undefined,
+        cacheControl === undefined ? {} : { headers: { "cache-control": cacheControl } },
+      );
+      expect(await second.json<RelayEnvelope>()).toMatchObject({
+        status: 200,
+        body: "build log\n",
+        body_encoding: "text",
+        relay: { cache: "hit", cacheable: true, route_kind: "job_logs" },
+      });
+      expect(jobMetadataCalls(upstream)).toBe(2);
+      expect(logBackendCalls(upstream)).toBe(1);
+      expect(
+        await env.DB.prepare(
+          "SELECT cache_status, cacheable FROM audit_events ORDER BY rowid ASC",
+        ).all(),
+      ).toMatchObject({
+        results: [
+          { cache_status: "miss", cacheable: 1 },
+          { cache_status: "hit", cacheable: 1 },
+        ],
+      });
+    },
+  );
 
   it("bypasses an active rerun job despite a cached completed run", async () => {
     const runRequest: RelayRequest = {
@@ -426,7 +433,12 @@ describe("terminal Actions log cache", () => {
     expect(logBackendCalls(upstream)).toBe(1);
   });
 
-  it("purges an hour-old cached log when the authenticated probe returns 404", async () => {
+  it.each([
+    { age: "-2 hours", cacheControl: undefined },
+    { age: "-2 hours", cacheControl: "max-age=86400" },
+    { age: "+0 seconds", cacheControl: "max-age=0" },
+    { age: "-2 minutes", cacheControl: "max-age=60" },
+  ])("honors log deletion for $age cache with $cacheControl", async ({ age, cacheControl }) => {
     let logRequests = 0;
     const base = terminalLogUpstream("completed");
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
@@ -442,9 +454,13 @@ describe("terminal Actions log cache", () => {
     vi.stubGlobal("fetch", upstream);
     await relay(LOG_PATH);
     const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
-    await ageTerminalLog(key, "-2 hours");
+    await ageTerminalLog(key, age);
 
-    const response = await relay(LOG_PATH);
+    const response = await relay(
+      LOG_PATH,
+      undefined,
+      cacheControl === undefined ? {} : { headers: { "cache-control": cacheControl } },
+    );
     expect(await response.json<RelayEnvelope>()).toMatchObject({
       status: 404,
       body: { message: "Not Found" },

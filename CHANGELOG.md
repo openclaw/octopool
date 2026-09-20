@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Honor explicit cache-age limits for completed Actions logs, checking upstream existence before forced-fresh reads while reusing unchanged log bytes.
+
 ## 0.6.7 - 2026-09-19
 
 ### Fixes

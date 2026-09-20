@@ -55,9 +55,18 @@ export async function terminalLogCacheProof(
   }
 }
 
-export function terminalLogNeedsRevalidation(cached: CachedTerminalLog): boolean {
+export function terminalLogNeedsRevalidation(
+  cached: CachedTerminalLog,
+  maxAgeSeconds?: number,
+): boolean {
   const createdAt = parseSQLiteTimestamp(cached.created_at);
-  return !Number.isFinite(createdAt) || Date.now() - createdAt >= LOG_REVALIDATE_SECONDS * 1000;
+  const ageMs = Date.now() - createdAt;
+  return (
+    !Number.isFinite(createdAt) ||
+    ageMs >= LOG_REVALIDATE_SECONDS * 1000 ||
+    maxAgeSeconds === 0 ||
+    (maxAgeSeconds !== undefined && ageMs > maxAgeSeconds * 1000)
+  );
 }
 
 export async function deleteTerminalLogCache(env: Env, key: string): Promise<void> {
