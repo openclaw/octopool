@@ -168,7 +168,7 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 		values += " --interval,-i"
 		booleans = "--exit-status --compact"
 	case "run list":
-		values += " --limit,-L --branch --workflow --status"
+		values += " --limit,-L --branch --workflow --status --commit,-c --event,-e"
 	case "pr checks":
 		booleans = "--fail-fast --required"
 	case "repo view":
@@ -327,7 +327,16 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	}
 	for key, value := range flags.values {
 		if key != "--repo" && key != "--jq" && key != "--json" {
-			request.query[strings.TrimPrefix(key, "--")] = value
+			queryKey := strings.TrimPrefix(key, "--")
+			if command == "run list" && (key == "--commit" || key == "--event") {
+				if value == "" {
+					continue
+				}
+				if key == "--commit" {
+					queryKey = "head_sha"
+				}
+			}
+			request.query[queryKey] = value
 		}
 	}
 	if err := policy.guardRequest(request); err != nil {

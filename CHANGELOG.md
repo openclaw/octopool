@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Route machine-readable run lists filtered by commit or event through the shared REST cache, preserving native filter values, protected dispatch, and freshness controls.
 - Honor explicit cache-age limits for completed Actions logs, checking upstream existence before forced-fresh reads while reusing unchanged log bytes.
 - Stop run and PR-check watches immediately on oversized relay responses, avoiding repeated downloads and backoff delays.
 - Stop first-page validators from refreshing complete Actions job aggregates without checking later pages, including entries cached by older Workers; single-page validation and existing cache lifetimes remain unchanged.

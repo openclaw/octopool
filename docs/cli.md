@@ -438,7 +438,11 @@ enum comparisons. Replace `.mergeable == true` with `.mergeable == "MERGEABLE"` 
 Do not rely on truthiness: all three enum strings are truthy in `jq`.
 Machine `gh run list/view --json` exports use canonical, unshaped REST reads through the
 shared cache, not public-page reconstructions. Human run lists/views and watch retain their
-page-backed paths. The existing 13 list and 15 view fields are unchanged. Run `name` is the
+page-backed paths. Machine run lists also support `--commit`/`-c` and `--event`/`-e`,
+including attached short values, through the same cache and explicit freshness controls.
+Repeated values use the last occurrence; an empty final value removes that filter.
+Run lists using these filters without `--json` retain native `gh` delegation.
+The existing 13 list and 15 view fields are unchanged. Run `name` is the
 REST run name; `workflowName` comes only from real workflow metadata, never from `name`.
 Missing/null ordinary strings become empty strings, and timestamps use native parsed time
 defaults. Jobs always have eight keys and steps six, with non-null arrays in acquisition

@@ -165,6 +165,8 @@ func typedReadSpecs(command, values, booleans string) map[string]readOptionSpec 
 		switch alias {
 		case "-R", "-L", "-q":
 			spec.attached = true
+		case "-c", "-e":
+			spec.attached = command == "run list"
 		}
 		switch name {
 		case "--json", "--label":
