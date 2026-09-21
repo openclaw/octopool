@@ -122,6 +122,11 @@ Supported field sets:
   timestamps are not native machine-export evidence.
 - Actions jobs shapes add bounded job and step metadata for human/watch output, not run JSON.
 
+Issue summary and list shapes validate only their documented fields. Missing pagination
+metadata for unselected assignees does not discard an otherwise complete page. Labels
+still require explicit completeness; requests selecting assignees or milestones use
+the exact API representation.
+
 Workflow pagination uses
 `https://github.com/{owner}/{repo}/actions/workflows_partial?query=&page={page}`. Actions
 run enrichment may read a run page and

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Keep supported issue views and complete issue lists readable from public HTML when API quota is exhausted, without requiring unused assignee pagination data; requested labels still require completeness, and assignee/milestone selections retain exact API handling.
+
 ## 0.6.10 - 2026-09-20
 
 ### Features

@@ -19,7 +19,6 @@ export function parseIssueHTML(
   }
   const author = actorJSON(issue.author);
   const labels = labelConnectionJSON(issue.labels);
-  const assignees = actorConnectionJSON(issue.assignedActors);
   if (
     typeof issue.title !== "string" ||
     typeof issue.body !== "string" ||
@@ -27,8 +26,7 @@ export function parseIssueHTML(
     typeof issue.createdAt !== "string" ||
     typeof issue.updatedAt !== "string" ||
     author === undefined ||
-    labels === undefined ||
-    assignees === undefined
+    labels === undefined
   ) {
     return undefined;
   }
@@ -42,8 +40,6 @@ export function parseIssueHTML(
     created_at: issue.createdAt,
     updated_at: issue.updatedAt,
     labels,
-    assignees,
-    milestone: issue.milestone ?? null,
   };
 }
 
@@ -117,11 +113,9 @@ export function parseIssueListHTML(
       });
       continue;
     }
-    const assignees = actorConnectionJSON(node.assignedActors);
     if (
       typeof node.state !== "string" ||
-      (typeof node.closedAt !== "string" && node.closedAt !== null) ||
-      assignees === undefined
+      (typeof node.closedAt !== "string" && node.closedAt !== null)
     ) {
       return undefined;
     }
@@ -135,8 +129,6 @@ export function parseIssueListHTML(
       updated_at: node.updatedAt,
       closed_at: node.closedAt,
       labels,
-      assignees,
-      milestone: node.milestone ?? null,
     });
   }
   return items;
@@ -284,17 +276,6 @@ function actorJSON(value: unknown): Record<string, unknown> | undefined {
     name: typeof actor.name === "string" ? actor.name : "",
     is_bot: actor.__typename === "Bot",
   };
-}
-
-function actorConnectionJSON(value: unknown): Record<string, unknown>[] | undefined {
-  const nodes = connectionNodes(value);
-  if (nodes === undefined) {
-    return undefined;
-  }
-  const actors = nodes.map(actorJSON);
-  return actors.some((actor) => actor === undefined)
-    ? undefined
-    : (actors as Record<string, unknown>[]);
 }
 
 function labelConnectionJSON(value: unknown): Record<string, unknown>[] | undefined {
