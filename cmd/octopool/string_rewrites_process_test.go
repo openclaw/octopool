@@ -2196,8 +2196,11 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
 			capture := captureRewriteGH(t)
 			err := execRealGHWithStdin(t.Context(), args, strings.NewReader(`{"body":"safe"}`), io.Discard, io.Discard)
-			if err != errRewriteBlocked {
-				t.Fatalf("expected generic block, got %v for %v", err, args)
+			if !errors.Is(err, errRewriteBlocked) {
+				t.Fatalf("expected block, got %v for %v", err, args)
+			}
+			if strings.Contains(err.Error(), "internal-model") {
+				t.Fatalf("denial exposed rule text: %v", err)
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {
 				t.Fatal("blocked command executed")
@@ -2207,7 +2210,7 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 	for _, raw := range []string{`{"body":"safe","\u0062ody":"internal-model"}`, `{"body":"\ud800"}`, `{"body":"internal-model","unknown":"x"}`, `{"body":false}`, `{"body":"` + string([]byte{255}) + `"}`, `[]`} {
 		capture := captureRewriteGH(t)
 		err := execRealGHWithStdin(t.Context(), []string{"api", "repos/acme/repo/issues/1/comments", "--input=-"}, strings.NewReader(raw), io.Discard, io.Discard)
-		if err != errRewriteBlocked {
+		if !errors.Is(err, errRewriteBlocked) {
 			t.Fatalf("invalid JSON error=%v", err)
 		}
 		if _, err := os.Stat(capture); !os.IsNotExist(err) {

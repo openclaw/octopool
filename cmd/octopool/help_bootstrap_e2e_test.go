@@ -425,6 +425,22 @@ func testBootstrapOperational(t *testing.T, bin, native string, shim bool) {
 		t.Fatal(err)
 	}
 	base := []string{"pr", "merge", "123", "--repo", "acme/repo", "--squash", "--match-head-commit", sha}
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"api", "repos/acme/repo/pulls/123/merge", "-X", "PUT", "-fsha=short"}, `pull-merge payload field "sha" must be a 40-hex head commit`},
+		{[]string{"api", "repos/acme/repo/pulls/123/merge", "-X", "PUT", "-fmerge_method=internal-model"}, `pull-merge payload field "merge_method" must be one of squash, merge, rebase`},
+		{[]string{"api", "repos/acme/repo/issues", "-X", "POST", "-ftitle=safe"}, `issue-create payload is missing required field "body"`},
+	} {
+		t.Run("schema-error/"+test.want, func(t *testing.T) {
+			result, captures := fixture.run(t, test.args, bootstrapInputFile(t, "unused stdin"), true, 0)
+			assertBootstrapBlocked(t, result, captures)
+			if !strings.Contains(result.stderr, test.want) || strings.Contains(result.stderr, "internal-model") {
+				t.Fatalf("schema diagnostic was lost or exposed rule text: %q", result.stderr)
+			}
+		})
+	}
 	for _, method := range []string{"squash", "merge", "rebase", ""} {
 		t.Run("raw-merge/method="+method, func(t *testing.T) {
 			args := []string{"api", "repos/acme/repo/pulls/123/merge", "-X", "PUT", "-f", "sha=" + sha}

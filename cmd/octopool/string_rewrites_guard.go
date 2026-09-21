@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/url"
 	"regexp"
@@ -549,6 +550,9 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	}
 	if err != nil {
 		prepared.cleanup()
+		if errors.Is(err, errRewriteBlocked) {
+			return prepared, err
+		}
 		return prepared, rewriteGitError(err)
 	}
 	return prepared, nil

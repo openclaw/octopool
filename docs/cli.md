@@ -996,6 +996,8 @@ With active rules, the initial local publication vocabulary is deliberately cons
   Other bracket accumulation, duplicate keys, mixed input/field sources, unknown properties,
   and custom authentication headers are rejected. Raw release creation first verifies the
   existing remote tag with a local authenticated GET.
+  Payload validation errors identify the schema, field, and expected shape without echoing
+  submitted values or rewrite rules; policy rejections retain a generic protection error.
 
 Long flags accept separate or equal values; supported short value flags also accept
 attached values. Repeated flags/aliases and boolean clusters are rejected. Metadata flags

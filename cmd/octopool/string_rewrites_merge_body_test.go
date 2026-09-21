@@ -325,7 +325,7 @@ func TestStringRewriteMergeTextAPI(t *testing.T) {
 					}
 					err = execRealGHWithStdin(t.Context(), []string{"api", "repos/acme/repo/pulls/123/merge", "--method=PUT", "--input=-"}, strings.NewReader(string(input)), io.Discard, io.Discard)
 					if test.blocked {
-						if err != errRewriteBlocked {
+						if !errors.Is(err, errRewriteBlocked) {
 							t.Fatalf("invalid merge text was not rejected: %v", err)
 						}
 						if _, err := os.Stat(capturePath); !os.IsNotExist(err) {

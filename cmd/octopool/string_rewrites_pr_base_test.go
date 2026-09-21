@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -141,7 +142,7 @@ func TestStringRewritePRBaseEditRejectsUnsafeRefs(t *testing.T) {
 				if transport == "api" {
 					args = []string{"api", "repos/acme/repo/pulls/3486", "--method=PATCH", "--raw-field=base=" + base}
 				}
-				if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != errRewriteBlocked {
+				if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); !errors.Is(err, errRewriteBlocked) {
 					t.Fatalf("expected protected rejection, got %v", err)
 				}
 				if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
@@ -163,7 +164,7 @@ func TestStringRewritePRBaseEditRejectsAmbiguousInputs(t *testing.T) {
 		{"api", "repos/acme/repo/pulls/3486", "--method=PATCH", "--raw-field=base=main", "--field=maintainer_can_modify=true"},
 	} {
 		capturePath := captureRewriteGH(t)
-		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != errRewriteBlocked {
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); !errors.Is(err, errRewriteBlocked) {
 			t.Fatalf("ambiguous edit accepted: %v: %v", args, err)
 		}
 		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
@@ -202,7 +203,7 @@ func TestStringRewritePRBasePreparationPortable(t *testing.T) {
 	for _, base := range []any{nil, 123, true, "", "bad base", "topic..main", "internal-model"} {
 		prepared := &rewritePreparation{}
 		payload := map[string]any{"base": base}
-		if err := rewriteAPIPayload(policy, prepared, payload, "pull-edit"); err != errRewriteBlocked {
+		if err := rewriteAPIPayload(policy, prepared, payload, "pull-edit"); !errors.Is(err, errRewriteBlocked) {
 			t.Fatalf("invalid base accepted: %v", err)
 		}
 	}

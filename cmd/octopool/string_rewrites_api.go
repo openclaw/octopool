@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/url"
 	"regexp"
@@ -441,21 +442,28 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 		key, kind, _ := strings.Cut(entry, ":")
 		allowed[key] = kind
 	}
-	if len(payload) == 0 && schema != "pull-merge" {
-		return errRewriteBlocked
-	}
 	for _, key := range strings.Fields(required) {
 		if _, ok := payload[key]; !ok {
-			return errRewriteBlocked
+			return fmt.Errorf("%w: %s payload is missing required field %q", errRewriteBlocked, schema, key)
 		}
+	}
+	if len(payload) == 0 && schema != "pull-merge" {
+		return fmt.Errorf("%w: %s payload must contain at least one supported field", errRewriteBlocked, schema)
+	}
+	fieldError := func(key, requirement string) error {
+		return fmt.Errorf("%w: %s payload field %q %s", errRewriteBlocked, schema, key, requirement)
 	}
 	if schema == "review" {
 		event, ok := payload["event"].(string)
 		if !ok || (event != "APPROVE" && event != "COMMENT" && event != "REQUEST_CHANGES") {
-			return errRewriteBlocked
+			return fieldError("event", "must be one of APPROVE, COMMENT, REQUEST_CHANGES")
 		}
 	}
 	for key, value := range payload {
+		// Unknown keys may contain policy material; never include it in diagnostics.
+		if policy.containsRuleMaterial(key) {
+			return errRewriteBlocked
+		}
 		if err := policy.checkStructural(key); err != nil {
 			return err
 		}
@@ -463,23 +471,26 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 		case "text":
 			text, ok := value.(string)
 			if !ok {
-				return errRewriteBlocked
+				return fieldError(key, "must be a string")
 			}
 			rewritten, err := prepared.text(policy, text)
 			if err != nil {
 				return err
 			}
 			if strings.HasSuffix(schema, "-create") && strings.TrimSpace(rewritten) == "" {
-				return errRewriteBlocked
+				return fieldError(key, "must be non-empty after rewriting")
 			}
 			payload[key] = rewritten
 		case "string", "branch":
 			text, ok := value.(string)
-			if !ok || text == "" || (schema == "pull-merge" && key == "sha" && !rewriteCommitSHA.MatchString(text)) {
-				return errRewriteBlocked
+			if schema == "pull-merge" && key == "sha" && (!ok || !rewriteCommitSHA.MatchString(text)) {
+				return fieldError(key, "must be a 40-hex head commit")
+			}
+			if !ok || text == "" {
+				return fieldError(key, "must be a non-empty string")
 			}
 			if allowed[key] == "branch" && !validRewriteBaseBranch(text) {
-				return errRewriteBlocked
+				return fieldError(key, "must be a valid branch name")
 			}
 			if err := policy.checkStructural(text); err != nil {
 				return err
@@ -487,17 +498,20 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 		case "merge-method":
 			text, ok := value.(string)
 			if !ok || (text != "squash" && text != "merge" && text != "rebase") {
-				return errRewriteBlocked
+				return fieldError(key, "must be one of squash, merge, rebase")
 			}
 		case "strings":
 			values, ok := value.([]any)
 			if !ok {
-				return errRewriteBlocked
+				return fieldError(key, "must be an array of strings")
 			}
 			for _, value := range values {
 				text, ok := value.(string)
-				if !ok || (schema == "assignees" && !rewriteGitHubLogin.MatchString(text)) {
-					return errRewriteBlocked
+				if !ok {
+					return fieldError(key, "must be an array of strings")
+				}
+				if schema == "assignees" && !rewriteGitHubLogin.MatchString(text) {
+					return fieldError(key, "must contain valid GitHub logins")
 				}
 				if err := policy.checkStructural(text); err != nil {
 					return err
@@ -505,28 +519,34 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 			}
 		case "integer":
 			if _, ok := rewriteInteger(value); !ok {
-				return errRewriteBlocked
+				return fieldError(key, "must be an integer")
 			}
 		case "bool":
 			if _, ok := value.(bool); !ok {
-				return errRewriteBlocked
+				return fieldError(key, "must be a boolean")
 			}
 		case "comments":
 			values, ok := value.([]any)
 			if !ok {
-				return errRewriteBlocked
+				return fieldError(key, "must be an array of comment objects")
 			}
 			for _, value := range values {
 				comment, ok := value.(map[string]any)
 				if !ok {
-					return errRewriteBlocked
+					return fieldError(key, "must be an array of comment objects")
 				}
 				if err := rewriteAPIPayload(policy, prepared, comment, "review-comment"); err != nil {
 					return err
 				}
 			}
 		default:
-			return errRewriteBlocked
+			// Regex source need not match its own pattern.
+			for _, rule := range policy.Rules {
+				if strings.Contains(key, rule.Pattern) {
+					return errRewriteBlocked
+				}
+			}
+			return fieldError(key, "is unsupported")
 		}
 	}
 	return nil
