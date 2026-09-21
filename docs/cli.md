@@ -275,6 +275,16 @@ route. A known `server_policy_revision` belongs to the server; `effective_rule_c
 includes merged local rules, which that revision does not identify. Initial-policy failures
 before reaching this boundary retain the existing policy-failure diagnostic.
 
+Automation can distinguish a refusal before mutation dispatch using exactly one complete
+`merge_diagnostics` record captured from that invocation: `child_started=false`,
+`outcome=preparation_failed`, `start_failed`, or `canceled_before_start`, no `exit_code`,
+and `headers=unavailable` establish that the native merge child did not start. The ordinary
+error can follow this record. This is a dispatch fact, not permission to ignore changed
+remote state or retry without the caller's normal reconciliation. Missing, truncated,
+malformed, or duplicate records, an unknown outcome, and `child_started=true` do not
+establish non-dispatch. A generic protection error from older clients is insufficient;
+native children preserve their exit codes and can fail after GitHub accepted a write.
+
 Only an internally converted silent, nonpaginated REST merge can capture response metadata.
 Octopool checks an added include flag against the same final policy and byte limits, then
 uses the existing single body preparation and request. If instrumentation cannot pass,
@@ -1206,9 +1216,26 @@ JSON snapshot as REST content. An optional `--subject`/`-t` supplies `commit_tit
 that same protection, with separate, equals, and short attached values supported. Subjects
 are literal text: a leading `@` never reads a file or stdin. The child receives only the
 checked JSON snapshot, not the original subject, body path, or live stdin. Omitting the
-subject leaves `commit_title` absent. Inline-body merge flags, non-squash methods, admin/auto variants,
-URL selectors, numeric inferred branches, and unpinned merges remain blocked on that strict
-lifecycle path. Other editor/web/template/fill modes, unmodeled uploads, aliases/extensions, raw
+subject leaves `commit_title` absent.
+
+Explicit `pr merge --auto --squash --match-head-commit FULL_SHA` also accepts a numeric
+selector, but requires both a nonempty `--subject`/`-t` and an explicit `--body-file`/`-F`.
+The subject and body pass through the same bounded text rewriting; a subject that becomes
+empty or whitespace is rejected so native gh cannot generate an uninspected headline.
+An explicit empty body is allowed. Native gh receives the sanitized subject value and
+private body snapshot, an explicit repository, the full head SHA, and empty stdin.
+Original body files are never modified or reopened by the child. `--auto=false` retains
+the immediate REST path. Admin privileges, other merge methods, disabling auto-merge,
+inline-body flags, URL selectors, and unpinned merges remain blocked on this strict path.
+
+The auto path preserves native gh semantics: it can merge immediately when requirements
+are already satisfied, otherwise it enables auto-merge. The expected SHA constrains the
+submission; it is not a permanent head freeze. Later pushes, requirements, and merge-queue
+behavior remain GitHub-owned, and queue policy may determine the final merge method and
+metadata. A caller requiring an exact eventual commit must continue observing and
+reconciling the PR. The immediate REST path never silently opts into that lifecycle.
+
+Other editor/web/template/fill modes, unmodeled uploads, aliases/extensions, raw
 GraphQL, and newly introduced native commands/flags use best-effort filtering and retain
 native behavior. A denial reports only the generic unsafe-input boundary and never echoes the
 rejected text.

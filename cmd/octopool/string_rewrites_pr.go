@@ -21,7 +21,7 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		booleans = rewriteFlagNames("--undo")
 	case "pr merge":
 		values = rewriteFlagNames("--repo,-R --match-head-commit --body-file,-F --subject,-t")
-		booleans = rewriteFlagNames("--squash")
+		booleans = rewriteFlagNames("--squash --auto")
 	default:
 		return errRewriteBlocked
 	}
@@ -60,6 +60,9 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		}
 		if err := policy.checkStructural(sha); err != nil {
 			return err
+		}
+		if flags.values["--auto"] == "true" {
+			return prepareRewriteAutoMerge(policy, flags, stdin, prepared)
 		}
 		// Native gh can reinterpret a merge as auto-merge on merge-queue branches.
 		// Use GitHub's immediate merge endpoint so the checked head SHA remains the
@@ -114,6 +117,50 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		prepared.args = append(prepared.args, flag.name+"="+flag.value)
 	}
 	prepared.stdin = strings.NewReader("")
+	return nil
+}
+
+func prepareRewriteAutoMerge(policy stringRewritePolicy, flags rewriteFlags, stdin io.Reader, prepared *rewritePreparation) error {
+	// Native gh omits an empty headline and an unspecified body, which would let
+	// GitHub generate publication text that has not passed the current policy.
+	if !flags.has("--subject") || !flags.has("--body-file") || flags.values["--body-file"] == "" {
+		return errRewriteBlocked
+	}
+	subject, err := prepared.text(policy, flags.values["--subject"])
+	if err != nil || strings.TrimSpace(subject) == "" {
+		return errRewriteBlocked
+	}
+	body, err := readRewriteFile(flags.values["--body-file"], stdin, rewriteMaxContent-prepared.inputBytes)
+	if err != nil {
+		return err
+	}
+	text, err := prepared.text(policy, string(body))
+	if err != nil {
+		return err
+	}
+	// The full head is checked at submission. A queued merge remains GitHub's
+	// lifecycle; this does not freeze the head or override branch/queue policy.
+	args := []string{
+		"pr", "merge", flags.positionals[0], "--repo=" + flags.values["--repo"],
+		"--squash", "--auto", "--match-head-commit=" + flags.values["--match-head-commit"],
+		"--subject=" + subject,
+	}
+	if ghMergeArgBytes(args)+len("--body-file=")+len(text) > rewriteMaxContent {
+		return errRewriteBlocked
+	}
+	path, err := prepared.snapshot([]byte(text))
+	if err != nil {
+		return err
+	}
+	args = append(args, "--body-file="+path)
+	if ghMergeArgBytes(args)+len(text) > rewriteMaxContent {
+		return errRewriteBlocked
+	}
+	prepared.args = args
+	prepared.stdin = strings.NewReader("")
+	if prepared.mergeDiagnostics != nil {
+		prepared.mergeDiagnostics.route = ghMergeNative
+	}
 	return nil
 }
 

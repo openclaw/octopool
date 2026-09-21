@@ -127,11 +127,15 @@ func TestGHMergeDiagnosticsFinalPolicy(t *testing.T) {
 	for _, test := range []struct {
 		name, first, final, want string
 		failure                  int
+		auto                     bool
 	}{
-		{"active_to_empty", active, empty, "route=native server_policy_revision=33 effective_rule_count=0", 0},
-		{"empty_to_active", empty, active, "route=rest_put server_policy_revision=22 effective_rule_count=1", 0},
-		{"final_load_failure", active, "", "outcome=preparation_failed", 403},
-		{"final_structural_denial", empty, strings.Replace(active, "internal-model", "acme", 1), "outcome=preparation_failed", 0},
+		{"active_to_empty", active, empty, "route=native server_policy_revision=33 effective_rule_count=0", 0, false},
+		{"empty_to_active", empty, active, "route=rest_put server_policy_revision=22 effective_rule_count=1", 0, false},
+		{"final_load_failure", active, "", "outcome=preparation_failed", 403, false},
+		{"final_structural_denial", empty, strings.Replace(active, "internal-model", "acme", 1), "outcome=preparation_failed", 0, false},
+		{"auto_empty_to_active", empty, active, "route=native server_policy_revision=22 effective_rule_count=1", 0, true},
+		{"auto_final_structural_denial", empty, strings.Replace(active, "internal-model", "acme", 1), "outcome=preparation_failed", 0, true},
+		{"auto_final_load_failure", active, "", "outcome=preparation_failed", 403, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			policies := rewriteTestServerPolicySequence(t, func(n int64) (string, int) {
@@ -151,6 +155,13 @@ func TestGHMergeDiagnosticsFinalPolicy(t *testing.T) {
 			t.Setenv("OCTOPOOL_TEST_REWRITE_STDOUT", mergeHeaderFrame(403, 4958))
 			var stdout, stderr bytes.Buffer
 			args := mergeDiagnosticArgs()
+			if test.auto {
+				bodyFile := filepath.Join(t.TempDir(), "body.txt")
+				if err := os.WriteFile(bodyFile, []byte("internal-model body"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, "--auto", "--subject=internal-model title", "--body-file="+bodyFile)
+			}
 			original := slices.Clone(args)
 			err := runGH(t.Context(), args, &stdout, &stderr)
 			line := mergeDiagnosticLine(t, stderr.String())
@@ -173,7 +184,16 @@ func TestGHMergeDiagnosticsFinalPolicy(t *testing.T) {
 				t.Fatal("child outcome changed")
 			}
 			capture := readRewriteCapture(t, capturePath)
-			if test.final == empty {
+			if test.auto {
+				if !slices.Contains(capture.Args, "--subject=public title") || !slices.Contains(capture.Args, "--auto") || len(capture.Files) != 1 || stdout.String() != mergeHeaderFrame(403, 4958) || strings.Contains(line, "http_status=") {
+					t.Fatal("auto-merge did not apply final policy or preserve native output")
+				}
+				for _, body := range capture.Files {
+					if body != "public body" {
+						t.Fatal("auto-merge body missed final policy")
+					}
+				}
+			} else if test.final == empty {
 				if !slices.Equal(capture.Args, args) || stdout.String() != mergeHeaderFrame(403, 4958) || strings.Contains(line, "http_status=") {
 					t.Fatal("native stream intercepted or guessed HTTP attribution")
 				}

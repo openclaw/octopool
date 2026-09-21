@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Allow protected `gh pr merge --auto --squash` with a full submission head SHA and explicitly sanitized subject/body, retaining private body snapshots, final policy checks, native exit codes, and distinguishable pre-dispatch diagnostics.
+
 ## 0.7.0 - 2026-09-21
 
 ### Features

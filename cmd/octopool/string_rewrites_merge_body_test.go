@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -25,6 +26,7 @@ func TestStringRewritePinnedMergeBody(t *testing.T) {
 		subject string
 	}{
 		{"long file", []string{"--body-file", file}, ""},
+		{"auto disabled", []string{"--body-file", file, "--auto=false"}, ""},
 		{"long equals", []string{"--body-file=" + file}, ""},
 		{"short file", []string{"-F", file}, ""},
 		{"short attached", []string{"-F" + file}, ""},
@@ -79,6 +81,105 @@ func TestStringRewritePinnedMergeBody(t *testing.T) {
 						t.Fatal("source body file was modified")
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestStringRewriteAutoMerge(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	sha := strings.Repeat("a", 40)
+	body := "Reviewed internal-model fix\n\nCo-authored-by: Contributor <contributor@example.com>\n"
+	file := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, title, body string
+		flags             []string
+	}{
+		{"file", "fix: public", body, []string{"--subject=fix: internal-model", "--body-file=" + file}},
+		{"stdin", "fix: public", body, []string{"-tfix: internal-model", "-F-"}},
+		{"empty body", "fix: safe", "", []string{"--subject=fix: safe", "--body-file=-"}},
+		{"literal subject", "@public $(public) `public`", body, []string{"-t@internal-model $(internal-model) `internal-model`", "-F-"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, exit := range []string{"0", "19"} {
+				t.Run("child exit "+exit, func(t *testing.T) {
+					capturePath := captureRewriteGH(t)
+					t.Setenv("OCTOPOOL_TEST_REWRITE_EXIT", exit)
+					t.Setenv("OCTOPOOL_DIAGNOSTICS", "1")
+					t.Setenv("GH_HOST", "synthetic.example")
+					t.Setenv("GH_REPO", "other/repo")
+					args := append([]string{"pr", "merge", "123", "--repo=https://github.com/acme/repo", "--squash", "--match-head-commit=" + sha, "--auto"}, test.flags...)
+					var stderr bytes.Buffer
+					err := execRealGHWithStdin(t.Context(), args, strings.NewReader(test.body), io.Discard, &stderr)
+					if exit == "0" && err != nil {
+						t.Fatal(err)
+					}
+					if exit != "0" {
+						var exitErr exitCodeError
+						if !errors.As(err, &exitErr) || exitErr.Code != 19 {
+							t.Fatalf("child exit was not preserved: %v", err)
+						}
+					}
+					capture := readRewriteCapture(t, capturePath)
+					if capture.Stdin != "" || len(capture.Files) != 1 || capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != "" {
+						t.Fatal("auto-merge did not isolate its body, stdin, and host")
+					}
+					for path, content := range capture.Files {
+						want := []string{"pr", "merge", "123", "--repo=acme/repo", "--squash", "--auto", "--match-head-commit=" + sha, "--subject=" + test.title, "--body-file=" + path}
+						if !slices.Equal(capture.Args, want) || content != strings.ReplaceAll(test.body, "internal-model", "public") {
+							t.Fatalf("auto-merge did not preserve sanitized explicit metadata and head: %+v", capture)
+						}
+						if path == file || capture.Modes[path] != 0600 || capture.DirectoryModes[path] != 0700 {
+							t.Fatal("auto-merge body was not privately snapshotted")
+						}
+						if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+							t.Fatal("snapshot survived child completion")
+						}
+					}
+					line := mergeDiagnosticLine(t, stderr.String())
+					if !strings.Contains(line, "child_started=true") || !strings.Contains(line, "route=native") || !strings.Contains(line, "exit_code="+exit) {
+						t.Fatalf("dispatched auto-merge outcome was lost: %s", line)
+					}
+					got, err := os.ReadFile(file)
+					if err != nil || string(got) != body {
+						t.Fatal("source body file was modified")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestStringRewriteAutoMergeRequiresMetadata(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	for _, test := range []struct {
+		name  string
+		flags []string
+	}{
+		{"missing subject", []string{"--body-file=-"}},
+		{"missing body", []string{"--subject=safe"}},
+		{"empty subject", []string{"--subject=", "--body-file=-"}},
+		{"blank subject", []string{"--subject= ", "--body-file=-"}},
+		{"empty body path", []string{"--subject=safe", "--body-file="}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capturePath := captureRewriteGH(t)
+			t.Setenv("OCTOPOOL_DIAGNOSTICS", "1")
+			args := append(mergeDiagnosticArgs(), "--auto")
+			args = append(args, test.flags...)
+			var stderr bytes.Buffer
+			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader("safe"), io.Discard, &stderr); err != errRewriteBlocked {
+				t.Fatalf("implicit publication metadata was not rejected: %v", err)
+			}
+			if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+				t.Fatal("rejected auto-merge spawned a child")
+			}
+			line := mergeDiagnosticLine(t, stderr.String())
+			if !strings.Contains(line, "child_started=false outcome=preparation_failed") || !strings.Contains(line, "headers=unavailable") || strings.Contains(line, "exit_code=") {
+				t.Fatalf("guard refusal was not distinguished from child failure: %s", line)
 			}
 		})
 	}
@@ -159,7 +260,6 @@ func TestStringRewritePinnedMergeBodyRejectsUnsafeRequests(t *testing.T) {
 		{"short head", "short", nil},
 		{"nonhex head", strings.Repeat("g", 40), nil},
 		{"missing head", "", nil},
-		{"auto", sha, []string{"--auto"}},
 		{"admin", sha, []string{"--admin"}},
 		{"merge method", sha, []string{"--merge"}},
 		{"rebase method", sha, []string{"--rebase"}},
@@ -174,7 +274,8 @@ func TestStringRewritePinnedMergeBodyRejectsUnsafeRequests(t *testing.T) {
 		{"inline body", sha, []string{"--body", "safe"}},
 		{"duplicate body aliases", sha, []string{"-F", file}},
 		{"conflicting squash", sha, []string{"--squash=false"}},
-		{"auto with subject", sha, []string{"--subject=safe", "--auto"}},
+		{"auto admin with subject", sha, []string{"--subject=safe", "--auto", "--admin"}},
+		{"duplicate auto", sha, []string{"--subject=safe", "--auto", "--auto=false"}},
 		{"admin with subject", sha, []string{"-tsafe", "--admin"}},
 		{"other method with subject", sha, []string{"-tsafe", "--rebase"}},
 		{"duplicate repo with subject", sha, []string{"-tsafe", "-Rother/repo"}},
@@ -228,6 +329,10 @@ func TestStringRewriteMergeSubjectValidation(t *testing.T) {
 		rules   []stringRewriteRule
 	}{
 		{name: "invalid UTF-8", subject: string([]byte{255})},
+		{name: "invalid UTF-8 body", subject: "safe", body: string([]byte{255})},
+		{name: "oversized body", subject: "safe", body: strings.Repeat("x", rewriteMaxContent+1)},
+		{name: "body policy material", subject: "safe", body: `{"pattern":"internal-model","replacement":"public"}`},
+		{name: "subject rewritten empty", subject: "private", rules: []stringRewriteRule{{"private", ""}}},
 		{name: "oversized", subject: strings.Repeat("x", rewriteMaxContent+1)},
 		{name: "combined title and body budget", subject: strings.Repeat("x", rewriteMaxContent/2), body: strings.Repeat("y", rewriteMaxContent/2)},
 		{name: "policy material", subject: `{"pattern":"internal-model","replacement":"public"}`},
@@ -243,17 +348,25 @@ func TestStringRewriteMergeSubjectValidation(t *testing.T) {
 				rules = []stringRewriteRule{{"internal-model", "public"}}
 			}
 			policy := testRewritePolicy(t, rules...)
-			prepared := &rewritePreparation{ctx: t.Context()}
-			defer prepared.cleanup()
-			args := []string{"pr", "merge", "123", "--repo=acme/repo", "--squash", "--match-head-commit=" + strings.Repeat("a", 40), "--subject=" + test.subject}
-			if test.body != "" {
-				args = append(args, "--body-file=-")
-			}
-			if err := prepareRewritePRLifecycle(policy, args, strings.NewReader(test.body), prepared); err != errRewriteBlocked {
-				t.Fatalf("unsafe subject merge was not blocked: %v", err)
-			}
-			if len(prepared.args) != 0 || prepared.directory != "" {
-				t.Fatal("unsafe subject merge produced a dispatch snapshot")
+			for _, auto := range []bool{false, true} {
+				if !auto && test.name == "subject rewritten empty" {
+					continue
+				}
+				prepared := &rewritePreparation{ctx: t.Context()}
+				defer prepared.cleanup()
+				args := []string{"pr", "merge", "123", "--repo=acme/repo", "--squash", "--match-head-commit=" + strings.Repeat("a", 40), "--subject=" + test.subject}
+				if test.body != "" || auto {
+					args = append(args, "--body-file=-")
+				}
+				if auto {
+					args = append(args, "--auto")
+				}
+				if err := prepareRewritePRLifecycle(policy, args, strings.NewReader(test.body), prepared); err != errRewriteBlocked {
+					t.Fatalf("unsafe subject merge was not blocked: %v", err)
+				}
+				if len(prepared.args) != 0 || prepared.directory != "" {
+					t.Fatal("unsafe subject merge produced a dispatch snapshot")
+				}
 			}
 		})
 	}
