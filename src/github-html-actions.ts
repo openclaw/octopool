@@ -223,6 +223,7 @@ export function parseActionsRunHTML(
     ),
   );
   const trigger = /^Triggered via\s+(.+)$/.exec(actionsText(adjacentNode(timestamp, -1)));
+  const event = actionsRunEvent(elements, runPath, [summary, header, navigation], trigger?.[1]);
   const createdAt = attribute(timestamp, "datetime");
   const sha = actionsCommitSHA(contents, owner, repo)?.sha;
   const branch = actionsRunBranch(contents, owner, repo, true);
@@ -231,7 +232,7 @@ export function parseActionsRunHTML(
     workflow === undefined ||
     state === undefined ||
     runNumber === undefined ||
-    trigger === null ||
+    event === undefined ||
     createdAt === undefined ||
     sha === undefined ||
     branch === undefined
@@ -254,14 +255,115 @@ export function parseActionsRunHTML(
     html_url: `https://github.com/${owner}/${repo}/actions/runs/${id}`,
     head_branch: branch.name ?? null,
     head_sha: sha,
-    event: trigger[1]!
-      .trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, "_"),
+    event,
     created_at: createdAt,
     updated_at: addDuration(createdAt, duration) ?? createdAt,
     run_attempt: runAttempt,
   };
+}
+
+// Canonical event names documented by GitHub; unknown graph values fall back to REST.
+const ACTIONS_EVENTS = new Set([
+  "branch_protection_rule",
+  "check_run",
+  "check_suite",
+  "create",
+  "delete",
+  "deployment",
+  "deployment_status",
+  "discussion",
+  "discussion_comment",
+  "fork",
+  "gollum",
+  "image_version",
+  "issue_comment",
+  "issues",
+  "label",
+  "merge_group",
+  "milestone",
+  "page_build",
+  "public",
+  "pull_request",
+  "pull_request_review",
+  "pull_request_review_comment",
+  "pull_request_target",
+  "push",
+  "registry_package",
+  "release",
+  "repository_dispatch",
+  "schedule",
+  "status",
+  "watch",
+  "workflow_call",
+  "workflow_dispatch",
+  "workflow_run",
+]);
+
+const ACTIONS_TRIGGER_PROSE = new Map([
+  ["push", "push"],
+  ["pull request", "pull_request"],
+]);
+
+function actionsRunEvent(
+  elements: ActionsElement[],
+  runPath: string,
+  regions: ActionsElement[],
+  prose: string | undefined,
+): string | undefined {
+  const proseEvent = ACTIONS_TRIGGER_PROSE.get(prose?.trim().toLowerCase() ?? "");
+  const graphs = elements.filter(
+    (element) =>
+      element.tagName === "div" && attribute(element, "aria-label") === "Workflow run graph",
+  );
+  if (graphs.length === 0) return proseEvent;
+  const graph = onlyElement(graphs);
+  if (
+    graph === undefined ||
+    attribute(graph, "data-url") !== `${runPath}/graph_partial` ||
+    !disjointRegions([...regions, graph])
+  )
+    return undefined;
+  const contents = ownedElements(graph);
+  if (contents === undefined) return undefined;
+  const workflow = onlyElement(
+    contents.filter(
+      (element) => isHTMLAnchor(element) && attribute(element, "href") === `${runPath}/workflow`,
+    ),
+  );
+  const heading = workflow?.parentNode;
+  if (
+    heading === null ||
+    heading === undefined ||
+    !("tagName" in heading) ||
+    heading.tagName !== "h2"
+  )
+    return undefined;
+  const label = adjacentNode(heading, 1);
+  if (
+    label === undefined ||
+    !("tagName" in label) ||
+    label.tagName !== "div" ||
+    !hasClass(label, "text-small") ||
+    !hasClass(label, "color-fg-muted")
+  )
+    return undefined;
+  const siblings = heading.parentNode?.childNodes.filter(
+    (node) => node.nodeName !== "#comment" && !("value" in node && node.value.trim() === ""),
+  );
+  if (
+    siblings?.length !== 2 ||
+    siblings[0] !== heading ||
+    siblings[1] !== label ||
+    label.childNodes.some((node) => node.nodeName !== "#text")
+  )
+    return undefined;
+  // This run-owned graph label is exact; summary prose such as "issue" is not.
+  const event = /^on: ([a-z_]+)$/.exec(actionsText(label))?.[1];
+  return event !== undefined &&
+    ACTIONS_EVENTS.has(event) &&
+    (proseEvent === undefined || proseEvent === event)
+    ? event
+    : undefined;
 }
 
 export function parseCommitPatchSHA(patch: string, abbreviation: string): string | undefined {

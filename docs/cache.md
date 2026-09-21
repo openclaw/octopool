@@ -287,8 +287,14 @@ to its workflow metadata region. The older sibling-timestamp forms remain suppor
 `#N: Commit <owned commit link> pushed`; commit-link text cannot supply an event.
 Current cards put trigger prose in a separate span and repeat timestamps for responsive
 layouts. The copies must agree; manual dispatch and commit-push prose are parsed there,
-and ambiguous event prose is hydrated from the owning run summary. Missing, conflicting,
-or unknown ownership falls back to REST.
+and ambiguous event prose is hydrated from the owning run page. Its disjoint `Workflow run
+graph` region supplies an exact `on: <event>` label beside the workflow link; the graph's
+`graph_partial` URL and workflow link must both belong to the requested run, and the event
+must be a documented GitHub event name. When the graph is absent, only confirmed summary
+prose `push` and `pull request` maps to `push` and `pull_request`. Ambiguous prose such as
+`issue` or `issue comment` is not canonical event evidence. Missing, conflicting, or
+unknown ownership falls back to REST. A list containing even one hydrated run whose event
+remains ambiguous falls back to REST as a whole, preserving exactness over page coverage.
 This deliberately bounded markup contract can cost more API reads when GitHub changes
 its layout. Valid known cards retain the existing wire fields, filters, and state-based
 TTLs; fresh job/attempt metadata still independently governs terminal caching.

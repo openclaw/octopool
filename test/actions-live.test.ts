@@ -12,29 +12,35 @@ it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
     const owner = "openclaw";
     const repo = "openclaw";
     const id = 35562572332;
+    const pushRunID = 35563305550;
     const root = `https://github.com/${owner}/${repo}`;
     const pages = await Promise.all(
-      [`${root}/actions/runs/${id}`, `${root}/actions`, `${root}/actions/workflows/ci.yml`].map(
-        async (url) => {
-          const response = await fetch(url, {
-            headers: { "user-agent": "octopool", accept: "text/html" },
-            signal: AbortSignal.timeout(30000),
-          });
-          expect(response.status).toBe(200);
-          return response.text();
-        },
-      ),
+      [
+        `${root}/actions/runs/${pushRunID}`,
+        `${root}/actions`,
+        `${root}/actions/workflows/ci.yml`,
+        `${root}/actions/runs/${id}`,
+      ].map(async (url) => {
+        const response = await fetch(url, {
+          headers: { "user-agent": "octopool", accept: "text/html" },
+          signal: AbortSignal.timeout(30000),
+        });
+        expect(response.status).toBe(200);
+        return response.text();
+      }),
     );
-    const run = parseActionsRunHTML(pages[0]!, owner, repo, id);
+    const run = parseActionsRunHTML(pages[0]!, owner, repo, pushRunID);
     expect(run).toMatchObject({
-      id,
+      id: pushRunID,
       run_attempt: expect.any(Number),
       status: expect.any(String),
       name: expect.any(String),
       head_sha: expect.stringMatching(/^[a-f0-9]{40}$/),
-      event: expect.any(String),
+      event: "push",
     });
-    const lists = pages.slice(1).map((html) => parseActionsRunListHTML(html, owner, repo));
+    const issueRun = parseActionsRunHTML(pages[3]!, owner, repo, id);
+    expect(issueRun).toMatchObject({ id, event: "issue_comment" });
+    const lists = pages.slice(1, 3).map((html) => parseActionsRunListHTML(html, owner, repo));
     for (const list of lists) {
       expect(list).toBeDefined();
       expect(list?.total_count).toBeGreaterThan(0);
@@ -117,6 +123,7 @@ it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
       JSON.stringify(
         {
           run_view: run,
+          canonical_issue_run: issueRun,
           run_list: {
             total_count: lists[0]!.total_count,
             capped: lists[0]!.capped,

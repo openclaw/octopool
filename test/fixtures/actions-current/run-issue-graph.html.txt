@@ -1,0 +1,23 @@
+<div role="region" aria-label="Workflow run graph" class="js-updatable-content js-socket-channel"
+
+data-url="/openclaw/openclaw/actions/runs/35562572332/graph_partial"
+>
+<action-graph data-hpc>
+<div
+class="actions-fullwidth-module WorkflowGraph color-shadow-small tmp-mb-3 border rounded color-bg-inset overflow-hidden position-relative p-2 border-top-0 border-md-top"
+
+tabindex="0"
+data-target="action-graph.canvas"
+
+>
+<div class="d-flex flex-items-center flex-justify-between position-relative p-md-1 pb-md-2">
+<div class="p-2 color-bg-inset rounded position-relative">
+<h2 class="d-flex flex-items-center h4">
+<a class="Link--primary no-underline" href="/openclaw/openclaw/actions/runs/35562572332/workflow">security-review.yml</a>
+</h2>
+<div class="text-small color-fg-muted">on: issue_comment</div>
+</div>
+</div>
+</div>
+</action-graph>
+</div>

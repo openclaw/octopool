@@ -151,8 +151,15 @@ not an exact repository/workflow total. Such pages must contain at least the req
 number of cards (up to 25); uncapped counts remain exact. Human run lists render the
 returned rows without using the total. Filtered cache reuse still requires enough matching
 rows, and a short larger cached page still needs exact completion evidence. Ambiguous
-event prose and missing commit SHAs are hydrated from each run's owned summary; missing
-or conflicting evidence still falls back to REST.
+event prose and missing commit SHAs are hydrated from each run's owned page. Canonical
+events come from the `on: <event>` label beside the workflow link in the disjoint
+`Workflow run graph` region, with both its `graph_partial` URL and workflow link bound
+to the requested run. Only [documented event names](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows)
+are accepted. Without a graph, the confirmed summary-prose allowlist is only `push` →
+`push` and `pull request` → `pull_request`. Prose such as `issue`, `issues`, and
+`issue comment` is never mechanically converted into an event. Missing, malformed,
+or conflicting evidence falls back to REST. If even one hydrated run still has an
+ambiguous event, the entire list falls back to REST; partial lists are not returned.
 Unfiltered superset projection preserves the upstream count/lower bound; filtered
 projections report the number of captured matches before applying the requested limit.
 

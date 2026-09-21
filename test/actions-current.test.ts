@@ -22,7 +22,10 @@ const fixture = (name: string) =>
   readFileSync(new URL(`./fixtures/actions-current/${name}`, import.meta.url), "utf8");
 const runID = 35562572332;
 const path = `/repos/openclaw/openclaw/actions/runs/${runID}`;
-const runHTML = fixture("run.html.txt");
+const ambiguousRunHTML = fixture("run.html.txt");
+const runHTML = fixture("run-push.html.txt");
+const pushRunID = 35563305550;
+const issueGraphHTML = fixture("run-issue-graph.html.txt");
 const skippedHTML = fixture("skipped-job.html.txt");
 const firstBatch = JSON.parse(fixture("job-batch-0.json"));
 const lastBatch = JSON.parse(fixture("job-batch-1.json"));
@@ -99,7 +102,7 @@ describe("current GitHub Actions markup", () => {
         'class="markdown-title"',
         `class="markdown-title ${controlClass}" class="conflicting"`,
       );
-      expect(parseActionsRunHTML(html, "openclaw", "openclaw", runID)).toBeUndefined();
+      expect(parseActionsRunHTML(html, "openclaw", "openclaw", pushRunID)).toBeUndefined();
     },
   );
 
@@ -336,22 +339,141 @@ describe("current GitHub Actions markup", () => {
   );
 
   it("reads the run's retained header, summary and attempt through unrelated malformed dialog controls", () => {
-    expect(parseActionsRunHTML(runHTML, "openclaw", "openclaw", runID)).toMatchObject({
-      id: runID,
-      name: "Security Review",
-      run_number: 76278,
+    expect(parseActionsRunHTML(runHTML, "openclaw", "openclaw", pushRunID)).toMatchObject({
+      id: pushRunID,
+      name: "CI",
+      run_number: 482552,
       status: "completed",
-      conclusion: "skipped",
-      event: "issue",
+      conclusion: "cancelled",
+      event: "push",
       run_attempt: 1,
-      head_sha: "f76d38a4ac5e5f4e6c5a5320436db169e33d5c8a",
+      head_sha: "65485f6adee955abe60d18ec3277ff9bd77e1309",
     });
+  });
+
+  it.each([
+    "issue",
+    "issues",
+    "issue comment",
+    "discussion",
+    "discussion comment",
+    "check run",
+    "check suite",
+    "status",
+    "watch",
+    "fork",
+    "gollum",
+    "label",
+    "milestone",
+    "page build",
+    "project",
+    "project card",
+    "project column",
+    "public",
+    "registry package",
+    "dynamic",
+    "unknown event",
+    "pull-request",
+    "pull_request",
+    "pull request target",
+    "schedule",
+    "scheduled",
+    "workflow dispatch",
+    "workflow run",
+    "workflow call",
+    "repository dispatch",
+    "release",
+    "merge group",
+    "deployment",
+    "deployment status",
+    "create",
+    "delete",
+  ])("rejects unproven summary prose without canonical graph evidence: %s", (prose) => {
+    const html = ambiguousRunHTML.replace("Triggered via issue", `Triggered via ${prose}`);
+    expect(parseActionsRunHTML(html, "openclaw", "openclaw", runID)).toBeUndefined();
+  });
+
+  it.each([
+    ["push", "push"],
+    ["pull request", "pull_request"],
+  ])("accepts confirmed unambiguous prose without a graph: %s", (prose, event) => {
+    const html = ambiguousRunHTML.replace("Triggered via issue", `Triggered via ${prose}`);
+    expect(parseActionsRunHTML(html, "openclaw", "openclaw", runID)).toMatchObject({ event });
+  });
+
+  it("uses the run-owned graph's canonical event instead of ambiguous summary prose", () => {
+    expect(
+      parseActionsRunHTML(ambiguousRunHTML + issueGraphHTML, "openclaw", "openclaw", runID),
+    ).toMatchObject({ event: "issue_comment" });
+    expect(parseActionsRunHTML(ambiguousRunHTML, "openclaw", "openclaw", runID)).toBeUndefined();
+  });
+
+  it.each([
+    ["foreign graph", (graph: string) => graph.replace("/graph_partial", "/other_graph_partial")],
+    ["foreign workflow", (graph: string) => graph.replace("/workflow", "/other_workflow")],
+    ["duplicate graph", (graph: string) => graph + graph],
+    ["unknown canonical event", (graph: string) => graph.replace("on: push", "on: issue")],
+    [
+      "duplicate label",
+      (graph: string) =>
+        graph.replace(
+          "on: push</div>",
+          'on: push</div><div class="text-small color-fg-muted">on: issue_comment</div>',
+        ),
+    ],
+    ["nested label markup", (graph: string) => graph.replace("on: push", "<span>on: push</span>")],
+    [
+      "duplicate graph attribute",
+      (graph: string) =>
+        graph.replace(
+          'aria-label="Workflow run graph"',
+          'aria-label="Workflow run graph" aria-label="other"',
+        ),
+    ],
+  ] as const)("rejects %s even when summary prose is otherwise unambiguous", (_name, transform) => {
+    const html = ambiguousRunHTML.replace("Triggered via issue", "Triggered via push");
+    const graph = issueGraphHTML.replace("on: issue_comment", "on: push");
+    expect(parseActionsRunHTML(html + graph, "openclaw", "openclaw", runID)).toMatchObject({
+      event: "push",
+    });
+    expect(
+      parseActionsRunHTML(html + transform(graph), "openclaw", "openclaw", runID),
+    ).toBeUndefined();
+  });
+
+  it("rejects contradictory exact events and overlapping graph ownership", () => {
+    const html = ambiguousRunHTML.replace("Triggered via issue", "Triggered via push");
+    expect(
+      parseActionsRunHTML(html + issueGraphHTML, "openclaw", "openclaw", runID),
+    ).toBeUndefined();
+    const nested = ambiguousRunHTML.replace(
+      "Triggered via issue",
+      `${issueGraphHTML}Triggered via issue`,
+    );
+    expect(parseActionsRunHTML(nested, "openclaw", "openclaw", runID)).toBeUndefined();
+  });
+
+  it("falls back to REST for an ambiguous run and its whole hydrated list", async () => {
+    const upstream = vi.fn(async (url: string) => {
+      if (url.startsWith("https://api.github.com/")) return Response.json({ exact: true });
+      if (url.endsWith("/actions")) return new Response(fixture("list.html.txt"));
+      const id = url.split("/").at(-1)!;
+      return new Response(ambiguousRunHTML.replaceAll(String(runID), id));
+    });
+    vi.stubGlobal("fetch", upstream);
+    expect(await readWeb()).toMatchObject({ backend: "github", body: { exact: true } });
+    expect(await readWeb("/repos/openclaw/openclaw/actions/runs", { per_page: "3" })).toMatchObject(
+      { backend: "github", body: { exact: true } },
+    );
+    expect(
+      upstream.mock.calls.filter(([url]) => url.startsWith("https://api.github.com/")),
+    ).toHaveLength(2);
   });
 
   it.each([
     [
       "conflicting responsive statuses",
-      (html: string) => html.replace('aria-label="skipped: "', 'aria-label="failed: "'),
+      (html: string) => html.replace('aria-label="cancelled: "', 'aria-label="failed: "'),
     ],
     [
       "duplicate header attribute",
@@ -381,19 +503,21 @@ describe("current GitHub Actions markup", () => {
       (html: string) => html.replace("/openclaw/openclaw/commit/", "/elsewhere/repo/commit/"),
     ],
   ] as const)("rejects %s", (_name, transform) => {
-    expect(parseActionsRunHTML(transform(runHTML), "openclaw", "openclaw", runID)).toBeUndefined();
+    expect(
+      parseActionsRunHTML(transform(runHTML), "openclaw", "openclaw", pushRunID),
+    ).toBeUndefined();
   });
 
   it("selects page transport for shaped run views without an API request", async () => {
     const upstream = vi.fn(async (_url: string) => new Response(runHTML));
     vi.stubGlobal("fetch", upstream);
-    expect(await readWeb()).toMatchObject({
+    expect(await readWeb(`/repos/openclaw/openclaw/actions/runs/${pushRunID}`)).toMatchObject({
       backend: "web",
-      body: { id: runID, run_attempt: 1, conclusion: "skipped" },
+      body: { id: pushRunID, run_attempt: 1, conclusion: "cancelled", event: "push" },
     });
     expect(upstream).toHaveBeenCalledOnce();
     expect(upstream.mock.calls[0]?.[0]).toBe(
-      `https://github.com/openclaw/openclaw/actions/runs/${runID}`,
+      `https://github.com/openclaw/openclaw/actions/runs/${pushRunID}`,
     );
   });
 

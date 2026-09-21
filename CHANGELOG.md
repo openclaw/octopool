@@ -13,6 +13,7 @@
 - Reuse the shared one-hour workflow catalogue for PR status-check rollups while keeping checks and runs live; retry missing workflow names once live for rollups and ordinary checks, preserving fresh watch confirmation and `OCTOPOOL_FRESH=1`.
 - Try available no-quota pages before anonymous API revalidation, skip unusable zero-age body-cache reads while retaining validators and fill ownership, and avoid retrying depleted anonymous quota for Actions completion proof; clarify that GitHub REST 304 validations consume quota.
 - Restore token-free page reuse for human Actions run views/lists and watch reads against current GitHub markup, preserve capped list counts as lower bounds, paginate complete job groups, and render skipped jobs without inventing timestamps.
+- Read exact Actions events from the run-owned workflow graph and reject ambiguous trigger prose, falling back to REST for the whole list when any hydrated event remains unproven.
 
 ### Upgrade notes
 
