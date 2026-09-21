@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticateCaller } from "../src/auth";
-import { clearConfigCache } from "../src/config-cache";
+import { clearConfigCache, withConfigCacheScope } from "../src/config-cache";
 import { withGitHubEgress } from "../src/github-egress";
 import { HttpError } from "../src/http";
 
@@ -12,7 +12,7 @@ describe("caller authentication cache", () => {
     vi.restoreAllMocks();
   });
 
-  it("shares a burst's D1 lookup and membership refresh after each request's guard", async () => {
+  it("shares a request's concurrent D1 lookups and membership refreshes after each guard", async () => {
     const fixture = authFixture();
     const gate = Promise.withResolvers<void>();
     const guards = Array.from({ length: 32 }, (_, index) =>
@@ -32,8 +32,8 @@ describe("caller authentication cache", () => {
       return membershipResponse();
     });
     vi.stubGlobal("fetch", upstream);
-    const requests = guards.map((guard) =>
-      authenticateCaller(request(), fixture.env, "pool", guard),
+    const requests = withConfigCacheScope(() =>
+      guards.map((guard) => authenticateCaller(request(), fixture.env, "pool", guard)),
     );
     await vi.waitFor(() => {
       expect(upstream).toHaveBeenCalledTimes(1);

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Keep pending configuration and caller-membership lookups within one Worker request, preventing unrelated policy reads from hanging on abandoned loads while preserving the shared 30-second cache of settled values.
 - Allow protected `gh pr merge --auto --squash` with a full submission head SHA and explicitly sanitized subject/body, retaining private body snapshots, final policy checks, native exit codes, and distinguishable pre-dispatch diagnostics.
 
 ## 0.7.0 - 2026-09-21

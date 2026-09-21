@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 // Process-local TTL cache for hot D1 config lookups: caller auth, pool policy,
 // and identity lists. These rows change only on rare admin action, so a warm
 // isolate can skip one D1 round trip per lookup during request bursts — the
@@ -11,57 +13,75 @@
 const CONFIG_CACHE_TTL_MS = 30_000;
 const MAX_ENTRIES = 256;
 
-type Entry = { expires: number } & ({ value: unknown } | { pending: Promise<unknown> });
+type Entry = { expires: number; value: unknown };
 const store = new Map<string, Entry>();
+let generation = 0;
+type Pending = { expires: number; generation: number; promise: Promise<unknown> };
+const requestLoads = new AsyncLocalStorage<Map<string, Pending>>();
+
+// Each fetch invocation owns its pending loads, including asynchronous children.
+// Callers outside this scope still cache values, but never share pending work.
+export function withConfigCacheScope<T>(run: () => T): T {
+  return requestLoads.run(new Map(), run);
+}
 
 export async function cachedConfigLookup<T>(key: string, load: () => Promise<T>): Promise<T> {
   const now = Date.now();
   const hit = store.get(key);
   if (hit !== undefined && hit.expires > now) {
-    return "pending" in hit ? (hit.pending as Promise<T>) : (hit.value as T);
+    return hit.value as T;
   }
-  if (store.size >= MAX_ENTRIES) {
-    for (const [staleKey, entry] of store) {
-      if (entry.expires <= now) {
-        store.delete(staleKey);
-      }
-    }
-    if (store.size >= MAX_ENTRIES) {
-      store.clear();
-    }
+  const pending = requestLoads.getStore();
+  const existing = pending?.get(key);
+  if (existing !== undefined && existing.expires > now && existing.generation === generation) {
+    return existing.promise as Promise<T>;
   }
-  // Share only fully consumed data, never a Response or another request's I/O
-  // objects. Pending entries use the same bound and deadline as ready values.
-  const entry: Entry = {
+  const entry: Pending = {
     expires: now + CONFIG_CACHE_TTL_MS,
-    pending: Promise.resolve()
+    generation,
+    promise: Promise.resolve()
       .then(load)
-      .then(
-        (value) => {
-          // A clear, expiry, or eviction may have replaced this load meanwhile.
-          if (store.get(key) === entry) {
-            store.set(key, { value, expires: entry.expires });
+      .then((value) => {
+        // Only settled data crosses request contexts. Clears, invalidations,
+        // eviction and another successful load fence late cache publication.
+        const settledAt = Date.now();
+        if (
+          generation === entry.generation &&
+          store.get(key) === hit &&
+          entry.expires > settledAt
+        ) {
+          if (store.size >= MAX_ENTRIES) {
+            for (const [staleKey, cached] of store) {
+              if (cached.expires <= settledAt) store.delete(staleKey);
+            }
+            if (store.size >= MAX_ENTRIES) clearConfigCache();
           }
-          return value;
-        },
-        (error: unknown) => {
-          if (store.get(key) === entry) store.delete(key);
-          throw error;
-        },
-      ),
+          store.set(key, { value, expires: entry.expires });
+        }
+        return value;
+      })
+      .finally(() => {
+        if (pending?.get(key) === entry) pending.delete(key);
+      }),
   };
-  store.set(key, entry);
-  return entry.pending as Promise<T>;
+  // Pending maps are also bounded, without ever affecting another request.
+  if (pending !== undefined && pending.size >= MAX_ENTRIES) pending.clear();
+  pending?.set(key, entry);
+  return entry.promise as Promise<T>;
 }
 
 // Auth can reject a locally valid row after its request-specific checks. Do not
 // evict a newer row if an older in-flight authentication fails after a clear.
 export function invalidateConfigValue(key: string, value: unknown): void {
   const entry = store.get(key);
-  if (entry !== undefined && "value" in entry && entry.value === value) store.delete(key);
+  if (entry !== undefined && entry.value === value) {
+    store.delete(key);
+    generation++;
+  }
 }
 
 // Tests mutate callers/identities/policies mid-run and expect immediate effect.
 export function clearConfigCache(): void {
   store.clear();
+  generation++;
 }

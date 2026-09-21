@@ -1,5 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import worker from "../../src/index";
+import { configCacheLifetimeRequest } from "./config-cache-lifetime-fixture";
+import { withConfigCacheScope } from "../../src/config-cache";
 
 export { PoolCoordinator } from "../../src/pool-coordinator";
 
@@ -8,6 +10,9 @@ export { PoolCoordinator } from "../../src/pool-coordinator";
 export default {
   ...worker,
   async fetch(request: Request, env: Env, native: ExecutionContext): Promise<Response> {
+    if (new URL(request.url).pathname.startsWith("/__test/config-cache/")) {
+      return withConfigCacheScope(() => configCacheLifetimeRequest(request));
+    }
     const protocol = request.headers.get("x-test-identity-protocol");
     if (protocol !== "missing-method" && protocol !== "missing-publication") {
       return worker.fetch(request, env, native);

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cachedConfigLookup, clearConfigCache, invalidateConfigValue } from "../src/config-cache";
+import {
+  cachedConfigLookup,
+  clearConfigCache,
+  invalidateConfigValue,
+  withConfigCacheScope,
+} from "../src/config-cache";
 
 describe("configuration cache", () => {
   beforeEach(clearConfigCache);
@@ -8,10 +13,75 @@ describe("configuration cache", () => {
     vi.restoreAllMocks();
   });
 
-  it("coalesces concurrent cold loads without joining unrelated keys", async () => {
+  it("runs its own loader when another request has an unresolved lookup", async () => {
+    void cachedConfigLookup("policy:abandoned", () => new Promise<string>(() => {}));
+    const load = vi.fn(async () => "independent");
+    const follower = cachedConfigLookup("policy:abandoned", load);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(1);
+    await expect(follower).resolves.toBe("independent");
+  });
+
+  it("isolates live request scopes and keeps the first settled value when a peer finishes late", async () => {
+    const gate = Promise.withResolvers<string>();
+    const old = withConfigCacheScope(() =>
+      cachedConfigLookup("policy:fixture", () => gate.promise),
+    );
+    const load = vi.fn(async () => "independent");
+    await expect(
+      withConfigCacheScope(() => cachedConfigLookup("policy:fixture", load)),
+    ).resolves.toBe("independent");
+    gate.resolve("old");
+    await expect(old).resolves.toBe("old");
+    await expect(cachedConfigLookup("policy:fixture", load)).resolves.toBe("independent");
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not republish an invalidated value from an older concurrent load", async () => {
+    const gate = Promise.withResolvers<object>();
+    const old = cachedConfigLookup("caller:fixture", () => gate.promise);
+    const rejected = await cachedConfigLookup("caller:fixture", async () => ({}));
+    invalidateConfigValue("caller:fixture", rejected);
+    gate.resolve({ stale: true });
+    await old;
+    const load = vi.fn(async () => ({ repaired: true }));
+    await expect(cachedConfigLookup("caller:fixture", load)).resolves.toEqual({ repaired: true });
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds settled values and fences pending loads across capacity eviction", async () => {
+    const gate = Promise.withResolvers<string>();
+    const old = cachedConfigLookup("policy:pending", () => gate.promise);
+    for (let index = 0; index < 257; index++) {
+      await cachedConfigLookup(`policy:${index}`, async () => "ready");
+    }
+    gate.resolve("old");
+    await old;
+    const load = vi.fn(async () => "reloaded");
+    await expect(cachedConfigLookup("policy:0", load)).resolves.toBe("reloaded");
+    await expect(cachedConfigLookup("policy:pending", load)).resolves.toBe("reloaded");
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("measures TTL from load start and never caches an already expired completion", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+    const gate = Promise.withResolvers<string>();
+    const old = cachedConfigLookup("policy:fixture", () => gate.promise);
+    clock.mockReturnValue(30_000);
+    gate.resolve("expired");
+    await expect(old).resolves.toBe("expired");
+    const load = vi.fn(async () => "fresh");
+    await expect(cachedConfigLookup("policy:fixture", load)).resolves.toBe("fresh");
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces concurrent cold loads within one request without joining unrelated keys", async () => {
     const gate = Promise.withResolvers<string>();
     const load = vi.fn(() => gate.promise);
-    const requests = Array.from({ length: 32 }, () => cachedConfigLookup("policy:fixture", load));
+    const requests = withConfigCacheScope(() =>
+      Array.from({ length: 32 }, () => cachedConfigLookup("policy:fixture", load)),
+    );
     await expect(cachedConfigLookup("policy:other", async () => "other")).resolves.toBe("other");
     expect(load).toHaveBeenCalledTimes(1);
     gate.resolve("ready");
@@ -23,7 +93,9 @@ describe("configuration cache", () => {
   it("retries a shared rejected load without retaining the failure", async () => {
     const gate = Promise.withResolvers<string>();
     const load = vi.fn(() => gate.promise);
-    const requests = Array.from({ length: 32 }, () => cachedConfigLookup("policy:fixture", load));
+    const requests = withConfigCacheScope(() =>
+      Array.from({ length: 32 }, () => cachedConfigLookup("policy:fixture", load)),
+    );
     const settled = Promise.allSettled(requests);
     const failure = new Error("unavailable");
     gate.reject(failure);

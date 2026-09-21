@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearConfigCache } from "../src/config-cache";
+import { clearConfigCache, withConfigCacheScope } from "../src/config-cache";
 import { loadIdentities, loadPoolPolicy, pruneOldAuditEvents } from "../src/db";
 import { restrictivePolicy } from "./fixtures/stored-policy";
 
@@ -65,6 +65,37 @@ describe("stored pool policy loading", () => {
 });
 
 describe("identity loading", () => {
+  it("bypasses pending and settled config values for authoritative fresh reads", async () => {
+    clearConfigCache();
+    const gate = Promise.withResolvers<{ results: never[] }>();
+    const all = vi.fn().mockReturnValueOnce(gate.promise).mockResolvedValue({ results: [] });
+    const database = env(vi.fn(() => ({ bind: () => ({ all }) })));
+    const route = {
+      kind: "rate_limit",
+      publicOnly: false,
+      resource: "core",
+      routeKey: "GET /rate_limit",
+      cacheable: false,
+      largePayload: false,
+      logs: false,
+    } as const;
+    await withConfigCacheScope(async () => {
+      const pending = loadIdentities(database, "fresh-fixture", route);
+      await Promise.resolve();
+      await expect(
+        loadIdentities(database, "fresh-fixture", route, { fresh: true }),
+      ).resolves.toEqual([]);
+      expect(all).toHaveBeenCalledTimes(2);
+      gate.resolve({ results: [] });
+      await pending;
+      await loadIdentities(database, "fresh-fixture", route);
+      expect(all).toHaveBeenCalledTimes(2);
+      await loadIdentities(database, "fresh-fixture", route, { fresh: true });
+      expect(all).toHaveBeenCalledTimes(3);
+    });
+    clearConfigCache();
+  });
+
   it("uses explicitly broad public PAT identities for public-only routes", async () => {
     const prepare = vi.fn(() => ({
       bind: vi.fn(() => ({

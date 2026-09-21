@@ -9,6 +9,23 @@ Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
 `src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
 `0002`/`0003`/`0006`/`0011`/`0013`/`0020`.
 
+## Configuration lookups
+
+Caller authentication and membership results, pool policies, and identity lists share a
+bounded, 256-entry isolate cache of settled values. Entries expire 30 seconds after their
+load starts; a slow load never extends that deadline. Revoked caller tokens, retired
+identities, and pool policy edits may therefore take up to 30 seconds to reach a warm
+isolate. Authoritative identity rechecks use fresh D1 reads and bypass both settled and
+pending lookups. String-rewrite policy itself always reads the D1 primary and is not
+stored in this cache; its caller authentication still uses the configuration cache.
+
+Identical concurrent loads coalesce only within one Worker request, using an asynchronous
+context created at the fetch boundary. Different requests load cold entries independently
+and reuse successful values once available. No request waits on another request's pending
+promise: that request may finish or be canceled before its load settles. Failed loads are
+not cached, and clearing or invalidating a value prevents older pending loads from
+repopulating it. This keeps the hot-cache D1 savings without coupling request lifetimes.
+
 ## Read-through edge + D1 cache
 
 On a cacheable route the relay computes a stable cache key, checks Cloudflare's

@@ -4,7 +4,7 @@ import { clearConfigCache } from "../../src/config-cache";
 import { CALLER_TOKEN, orgMembershipResponse, POOL, seedPool } from "./harness";
 import { ownedWork } from "./owned-work";
 
-it("shares membership data across native request contexts without sharing I/O objects", async () => {
+it("loads membership independently across native requests and then reuses settled data", async () => {
   await seedPool();
   await env.DB.prepare(
     "UPDATE callers SET org_identity_verified_at = '2000-01-01' WHERE id = 'caller'",
@@ -28,10 +28,16 @@ it("shares membership data across native request contexts without sharing I/O ob
       })(),
     ),
   );
-  await vi.waitFor(() => expect(upstream).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(upstream).toHaveBeenCalledTimes(32));
   gate.release();
   expect(await Promise.all(requests)).toEqual(Array(32).fill(200));
-  expect(upstream).toHaveBeenCalledTimes(1);
+  expect(upstream).toHaveBeenCalledTimes(32);
+  const warm = await worker.fetch(`https://octopool.dev/v1/pools/${POOL}/health`, {
+    headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+  });
+  expect(warm.status).toBe(200);
+  await warm.arrayBuffer();
+  expect(upstream).toHaveBeenCalledTimes(32);
   const proof = await env.DB.prepare(
     "SELECT org_identity_verified_at FROM callers WHERE id = 'caller'",
   ).first<{ org_identity_verified_at: string }>();

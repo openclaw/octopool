@@ -4,6 +4,7 @@ import { PoolCoordinator } from "./pool-coordinator";
 import { routeRequest } from "./router";
 import { httpsRedirect, secureResponse } from "./security";
 import { shouldUseWebError, webErrorResponse } from "./web-error";
+import { withConfigCacheScope } from "./config-cache";
 
 export { PoolCoordinator };
 
@@ -16,7 +17,10 @@ export default {
       return redirect;
     }
     try {
-      return secureResponse(request, await routeRequest(request, env, ctx, requestId));
+      return secureResponse(
+        request,
+        await withConfigCacheScope(() => routeRequest(request, env, ctx, requestId)),
+      );
     } catch (error) {
       logExpectedWorkerError(request, requestId, error, started);
       logUnexpectedWorkerError(request, requestId, error);
