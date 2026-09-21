@@ -15,6 +15,12 @@ const manualID = 35575007986;
 const manual = fixture("manual-queued");
 const parsedManualSHA = /\/commit\/([a-f0-9]{40})/.exec(manual)![1]!;
 const runPage = (id: number) => manual.replaceAll(String(manualID), String(id));
+const listPath = "/openclaw/openclaw/actions";
+function githubPagePath(input: string): string {
+  const url = new URL(input);
+  expect(url.origin).toBe("https://github.com");
+  return url.pathname;
+}
 const listPage = (count: number, complete = 0) =>
   `<strong>${count} workflow runs</strong>` +
   Array.from({ length: count }, (_, index) => {
@@ -142,12 +148,12 @@ describe("Actions list hydration", () => {
   );
 
   it.each([8, 9])("bounds hydration at eight cards: %i", async (count) => {
-    const upstream = vi.fn(
-      async (url: string) =>
-        new Response(
-          url.endsWith("/actions") ? listPage(count) : runPage(Number(url.split("/").at(-1))),
-        ),
-    );
+    const upstream = vi.fn(async (url: string) => {
+      const path = githubPagePath(url);
+      return new Response(
+        path === listPath ? listPage(count) : runPage(Number(path.split("/").at(-1))),
+      );
+    });
     vi.stubGlobal("fetch", upstream);
     const result = await readList();
     if (count === 8) {
@@ -167,12 +173,12 @@ describe("Actions list hydration", () => {
   });
 
   it("counts only incomplete cards, preserving a full 25-run result", async () => {
-    const upstream = vi.fn(
-      async (url: string) =>
-        new Response(
-          url.endsWith("/actions") ? listPage(25, 17) : runPage(Number(url.split("/").at(-1))),
-        ),
-    );
+    const upstream = vi.fn(async (url: string) => {
+      const path = githubPagePath(url);
+      return new Response(
+        path === listPath ? listPage(25, 17) : runPage(Number(path.split("/").at(-1))),
+      );
+    });
     vi.stubGlobal("fetch", upstream);
     const result = await readList();
     expect(result?.body).toHaveProperty("workflow_runs.length", 25);
@@ -182,10 +188,16 @@ describe("Actions list hydration", () => {
   it("aborts siblings on the first failed hydration and falls back without a partial list", async () => {
     const aborted = vi.fn();
     const upstream = vi.fn(async (url: string, init: RequestInit) => {
-      if (url.startsWith("https://api.github.com")) return Response.json({ exact: true });
-      if (url.endsWith("/actions")) return new Response(listPage(3));
-      if (url.endsWith("/1")) return new Response(runPage(1));
-      if (url.endsWith("/2")) return new Response("missing metadata");
+      const parsed = new URL(url);
+      if (
+        parsed.origin === "https://api.github.com" &&
+        parsed.pathname === "/repos/openclaw/openclaw/actions/runs"
+      )
+        return Response.json({ exact: true });
+      const path = githubPagePath(url);
+      if (path === listPath) return new Response(listPage(3));
+      if (path === `${listPath}/runs/1`) return new Response(runPage(1));
+      if (path === `${listPath}/runs/2`) return new Response("missing metadata");
       return new Promise<Response>((_resolve, reject) =>
         init.signal!.addEventListener(
           "abort",
@@ -219,14 +231,12 @@ describe("Actions list hydration", () => {
   it("rejects conflicting exact events instead of overwriting the list evidence", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(
-        async (url: string) =>
-          new Response(
-            url.endsWith("/actions")
-              ? listPage(1).replace("workflow dispatch", "pull request")
-              : runPage(1),
-          ),
-      ),
+      vi.fn(async (url: string) => {
+        const path = githubPagePath(url);
+        return new Response(
+          path === listPath ? listPage(1).replace("workflow dispatch", "pull request") : runPage(1),
+        );
+      }),
     );
     expect(await readList()).toBeUndefined();
   });
@@ -238,6 +248,7 @@ describe("Actions list hydration", () => {
       const cancelled = vi.fn();
       const pendingBody = () => new Response(new ReadableStream({ cancel: cancelled }));
       const upstream = vi.fn(async (url: string, init: RequestInit) => {
+        const path = githubPagePath(url);
         const pendingFetch = () =>
           new Promise<Response>((_resolve, reject) =>
             init.signal!.addEventListener(
@@ -249,11 +260,11 @@ describe("Actions list hydration", () => {
               { once: true },
             ),
           );
-        if (url.endsWith("/actions")) {
+        if (path === listPath) {
           return new Response(listPage(1));
         }
-        if (url.endsWith(".patch")) return pendingBody();
-        if (url.endsWith("/redirected")) return pendingFetch();
+        if (path.endsWith(".patch")) return pendingBody();
+        if (path === "/redirected") return pendingFetch();
         if (stage === "redirect")
           return new Response(null, { status: 302, headers: { location: "/redirected" } });
         if (stage === "run headers") return pendingFetch();
@@ -283,7 +294,8 @@ describe("Actions list hydration", () => {
       fakeTimeouts();
       const delay = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
       const upstream = vi.fn(async (url: string, init: RequestInit) => {
-        if (url.endsWith("/actions")) {
+        const path = githubPagePath(url);
+        if (path === listPath) {
           if (stage === "headers") {
             await delay();
             init.signal!.throwIfAborted();
@@ -320,8 +332,9 @@ describe("Actions list hydration", () => {
     fakeTimeouts();
     const cancelled = vi.fn();
     const upstream = vi.fn(async (url: string, init: RequestInit) => {
-      if (url.endsWith("/actions")) return new Response(listPage(1));
-      if (url.endsWith(".patch")) return new Response(new ReadableStream({ cancel: cancelled }));
+      const path = githubPagePath(url);
+      if (path === listPath) return new Response(listPage(1));
+      if (path.endsWith(".patch")) return new Response(new ReadableStream({ cancel: cancelled }));
       await new Promise((resolve) => setTimeout(resolve, 2000));
       init.signal!.throwIfAborted();
       return new Response(runPage(1).replaceAll(parsedManualSHA, parsedManualSHA.slice(0, 7)));
@@ -358,7 +371,7 @@ describe("Actions list hydration", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init: RequestInit) => {
-        if (url.endsWith("/actions")) return new Response(listPage(1));
+        if (githubPagePath(url) === listPath) return new Response(listPage(1));
         return new Promise<Response>((_resolve, reject) =>
           init.signal!.addEventListener("abort", () => reject(init.signal!.reason), { once: true }),
         );

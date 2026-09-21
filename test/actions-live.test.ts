@@ -18,9 +18,10 @@ async function measureLiveList(
   let patchFetches = 0;
   let listFinishedAt: number | undefined;
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-    expect(new URL(url).hostname).toBe("github.com");
-    if (/\/actions\/runs\/[0-9]+$/.test(url)) runPageFetches++;
-    if (url.endsWith(".patch")) patchFetches++;
+    const parsed = new URL(url);
+    expect(parsed.origin).toBe("https://github.com");
+    if (/\/actions\/runs\/[0-9]+$/.test(parsed.pathname)) runPageFetches++;
+    if (parsed.pathname.endsWith(".patch")) patchFetches++;
     const response = await originalFetch(url, init);
     if (url === listURL) {
       html = await response.clone().text();
@@ -165,16 +166,17 @@ it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
     }
     const batches: unknown[] = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-      expect(new URL(url).hostname).toBe("github.com");
+      const parsed = new URL(url);
+      expect(parsed.origin).toBe("https://github.com");
       const response = await originalFetch(url, init);
-      if (url.includes("job_groups_batch")) {
+      if (parsed.pathname.endsWith("/job_groups_batch")) {
         const body = (await response.clone().json()) as {
           hasMore: boolean;
           totalCount: number;
           jobGroups: unknown[];
         };
         batches.push({
-          batch: new URL(url).searchParams.get("batch"),
+          batch: parsed.searchParams.get("batch"),
           hasMore: body.hasMore,
           totalCount: body.totalCount,
           groups: body.jobGroups.length,
