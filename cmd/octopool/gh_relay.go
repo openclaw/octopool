@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net"
 	"os"
 	"runtime"
@@ -134,10 +135,17 @@ func newGHRelayClient() (ghRelayClient, error) {
 	return ghRelayClient{token: token, baseURL: baseURL, pool: pool}, nil
 }
 
-// Transient pool-exhaustion fallbacks are retried against the relay before the
-// CLI gives up and burns the caller's local token: a concurrent session often
-// fills the shared cache (or an identity cooldown resets) within seconds.
-var relayRetryDelays = []time.Duration{time.Second, 3 * time.Second}
+// A single brief retry can find a concurrently filled cache; pool cooldowns
+// generally outlast this budget.
+var relayRetryDelays = []time.Duration{time.Second}
+
+func relayReadTimeout() time.Duration {
+	seconds, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("OCTOPOOL_RELAY_TIMEOUT_SECONDS")), 10, 64)
+	if err != nil || seconds < 0 || seconds > math.MaxInt64/int64(time.Second) {
+		return 20 * time.Second
+	}
+	return time.Duration(max(seconds, 5)) * time.Second
+}
 
 func transientFallbackReason(reason string) bool {
 	switch reason {
@@ -190,11 +198,11 @@ func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relay
 }
 
 func transientRelayFailure(err error) bool {
+	if errors.Is(err, context.Canceled) || relayTimeout(err) {
+		return false
+	}
 	var relay *relayResponseError
 	if !errors.As(err, &relay) {
-		if errors.Is(err, context.Canceled) {
-			return false
-		}
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
 			errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EPIPE) {
 			return true
@@ -208,7 +216,7 @@ func transientRelayFailure(err error) bool {
 		if errors.As(err, &dns) && dns.IsNotFound {
 			return false
 		}
-		return errors.As(err, &network) && (network.Timeout() || network.Temporary())
+		return errors.As(err, &network) && network.Temporary()
 	}
 	if relay.Code == "fallback_local" {
 		return transientFallbackReason(relayFallbackReason(relay))
@@ -225,6 +233,11 @@ func transientRelayFailure(err error) bool {
 	default:
 		return false
 	}
+}
+
+func relayTimeout(err error) bool {
+	var network net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) && network.Timeout()
 }
 
 func terminalRelayFailure(err error) bool {
@@ -307,12 +320,26 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	if len(request.routeHint) > 0 {
 		body["route_hint"] = request.routeHint
 	}
-	out, status, err := doRaw(ctx, apiURL(client.baseURL, "/v1/github/request"), client.token, body)
+	// Policy acquisition above retains its independent timeout. Only the safe
+	// relay read gets this per-attempt header/body budget.
+	timeout := relayReadTimeout()
+	out, status, err := doRawWithTimeout(ctx, apiURL(client.baseURL, "/v1/github/request"), client.token, body, timeout)
 	if err != nil {
+		if ctx.Err() != nil {
+			return relayEnvelope{}, ctx.Err()
+		}
 		if status >= 300 && !errors.Is(err, errJSONResponseTooLarge) {
 			// An interrupted error body must not turn observed auth/policy rejection
 			// into a retryable transport failure or an unproven native handoff.
-			return relayEnvelope{}, parseRelayResponseError(status, nil)
+			relay := parseRelayResponseError(status, nil)
+			if relayTimeout(err) {
+				// Preserve the rejection, but do not retry a timed-out error body.
+				return relayEnvelope{}, errors.Join(relay, err)
+			}
+			return relayEnvelope{}, relay
+		}
+		if relayTimeout(err) {
+			return relayEnvelope{}, localFallbackError{Reason: fmt.Sprintf("relay_timeout (read timed out; limit %s)", timeout)}
 		}
 		return relayEnvelope{}, err
 	}

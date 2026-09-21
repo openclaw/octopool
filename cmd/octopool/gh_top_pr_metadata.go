@@ -12,7 +12,8 @@ import (
 func relayPRUser(ctx context.Context, client ghRelayClient, raw any, users map[string]map[string]any) (map[string]any, error) {
 	user, _ := raw.(map[string]any)
 	login, nodeID := firstString(user, "login"), firstString(user, "node_id")
-	if login == "" || nodeID == "" {
+	_, hasSourceNodeID := user["node_id"]
+	if login == "" || (hasSourceNodeID && nodeID == "") {
 		return nil, errors.New("pull request response did not include user identity")
 	}
 	key := strings.ToLower(login)
@@ -38,7 +39,8 @@ func relayPRUser(ctx context.Context, client ghRelayClient, raw any, users map[s
 	_, hasName := profile["name"]
 	_, stringName := profile["name"].(string)
 	_, hasID := profile["id"].(float64)
-	if !strings.EqualFold(firstString(profile, "login"), login) || firstString(profile, "node_id") != nodeID || !hasName || (!stringName && profile["name"] != nil) || !hasID || firstString(profile, "type") == "" {
+	profileNodeID := firstString(profile, "node_id")
+	if !strings.EqualFold(firstString(profile, "login"), login) || profileNodeID == "" || (hasSourceNodeID && profileNodeID != nodeID) || !hasName || (!stringName && profile["name"] != nil) || !hasID || firstString(profile, "type") == "" {
 		return nil, errors.New("user response did not include matching complete identity")
 	}
 	return profile, nil
@@ -50,7 +52,7 @@ func relayPRStatusCheckRollup(ctx context.Context, client ghRelayClient, repo, s
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, items)
+	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, nil, items)
 	if err != nil {
 		return nil, err
 	}

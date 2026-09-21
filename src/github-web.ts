@@ -14,11 +14,19 @@ import { fetchWebResponse, readWebBody } from "./github-web-transport";
 import { cancelResponseBody } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
+export function hasNoQuotaGitHubWebRequest(
+  env: GitHubEgressEnv,
+  request: RelayRequest,
+  route: RouteInfo,
+): boolean {
+  return webRequests(env, request, route).some((candidate) => candidate.usesApiQuota === false);
+}
+
 export async function callGitHubWeb(
   env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
-  options: { skipAnonymousAPI?: boolean } = {},
+  options: { skipAnonymousAPI?: boolean; skipNoQuota?: boolean } = {},
 ): Promise<GitHubRelayResponse | undefined> {
   let requests = webRequests(env, request, route);
   if (requests.length === 0) {
@@ -35,6 +43,7 @@ export async function callGitHubWeb(
   }
   for (const web of requests) {
     if (options.skipAnonymousAPI && web.usesApiQuota) continue;
+    if (options.skipNoQuota && !web.usesApiQuota) continue;
     const timeoutMs = requestTimeoutMs(env);
     const fetched = await fetchWebResponse(env, web.url, web.headers, timeoutMs);
     if (fetched === undefined) {

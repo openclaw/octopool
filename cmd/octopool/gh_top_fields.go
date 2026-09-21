@@ -83,7 +83,7 @@ var supportedPublicPRListFields = supportedFields(
 
 var supportedPublicPRViewFields = supportedFields(
 	"number", "title", "state", "url", "createdAt", "closedAt", "mergedAt",
-	"headRefName", "headRefOid", "baseRefName",
+	"headRefName", "headRefOid", "baseRefName", "mergeCommit", "merged", "isDraft", "author", "headRepositoryOwner",
 )
 
 var supportedPRSearchFields = supportedFields(

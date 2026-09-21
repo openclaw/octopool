@@ -42,7 +42,10 @@ export function summaryPageRequest(
   const shape = request.headers?.["x-octopool-public-shape"];
   let url: URL;
   let parse: (html: string) => unknown | undefined;
-  if (route.kind === "pr_view" && shape === PUBLIC_SHAPES.pullRequestSummary) {
+  if (
+    route.kind === "pr_view" &&
+    (shape === PUBLIC_SHAPES.pullRequestSummary || shape === PUBLIC_SHAPES.pullRequestSummaryV1)
+  ) {
     if (Object.keys(request.query ?? {}).length !== 0) {
       return undefined;
     }
@@ -53,7 +56,14 @@ export function summaryPageRequest(
     url = new URL(
       `https://github.com/${encodedPathSegments([route.owner, route.repo, "pull", number])}`,
     );
-    parse = (html) => parsePullRequestHTML(html, route.owner!, route.repo!, Number(number));
+    parse = (html) =>
+      parsePullRequestHTML(
+        html,
+        route.owner!,
+        route.repo!,
+        Number(number),
+        shape === PUBLIC_SHAPES.pullRequestSummary ? "v2" : "v1",
+      );
   } else if (route.kind === "issue_view" && shape === PUBLIC_SHAPES.issueSummary) {
     if (Object.keys(request.query ?? {}).length !== 0) {
       return undefined;

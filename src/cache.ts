@@ -163,6 +163,7 @@ export async function readGitHubCacheWithSource(
   maxAgeSeconds?: number,
   sharedOnly = false,
 ): Promise<GitHubCacheRead | undefined> {
+  if (maxAgeSeconds === 0) return undefined;
   const edge = sharedOnly ? undefined : await readEdgeGitHubCache(cacheKey, maxAgeSeconds);
   if (edge !== undefined) {
     return { cached: edge, source: "edge" };
@@ -184,6 +185,7 @@ export async function readEdgeGitHubCache(
   cacheKey: string,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
+  if (maxAgeSeconds === 0) return undefined;
   const edge = await readEdgeJSON<CachedGitHubResponse & { protocol_epoch: string }>(
     EDGE_CACHE_NAMESPACE,
     cacheKey,
@@ -219,7 +221,7 @@ export async function readStaleGitHubCache(
   route: RouteInfo,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
-  if (isLandingGraphQLRoute(route)) return undefined;
+  if (maxAgeSeconds === 0 || isLandingGraphQLRoute(route)) return undefined;
   const row = await env.DB.prepare(queries.readGitHubCacheAny)
     .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
     .first<CacheRow>();

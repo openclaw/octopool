@@ -426,13 +426,22 @@ states and human-format output remain unchanged. Unsupported issue fields such a
 absent values become `"UNKNOWN"`. This uses only REST `mergeable`, not `mergeable_state`,
 draft/lifecycle status, checks, or merge policy. Raw `gh api` REST reads retain their
 boolean, null, or absent `mergeable` values.
-`gh pr view --json mergeCommit` reads fresh REST metadata and returns `{"oid":"<sha>"}`
+`gh pr view --json mergeCommit` reads fresh PR metadata and returns `{"oid":"<sha>"}`
 for a merged PR or `null` for an unmerged PR. An open or closed-unmerged PR's synthetic
 test merge SHA is never exported as its merged commit. Missing merge status or an
 invalid merged-commit SHA requests guarded native fallback before printing output.
 Raw `gh api` reads retain `merge_commit_sha`. `mergeStateStatus` remains unsupported
 and delegates to real `gh`, including alongside `mergeable` or `mergeCommit`;
 `gh pr list --json mergeable` and `gh pr list --json mergeCommit` also delegate.
+Supported summary-only combinations use the `pr-summary-v2` public page shape, including
+`mergeCommit`, `merged`, `isDraft`, `author`, and `headRepositoryOwner`. Login-only page
+identities use the shared profile lookup for actor types and node IDs; supplied node IDs
+must still match the profile. Closed-unmerged pages omit draft status, and missing page
+authors or head owners are omitted. When a requested field needs an omitted value, the
+CLI retries once through the relay without the shape header, retaining `max-age=0` when
+required. This exact REST retry works with `OCTOPOOL_NO_FALLBACK=1` and completes before
+hydration or output. Adding API-only fields such as `mergeable` or `headRepository` skips
+the page shape. See [the complete supported field set](token-free.md#bounded-cli-shapes).
 PR views also relay `headRepository`, `headRepositoryOwner`, `assignees`, and
 `statusCheckRollup` to reduce local GitHub quota usage through shared transports and
 eligible caching, including under active string rewrite protection. Fork metadata
@@ -441,8 +450,12 @@ names use a shared per-command profile lookup. The rollup preserves native `gh`
 `CheckRun` and `StatusContext` fields and resolves workflow names by check-suite ID
 through head-filtered Actions runs and the complete raw workflow catalogue, including
 inactive workflows. It shares this verified association with `pr checks`, without using
-run names, display titles, or body-supplied URLs. Check/status
-pages and workflow lookups read live; after all hydration, a final live PR head check
+run names, display titles, or body-supplied URLs. Rollup check/status pages and
+head-filtered Actions runs read live. Workflow names use the shared one-hour catalogue
+cache; if a verified run's workflow ID has no catalogue name, the complete catalogue
+is retried once live before refusing the association. Missing run associations do not
+trigger this retry. `OCTOPOOL_FRESH=1` still reads every catalogue page live without an
+extra catalogue retry. After all hydration, a final live PR head check
 rejects a moving head before any JSON is printed. A matching SHA is not an atomic
 snapshot: checks can change on the same commit. Both `pr checks` and the rollup require
 consistent page totals, unique upstream IDs, and complete pages, bounded to 1,000 items
@@ -534,10 +547,13 @@ verified PR head SHA, allowing file pages to share a five-minute state-scoped ca
 `gh pr checks` uses the shared cache throughout ordinary acquisition: its PR
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share
 one upstream PR read at most 60 seconds old, and the check/status reads for that SHA use
-the normal cache TTLs, as do its raw Actions metadata reads. Each collection is bounded
-to 10 pages of 100 entries. Ordinary acquisition uses at most 41 logical data operations,
+the normal cache TTLs, as do its raw Actions metadata reads. Workflow names use the shared
+one-hour catalogue cache, with the same one-shot live catalogue retry for missing names
+as rollups. Each collection is bounded to 10 pages of 100 entries. Before any catalogue
+retry, ordinary acquisition uses at most 41 logical data operations,
 or 21 without Actions associations; an actual empty result takes 3. These are not limits
-on policy reads, transport attempts, retries, or an entire watch session. Every data
+on policy reads, transport attempts, retries, or an entire watch session. A missing-name
+retry adds at most 10 catalogue operations and does not refetch runs or checks. Every data
 operation retains authoritative policy checks through the relay client.
 
 Check-run and status collections for the same SHA are acquired concurrently. When
@@ -593,7 +609,7 @@ guarded native fallback. A refusal after watch progress never hands off.
 For `gh pr checks --watch`, an explicit relay `fallback_local` after progress still prints a
 handoff boundary and continues the command with real `gh`, which owns output and exit status.
 Its first snapshot may repeat the last relay-rendered state. Client-side incompleteness,
-auth, transport/decode failures, and ordinary relay service errors remain terminal after
+auth, transport/decode failures (including `relay_timeout`), and ordinary relay service errors remain terminal after
 progress and do not spend local GitHub quota. Cached empty checks are revalidated live.
 Terminal confirmation reacquires every check, status, run, and workflow page with
 `max-age=0`, builds fresh associations, then reads the PR head live again after hydration.
@@ -729,6 +745,15 @@ public responses to the shared cache, and returns the GitHub-shaped body. If the
 server says the read should run locally — unsupported route, public pooling disabled by
 policy, private/unverified repository, no usable identity, or identity pool depleted — the CLI
 runs the original command with the real `gh` and your local GitHub token.
+
+Transient pool fallbacks and eligible relay service/connection failures get one retry after
+one second by default. Each shim relay GET attempt has a 20-second timeout covering response
+headers and the body; policy fetches retain their separate timeout. A timed-out read does
+not retry and requests guarded local fallback with a `relay_timeout` diagnostic. An observed
+HTTP rejection remains a failure if its body times out. `OCTOPOOL_NO_FALLBACK=1` keeps timeout
+and pool fallbacks as failures. Watch ownership remains as described above: run watches stop,
+and PR-check watches never hand off a client timeout after printing progress. These limits
+apply per relay read, not to the entire command, policy checks, or native `gh` execution.
 
 Pagination is fail-closed: if bounded relay pagination cannot prove a complete PR detail,
 check set, or filtered issue list, the CLI delegates to real `gh` instead of returning a
@@ -1206,7 +1231,9 @@ Three things keep that honest:
   `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`,
   `closedAt`, or `statusCheckRollup` send `cache-control: max-age=0` automatically. These are the values callers
   branch on, so they require an upstream fetch or successful conditional revalidation.
-  Descriptive fields (`title`, `body`, `labels`, `author`) stay cached.
+  Descriptive fields (`title`, `body`, `labels`, `author`) stay cached. Rollup check/status
+  pages and head-filtered runs read live; workflow names use the shared one-hour catalogue
+  cache with one live retry if a verified run's workflow name is missing.
 - **Cached decision reads announce themselves.** When a PR, issue, run, or checks route is
   served from the shared cache, the CLI prints one line to stderr naming the route, whether
   it was a hit or a stale serve, and when it refreshes. stdout stays untouched, so `--json`
@@ -1270,19 +1297,26 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_QUIET_CACHE=1` — suppress the one-line stderr note printed when a
   decision-shaped route (PR/issue/run/checks) is served from the shared cache.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns
-  `fallback_local`, including during an active watch, useful for proving relay/cache coverage.
+  `fallback_local` or a shim relay read times out, including during an active watch, useful
+  for proving relay/cache coverage.
 - `OCTOPOOL_RELAY_RETRIES` — how many times transient pool-exhaustion fallbacks
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
   `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and
   malformed 502/503/504 or Cloudflare 520–524 gateway responses are retried against the
-  relay (1s, then 3s for subsequent retries). Interrupted response bodies and transient
-  connection failures or timeouts on safe relay reads use the same budget. Every retry
+  relay (1s before every retry). Interrupted response bodies and transient
+  connection failures on safe relay reads use the same budget; timeouts never retry. Every retry
   obtains current protection policy; policy failures, authentication denials, response-size
   violations and caller cancellation never become retries or native handoffs. Exhausted
   transient fallbacks may delegate to real `gh` except for
   supported `gh run watch`, which fails explicitly. Exhausted service errors remain failures
-  instead of spending local GitHub quota. Default `2`; `0`
+  instead of spending local GitHub quota. Default `1`; `0`
   disables retries.
+- `OCTOPOOL_RELAY_TIMEOUT_SECONDS` — per-attempt timeout for shim relay GET reads,
+  including response-body reads. Default `20`; nonnegative integer values below `5`
+  are clamped to `5` seconds. Invalid, negative, or unrepresentable durations use the
+  default. A timeout requests guarded native fallback with reason `relay_timeout`, without
+  retrying or claiming an explicit server `fallback_local` response. Login, writes, policy
+  fetches, and direct `octopool request` retain their existing timeouts.
 - `OCTOPOOL_ADMIN_TOKEN` — admin token for `octopool admin`.
 - `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` — permit non-HTTPS login for local dev.
 

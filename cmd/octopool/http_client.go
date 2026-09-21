@@ -51,9 +51,14 @@ func (transport jsonRedirectTransport) RoundTrip(req *http.Request) (*http.Respo
 }
 
 func doJSONRequest(req *http.Request) (*http.Response, error) {
+	return doJSONRequestWithTimeout(req, httpClient.Timeout)
+}
+
+func doJSONRequestWithTimeout(req *http.Request, timeout time.Duration) (*http.Response, error) {
 	// Login carries its credential in the body, so protect every JSON request.
 	// Keep credential-free discovery's redirect behavior on the shared client.
 	client := *httpClient
+	client.Timeout = timeout
 	transport := client.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
@@ -148,6 +153,10 @@ func postJSONRaw(
 	token string,
 	body map[string]any,
 ) (*http.Response, error) {
+	return postJSONRawWithTimeout(ctx, url, token, body, httpClient.Timeout)
+}
+
+func postJSONRawWithTimeout(ctx context.Context, url, token string, body map[string]any, timeout time.Duration) (*http.Response, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -160,7 +169,7 @@ func postJSONRaw(
 		req.Header.Set("authorization", "Bearer "+token)
 	}
 	req.Header.Set("content-type", "application/json")
-	return doJSONRequest(req)
+	return doJSONRequestWithTimeout(req, timeout)
 }
 
 func writeJSONResponse(stdout io.Writer, resp *http.Response) error {
@@ -182,7 +191,11 @@ func writeJSONResponse(stdout io.Writer, resp *http.Response) error {
 }
 
 func doRaw(ctx context.Context, url string, token string, body map[string]any) ([]byte, int, error) {
-	resp, err := postJSONRaw(ctx, url, token, body)
+	return doRawWithTimeout(ctx, url, token, body, httpClient.Timeout)
+}
+
+func doRawWithTimeout(ctx context.Context, url string, token string, body map[string]any, timeout time.Duration) ([]byte, int, error) {
+	resp, err := postJSONRawWithTimeout(ctx, url, token, body, timeout)
 	if err != nil {
 		return nil, 0, err
 	}

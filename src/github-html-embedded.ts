@@ -139,6 +139,7 @@ export function parsePullRequestHTML(
   owner: string,
   repo: string,
   number: number,
+  version: "v1" | "v2" = "v1",
 ): Record<string, unknown> | undefined {
   const embedded = embeddedAppJSON(html);
   const payload = embedded === undefined ? undefined : recordValue(embedded.payload);
@@ -163,7 +164,7 @@ export function parsePullRequestHTML(
   ) {
     return undefined;
   }
-  return {
+  const summary = {
     number,
     node_id: pullRequest.relayId,
     title: pullRequest.title,
@@ -174,6 +175,37 @@ export function parsePullRequestHTML(
     merged_at: pullRequest.mergedTime,
     head: { ref: pullRequest.headBranch, sha: pullRequest.headSha },
     base: { ref: pullRequest.baseBranch },
+  };
+  if (version === "v1") {
+    return summary;
+  }
+  const merged = pullRequest.mergedTime !== null;
+  if (
+    !["OPEN", "DRAFT", "CLOSED", "MERGED"].includes(pullRequest.state) ||
+    merged !== (pullRequest.state === "MERGED") ||
+    (merged &&
+      (typeof pullRequest.mergeCommitSha !== "string" ||
+        !/^[a-fA-F0-9]{40}$/.test(pullRequest.mergeCommitSha)))
+  ) {
+    return undefined;
+  }
+  const authorLogin = recordValue(pullRequest.author)?.login;
+  const headOwnerLogin = pullRequest.headRepositoryOwnerLogin;
+  return {
+    ...summary,
+    merged,
+    // REST test-merge SHAs and closed PR draft status are not proven by this page.
+    ...(merged ? { merge_commit_sha: pullRequest.mergeCommitSha } : {}),
+    ...(pullRequest.state === "CLOSED" ? {} : { draft: pullRequest.state === "DRAFT" }),
+    ...(typeof authorLogin === "string" && authorLogin.trim() !== ""
+      ? { user: { login: authorLogin } }
+      : {}),
+    head: {
+      ...summary.head,
+      ...(typeof headOwnerLogin === "string" && headOwnerLogin.trim() !== ""
+        ? { user: { login: headOwnerLogin } }
+        : {}),
+    },
   };
 }
 

@@ -37,9 +37,12 @@ func TestRunGHPRViewMetadataUnderActivePolicy(t *testing.T) {
 				paths = append(paths, path)
 				pathsMu.Unlock()
 				headers, _ := request["headers"].(map[string]any)
-				immutableOrDescriptive := path == "/users/contributor" || strings.HasSuffix(path, "/files")
+				immutableOrDescriptive := path == "/users/contributor" || strings.HasSuffix(path, "/files") || strings.HasSuffix(path, "/actions/workflows")
 				if (!immutableOrDescriptive || test.fresh == "1") && headers["cache-control"] != "max-age=0" {
 					t.Errorf("metadata request must be fresh: %#v", request)
+				}
+				if strings.HasSuffix(path, "/actions/workflows") && test.fresh != "1" && headers["cache-control"] != nil {
+					t.Errorf("workflow catalogue must use default freshness: %#v", request)
 				}
 				switch path {
 				case "/repos/acme/repo/pulls/1":
@@ -172,15 +175,27 @@ func TestRunGHPRViewRollupRejectsUnstableHead(t *testing.T) {
 }
 
 func TestRunGHPRViewRollupPaginates(t *testing.T) {
+	t.Setenv("OCTOPOOL_FRESH", "")
 	t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 	pages := map[string]int{}
+	var pagesMu sync.Mutex
 	relayTestServer(t, func(request map[string]any) any {
 		path := request["path"].(string)
+		headers, _ := request["headers"].(map[string]any)
+		var wantCacheControl any = "max-age=0"
+		if strings.HasSuffix(path, "/actions/workflows") {
+			wantCacheControl = nil
+		}
+		if headers["cache-control"] != wantCacheControl {
+			t.Errorf("rollup page freshness: request=%v want=%v", request, wantCacheControl)
+		}
 		if strings.HasSuffix(path, "/pulls/1") {
 			return map[string]any{"head": map[string]any{"sha": metadataHead}}
 		}
+		pagesMu.Lock()
 		pages[path]++
 		page := pages[path]
+		pagesMu.Unlock()
 		count := 100
 		if page == 2 {
 			count = 1
@@ -220,6 +235,8 @@ func TestRunGHPRViewRollupPaginates(t *testing.T) {
 	if len(got.StatusCheckRollup) != 202 || got.StatusCheckRollup[100]["workflowName"] != "workflow-101" || got.StatusCheckRollup[201]["context"] != "status-101" {
 		t.Fatalf("incomplete rollup: %s", out.String())
 	}
+	pagesMu.Lock()
+	defer pagesMu.Unlock()
 	for path, count := range pages {
 		if count != 2 {
 			t.Errorf("%s pages = %d", path, count)
