@@ -135,8 +135,18 @@ func execRealGHWithStdinAndEnv(
 		return err
 	}
 	if len(prepared.preflight) != 0 {
-		if err := execRealGHWithStdinAndEnv(ctx, prepared.preflight, strings.NewReader(""), io.Discard, io.Discard, env); err != nil {
+		var output rewritePreflightOutput
+		var stdout io.Writer = io.Discard
+		if prepared.afterPreflight != nil {
+			stdout = &output
+		}
+		if err := execRealGHWithStdinAndEnv(ctx, prepared.preflight, strings.NewReader(""), stdout, io.Discard, env); err != nil {
 			return errRewriteBlocked
+		}
+		if prepared.afterPreflight != nil {
+			if err := prepared.afterPreflight(output.data.Bytes()); err != nil {
+				return err
+			}
 		}
 	}
 	if diagnostic != nil {
@@ -207,6 +217,15 @@ func execRealGHWithStdinAndEnv(
 		return err
 	}
 	return nil
+}
+
+type rewritePreflightOutput struct{ data bytes.Buffer }
+
+func (output *rewritePreflightOutput) Write(data []byte) (int, error) {
+	if len(data) > rewriteMaxContent-output.data.Len() {
+		return 0, errRewriteBlocked
+	}
+	return output.data.Write(data)
 }
 
 func envWithGitHubHost(env []string) []string {

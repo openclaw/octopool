@@ -8,6 +8,7 @@
 
 ### Fixes
 
+- Accept all GitHub REST merge methods and omitted merge defaults under string rewrite protection, resolving and pinning the current PR head when `sha` is omitted.
 - Keep supported issue views and complete issue lists readable from public HTML when API quota is exhausted, without requiring unused assignee pagination data; requested labels still require completeness, and assignee/milestone selections retain exact API handling.
 - Fall back to guarded local gh sooner on pool cooldowns with one default retry after one second, and cap shim relay read attempts at 20 seconds with configurable timeouts that never retry, preserving no-fallback and watch ownership rules.
 - Reuse the shared one-hour workflow catalogue for PR status-check rollups while keeping checks and runs live; retry missing workflow names once live for rollups and ordinary checks, preserving fresh watch confirmation and `OCTOPOOL_FRESH=1`.

@@ -276,6 +276,37 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 	if err := rewriteAPIPayload(policy, prepared, payload, schema); err != nil {
 		return err
 	}
+	if schema == "pull-merge" {
+		if _, supplied := payload["sha"]; !supplied {
+			prepared.preflight = []string{"api", strings.TrimSuffix(request.path, "/merge"), "--method=GET", "--hostname=github.com"}
+			prepared.afterPreflight = func(data []byte) error {
+				value, err := strictRewriteJSON(data, rewriteMaxContent)
+				if err != nil {
+					return errRewriteBlocked
+				}
+				pull, _ := value.(map[string]any)
+				head, _ := pull["head"].(map[string]any)
+				sha, _ := head["sha"].(string)
+				if !rewriteCommitSHA.MatchString(sha) {
+					return errRewriteBlocked
+				}
+				if err := policy.checkStructural(sha); err != nil {
+					return err
+				}
+				payload["sha"] = sha
+				return snapshotRewriteAPI(policy, opts, payload, prepared)
+			}
+			return nil
+		}
+	}
+	if schema == "release-create" {
+		tag := payload["tag_name"].(string)
+		prepared.preflight = []string{"api", strings.TrimSuffix(request.path, "/releases") + "/git/ref/tags/" + url.PathEscape(tag), "--method=GET"}
+	}
+	return snapshotRewriteAPI(policy, opts, payload, prepared)
+}
+
+func snapshotRewriteAPI(policy stringRewritePolicy, opts rewriteAPIOptions, payload map[string]any, prepared *rewritePreparation) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil || len(encoded) > rewriteMaxContent {
 		return errRewriteBlocked
@@ -291,10 +322,6 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 	}
 	prepared.args = append([]string{"api", opts.endpoint, "--method=" + opts.method, "--hostname=github.com", "--input=" + path}, opts.output...)
 	prepared.stdin = strings.NewReader("")
-	if schema == "release-create" {
-		tag := payload["tag_name"].(string)
-		prepared.preflight = []string{"api", strings.TrimSuffix(request.path, "/releases") + "/git/ref/tags/" + url.PathEscape(tag), "--method=GET"}
-	}
 	return nil
 }
 
@@ -391,8 +418,8 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 		spec = "title:text body:text base:branch"
 		required = ""
 	case "pull-merge":
-		spec = "sha:string merge_method:squash commit_message:text commit_title:text"
-		required = "sha merge_method"
+		spec = "sha:string merge_method:merge-method commit_message:text commit_title:text"
+		required = ""
 	case "release-create":
 		spec = "name:text body:text tag_name:string draft:bool prerelease:bool make_latest:string"
 		required = "name body tag_name"
@@ -414,7 +441,7 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 		key, kind, _ := strings.Cut(entry, ":")
 		allowed[key] = kind
 	}
-	if len(payload) == 0 {
+	if len(payload) == 0 && schema != "pull-merge" {
 		return errRewriteBlocked
 	}
 	for _, key := range strings.Fields(required) {
@@ -457,9 +484,9 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 			if err := policy.checkStructural(text); err != nil {
 				return err
 			}
-		case "squash":
+		case "merge-method":
 			text, ok := value.(string)
-			if !ok || text != "squash" {
+			if !ok || (text != "squash" && text != "merge" && text != "rebase") {
 				return errRewriteBlocked
 			}
 		case "strings":

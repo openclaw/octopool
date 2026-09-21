@@ -986,8 +986,10 @@ With active rules, the initial local publication vocabulary is deliberately cons
   `-f`/`--raw-field`, `-F`/`--field`, or `--input` JSON. Literal and typed fields retain
   their distinction; only typed `@file`/`@-` values read files/stdin. Nested review comments
   use `--input` JSON. Exact issue-assignee POSTs accept repeated raw `assignees[]` values;
-  exact pull-request merge PUTs require a full 40-hex `sha` and `merge_method: squash`,
-  with optional rewritten `commit_message` and `commit_title` strings.
+  exact pull-request merge PUTs accept `merge_method` values `squash`, `merge`, or `rebase`,
+  leaving the field omitted for GitHub's default, with optional rewritten `commit_message`
+  and `commit_title` strings. A supplied `sha` must be a full 40-hex commit; when omitted,
+  a guarded local GET resolves the current PR head and pins it into the immutable merge snapshot.
   Pull-request PATCHes accept a string `base` field with the same branch checks as the CLI;
   base-only updates do not republish an implicit title or body. Numeric branch names must be
   supplied as strings, such as `-f base=123` or JSON `{"base":"123"}`.

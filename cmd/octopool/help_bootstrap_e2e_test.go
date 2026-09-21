@@ -425,6 +425,31 @@ func testBootstrapOperational(t *testing.T, bin, native string, shim bool) {
 		t.Fatal(err)
 	}
 	base := []string{"pr", "merge", "123", "--repo", "acme/repo", "--squash", "--match-head-commit", sha}
+	for _, method := range []string{"squash", "merge", "rebase", ""} {
+		t.Run("raw-merge/method="+method, func(t *testing.T) {
+			args := []string{"api", "repos/acme/repo/pulls/123/merge", "-X", "PUT", "-f", "sha=" + sha}
+			if method != "" {
+				args = append(args, "-f", "merge_method="+method)
+			}
+			result, captures := fixture.run(t, args, bootstrapInputFile(t, "unused stdin"), true, 0)
+			if len(captures) != 1 || len(captures[0].Files) != 1 {
+				t.Fatalf("raw merge did not dispatch one snapshot: %+v; %+v", result, captures)
+			}
+			for snapshot, content := range captures[0].Files {
+				wantArgs := []string{"api", "repos/acme/repo/pulls/123/merge", "--method=PUT", "--hostname=github.com", "--input=" + snapshot}
+				assertBootstrapChild(t, result, captures, wantArgs, 0)
+				var payload map[string]string
+				if err := json.Unmarshal([]byte(content), &payload); err != nil {
+					t.Fatal(err)
+				}
+				_, hasMethod := payload["merge_method"]
+				if payload["sha"] != sha || payload["merge_method"] != method || hasMethod != (method != "") {
+					t.Fatalf("raw merge SHA/method changed: %q", content)
+				}
+				assertBootstrapSnapshot(t, captures[0], snapshot)
+			}
+		})
+	}
 	for _, input := range []struct {
 		field string
 		want  string

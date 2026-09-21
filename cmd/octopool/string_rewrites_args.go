@@ -82,6 +82,7 @@ type rewritePreparation struct {
 	policy            stringRewritePolicy
 	closeDirectory    func()
 	preflight         []string
+	afterPreflight    func([]byte) error
 	args              []string
 	stdin             io.Reader
 	directory         string
