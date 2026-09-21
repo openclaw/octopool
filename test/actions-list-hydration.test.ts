@@ -62,6 +62,15 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function fakeTimeouts() {
+  vi.useFakeTimers();
+  vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), ms);
+    return controller.signal;
+  });
+}
+
 describe("Actions list hydration", () => {
   it.each([
     ["manual-queued", manualID, "queued"],
@@ -222,15 +231,10 @@ describe("Actions list hydration", () => {
     expect(await readList()).toBeUndefined();
   });
 
-  it.each(["list headers", "list body", "run headers", "run body", "patch body", "redirect"])(
-    "bounds stalled %s by the shared one-second deadline",
+  it.each(["run headers", "run body", "patch body", "redirect"])(
+    "bounds stalled %s by the shared 2500 ms hydration deadline",
     async (stage) => {
-      vi.useFakeTimers();
-      vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(new DOMException("Timed out", "TimeoutError")), ms);
-        return controller.signal;
-      });
+      fakeTimeouts();
       const cancelled = vi.fn();
       const pendingBody = () => new Response(new ReadableStream({ cancel: cancelled }));
       const upstream = vi.fn(async (url: string, init: RequestInit) => {
@@ -246,8 +250,6 @@ describe("Actions list hydration", () => {
             ),
           );
         if (url.endsWith("/actions")) {
-          if (stage === "list headers") return pendingFetch();
-          if (stage === "list body") return pendingBody();
           return new Response(listPage(1));
         }
         if (url.endsWith(".patch")) return pendingBody();
@@ -264,16 +266,79 @@ describe("Actions list hydration", () => {
         settled = true;
         return value;
       });
-      await vi.advanceTimersByTimeAsync(999);
+      await vi.advanceTimersByTimeAsync(2499);
       expect(settled).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       expect(await result).toBeUndefined();
       expect(cancelled).toHaveBeenCalledOnce();
-      expect(AbortSignal.timeout).toHaveBeenCalledWith(1000);
+      expect(AbortSignal.timeout).toHaveBeenCalledWith(2500);
       if (stage.startsWith("run") || stage === "redirect")
         expect(AbortSignal.timeout).toHaveBeenCalledWith(5000);
     },
   );
+
+  it.each(["headers", "body"])(
+    "gives hydration its full deadline after slow list %s",
+    async (stage) => {
+      fakeTimeouts();
+      const delay = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
+      const upstream = vi.fn(async (url: string, init: RequestInit) => {
+        if (url.endsWith("/actions")) {
+          if (stage === "headers") {
+            await delay();
+            init.signal!.throwIfAborted();
+            return new Response(listPage(1));
+          }
+          return new Response(
+            new ReadableStream({
+              async start(controller) {
+                await delay();
+                if (init.signal!.aborted) controller.error(init.signal!.reason);
+                else {
+                  controller.enqueue(new TextEncoder().encode(listPage(1)));
+                  controller.close();
+                }
+              },
+            }),
+          );
+        }
+        await delay();
+        init.signal!.throwIfAborted();
+        return new Response(runPage(1));
+      });
+      vi.stubGlobal("fetch", upstream);
+      const result = readList();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(upstream).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await result).toMatchObject({ backend: "web", body: { workflow_runs: [{ id: 1 }] } });
+      expect(AbortSignal.timeout).toHaveBeenCalledWith(30000);
+    },
+  );
+
+  it("shares the hydration deadline across run pages and commit patches", async () => {
+    fakeTimeouts();
+    const cancelled = vi.fn();
+    const upstream = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("/actions")) return new Response(listPage(1));
+      if (url.endsWith(".patch")) return new Response(new ReadableStream({ cancel: cancelled }));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      init.signal!.throwIfAborted();
+      return new Response(runPage(1).replaceAll(parsedManualSHA, parsedManualSHA.slice(0, 7)));
+    });
+    vi.stubGlobal("fetch", upstream);
+    let settled = false;
+    const result = readList().then((value) => {
+      settled = true;
+      return value;
+    });
+    await vi.advanceTimersByTimeAsync(2499);
+    expect(upstream).toHaveBeenCalledTimes(3);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toBeUndefined();
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
 
   it("honors a shorter configured timeout", async () => {
     const upstream = vi.fn(
@@ -286,5 +351,23 @@ describe("Actions list hydration", () => {
     const timeout = vi.spyOn(AbortSignal, "timeout");
     expect(await readList({ timeout: 20 })).toBeUndefined();
     expect(timeout).toHaveBeenCalledWith(20);
+  });
+
+  it("honors a shorter configured per-page timeout during hydration", async () => {
+    fakeTimeouts();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        if (url.endsWith("/actions")) return new Response(listPage(1));
+        return new Promise<Response>((_resolve, reject) =>
+          init.signal!.addEventListener("abort", () => reject(init.signal!.reason), { once: true }),
+        );
+      }),
+    );
+    const result = readList({ timeout: 100 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await result).toBeUndefined();
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(100);
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(2500);
   });
 });

@@ -6,6 +6,92 @@ import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/polic
 
 afterEach(() => vi.unstubAllGlobals());
 
+async function measureLiveList(
+  originalFetch: typeof fetch,
+  owner: string,
+  repo: string,
+  suffix = "runs",
+) {
+  const listURL = `https://github.com/${owner}/${repo}/actions${suffix === "runs" ? "" : "/workflows/ci.yml"}`;
+  let html: string | undefined;
+  let runPageFetches = 0;
+  let patchFetches = 0;
+  let listFinishedAt: number | undefined;
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    expect(new URL(url).hostname).toBe("github.com");
+    if (/\/actions\/runs\/[0-9]+$/.test(url)) runPageFetches++;
+    if (url.endsWith(".patch")) patchFetches++;
+    const response = await originalFetch(url, init);
+    if (url === listURL) {
+      html = await response.clone().text();
+      listFinishedAt = performance.now();
+    }
+    return response;
+  });
+  const request = validateRelayRequest({
+    pool: "maintainers",
+    method: "GET",
+    path: `/repos/${owner}/${repo}/actions/${suffix}`,
+    query: { per_page: "25" },
+    headers: { "x-octopool-public-shape": "actions-summary-v1" },
+  });
+  const started = performance.now();
+  const result = await callGitHubWeb(
+    withGitHubEgress({ REQUEST_TIMEOUT_MS: "30000" } as unknown as Env, []),
+    request,
+    classifyRoute(request, defaultPolicy(owner)),
+    { skipAnonymousAPI: true },
+  );
+  const finished = performance.now();
+  const list = html === undefined ? undefined : parseActionsRunListHTML(html, owner, repo);
+  const measurement = {
+    repo: `${owner}/${repo}`,
+    route: suffix,
+    shape: "actions-summary-v1",
+    cards: list?.workflow_runs.length,
+    needsHydration: list?.workflow_runs.filter(
+      (item) => !/^[a-f0-9]{40}$/i.test(String(item.head_sha)) || typeof item.event !== "string",
+    ).length,
+    result: result === undefined ? "undefined" : "defined",
+    returnedRuns: (result?.body as { workflow_runs?: unknown[] } | undefined)?.workflow_runs
+      ?.length,
+    runPageFetches,
+    patchFetches,
+    elapsedMs: Math.round(finished - started),
+    listFetchMs: listFinishedAt === undefined ? undefined : Math.round(listFinishedAt - started),
+    postListMs: listFinishedAt === undefined ? undefined : Math.round(finished - listFinishedAt),
+  };
+  return { result, list, measurement };
+}
+
+it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
+  "returns a complete live public Actions list within the hydration count bound",
+  async () => {
+    const { result, list, measurement } = await measureLiveList(
+      globalThis.fetch,
+      "freebsd",
+      "freebsd-src",
+    );
+    process.stdout.write(`${JSON.stringify(measurement)}\n`);
+    expect(list).toBeDefined();
+    expect(measurement.needsHydration).toBeLessThanOrEqual(8);
+    expect(result).toMatchObject({ backend: "web", status: 200 });
+    expect(measurement.returnedRuns).toBe(list!.workflow_runs.length);
+    expect(measurement.returnedRuns).toBeGreaterThan(0);
+    expect(measurement.runPageFetches).toBe(measurement.needsHydration);
+    const runs = (result!.body as { workflow_runs: Record<string, unknown>[] }).workflow_runs;
+    for (const run of runs) {
+      expect(run).toMatchObject({
+        id: expect.any(Number),
+        status: expect.any(String),
+        event: expect.any(String),
+        head_sha: expect.stringMatching(/^[a-f0-9]{40}$/i),
+      });
+    }
+  },
+  45000,
+);
+
 it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
   "parses live public Actions pages and all job-group batches without API quota",
   async () => {
@@ -59,83 +145,23 @@ it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
       }
     }
     const originalFetch = globalThis.fetch;
-    for (const [index, suffix] of ["runs", "workflows/ci.yml/runs"].entries()) {
-      const page = pages[index + 1]!;
-      const parsed = lists[index]!;
-      const needsHydration = parsed.workflow_runs.filter(
-        (item) => !/^[a-f0-9]{40}$/i.test(String(item.head_sha)) || typeof item.event !== "string",
-      ).length;
-      const fetchedURLs: string[] = [];
-      // Replay the just-fetched list so cardinality and hydration use one snapshot.
-      vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-        fetchedURLs.push(url);
-        expect(new URL(url).hostname).toBe("github.com");
-        if (url.endsWith(index === 0 ? "/actions" : "/actions/workflows/ci.yml")) {
-          return new Response(page);
-        }
-        return originalFetch(url, init);
-      });
-      const listRequest = validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
-        path: `/repos/${owner}/${repo}/actions/${suffix}`,
-        query: { per_page: "25" },
-        headers: { "x-octopool-public-shape": "actions-summary-v1" },
-      });
-      const started = performance.now();
-      const hydrated = await callGitHubWeb(
-        withGitHubEgress({ REQUEST_TIMEOUT_MS: "30000" } as unknown as Env, []),
-        listRequest,
-        classifyRoute(listRequest, defaultPolicy(owner)),
-        { skipAnonymousAPI: true },
+    for (const suffix of ["runs", "workflows/ci.yml/runs"]) {
+      const { result, list, measurement } = await measureLiveList(
+        originalFetch,
+        owner,
+        repo,
+        suffix,
       );
-      const elapsedMs = Math.round(performance.now() - started);
-      if (needsHydration > 8) {
-        expect(hydrated).toBeUndefined();
-        expect(fetchedURLs).toHaveLength(1);
-        expect(elapsedMs).toBeLessThan(1000);
+      expect(list).toBeDefined();
+      if (measurement.needsHydration! > 8) {
+        expect(result).toBeUndefined();
+        expect(measurement.runPageFetches).toBe(0);
+        expect(measurement.postListMs).toBeLessThan(1000);
       } else {
-        expect(hydrated).toMatchObject({ backend: "web" });
-        expect(hydrated?.body).toHaveProperty("workflow_runs.length", parsed.workflow_runs.length);
+        expect(result).toMatchObject({ backend: "web" });
+        expect(result?.body).toHaveProperty("workflow_runs.length", list!.workflow_runs.length);
       }
-      process.stdout.write(
-        `${JSON.stringify({ list: suffix, cards: parsed.workflow_runs.length, needsHydration, result: hydrated === undefined ? "undefined: hydration count exceeds 8" : "complete", runPageFetches: fetchedURLs.length - 1, elapsedMs })}\n`,
-      );
-      let freshHydrations: number | undefined;
-      let freshRunFetches = 0;
-      vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
-        expect(new URL(url).hostname).toBe("github.com");
-        const response = await originalFetch(url, init);
-        if (url.endsWith(index === 0 ? "/actions" : "/actions/workflows/ci.yml")) {
-          const fresh = parseActionsRunListHTML(await response.clone().text(), owner, repo);
-          expect(fresh).toBeDefined();
-          freshHydrations = fresh!.workflow_runs.filter(
-            (item) =>
-              !/^[a-f0-9]{40}$/i.test(String(item.head_sha)) || typeof item.event !== "string",
-          ).length;
-        } else {
-          freshRunFetches++;
-        }
-        return response;
-      });
-      const freshStarted = performance.now();
-      const freshResult = await callGitHubWeb(
-        withGitHubEgress({ REQUEST_TIMEOUT_MS: "30000" } as unknown as Env, []),
-        listRequest,
-        classifyRoute(listRequest, defaultPolicy(owner)),
-        { skipAnonymousAPI: true },
-      );
-      const freshElapsedMs = Math.round(performance.now() - freshStarted);
-      expect(freshElapsedMs).toBeLessThan(1600);
-      if (freshResult === undefined) {
-        expect((freshHydrations ?? 0) > 8 || freshElapsedMs >= 950).toBe(true);
-        if ((freshHydrations ?? 0) > 8) expect(freshRunFetches).toBe(0);
-      } else {
-        expect(freshResult).toMatchObject({ backend: "web" });
-      }
-      process.stdout.write(
-        `${JSON.stringify({ liveFetch: suffix, needsHydration: freshHydrations, result: freshResult === undefined ? "undefined: count/deadline bound" : "complete", runPageFetches: freshRunFetches, elapsedMs: freshElapsedMs })}\n`,
-      );
+      process.stdout.write(`${JSON.stringify(measurement)}\n`);
     }
     const batches: unknown[] = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {

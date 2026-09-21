@@ -311,12 +311,13 @@ require REST, including queued or completed runs.
 Before any enrichment, a page with more than eight cards needing an event or full SHA
 falls back to REST, counting the whole page before request-limit truncation. At most
 eight run pages are hydrated concurrently, each capped at five seconds or the configured
-request timeout, whichever is shorter. A shared one-second budget (also capped by the
-configured timeout) covers the entire list-page attempt, including list and redirect
-bodies, enrichment and commit patches. A failed hydration or deadline aborts siblings;
-no partial list reaches cache publication. REST fallback adds at most roughly one
-second of page work plus synchronous parsing/scheduling overhead. These bounds also
-apply to canonical 25-card fills; cache TTLs and machine JSON paths are unchanged.
+request timeout, whichever is shorter. The list page fetch keeps the normal configured
+transport timeout. After parsing and the card-count check, a separate shared 2500 ms
+hydration deadline covers all run pages, redirects, body reads and commit patches.
+List fetching and parsing do not consume that deadline. A failed hydration or deadline
+aborts siblings; no partial list reaches cache publication. Failed hydration adds at
+most roughly 2.5 seconds after the list page, plus synchronous parsing/scheduling overhead.
+These bounds also apply to canonical 25-card fills; cache TTLs and machine JSON paths are unchanged.
 This deliberately bounded markup contract can cost more API reads when GitHub changes
 its layout. Valid known cards retain the existing wire fields, filters, and state-based
 TTLs; fresh job/attempt metadata still independently governs terminal caching.

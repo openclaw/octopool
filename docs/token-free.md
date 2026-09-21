@@ -179,13 +179,14 @@ commit SHA remain API-only; a PR link or current branch head cannot supply histo
 Before fetching any run page, the list adapter counts cards needing an event or full
 SHA across the entire parsed page, before limit truncation. More than eight causes
 immediate REST fallback. Otherwise hydration runs concurrently, with each run-page
-fetch capped at the lesser of the configured request timeout and five seconds. A shared
-one-second budget (or the shorter configured timeout) bounds the entire list-page
-attempt, including redirects, body reads, enrichment and commit patches. The first
-failed hydration or deadline aborts outstanding work; only a complete result can be
-returned or cached. Thus a failing page attempt adds roughly at most one second before
-REST, plus synchronous parsing/scheduling overhead. Run views and jobs retain their
-existing timeout policy.
+fetch capped at the lesser of the configured request timeout and five seconds. The list
+page fetch keeps the normal configured transport timeout. After parsing and the card-count
+check, hydration gets its own shared 2500 ms deadline, covering all run-page fetches,
+redirects, body reads and commit patches. List fetching and parsing do not consume that
+deadline. The first failed hydration or deadline aborts outstanding work; only a complete
+result can be returned or cached. A failed hydration phase adds at most roughly 2.5 seconds
+after the list page, plus synchronous parsing/scheduling overhead. Run views and jobs
+retain their existing timeout policy.
 Unfiltered superset projection preserves the upstream count/lower bound; filtered
 projections report the number of captured matches before applying the requested limit.
 

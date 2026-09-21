@@ -44,9 +44,8 @@ export async function callGitHubWeb(
   for (const web of requests) {
     if (options.skipAnonymousAPI && web.usesApiQuota) continue;
     if (options.skipNoQuota && !web.usesApiQuota) continue;
-    const timeoutMs = Math.min(requestTimeoutMs(env), web.timeoutMs ?? Infinity);
-    const signal = web.timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
-    const fetched = await fetchWebResponse(env, web.url, web.headers, timeoutMs, false, signal);
+    const timeoutMs = requestTimeoutMs(env);
+    const fetched = await fetchWebResponse(env, web.url, web.headers, timeoutMs);
     if (fetched === undefined) {
       continue;
     }
@@ -59,15 +58,14 @@ export async function callGitHubWeb(
       continue;
     }
     try {
-      const body = await readWebBody(response, web.capBytes, signal);
+      const body = await readWebBody(response, web.capBytes);
       const payload = await web.payload(
         new Uint8Array(body),
         response.headers,
         response.status,
         responseURL,
-        signal,
       );
-      if (payload !== undefined && !signal?.aborted) {
+      if (payload !== undefined) {
         return { ...payload, backend: web.usesApiQuota ? "github" : "web" };
       }
     } catch (error) {

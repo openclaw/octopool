@@ -19,8 +19,9 @@ so queued/in-progress states may have advanced. The baseline parser was commit 8
 All 50 run pages had a summary and graph; none failed because a queued/pending summary
 was missing or a `waiting` label was unknown. The repository page requires 25 hydrations;
 the workflow page requires 22. The new eight-card cutoff therefore rejects both before
-fetching any run page, even when the caller requests only one card. The one-second shared
-budget covers list fetching as well as allowed hydration on less busy pages.
+fetching any run page, even when the caller requests only one card. Allowed hydration on
+less busy pages has its own shared 2500 ms deadline; list fetching retains the normal
+configured transport timeout.
 
 Trimming removes unrelated page chrome, images, SVG paths, telemetry/socket attributes,
 and graph job visualization. Run fixtures retain header status icons, summary, navigation

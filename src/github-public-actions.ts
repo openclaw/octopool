@@ -28,7 +28,7 @@ import type { RelayRequest, RouteInfo } from "./types";
 
 const MAX_PUBLIC_JOB_PAGES = 25;
 const MAX_RUN_LIST_HYDRATIONS = 8;
-const RUN_LIST_TIMEOUT_MS = 1000;
+const RUN_LIST_HYDRATION_TIMEOUT_MS = 2500;
 
 export function actionsPageRequest(
   env: GitHubEgressEnv,
@@ -86,7 +86,7 @@ function actionsRunListRequest(
   if (query.search !== "") {
     url.searchParams.set("query", query.search);
   }
-  const web = htmlWebRequest(env, url.toString(), async (body, headers, status, _url, signal) => {
+  return htmlWebRequest(env, url.toString(), async (body, headers, status) => {
     const parsed = parseActionsRunListHTML(
       new TextDecoder().decode(body),
       route.owner!,
@@ -107,8 +107,10 @@ function actionsRunListRequest(
       return undefined;
     }
     const controller = new AbortController();
-    const enrichmentSignal =
-      signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
+    const enrichmentSignal = AbortSignal.any([
+      controller.signal,
+      AbortSignal.timeout(RUN_LIST_HYDRATION_TIMEOUT_MS),
+    ]);
     try {
       const runs = await Promise.all(
         parsed.workflow_runs.slice(0, query.perPage).map(async (run) => {
@@ -131,8 +133,6 @@ function actionsRunListRequest(
       controller.abort();
     }
   });
-  // This includes list/redirect bodies, parsing, run pages and commit patches.
-  return { ...web, timeoutMs: RUN_LIST_TIMEOUT_MS };
 }
 
 function needsRunEnrichment(run: Record<string, unknown>): boolean {
