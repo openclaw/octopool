@@ -56,11 +56,15 @@ describe("PR summary v2", () => {
 
   function withPR(changes: Record<string, unknown>): string {
     const html = fixture("merged");
-    return html.replace(/(<script[^>]*>)(.*?)(<\/script>)/s, (_match, start, raw, end) => {
-      const data = JSON.parse(raw);
-      Object.assign(data.payload.pullRequestsLayoutRoute.pullRequest, changes);
-      return start + JSON.stringify(data) + end;
-    });
+    // The fixture carries exactly one embedded-data script; splice its JSON by
+    // exact markers rather than pattern-matching HTML.
+    const open = '<script type="application/json" data-target="react-app.embeddedData">';
+    const start = html.indexOf(open);
+    const end = start === -1 ? -1 : html.indexOf("</script>", start + open.length);
+    if (start === -1 || end === -1) throw new Error("fixture lacks the embedded data script");
+    const data = JSON.parse(html.slice(start + open.length, end));
+    Object.assign(data.payload.pullRequestsLayoutRoute.pullRequest, changes);
+    return html.slice(0, start + open.length) + JSON.stringify(data) + html.slice(end);
   }
 
   it.each([undefined, null, {}, { login: null }, { login: "" }, { login: " " }])(
