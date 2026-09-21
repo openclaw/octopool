@@ -152,6 +152,19 @@ func relayLandingGraphQL(ctx context.Context, request ghAPIRequest, stdout io.Wr
 	if _, present := response.Data["repository"]; !present && len(response.Errors) == 0 {
 		return localFallbackError{Reason: "unsupported_graphql_landing_shape"}
 	}
+	if request.headers["x-octopool-public-shape"] == publicShapePullRequestMergeSnapshot && len(response.Errors) == 0 {
+		var repository struct {
+			PullRequest *struct {
+				HeadRefName string `json:"headRefName"`
+			} `json:"pullRequest"`
+		}
+		if err := json.Unmarshal(response.Data["repository"], &repository); err != nil {
+			return err
+		}
+		if repository.PullRequest != nil && repository.PullRequest.HeadRefName == "" {
+			return localFallbackError{Reason: "unsupported_graphql_merge_snapshot"}
+		}
+	}
 	if err := writeGHBody(ctx, stdout, envelope, request.jq); err != nil {
 		return err
 	}

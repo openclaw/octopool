@@ -5,6 +5,7 @@
 ### Fixes
 
 - Verify release-asset bytes before, during, and after staging so same-tick mutations with restored timestamps cannot silently change uploads. Thanks @steipete for the report (#167).
+- Carry source branch names in public merge snapshots and retire prior cache representations from the canonical query, preserving fresh receipt reads and guarded fallback for older Workers. Thanks @steipete (#169).
 
 ## 0.7.2 - 2026-09-23
 

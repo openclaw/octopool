@@ -49,6 +49,13 @@ The fixed `pr-ci-summary-v1`, `pr-ci-rollup-v1`, and `pr-merge-snapshot-v1`
 projections use pooled GraphQL reads after the normal public-repository guard.
 The shape and detail cursor vary the existing cache key; a raw REST PR response,
 a different projection, and another cursor can never satisfy the request.
+The merge snapshot includes `headRefName` so a landing can bind the observed source
+branch to its acquired source facts. Its cache representation includes the exact canonical
+GraphQL document in the existing hashed key. Older projections lacking that field cannot
+be reused from edge, D1, identity caches, or concurrent fills. Future changes to that
+document retire its prior representation automatically; unchanged CI and raw REST keys
+stay warm. No schema, publication-epoch change, or cache purge is required.
+
 Snapshots stay fresh for at most 60 seconds, including completed CI and merged PRs.
 They have no stale fallback: a previous merge snapshot cannot authorize a later landing.
 The CLI's recognized landing queries request a live read by default; callers must

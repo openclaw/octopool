@@ -16,7 +16,7 @@ import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-response";
 import { scalarQuery } from "./github-public-utils";
-import { PUBLIC_SHAPES } from "./github-public-shapes";
+import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
 import { isRecord } from "./object";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
@@ -88,6 +88,11 @@ export async function githubCacheKey(
     headers: stableRecord(varyHeaders),
     route_key: route.routeKey,
     state: cacheStateDiscriminator(route),
+    // A fixed shape can gain fields without changing its wire name.
+    ...(isLandingGraphQLRoute(route) &&
+    request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.pullRequestMergeSnapshot
+      ? { representation: GITHUB_LANDING_QUERIES.pullRequestMergeSnapshot }
+      : {}),
     // Old compare keys conflated GitHub's unpaged 250-commit response with
     // explicit pagination, including the default 30-commit first page.
     ...(route.kind === "compare" ? { query_semantics: "compare-pagination-v1" } : {}),

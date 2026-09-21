@@ -30,7 +30,11 @@ func TestLandingGraphQLRelay(t *testing.T) {
 		} {
 			t.Run(policy+"/"+test.name, func(t *testing.T) {
 				calls := 0
-				body := map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"headRefOid": metadataHead, "state": "OPEN"}}}}
+				pr := map[string]any{"headRefOid": metadataHead, "state": "OPEN"}
+				if test.shape == publicShapePullRequestMergeSnapshot {
+					pr["headRefName"] = "feature"
+				}
+				body := map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pr}}}
 				rewriteTestServer(t, policy, func(w http.ResponseWriter, r *http.Request) {
 					calls++
 					request := decodeCLIRequest(t, w, r)
@@ -86,7 +90,11 @@ func TestLandingGraphQLFreshObservations(t *testing.T) {
 					if cache == "explicit-cache" && headers["cache-control"] != "max-age=30" {
 						t.Errorf("explicit cache age changed: %v", headers)
 					}
-					writeCLIEnvelope(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"headRefOid": head}}}})
+					pr := map[string]any{"headRefOid": head}
+					if query.numberKey == "number" {
+						pr["headRefName"] = "feature"
+					}
+					writeCLIEnvelope(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pr}}})
 				})
 				t.Setenv("OCTOPOOL_FRESH", "")
 				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
@@ -312,6 +320,39 @@ func TestLandingGraphQLResponseBoundaries(t *testing.T) {
 			}
 			if test.status >= 400 && (isLocalFallback(err) || stderr.Len() != 0) {
 				t.Fatalf("upstream failure became a native handoff: err=%v stderr=%q", err, stderr.String())
+			}
+		})
+	}
+}
+
+func TestLandingGraphQLMergeProjectionFallback(t *testing.T) {
+	for _, blocked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "native", true: "no-fallback"}[blocked], func(t *testing.T) {
+			relayTestServer(t, func(map[string]any) any {
+				return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"headRefOid": metadataHead}}}}
+			})
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			if blocked {
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			}
+			capture := captureRewriteGH(t)
+			args := landingGraphQLArgs(githubLandingQueryPullRequestMergeSnapshot, "number")
+			var out, stderr bytes.Buffer
+			err := runGH(t.Context(), args, &out, &stderr)
+			if blocked {
+				if err == nil || out.Len() != 0 {
+					t.Fatalf("old projection must fail before output: err=%v out=%q", err, out.String())
+				}
+				if _, err := os.Stat(capture); !os.IsNotExist(err) {
+					t.Fatal("disabled fallback dispatched native gh")
+				}
+				return
+			}
+			if err != nil || out.String() != "child stdout\n" {
+				t.Fatalf("fallback must emit only native output: err=%v out=%q", err, out.String())
+			}
+			if got := readRewriteCapture(t, capture); !slices.Equal(got.Args, args) {
+				t.Fatalf("native query changed: %q", got.Args)
 			}
 		})
 	}

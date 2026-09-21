@@ -223,7 +223,9 @@ errors; they never masquerade as an older Worker and trigger personal-token fall
 Viewer-dependent merge previews, arbitrary GraphQL, mutations, extra variables, file
 inputs, and unsupported output modes stay with native `gh`. Private repositories retain
 guarded local fallback. A CLI connected to an older Worker rejects its raw REST response
-before any output and uses guarded fallback; upgrade both components for pooled GraphQL.
+before any output and uses guarded fallback. The merge projection also requires the
+source branch name (`headRefName`); a Worker returning an older merge projection triggers
+the same handoff before any partial output. Upgrade both components for pooled GraphQL.
 No general GraphQL proxy or caller-controlled upstream query is exposed.
 
 ### Read routing and freshness

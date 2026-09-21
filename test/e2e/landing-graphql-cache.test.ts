@@ -1,12 +1,24 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { deleteEdgeJSON } from "../../src/edge-cache";
+import { githubCacheKey, GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
+import { loadIdentities } from "../../src/db";
+import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
+import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { bearer, jsonResponse, POOL, rateHeaders, relay, seedPool } from "./harness";
 
 const path = "/repos/openclaw/octopool/pulls/42";
-const snapshot = (head: string) => ({
-  data: { repository: { pullRequest: { state: "OPEN", headRefOid: head } } },
+const snapshot = (head: string, branch?: string) => ({
+  data: {
+    repository: {
+      pullRequest: {
+        state: "OPEN",
+        headRefOid: head,
+        ...(branch === undefined ? {} : { headRefName: branch }),
+      },
+    },
+  },
 });
 const options = (shape: string, fresh = false) => ({
   headers: {
@@ -30,6 +42,8 @@ describe("public landing GraphQL cache", () => {
   ])("pools %s, reuses it, and revalidates once with max-age=0", async (shape, field, variable) => {
     await seedPool();
     let queries = 0;
+    const projected = (index: number) =>
+      snapshot(`head-${index}`, shape === "pr-merge-snapshot-v1" ? `branch-${index}` : undefined);
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
@@ -44,9 +58,11 @@ describe("public landing GraphQL cache", () => {
         const body = (await request.json()) as { query: string; variables: unknown };
         expect(body.variables).toEqual({ owner: "openclaw", name: "octopool", [variable]: 42 });
         expect(body.query).toContain(field);
+        if (shape === "pr-merge-snapshot-v1")
+          expect(body.query).toContain("headRefOid headRefName baseRefName");
         expect(body.query).not.toMatch(/viewer|mutation/);
         queries++;
-        return jsonResponse(snapshot(`head-${queries}`), 200, {
+        return jsonResponse(projected(queries), 200, {
           ...Object.fromEntries(new Headers(rateHeaders({ remaining: 4_999 - queries }))),
           "x-ratelimit-resource": "graphql",
           etag: '"not-a-graphql-validator"',
@@ -55,24 +71,24 @@ describe("public landing GraphQL cache", () => {
     );
 
     expect(await (await relay(path, undefined, options(shape))).json<Envelope>()).toMatchObject({
-      body: snapshot("head-1"),
+      body: projected(1),
       identity: { id: "primary" },
       relay: { cache: "miss" },
     });
     expect(await (await relay(path, undefined, options(shape))).json<Envelope>()).toMatchObject({
-      body: snapshot("head-1"),
+      body: projected(1),
       relay: { cache: "hit" },
     });
     expect(queries).toBe(1);
     expect(
       await (await relay(path, undefined, options(shape, true))).json<Envelope>(),
     ).toMatchObject({
-      body: snapshot("head-2"),
+      body: projected(2),
       relay: { cache: "miss" },
     });
     expect(queries).toBe(2);
     expect(await (await relay(path, undefined, options(shape))).json<Envelope>()).toMatchObject({
-      body: snapshot("head-2"),
+      body: projected(2),
       relay: { cache: "hit" },
     });
     expect(queries).toBe(2);
@@ -90,6 +106,73 @@ describe("public landing GraphQL cache", () => {
     expect((await poolCoordinatorStub(env, POOL).snapshot()).rates).toMatchObject([
       { identity_id: "primary", resource: "graphql", remaining: 4_997 },
     ]);
+  });
+
+  it.each([
+    ["shared edge", "1s_y-kwI2fRm6NKEHk3ecDLe-bZNFF2CxsNrpP-yHIg", false],
+    ["shared D1", "1s_y-kwI2fRm6NKEHk3ecDLe-bZNFF2CxsNrpP-yHIg", true],
+    ["identity edge", "0U-k4JPBUIVBlqsu8Tia_8224GyXop9qHtUUECziXhM", false],
+    ["identity D1", "0U-k4JPBUIVBlqsu8Tia_8224GyXop9qHtUUECziXhM", true],
+  ])("retires the phase-one merge projection from %s", async (_, legacyKey, d1Only) => {
+    await seedPool();
+    const request = validateRelayRequest({
+      pool: POOL,
+      method: "GET",
+      path,
+      ...options("pr-merge-snapshot-v1"),
+    });
+    const route = classifyRoute(request, defaultPolicy("openclaw"));
+    const identity = (await loadIdentities(env, POOL, route)).find(
+      (candidate) => candidate.id === "primary",
+    );
+    if (identity === undefined) throw new Error("Fixture identity missing");
+    // Frozen phase-one keys precede query-derived representation identity.
+    expect(await githubCacheKey(POOL, request, route)).not.toBe(legacyKey);
+    expect(await githubCacheKey(POOL, request, route, identity)).not.toBe(legacyKey);
+    await seedPublicRepoProof(env, route);
+    expect(
+      await writeOwnedGitHubCache(
+        env,
+        legacyKey,
+        request,
+        route,
+        {
+          status: 200,
+          headers: {},
+          body_encoding: "json",
+          body: snapshot("old-head"),
+        },
+        identity,
+      ),
+    ).toBe("shared");
+    if (d1Only) await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, legacyKey);
+    let queries = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const upstream = new Request(input, init);
+        if (upstream.url === "https://api.github.com/repos/openclaw/octopool")
+          return jsonResponse({ private: false });
+        expect(upstream.url).toBe("https://api.github.com/graphql");
+        const body = (await upstream.json()) as { query: string };
+        expect(body.query).toContain("headRefOid headRefName baseRefName");
+        queries++;
+        return jsonResponse(snapshot("current-head", "topic"));
+      }),
+    );
+    expect(
+      await (await relay(path, undefined, options("pr-merge-snapshot-v1"))).json<Envelope>(),
+    ).toMatchObject({
+      body: snapshot("current-head", "topic"),
+      relay: { cache: "miss" },
+    });
+    expect(
+      await (await relay(path, undefined, options("pr-merge-snapshot-v1"))).json<Envelope>(),
+    ).toMatchObject({
+      body: snapshot("current-head", "topic"),
+      relay: { cache: "hit" },
+    });
+    expect(queries).toBe(1);
   });
 
   it("keeps GraphQL cursors and REST representations in separate cache entries", async () => {
