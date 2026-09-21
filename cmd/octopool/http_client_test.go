@@ -124,6 +124,33 @@ func useHTTPTestTransport(t *testing.T, transport http.RoundTripper) {
 	t.Cleanup(func() { httpClient = original })
 }
 
+func TestJSONRequestTimeoutIsScoped(t *testing.T) {
+	originalTimeout := httpClient.Timeout
+	for _, timeout := range []time.Duration{5 * time.Second, 45 * time.Second} {
+		t.Run(timeout.String(), func(t *testing.T) {
+			want := timeout
+			useHTTPTestTransport(t, rewritePolicyTestTransport(func(request *http.Request) (*http.Response, error) {
+				deadline, ok := request.Context().Deadline()
+				remaining := time.Until(deadline)
+				if !ok || remaining > want || remaining < want-time.Second {
+					t.Errorf("deadline remaining=%s, want %s", remaining, want)
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{}`)), Request: request}, nil
+			}))
+			if _, _, err := doRawWithTimeout(t.Context(), "https://synthetic.invalid", "synthetic-token", nil, timeout); err != nil {
+				t.Fatal(err)
+			}
+			want = originalTimeout
+			if _, _, err := doRaw(t.Context(), "https://synthetic.invalid", "synthetic-token", nil); err != nil {
+				t.Fatal(err)
+			}
+			if httpClient.Timeout != originalTimeout {
+				t.Fatal("relay read changed the shared timeout")
+			}
+		})
+	}
+}
+
 type redirectProbe struct {
 	requests    atomic.Int32
 	credentials atomic.Int32

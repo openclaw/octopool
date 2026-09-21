@@ -174,13 +174,16 @@ func TestRunGHPRViewRollupRejectsUnstableHead(t *testing.T) {
 func TestRunGHPRViewRollupPaginates(t *testing.T) {
 	t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 	pages := map[string]int{}
+	var pagesMu sync.Mutex
 	relayTestServer(t, func(request map[string]any) any {
 		path := request["path"].(string)
 		if strings.HasSuffix(path, "/pulls/1") {
 			return map[string]any{"head": map[string]any{"sha": metadataHead}}
 		}
+		pagesMu.Lock()
 		pages[path]++
 		page := pages[path]
+		pagesMu.Unlock()
 		count := 100
 		if page == 2 {
 			count = 1
@@ -220,6 +223,8 @@ func TestRunGHPRViewRollupPaginates(t *testing.T) {
 	if len(got.StatusCheckRollup) != 202 || got.StatusCheckRollup[100]["workflowName"] != "workflow-101" || got.StatusCheckRollup[201]["context"] != "status-101" {
 		t.Fatalf("incomplete rollup: %s", out.String())
 	}
+	pagesMu.Lock()
+	defer pagesMu.Unlock()
 	for path, count := range pages {
 		if count != 2 {
 			t.Errorf("%s pages = %d", path, count)

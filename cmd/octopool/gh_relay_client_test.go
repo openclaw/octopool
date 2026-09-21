@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -152,17 +153,13 @@ func TestGHRelayTransportTimeoutHonorsCallerContext(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			original := httpClient
-			client := *original
-			client.Timeout = 100 * time.Millisecond
+			t.Setenv("OCTOPOOL_RELAY_TIMEOUT_SECONDS", "5")
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 			if mode == "caller deadline" {
 				var cancelDeadline context.CancelFunc
 				ctx, cancelDeadline = context.WithTimeout(ctx, 200*time.Millisecond)
 				defer cancelDeadline()
-				client.Timeout = time.Second
 			}
-			httpClient = &client
-			t.Cleanup(func() { httpClient = original })
 			var calls atomic.Int64
 			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
 				if calls.Add(1) == 1 {
@@ -182,16 +179,14 @@ func TestGHRelayTransportTimeoutHonorsCallerContext(t *testing.T) {
 			useTestRelayRetryDelays(t, time.Millisecond)
 			var out, stderr bytes.Buffer
 			err := run(ctx, []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
-			wantCalls := int64(1)
 			if mode == "HTTP timeout" {
-				wantCalls = 2
-				if err != nil || out.String() != "{\"ok\":true}\n" {
+				if !isLocalFallback(err) || !strings.Contains(err.Error(), "relay_timeout") || out.Len() != 0 {
 					t.Fatalf("err=%v output=%q", err, out.String())
 				}
 			} else if !errors.Is(err, ctx.Err()) || ctx.Err() == nil || out.Len() != 0 {
 				t.Fatalf("err=%v context=%v output=%q", err, ctx.Err(), out.String())
 			}
-			if calls.Load() != wantCalls || policies.Load() != wantCalls+1 || stderr.Len() != 0 {
+			if calls.Load() != 1 || policies.Load() != 2 || stderr.Len() != 0 {
 				t.Fatalf("relay=%d policies=%d stderr=%q", calls.Load(), policies.Load(), stderr.String())
 			}
 		})
@@ -280,11 +275,87 @@ func TestRelayRetryAttempts(t *testing.T) {
 		{name: "default", want: len(relayRetryDelays)},
 		{name: "zero", raw: "0", want: 0},
 		{name: "larger than schedule", raw: "5", want: 5},
+		{name: "invalid", raw: "invalid", want: 1},
+		{name: "negative", raw: "-1", want: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("OCTOPOOL_RELAY_RETRIES", test.raw)
 			if got := relayRetryAttempts(); got != test.want {
 				t.Fatalf("relayRetryAttempts() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRelayReadTimeout(t *testing.T) {
+	for _, test := range []struct {
+		raw  string
+		want time.Duration
+	}{
+		{"", 20 * time.Second},
+		{"5", 5 * time.Second},
+		{"0", 5 * time.Second},
+		{"1", 5 * time.Second},
+		{" 45 ", 45 * time.Second},
+		{"invalid", 20 * time.Second},
+		{"-1", 20 * time.Second},
+		{"9223372036854775807", 20 * time.Second},
+	} {
+		t.Run(test.raw, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_RELAY_TIMEOUT_SECONDS", test.raw)
+			if got := relayReadTimeout(); got != test.want {
+				t.Fatalf("timeout=%s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestGHRelayDefaultRetryBudget(t *testing.T) {
+	for _, failure := range []string{"identities_cooling_down", "500", "503", "524"} {
+		for _, retries := range []string{"", "0", "3"} {
+			t.Run(failure+"/retries="+retries, func(t *testing.T) {
+				client, calls := newRelayTestClient(t, func(int64) (int, string) {
+					if failure == "identities_cooling_down" {
+						return 424, `{"error":{"code":"fallback_local","details":{"reason":"identities_cooling_down"}}}`
+					}
+					code, _ := strconv.Atoi(failure)
+					return code, `{"error":{"code":"internal_error"}}`
+				})
+				t.Setenv("OCTOPOOL_RELAY_RETRIES", retries)
+				sleeps := recordWatchSleeps(t)
+				_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/acme/repo"})
+				count := 1
+				if retries != "" {
+					count, _ = strconv.Atoi(retries)
+				}
+				wantSleeps := make([]time.Duration, count)
+				for i := range wantSleeps {
+					wantSleeps[i] = time.Second
+				}
+				if err == nil || isLocalFallback(err) != (failure == "identities_cooling_down") || calls.Load() != int64(count+1) || !reflect.DeepEqual(*sleeps, wantSleeps) {
+					t.Fatalf("err=%v calls=%d sleeps=%v", err, calls.Load(), *sleeps)
+				}
+			})
+		}
+	}
+}
+
+func TestGHRelayTimeoutDoesNotHideHTTPRejection(t *testing.T) {
+	for _, status := range []int{401, 403, 424, 503, 524} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
+			calls := 0
+			useHTTPTestTransport(t, rewritePolicyTestTransport(func(request *http.Request) (*http.Response, error) {
+				calls++
+				return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(iotest.ErrReader(context.DeadlineExceeded)), Request: request}, nil
+			}))
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "3")
+			sleeps := recordWatchSleeps(t)
+			var out, stderr bytes.Buffer
+			err := runGH(t.Context(), []string{"api", "repos/acme/repo"}, &out, &stderr)
+			var relay *relayResponseError
+			if !errors.As(err, &relay) || relay.Status != status || isLocalFallback(err) || calls != 1 || policies.Load() != 2 || len(*sleeps) != 0 || out.Len() != 0 || stderr.Len() != 0 {
+				t.Fatalf("err=%v calls=%d policies=%d sleeps=%v out=%q stderr=%q", err, calls, policies.Load(), *sleeps, out.String(), stderr.String())
 			}
 		})
 	}
@@ -319,13 +390,13 @@ func TestGHRelayClientRetriesTransientFailuresThenSucceeds(t *testing.T) {
 	}{
 		{
 			name:     "transient fallback",
-			failures: 2,
+			failures: 1,
 			status:   http.StatusFailedDependency,
 			body:     `{"error":{"code":"fallback_local","message":"Run locally","details":{"reason":"identities_cooling_down"}}}`,
 		},
 		{
 			name:     "typed internal_error",
-			failures: 2,
+			failures: 1,
 			status:   http.StatusInternalServerError,
 			body:     `{"error":{"code":"internal_error","message":"Internal error","request_id":"transient-request"}}`,
 		},
@@ -338,7 +409,7 @@ func TestGHRelayClientRetriesTransientFailuresThenSucceeds(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("OCTOPOOL_RELAY_RETRIES", "")
-			useTestRelayRetryDelays(t, time.Millisecond, time.Millisecond)
+			useTestRelayRetryDelays(t, time.Millisecond)
 			client, calls := newRelayTestClient(t, func(call int64) (int, string) {
 				if call <= test.failures {
 					return test.status, test.body

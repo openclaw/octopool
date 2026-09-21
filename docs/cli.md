@@ -593,7 +593,7 @@ guarded native fallback. A refusal after watch progress never hands off.
 For `gh pr checks --watch`, an explicit relay `fallback_local` after progress still prints a
 handoff boundary and continues the command with real `gh`, which owns output and exit status.
 Its first snapshot may repeat the last relay-rendered state. Client-side incompleteness,
-auth, transport/decode failures, and ordinary relay service errors remain terminal after
+auth, transport/decode failures (including `relay_timeout`), and ordinary relay service errors remain terminal after
 progress and do not spend local GitHub quota. Cached empty checks are revalidated live.
 Terminal confirmation reacquires every check, status, run, and workflow page with
 `max-age=0`, builds fresh associations, then reads the PR head live again after hydration.
@@ -729,6 +729,15 @@ public responses to the shared cache, and returns the GitHub-shaped body. If the
 server says the read should run locally — unsupported route, public pooling disabled by
 policy, private/unverified repository, no usable identity, or identity pool depleted — the CLI
 runs the original command with the real `gh` and your local GitHub token.
+
+Transient pool fallbacks and eligible relay service/connection failures get one retry after
+one second by default. Each shim relay GET attempt has a 20-second timeout covering response
+headers and the body; policy fetches retain their separate timeout. A timed-out read does
+not retry and requests guarded local fallback with a `relay_timeout` diagnostic. An observed
+HTTP rejection remains a failure if its body times out. `OCTOPOOL_NO_FALLBACK=1` keeps timeout
+and pool fallbacks as failures. Watch ownership remains as described above: run watches stop,
+and PR-check watches never hand off a client timeout after printing progress. These limits
+apply per relay read, not to the entire command, policy checks, or native `gh` execution.
 
 Pagination is fail-closed: if bounded relay pagination cannot prove a complete PR detail,
 check set, or filtered issue list, the CLI delegates to real `gh` instead of returning a
@@ -1270,19 +1279,26 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_QUIET_CACHE=1` — suppress the one-line stderr note printed when a
   decision-shaped route (PR/issue/run/checks) is served from the shared cache.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns
-  `fallback_local`, including during an active watch, useful for proving relay/cache coverage.
+  `fallback_local` or a shim relay read times out, including during an active watch, useful
+  for proving relay/cache coverage.
 - `OCTOPOOL_RELAY_RETRIES` — how many times transient pool-exhaustion fallbacks
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
   `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and
   malformed 502/503/504 or Cloudflare 520–524 gateway responses are retried against the
-  relay (1s, then 3s for subsequent retries). Interrupted response bodies and transient
-  connection failures or timeouts on safe relay reads use the same budget. Every retry
+  relay (1s before every retry). Interrupted response bodies and transient
+  connection failures on safe relay reads use the same budget; timeouts never retry. Every retry
   obtains current protection policy; policy failures, authentication denials, response-size
   violations and caller cancellation never become retries or native handoffs. Exhausted
   transient fallbacks may delegate to real `gh` except for
   supported `gh run watch`, which fails explicitly. Exhausted service errors remain failures
-  instead of spending local GitHub quota. Default `2`; `0`
+  instead of spending local GitHub quota. Default `1`; `0`
   disables retries.
+- `OCTOPOOL_RELAY_TIMEOUT_SECONDS` — per-attempt timeout for shim relay GET reads,
+  including response-body reads. Default `20`; nonnegative integer values below `5`
+  are clamped to `5` seconds. Invalid, negative, or unrepresentable durations use the
+  default. A timeout requests guarded native fallback with reason `relay_timeout`, without
+  retrying or claiming an explicit server `fallback_local` response. Login, writes, policy
+  fetches, and direct `octopool request` retain their existing timeouts.
 - `OCTOPOOL_ADMIN_TOKEN` — admin token for `octopool admin`.
 - `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` — permit non-HTTPS login for local dev.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Fall back to guarded local gh sooner on pool cooldowns with one default retry after one second, and cap shim relay read attempts at 20 seconds with configurable timeouts that never retry, preserving no-fallback and watch ownership rules.
+
 ## 0.6.10 - 2026-09-20
 
 ### Features

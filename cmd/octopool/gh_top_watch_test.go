@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"reflect"
@@ -1008,6 +1009,7 @@ func TestWatchErrorClassification(t *testing.T) {
 		{name: "local fallback after progress", err: localFallbackError{Reason: "pagination_exhausted"}, progress: true, action: ghFail},
 		{name: "service error after progress", err: &relayResponseError{Status: http.StatusServiceUnavailable, apiError: apiError{Code: "admin_unconfigured"}}, progress: true, action: ghFail},
 		{name: "transport error after progress", err: errors.New("connection reset"), progress: true, action: ghFail},
+		{name: "timeout after progress", err: localFallbackError{Reason: "relay_timeout"}, progress: true, action: ghFail},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := ghWatchCompleted(watchError(test.err, test.progress))
@@ -1015,6 +1017,63 @@ func TestWatchErrorClassification(t *testing.T) {
 				t.Fatalf("action=%v, want %v; err=%v", result.action, test.action, result.err)
 			}
 		})
+	}
+}
+
+func TestGHWatchTimeoutOwnership(t *testing.T) {
+	for _, command := range []string{"run", "pr"} {
+		for _, phase := range []string{"initial", "after progress"} {
+			t.Run(command+"/"+phase, func(t *testing.T) {
+				rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
+				captureRewriteGH(t)
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+				t.Setenv("OCTOPOOL_RELAY_RETRIES", "3")
+				sleeps := recordWatchSleeps(t)
+				fixture := newPRChecksFixture()
+				var polls atomic.Int64
+				useHTTPTestTransport(t, rewritePolicyTestTransport(func(request *http.Request) (*http.Response, error) {
+					var body map[string]any
+					if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+						return nil, err
+					}
+					if command == "run" || strings.HasSuffix(body["path"].(string), "/pulls/7") {
+						if count := polls.Add(1); phase == "initial" || count > 1 {
+							return nil, &net.DNSError{Err: "synthetic timeout", IsTimeout: true}
+						}
+					}
+					var result any = map[string]any{"status": "in_progress", "run_attempt": 1}
+					if command == "pr" {
+						result = fixture.response(t, body)
+					}
+					encoded, err := json.Marshal(map[string]any{"status": 200, "body_encoding": "json", "body": result})
+					return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(encoded)), Request: request}, err
+				}))
+				args := []string{"run", "watch", "42", "-R", "acme/repo"}
+				if command == "pr" {
+					args = []string{"pr", "checks", "7", "-R", "acme/repo", "--watch"}
+				}
+				var out, stderr bytes.Buffer
+				err := runGH(t.Context(), args, &out, &stderr)
+				childAllowed := command == "pr" && phase == "initial"
+				if childAllowed {
+					if err != nil || out.String() != "child stdout\n" || !strings.Contains(stderr.String(), "relay_timeout") {
+						t.Fatalf("initial checks fallback: err=%v out=%q stderr=%q", err, out.String(), stderr.String())
+					}
+				} else if err == nil || shouldRunRealGH(err) || !strings.Contains(err.Error(), "relay_timeout") || strings.Contains(out.String(), "child stdout") || strings.Contains(stderr.String(), "real gh") {
+					t.Fatalf("watch lost ownership: err=%v out=%q stderr=%q", err, out.String(), stderr.String())
+				}
+				wantPolls, wantSleeps := int64(1), 0
+				if phase == "after progress" {
+					wantPolls = 2
+					if command == "run" {
+						wantSleeps = 1
+					}
+				}
+				if polls.Load() != wantPolls || len(*sleeps) != wantSleeps {
+					t.Fatalf("timeout retried: polls=%d sleeps=%v", polls.Load(), *sleeps)
+				}
+			})
+		}
 	}
 }
 

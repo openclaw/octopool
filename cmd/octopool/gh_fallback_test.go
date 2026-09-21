@@ -4,9 +4,64 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"os/exec"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestGHRelayCoolingDownFallsBackAfterOneRetry(t *testing.T) {
+	var calls atomic.Int64
+	rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		writeCLIFallback(t, w, "identities_cooling_down")
+	})
+	captureRewriteGH(t)
+	t.Setenv("OCTOPOOL_RELAY_RETRIES", "")
+	t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+	sleeps := recordWatchSleeps(t)
+	var out, stderr bytes.Buffer
+	err := runGH(t.Context(), []string{"api", "repos/acme/repo"}, &out, &stderr)
+	if err != nil || calls.Load() != 2 || len(*sleeps) != 1 || (*sleeps)[0] != time.Second || out.String() != "child stdout\n" || !strings.Contains(stderr.String(), "identities_cooling_down; falling back to real gh") {
+		t.Fatalf("err=%v calls=%d sleeps=%v out=%q stderr=%q", err, calls.Load(), *sleeps, out.String(), stderr.String())
+	}
+}
+
+func TestGHRelaySlowReadFallsBackWithoutRetry(t *testing.T) {
+	for _, phase := range []string{"headers", "body"} {
+		t.Run(phase, func(t *testing.T) {
+			captureRewriteGH(t)
+			var calls atomic.Int64
+			rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				_, _ = io.Copy(io.Discard, r.Body)
+				if phase == "body" {
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, `{"status":200,"body":`)
+					w.(http.Flusher).Flush()
+				}
+				select {
+				case <-time.After(6 * time.Second):
+				case <-r.Context().Done():
+				}
+			})
+			t.Setenv("OCTOPOOL_RELAY_TIMEOUT_SECONDS", "5")
+			t.Setenv("OCTOPOOL_RELAY_RETRIES", "3")
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			var out, stderr bytes.Buffer
+			started := time.Now()
+			err := runGH(t.Context(), []string{"api", "repos/acme/repo"}, &out, &stderr)
+			elapsed := time.Since(started)
+			if err != nil || calls.Load() != 1 || elapsed >= 7500*time.Millisecond || out.String() != "child stdout\n" || !strings.Contains(stderr.String(), "relay_timeout (read timed out; limit 5s); falling back to real gh") {
+				t.Fatalf("err=%v calls=%d elapsed=%s out=%q stderr=%q", err, calls.Load(), elapsed, out.String(), stderr.String())
+			}
+			t.Logf("slow %s: timeout=5s elapsed=%s attempts=%d guarded native fallback=true", phase, elapsed.Round(time.Millisecond), calls.Load())
+		})
+	}
+}
 
 func TestRunJQPreservesOutputBytes(t *testing.T) {
 	isolateTestConfig(t)
