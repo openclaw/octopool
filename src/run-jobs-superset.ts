@@ -3,7 +3,11 @@ import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-publ
 import { isRecord } from "./object";
 import { rethrowStringRewriteDenial } from "./github-egress";
 import { GitHubTransportError } from "./github";
-import { isTransientGitHubStatus, transformedGitHubHeaders } from "./github-response";
+import {
+  defaultGitHubJSONAccept,
+  isTransientGitHubStatus,
+  transformedGitHubHeaders,
+} from "./github-response";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
 
 const MAX_PAGE_SIZE = 100;
@@ -20,6 +24,49 @@ export type RunJobsSupersetView = {
   cacheRequest: RelayRequest;
   limit: number;
 };
+
+export function rawRunJobsSupersetView(
+  request: RelayRequest,
+  route: RouteInfo,
+): RunJobsSupersetView | undefined {
+  if (
+    route.kind !== "run_jobs" ||
+    request.headers?.["x-octopool-public-shape"] !== undefined ||
+    !defaultGitHubJSONAccept(request.headers?.accept)
+  ) {
+    return undefined;
+  }
+  const query = request.query ?? {};
+  if (
+    !validScalarQuery(query, new Set(["filter", "page", "per_page"])) ||
+    !firstPageQuery(query) ||
+    (query.filter !== undefined && query.filter !== "latest" && query.filter !== "all")
+  ) {
+    return undefined;
+  }
+  const limit = boundedPageSize(query.per_page, { strict: true, defaultValue: DEFAULT_PAGE_SIZE });
+  if (limit === undefined || limit >= MAX_PAGE_SIZE) return undefined;
+  return {
+    cacheRequest: {
+      ...request,
+      query: { ...query, page: "1", per_page: String(MAX_PAGE_SIZE) },
+    },
+    limit,
+  };
+}
+
+export function completeRawRunJobsPage(response: GitHubRelayResponse, limit: number): boolean {
+  return (
+    response.status === 200 &&
+    response.body_encoding === "json" &&
+    isRecord(response.body) &&
+    Array.isArray(response.body.jobs) &&
+    Number.isSafeInteger(response.body.total_count) &&
+    response.body.total_count === response.body.jobs.length &&
+    response.body.jobs.length <= limit &&
+    !Object.keys(response.headers).some((key) => key.toLowerCase() === "link")
+  );
+}
 
 export function runJobsSupersetView(
   request: RelayRequest,

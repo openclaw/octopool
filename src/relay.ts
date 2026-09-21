@@ -59,9 +59,11 @@ import {
   type RunListSupersetView,
 } from "./run-list-superset";
 import {
+  completeRawRunJobsPage,
   completeRunJobsSuperset,
   RunJobsUnavailableError,
   filterRunJobsSuperset,
+  rawRunJobsSupersetView,
   runJobsSupersetHasMergedPages,
   runJobsSupersetIncomplete,
   runJobsSupersetView,
@@ -326,6 +328,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   if (largerPage !== undefined) return serveFreshCachedRelayResponse(state, largerPage);
   const workflow = await readWorkflowCatalogueCache(state);
   if (workflow !== undefined) return serveFreshCachedRelayResponse(state, workflow);
+  const rawJobs = await readRawRunJobsCache(state);
+  if (rawJobs !== undefined) return serveFreshCachedRelayResponse(state, rawJobs);
 
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
@@ -1208,6 +1212,25 @@ async function serveStaleRelayCache(
   return serveExactRunListCache(state, "stale", { staleReason });
 }
 
+async function readRawRunJobsCache(state: ActiveRelay): Promise<CachedGitHubResponse | undefined> {
+  if (!state.cacheEnabled || state.maxAgeSeconds === 0) return undefined;
+  const view = rawRunJobsSupersetView(state.request, state.route);
+  if (view === undefined) return undefined;
+  const request = view.cacheRequest;
+  const probe = async (identity?: Identity) => {
+    const key = await githubCacheKey(request.pool, request, state.route, identity);
+    const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
+    if (
+      cached === undefined ||
+      !completeRawRunJobsPage(cached, view.limit) ||
+      !(await cachedResponseAvailable(state.env, request.pool, state.route, cached, identity))
+    )
+      return undefined;
+    return { ...cached, headers: transformedGitHubHeaders(cached.headers) };
+  };
+  return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
+}
+
 async function readWorkflowCatalogueCache(
   state: ActiveRelay,
 ): Promise<CachedGitHubResponse | undefined> {
@@ -1254,19 +1277,8 @@ async function readWorkflowCatalogueCache(
       return undefined;
     return { ...cached, body: item, headers: transformedGitHubHeaders(cached.headers) };
   };
-  try {
-    const anonymous = await probe();
-    if (anonymous !== undefined) return anonymous;
-    for (const identity of await loadIdentities(state.env, request.pool, route)) {
-      const cached = await probe(identity);
-      if (cached !== undefined) return cached;
-    }
-  } catch (error) {
-    rethrowStringRewriteDenial(error);
-    if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
-  }
   // A missing catalogue item proves nothing; keep the normal view fill and its owner.
-  return undefined;
+  return readOptionalCacheCandidates(state.env, request.pool, route, probe);
 }
 
 async function readLargerRunListCache(
@@ -1283,10 +1295,19 @@ async function readLargerRunListCache(
     const projected = projectLargerRunListPage(cached);
     return projected === undefined ? undefined : { ...cached, ...projected };
   };
+  return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
+}
+
+async function readOptionalCacheCandidates(
+  env: Env,
+  pool: string,
+  route: RouteInfo,
+  probe: (identity?: Identity) => Promise<CachedGitHubResponse | undefined>,
+): Promise<CachedGitHubResponse | undefined> {
   try {
     const anonymous = await probe();
     if (anonymous !== undefined) return anonymous;
-    for (const identity of await loadIdentities(state.env, request.pool, state.route)) {
+    for (const identity of await loadIdentities(env, pool, route)) {
       const cached = await probe(identity);
       if (cached !== undefined) return cached;
     }

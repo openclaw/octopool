@@ -491,6 +491,21 @@ Worker's 3×100 shaped superset remain separate. Requested attempts qualify mach
 URLs while returned attempts own jobs acquisition; [CLI documentation](cli.md) describes
 the native defaults, explicit safe-integer boundary, lazy names and whole-command fallback.
 
+Raw default-JSON first-page jobs requests with a smaller page size can reuse a fresh
+raw `per_page=100` entry for the same path and exact filter. Its `total_count` must equal
+the jobs array length, the entire array must fit the requested page, and it must have no
+`Link` header. This includes empty lists. Octopool returns the complete REST body unchanged,
+including extra fields, while omitting source representation validators and lengths.
+It keeps the source timestamps and expiry without publishing an alias or extending its TTL.
+
+The optional lookup checks one larger page for the shared cache, then one per eligible
+identity; it never fetches a cold larger page. Requests for 100 jobs skip this probe.
+Pool, run, attempt, filter, API version, media type, current identity eligibility,
+public visibility, and positive maximum-age bounds still apply. Shaped responses,
+custom media, later pages, unsupported queries, conditionals, and forced-live requests
+retain their existing paths. Lookup failures fall through to the exact request;
+policy and visibility denials still propagate.
+
 ## Cache-hit integrity
 
 A fresh or bounded-stale hit is only served if:
