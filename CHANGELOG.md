@@ -11,6 +11,7 @@
 - Fall back to guarded local gh sooner on pool cooldowns with one default retry after one second, and cap shim relay read attempts at 20 seconds with configurable timeouts that never retry, preserving no-fallback and watch ownership rules.
 - Reuse the shared one-hour workflow catalogue for PR status-check rollups while keeping checks and runs live; retry missing workflow names once live for rollups and ordinary checks, preserving fresh watch confirmation and `OCTOPOOL_FRESH=1`.
 - Try available no-quota pages before anonymous API revalidation, skip unusable zero-age body-cache reads while retaining validators and fill ownership, and avoid retrying depleted anonymous quota for Actions completion proof; clarify that GitHub REST 304 validations consume quota.
+
 ### Upgrade notes
 
 - Deploy the Worker and upgrade the CLI for `pr-summary-v2`; older CLIs keep working on `pr-summary-v1`. No database migration, re-login, or cache purge is required.
