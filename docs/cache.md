@@ -282,10 +282,13 @@ historical top-level `head_sha`, never the mutable `pull_requests[].head.sha`.
 Run status comes only from the recognized status prefix before the first colon on the
 owned run link (or the owned status icon on a run page). Workflow names, display titles,
 and branch prose cannot supply status or conclusion. A list card's trigger belongs only
-to the interval between its unique workflow span and sibling timestamp. The supported
-forms are `#N: pull request`, `#N: schedule`/`scheduled`, `#N: workflow dispatch`, and
+to its workflow metadata region. The older sibling-timestamp forms remain supported:
+`#N: pull request`, `#N: schedule`/`scheduled`, `#N: workflow dispatch`, and
 `#N: Commit <owned commit link> pushed`; commit-link text cannot supply an event.
-Missing, conflicting, unknown, or differently structured metadata falls back to REST.
+Current cards put trigger prose in a separate span and repeat timestamps for responsive
+layouts. The copies must agree; manual dispatch and commit-push prose are parsed there,
+and ambiguous event prose is hydrated from the owning run summary. Missing, conflicting,
+or unknown ownership falls back to REST.
 This deliberately bounded markup contract can cost more API reads when GitHub changes
 its layout. Valid known cards retain the existing wire fields, filters, and state-based
 TTLs; fresh job/attempt metadata still independently governs terminal caching.
@@ -447,7 +450,9 @@ All other exact shaped requests, including workflow-scoped paths, use the same t
 and never forward `limit` to GitHub. Locally shaped responses omit `ETag`, `Last-Modified`,
 `Content-Length`, and `Link` because those validators, lengths, and pagination links describe
 the upstream representation, not the transformed body.
-Public Actions pages must also expose at least `min(total_count, per_page)` parseable cards;
+Public Actions pages with exact totals must expose at least `min(total_count, per_page)`
+parseable cards. Capped totals are lower bounds and require at least `per_page` cards
+(page requests are bounded to 25);
 otherwise Octopool discards the page and falls back to exact anonymous API JSON.
 Branch/status-filtered public pages are never treated as exact: GitHub can report only the
 visible matching card count while older API matches still exist. Underfilled canonical filters

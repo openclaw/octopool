@@ -12,6 +12,7 @@
 - Fall back to guarded local gh sooner on pool cooldowns with one default retry after one second, and cap shim relay read attempts at 20 seconds with configurable timeouts that never retry, preserving no-fallback and watch ownership rules.
 - Reuse the shared one-hour workflow catalogue for PR status-check rollups while keeping checks and runs live; retry missing workflow names once live for rollups and ordinary checks, preserving fresh watch confirmation and `OCTOPOOL_FRESH=1`.
 - Try available no-quota pages before anonymous API revalidation, skip unusable zero-age body-cache reads while retaining validators and fill ownership, and avoid retrying depleted anonymous quota for Actions completion proof; clarify that GitHub REST 304 validations consume quota.
+- Restore token-free page reuse for human Actions run views/lists and watch reads against current GitHub markup, preserve capped list counts as lower bounds, paginate complete job groups, and render skipped jobs without inventing timestamps.
 
 ### Upgrade notes
 

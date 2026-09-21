@@ -1,4 +1,4 @@
-import { responseCapBytes } from "./github-limits";
+import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { decodeURIComponentSafe, encodedPathSegments } from "./github-path";
 import {
   boundedPageSize,
@@ -11,14 +11,16 @@ import {
 } from "./github-public-utils";
 import { defaultGitHubJSONAccept } from "./github-response";
 import {
-  parseActionsJobGroupsJSON,
+  parseActionsJobGroupsPageJSON,
   parseActionsJobHTML,
   parseActionsRunHTML,
   parseActionsRunListHTML,
   parseCommitPatchSHA,
 } from "./github-html";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
-import { fetchPublicPage } from "./github-web-transport";
+import { fetchPublicPage, fetchWebResponse, readWebBody } from "./github-web-transport";
+import { cancelResponseBody } from "./response-body";
+import { transformedGitHubHeaders } from "./github-response";
 import type { GitHubEgressEnv } from "./github-egress";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
@@ -90,20 +92,29 @@ function actionsRunListRequest(
     if (parsed === undefined) {
       return undefined;
     }
-    if (parsed.workflow_runs.length < Math.min(parsed.total_count, query.perPage)) {
+    // actionsListQuery rejects requests above the public page's 25-card capacity.
+    if (
+      parsed.workflow_runs.length <
+      (parsed.capped ? Math.min(query.perPage, 25) : Math.min(parsed.total_count, query.perPage))
+    ) {
       return undefined;
     }
     parsed.workflow_runs = parsed.workflow_runs.slice(0, query.perPage);
     const runs = await Promise.all(
       parsed.workflow_runs.map((run) =>
-        isFullGitSHA(run.head_sha) ? run : enrichActionsRun(env, route, run),
+        isFullGitSHA(run.head_sha) && typeof run.event === "string"
+          ? run
+          : enrichActionsRun(env, route, run),
       ),
     );
     if (runs.some((run) => run === undefined)) {
       return undefined;
     }
     parsed.workflow_runs = runs as Record<string, unknown>[];
-    return publicJSONResponse(headers, status, parsed);
+    return publicJSONResponse(headers, status, {
+      total_count: parsed.total_count,
+      workflow_runs: runs,
+    });
   });
 }
 
@@ -159,22 +170,79 @@ function actionsRunJobsRequest(
     return undefined;
   }
   const runID = Number(id);
+  const url = `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id, "job_groups_batch"])}?attempt=${attempt}`;
+  const batchURL = (batch: number) => `${url}&batch=${batch}&size=1`;
+  const requestHeaders = {
+    accept: "application/json",
+    referer: `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id])}`,
+    "user-agent": "octopool",
+    "x-requested-with": "XMLHttpRequest",
+  };
   return {
-    url: `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id, "job_groups_batch"])}?attempt=${attempt}`,
-    headers: {
-      accept: "application/json",
-      referer: `https://github.com/${encodedPathSegments([route.owner!, route.repo!, "actions", "runs", id])}`,
-      "user-agent": "octopool",
-      "x-requested-with": "XMLHttpRequest",
-    },
+    url: batchURL(0),
+    headers: requestHeaders,
     capBytes: responseCapBytes(env),
     usesApiQuota: false,
     payload: async (body, headers, status) => {
-      const parsed = parseJSONBytes(body);
-      const summaries = parseActionsJobGroupsJSON(parsed, route.owner!, route.repo!, runID);
-      if (summaries === undefined || summaries.length > MAX_PUBLIC_JOB_PAGES) {
+      let page = parseActionsJobGroupsPageJSON(
+        parseJSONBytes(body),
+        route.owner!,
+        route.repo!,
+        runID,
+      );
+      if (
+        page === undefined ||
+        page.groupCount !== Math.min(1, page.totalCount) ||
+        page.totalCount > MAX_PUBLIC_JOB_PAGES
+      )
         return undefined;
+      const total = page.totalCount;
+      const summaries = [...page.jobs];
+      const ids = new Set(summaries.map((job) => job.id));
+      let groups = page.groupCount;
+      let batches = 1;
+      while (page.hasMore && batches < MAX_PUBLIC_JOB_PAGES) {
+        if (groups >= total) return undefined;
+        const fetched = await fetchWebResponse(
+          env,
+          batchURL(batches),
+          requestHeaders,
+          requestTimeoutMs(env),
+          true,
+        );
+        if (fetched === undefined) return undefined;
+        if (fetched.response.status !== 200) {
+          await cancelResponseBody(fetched.response);
+          return undefined;
+        }
+        let bytes: Uint8Array;
+        try {
+          bytes = await readWebBody(fetched.response, responseCapBytes(env));
+        } catch {
+          return undefined;
+        }
+        page = parseActionsJobGroupsPageJSON(
+          parseJSONBytes(bytes),
+          route.owner!,
+          route.repo!,
+          runID,
+        );
+        if (page === undefined || page.totalCount !== total || page.groupCount !== 1)
+          return undefined;
+        for (const job of page.jobs) {
+          if (ids.has(job.id)) return undefined;
+          ids.add(job.id);
+          summaries.push(job);
+        }
+        groups += page.groupCount;
+        batches++;
       }
+      if (
+        page.hasMore ||
+        groups !== total ||
+        Math.min(summaries.length, query.perPage) > MAX_PUBLIC_JOB_PAGES
+      )
+        return undefined;
       const jobs = await Promise.all(
         summaries.slice(0, query.perPage).map(async (summary) => {
           const page = await fetchPublicPage(
@@ -187,9 +255,10 @@ function actionsRunJobsRequest(
             : parseActionsJobHTML(page, summary, route.owner!, route.repo!);
         }),
       );
-      return jobs.some((job) => job === undefined)
-        ? undefined
-        : publicJSONResponse(headers, status, { total_count: summaries.length, jobs });
+      if (jobs.some((job) => job === undefined)) return undefined;
+      const response = publicJSONResponse(headers, status, { total_count: summaries.length, jobs });
+      // A group page's validators cannot describe the hydrated job pages.
+      return { ...response, headers: transformedGitHubHeaders(response.headers) };
     },
   };
 }

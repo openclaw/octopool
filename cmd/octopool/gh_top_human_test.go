@@ -615,3 +615,20 @@ func TestPRChecksHumanSortSeparateFromJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestSkippedJobMissingTimingMatchesNativeZeroDuration(t *testing.T) {
+	run := map[string]any{"id": 1, "status": "completed", "conclusion": "skipped", "name": "CI"}
+	job := map[string]any{"databaseId": 2, "name": "skipped job", "status": "completed", "conclusion": "skipped", "startedAt": nil, "completedAt": nil, "steps": []any{}}
+	var missing, exact bytes.Buffer
+	if err := renderHumanRunView(&missing, run, []any{job}); err != nil {
+		t.Fatal(err)
+	}
+	job["startedAt"] = "2026-09-21T04:53:38Z"
+	job["completedAt"] = "2026-09-21T04:53:38Z"
+	if err := renderHumanRunView(&exact, run, []any{job}); err != nil {
+		t.Fatal(err)
+	}
+	if missing.String() != exact.String() || !strings.Contains(missing.String(), "- skipped job in 0s (ID 2)") {
+		t.Fatalf("null timing output %q differs from native equal-time output %q", missing.String(), exact.String())
+	}
+}

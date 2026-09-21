@@ -1,0 +1,23 @@
+{
+  "jobGroups": [
+    {
+      "name": "resolve",
+      "nonNested": {
+        "jobs": [
+          {
+            "id": 106218103310,
+            "displayName": "resolve",
+            "status": "completed",
+            "conclusion": "skipped",
+            "href": "/openclaw/openclaw/actions/runs/35562572332/job/106218103310",
+            "showRerunButton": false,
+            "rerunDialogId": "rerun-dialog-106218103310",
+            "jobId": "resolve"
+          }
+        ]
+      }
+    }
+  ],
+  "totalCount": 2,
+  "hasMore": true
+}

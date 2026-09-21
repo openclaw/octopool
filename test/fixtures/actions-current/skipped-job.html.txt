@@ -1,0 +1,132 @@
+<react-partial
+  partial-name="actions-run-jobs-list"
+  data-ssr="false"
+  data-attempted-ssr="false"
+  data-react-profiling="false"
+>
+  <script type="application/json" data-target="react-partial.embeddedData">
+    {
+      "props": {
+        "summaryHref": "/openclaw/openclaw/actions/runs/35562572332",
+        "summarySelected": false,
+        "selectedJobId": 106218103310,
+        "jobGroupsFetchUrl": "/openclaw/openclaw/actions/runs/35562572332/job_groups_batch?attempt=1"
+      }
+    }
+  </script>
+  <div data-target="react-partial.reactRoot"></div>
+</react-partial>
+<section
+  aria-label="Check run summary"
+  data-hpc
+  class="actions-fullwidth-module js-selected-check-run d-flex flex-auto min-width-0 tmp-mb-3 rounded-md-1 color-bg-subtle"
+>
+  <div class="flex-auto min-width-0">
+    <div classes="pb-2"></div>
+
+    <div
+      class="js-check-run-blankslate js-socket-channel d-flex flex-auto height-full position-relative"
+    >
+      <div class="position-absolute top-0 right-0 tmp-p-3">
+        <action-menu data-select-variant="none" data-view-component="true">
+          <focus-group direction="vertical" mnemonics retain>
+            <button
+              id="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-button"
+              popovertarget="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-overlay"
+              aria-controls="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-list"
+              aria-haspopup="true"
+              aria-labelledby="tooltip-8cfecbf1-c505-453f-97c6-ebbec5c46cc6"
+              type="button"
+              data-view-component="true"
+              class="Button Button--iconOnly Button--invisible Button--medium"
+            >
+              <svg
+                aria-hidden="true"
+                data-component="Octicon"
+                height="16"
+                viewBox="0 0 16 16"
+                version="1.1"
+                width="16"
+                data-view-component="true"
+                class="octicon octicon-gear Button-visual"
+              ></svg></button
+            ><tool-tip
+              id="tooltip-8cfecbf1-c505-453f-97c6-ebbec5c46cc6"
+              for="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-button"
+              popover="manual"
+              data-direction="s"
+              data-type="label"
+              data-view-component="true"
+              class="sr-only position-absolute"
+              >Job log options</tool-tip
+            >
+
+            <anchored-position
+              data-target="action-menu.overlay"
+              id="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-overlay"
+              anchor="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-button"
+              align="end"
+              side="outside-bottom"
+              anchor-offset="normal"
+              popover="auto"
+              data-view-component="true"
+            >
+              <div data-view-component="true" class="Overlay Overlay--size-auto">
+                <div data-view-component="true" class="Overlay-body Overlay-body--paddingNone">
+                  <action-list>
+                    <div data-view-component="true">
+                      <ul
+                        aria-labelledby="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-button"
+                        id="action-menu-491a8e87-4d80-4ef2-af7b-a5a7342a7ba3-list"
+                        role="menu"
+                        data-view-component="true"
+                        class="ActionListWrap--inset ActionListWrap"
+                      >
+                        <li
+                          data-targets="action-list.items"
+                          role="none"
+                          data-view-component="true"
+                          class="ActionListItem"
+                        >
+                          <a
+                            tabindex="-1"
+                            id="item-6e94a387-c654-4e6e-88c1-8f3c2645b265"
+                            href="/openclaw/openclaw/suites/96281032113/logs?attempt=1"
+                            role="menuitem"
+                            data-view-component="true"
+                            class="ActionListContent"
+                          >
+                            <span data-view-component="true" class="ActionListItem-label">
+                              Download log archive
+                            </span>
+                          </a>
+                        </li>
+                      </ul>
+                    </div></action-list
+                  >
+                </div>
+              </div></anchored-position
+            >
+          </focus-group>
+        </action-menu>
+      </div>
+      <div class="d-flex flex-auto flex-justify-center tmp-py-6">
+        <div class="text-center tmp-py-6">
+          <div class="mb-2">
+            <svg
+              height="32"
+              aria-hidden="true"
+              data-component="Octicon"
+              viewBox="0 0 24 24"
+              version="1.1"
+              width="32"
+              data-view-component="true"
+              class="octicon octicon-skip color-fg-muted"
+            ></svg>
+          </div>
+          <h4 class="color-fg-muted text-mono f5 text-normal">This job was skipped</h4>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

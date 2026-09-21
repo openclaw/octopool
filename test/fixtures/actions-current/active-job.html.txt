@@ -1,0 +1,483 @@
+<react-partial
+partial-name="actions-run-jobs-list"
+data-ssr="false"
+data-attempted-ssr="false"
+data-react-profiling="false"
+>
+
+<script type="application/json" data-target="react-partial.embeddedData">{"props":{"summaryHref":"/openclaw/openclaw/actions/runs/35566435541","summarySelected":false,"selectedJobId":106229081199,"jobGroupsFetchUrl":"/openclaw/openclaw/actions/runs/35566435541/job_groups_batch?attempt=1"}}</script>
+<div data-target="react-partial.reactRoot"></div>
+</react-partial>
+<section aria-label="Check run summary" data-hpc
+class="actions-fullwidth-module js-selected-check-run d-flex flex-auto min-width-0 tmp-mb-3 rounded-md-1 color-bg-subtle">
+<div class="flex-auto min-width-0">
+
+<div classes="pb-2">
+
+</div>
+
+<div id="logs"
+class="CheckRun js-check-steps  rounded-0 rounded-md-1 border-md tmp-pb-3 "
+>
+<style>
+@media (prefers-reduced-motion: no-preference) {
+html {
+scroll-behavior: smooth;
+}
+}
+</style>
+<div
+class="uxr_CheckRun-header CheckRun-header mb-2 d-flex flex-justify-between flex-items-center mb-1 tmp-py-3 tmp-pr-3 js-checks-log-toolbar rounded-top-0 rounded-md-top-1 tmp-pl-3 tmp-pl-md-4"
+>
+<span class="CheckRun-log-title color-fg-default flex-auto mt-2 mt-md-0 overflow-hidden">
+<div class="f4">
+<div class="mr-2 pr-2 mr-sm-0 pr-sm-0 mx-sm-2 px-sm-2 py-1 rounded mt-1 d-flex flex-items-center d-md-none">
+
+<div class="d-block d-md-none tmp-ml-n3 tmp-mr-n3 mt-n1 overflow-hidden">
+<div class="d-flex flex-items-center tmp-mx-3">
+<div class="d-flex mr-2 overflow-hidden">
+<h4 data-view-component="true" class="min-width-0 flex-justify-start flex-nowrap css-truncate-overflow d-flex">
+<span class="css-truncate css-truncate-overflow" data-target="streaming-graph-job.name">
+preflight
+</span>
+</h4>
+</div>
+</div>
+</div>
+</div>
+
+<div class="d-none d-md-block">
+<a href="#logs" class="text-bold no-underline Link--inTextBlock" id="check-step-header-title">
+<span class="two-line-wrapping">preflight</span>
+</a>
+</div>
+</div>
+<span class="d-block f6 js-socket-channel js-updatable-content color-fg-muted"
+
+data-url="/openclaw/openclaw/runs/106229081199/header">
+Started
+<relative-time format="elapsed" datetime="2026-09-21T05:56:51Z">
+2026-09-21 05:56:51
+</relative-time>
+ago
+</span>
+
+</span>
+</div>
+
+<div
+class="position-relative js-full-logs-container WorkflowRunLogsScroll"
+data-actions_runner_emit_composite_markers
+data-ux-refresh
+>
+
+<template id="step-icon-timed_out">
+<svg data-component="Octicon" class="octicon octicon-x color-fg-danger tmp-mr-3 flex-shrink-0 ml-1" title="This step timed out" viewBox="0 0 16 16" version="1.1" width="16" height="16" aria-hidden="true"></svg>
+</template>
+
+<template id="step-icon-failure">
+<svg data-component="Octicon" class="octicon octicon-x-circle-fill color-fg-danger tmp-mr-3 flex-shrink-0 ml-1" title="This step failed" viewBox="0 0 16 16" version="1.1" width="16" height="16" aria-hidden="true"></svg>
+</template>
+
+<template id="step-icon-neutral">
+<svg data-component="Octicon" class="octicon octicon-square-fill neutral-check tmp-mr-3 flex-shrink-0 ml-1" title="This step was neutral" viewBox="0 0 16 16" version="1.1" width="16" height="16" aria-hidden="true"></svg>
+</template>
+
+<template id="step-icon-success">
+<svg data-component="Octicon" class="octicon octicon-check-circle-fill tmp-mr-3 flex-shrink-0 ml-1" title="This step passed" viewBox="0 0 16 16" version="1.1" width="16" height="16" aria-hidden="true"></svg>
+</template>
+
+<template id="step-icon-cancelled">
+<svg data-component="Octicon" class="octicon octicon-stop neutral-check tmp-mr-3 flex-shrink-0 ml-1" title="This step was cancelled" viewBox="0 0 16 16" version="1.1" width="16" height="16" aria-hidden="true"></svg>
+</template>
+
+<template id="step-icon-action_required">
+<svg data-component="Octicon" class="octicon octicon-alert color-fg-attention tmp-mr-3 flex-shrink-0 ml-1" title="This step requires action with the application" viewBox="0 0 16 16" version="1.1" width="16" height="16" aria-hidden="true"></svg>
+</template>
+
+<template id="step-icon-skipped">
+<svg data-component="Octicon" class="octicon octicon-skip neutral-check tmp-mr-3 flex-shrink-0 ml-1" title="This step was skipped" viewBox="0 0 16 16" version="1.1" width="16" height="16" aria-hidden="true"></svg>
+</template>
+
+<template id="step-icon-in-progress">
+<svg width="16" height="16" fill="none" class="anim-rotate tmp-mr-3 flex-shrink-0 ml-1" xmlns="http://www.w3.org/2000/svg" aria-label="In progress"></svg>
+</template>
+
+<template id="step-icon-other">
+<svg data-component="Octicon" class="octicon octicon-circle tmp-mr-3 flex-shrink-0 ml-1" height="16" viewBox="0 0 16 16" version="1.1" width="16" aria-hidden="true"></svg>
+</template>
+
+<template id="primer-octicon-gear">
+<svg aria-hidden="true" data-component="Octicon" height="16" viewBox="0 0 16 16" version="1.1" width="16" data-view-component="true" class="octicon octicon-gear">
+
+</svg>
+</template>
+
+<template id="step-badge-background">
+<span class="CheckStep-badge CheckStep-badge--background">background</span>
+</template>
+
+<template id="step-badge-wait">
+<span class="CheckStep-badge CheckStep-badge--wait">wait</span>
+</template>
+
+<template id="step-badge-wait-all">
+<span class="CheckStep-badge CheckStep-badge--wait">wait-all</span>
+</template>
+
+<template id="step-badge-cancel">
+<span class="CheckStep-badge CheckStep-badge--cancel">cancel</span>
+</template>
+
+<template id="step-badge-parallel">
+<span class="CheckStep-badge CheckStep-badge--parallel">parallel</span>
+</template>
+
+<check-steps
+class="js-socket-channel"
+data-job-status="in_progress"
+
+data-use-actions-ux>
+<check-step
+data-name="Set up job"
+data-number="1"
+data-conclusion="success"
+data-external-id="8ed0f4ca-75fb-4bbf-b1c0-a96176c500ea"
+data-expand=""
+data-started-at="2026-09-21T05:56:52Z"
+data-completed-at="2026-09-21T05:56:53Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/1"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Set up runner"
+data-number="2"
+data-conclusion="success"
+data-external-id="41e1e771-301a-4e98-8d33-730e553a475f"
+data-expand=""
+data-started-at="2026-09-21T05:56:53Z"
+data-completed-at="2026-09-21T05:56:53Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/2"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Validate release-gate dispatch"
+data-number="3"
+data-conclusion="skipped"
+data-external-id="9bb0be8e-c838-4779-849e-583646c39d6b"
+data-expand=""
+data-started-at="2026-09-21T05:56:53Z"
+data-completed-at="2026-09-21T05:56:53Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Checkout"
+data-number="4"
+data-conclusion="success"
+data-external-id="28c1b8d8-99b0-41f8-b2a1-afa4d60a998c"
+data-expand=""
+data-started-at="2026-09-21T05:56:53Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/4"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Resolve checkout SHA"
+data-number="5"
+data-conclusion="success"
+data-external-id="7e691540-0b9f-466a-ac82-c2dad6eb32b9"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/5"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Checkout trusted CI harness"
+data-number="6"
+data-conclusion="skipped"
+data-external-id="15e1d24c-8385-4c60-87f2-014a41e495c7"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Resolve logical runner profile"
+data-number="7"
+data-conclusion="success"
+data-external-id="e6313752-95ce-451f-b801-d74a6229ca67"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/7"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Resolve exact diff base"
+data-number="8"
+data-conclusion="success"
+data-external-id="d50ed414-006d-48d4-89e9-a59fcffab6e5"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/8"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Validate historical release target"
+data-number="9"
+data-conclusion="skipped"
+data-external-id="95b217ec-d744-410d-b5fb-7625a30b8d6a"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Validate release candidate target"
+data-number="10"
+data-conclusion="skipped"
+data-external-id="83e6d06c-d3cc-4dad-a4a6-f2161ce665a4"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Validate target context"
+data-number="11"
+data-conclusion="skipped"
+data-external-id="e9fcc625-420b-4248-b868-aeff3c1d10ed"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:28Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Setup manifest TypeScript runtime"
+data-number="12"
+data-conclusion="success"
+data-external-id="029de5c7-2041-4503-8499-0b161117d4e8"
+data-expand=""
+data-started-at="2026-09-21T05:57:28Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/12"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Resolve release correction base"
+data-number="13"
+data-conclusion="skipped"
+data-external-id="619248c4-7f59-41db-8c87-e2e91af003e2"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Classify candidate cache trust"
+data-number="14"
+data-conclusion="success"
+data-external-id="0c781b40-d0ec-4a31-9b65-ab7bcc4d9d77"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/14"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Ensure preflight base commit"
+data-number="15"
+data-conclusion="success"
+data-external-id="e96ff427-3c9b-4583-91e1-dbb3539120d4"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/15"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Detect docs-only changes"
+data-number="16"
+data-conclusion="success"
+data-external-id="21353609-8305-43ca-82f7-6ed92b9f4fa0"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/16"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Detect changed scopes"
+data-number="17"
+data-conclusion="success"
+data-external-id="d0306a7f-2aa9-49ed-be61-941e6f88fec7"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url="/openclaw/openclaw/commit/8adae7c8fa64511aa882ac6ca968a1b56cc993a7/checks/106229081199/logs/17"
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Setup manifest pnpm"
+data-number="18"
+data-conclusion="skipped"
+data-external-id="1aa3e613-829b-4e4d-a481-cd2ab6bcad58"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Install manifest dependencies"
+data-number="19"
+data-conclusion="skipped"
+data-external-id="bebd27d2-621e-451a-80dc-382521b2b884"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at="2026-09-21T05:57:29Z"
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Build CI manifest"
+data-number="20"
+data-conclusion="null"
+data-external-id="08bd4af6-1581-4acb-b2e1-85ae977b146b"
+data-expand=""
+data-started-at="2026-09-21T05:57:29Z"
+data-completed-at=""
+data-log-url=""
+data-in-progress
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Check mobile protocol event coverage"
+data-number="21"
+data-conclusion="null"
+data-external-id="6396bed8-699e-4487-89a6-8a18e8971363"
+data-expand=""
+data-started-at=""
+data-completed-at=""
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Restore exact dependency cache"
+data-number="22"
+data-conclusion="null"
+data-external-id="b91ef81b-9a1d-4b38-9d38-723e1c8e8122"
+data-expand=""
+data-started-at=""
+data-completed-at=""
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Post Setup manifest TypeScript runtime"
+data-number="43"
+data-conclusion="null"
+data-external-id="e5981d20-e2e1-4058-bb84-6ba3d8573834"
+data-expand=""
+data-started-at=""
+data-completed-at=""
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+<check-step
+data-name="Complete runner"
+data-number="44"
+data-conclusion="null"
+data-external-id="e29b5e20-43ee-4de5-940a-983dead58d9a"
+data-expand=""
+data-started-at=""
+data-completed-at=""
+data-log-url=""
+
+data-use-actions-ux
+
+>
+</check-step>
+</check-steps>
+</div>
+</div>
+
+</div>
+</section>

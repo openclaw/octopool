@@ -1,5 +1,6 @@
 export {
   parseActionsJobGroupsJSON,
+  parseActionsJobGroupsPageJSON,
   parseActionsJobHTML,
   parseActionsRunHTML,
   parseActionsRunListHTML,

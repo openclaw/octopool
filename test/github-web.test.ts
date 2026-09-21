@@ -804,6 +804,8 @@ describe("github web provider", () => {
       )
       .mockResolvedValueOnce(
         new Response(`
+          <react-partial partial-name="actions-run-jobs-list"><script data-target="react-partial.embeddedData">{"props":{"summaryHref":"/openclaw/octopool/actions/runs/27398328238","summarySelected":false,"selectedJobId":80970314592}}</script></react-partial>
+          <section aria-label="Check run summary" class="js-selected-check-run">
           <span data-url="/openclaw/octopool/runs/80970314592/header">
             succeeded
             <relative-time datetime="2026-06-12T06:17:55Z"></relative-time>
@@ -817,6 +819,7 @@ describe("github web provider", () => {
               data-completed-at="2026-06-12T06:15:26Z">
             </check-step>
           </check-steps>
+          </section>
         `),
       );
     vi.stubGlobal("fetch", fetchMock);
@@ -833,7 +836,7 @@ describe("github web provider", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://github.com/openclaw/octopool/actions/runs/27398328238/job_groups_batch?attempt=2",
+      "https://github.com/openclaw/octopool/actions/runs/27398328238/job_groups_batch?attempt=2&batch=0&size=1",
       expect.objectContaining({
         headers: expect.objectContaining({ "x-requested-with": "XMLHttpRequest" }),
       }),

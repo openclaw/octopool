@@ -144,6 +144,35 @@ not trigger this retry. `headRepository` and `mergeable` remain API-only; `merge
 remains unsupported by the CLI. Older CLIs can still request the original `pr-summary-v1`
 field set. Deploy the Worker and upgrade the CLI to use v2.
 
+Actions run lists validate the first page's cards and matching responsive copies of counts
+and timestamps. When GitHub marks the count as capped (`N+ workflow runs` or
+`count_is_capped="true"`), `total_count` in `actions-summary-v1` is the lower bound `N`,
+not an exact repository/workflow total. Such pages must contain at least the requested
+number of cards (up to 25); uncapped counts remain exact. Human run lists render the
+returned rows without using the total. Filtered cache reuse still requires enough matching
+rows, and a short larger cached page still needs exact completion evidence. Ambiguous
+event prose and missing commit SHAs are hydrated from each run's owned summary; missing
+or conflicting evidence still falls back to REST.
+Unfiltered superset projection preserves the upstream count/lower bound; filtered
+projections report the number of captured matches before applying the requested limit.
+
+Job groups use zero-based `batch` pagination with an explicit `size=1`, up to 25 batches
+and 25 job pages. Every batch must keep the same group total, advance without duplicate
+jobs, and end with `hasMore: false` at the declared group count. Group totals are not job
+totals: nested groups may contain several jobs. The resulting jobs shape reports the
+complete job count, and discards the group page's response validators after hydration.
+Verified skipped-job pages expose no timestamps or steps. This bounded shape returns
+`started_at: null`, `completed_at: null`, and `steps: []` for those jobs; these are unavailable
+timestamps, not reconstructed REST times. Human output matches native `gh`'s `in 0s`
+rendering for skipped jobs with absent/equal timestamps; watch output does not use job timing.
+Ordinary job pages must identify the selected job and agree with the group status. A live
+`Started` header supplies the start time; completed headers supply the completion time.
+Contradictory states, conclusions, or timestamp ordering fall back to REST.
+
+The opt-in live parser check fetches public pages only:
+`OCTOPOOL_LIVE_GITHUB=1 pnpm exec vitest run test/actions-live.test.ts`.
+Without the flag, this test is skipped and does not access the network.
+
 Workflow pagination uses
 `https://github.com/{owner}/{repo}/actions/workflows_partial?query=&page={page}`. Actions
 run enrichment may read a run page and

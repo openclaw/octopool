@@ -248,6 +248,11 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 			firstJobID = jobID
 		}
 		duration := humanDuration(firstString(job, "startedAt"), firstString(job, "completedAt"))
+		// Public skipped-job pages omit timing; native gh renders two absent
+		// timestamps as 0s, just like REST's equal start and completion times.
+		if duration == "" && strings.EqualFold(firstString(job, "conclusion"), "skipped") && firstString(job, "startedAt") == "" && firstString(job, "completedAt") == "" {
+			duration = "0s"
+		}
 		inDuration := ""
 		if duration != "" {
 			inDuration = " in " + duration

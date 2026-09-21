@@ -22,6 +22,30 @@ const RUNS_PATH = "/repos/openclaw/octopool/actions/runs";
 describe("Actions run-list superset", () => {
   beforeEach(seedPool);
 
+  it("preserves capped totals through public fills and smaller unfiltered cache hits", async () => {
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      expect(new URL(new Request(input, init).url).hostname).toBe("github.com");
+      return new Response(
+        runListHTML(
+          2500,
+          Array.from(
+            { length: 25 },
+            (_, index) => [index + 1, "main", "completed successfully"] as [number, string, string],
+          ),
+        ).replace("2500 workflow runs", "2,500+ workflow runs"),
+      );
+    });
+    vi.stubGlobal("fetch", upstream);
+    const first = await shapedRunList({ limit: "2" });
+    expect(first.body).toMatchObject({ total_count: 2500 });
+    expect(runIDs(first.body)).toEqual([1, 2]);
+    const cached = await shapedRunList({ limit: "1" });
+    expect(cached.body).toMatchObject({ total_count: 2500 });
+    expect(runIDs(cached.body)).toEqual([1]);
+    expect(cached.relay.cache).toBe("hit");
+    expect(upstream).toHaveBeenCalledOnce();
+  });
+
   it.each<{
     scenario: string;
     expected: "hit" | "miss" | "exact" | "denied";
@@ -276,7 +300,7 @@ describe("Actions run-list superset", () => {
         expect(result.body).toMatchObject({
           total_count:
             test.expectedTotal ??
-            (test.filter === "branch" ? 13 : test.filter === "status" ? 12 : 25),
+            (test.filter === "branch" ? 13 : test.filter === "status" ? 12 : page.total),
         });
         expect(result.relay).toMatchObject({ cache_expires_at: source!.expires_at });
         expect(result.headers).not.toHaveProperty("etag");

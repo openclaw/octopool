@@ -1,0 +1,23 @@
+{
+  "jobGroups": [
+    {
+      "name": "review",
+      "nonNested": {
+        "jobs": [
+          {
+            "id": 106218103534,
+            "displayName": "review",
+            "status": "completed",
+            "conclusion": "skipped",
+            "href": "/openclaw/openclaw/actions/runs/35562572332/job/106218103534",
+            "showRerunButton": false,
+            "rerunDialogId": "rerun-dialog-106218103534",
+            "jobId": "review"
+          }
+        ]
+      }
+    }
+  ],
+  "totalCount": 2,
+  "hasMore": false
+}

@@ -118,12 +118,19 @@ export function filterRunListSuperset(
     return response;
   }
   const filtered = filterRuns(response.body.workflow_runs, view);
+  const preserveTotal =
+    options.preserveTotalCount === true ||
+    (view.branch === undefined &&
+      view.status === undefined &&
+      typeof response.body.total_count === "number" &&
+      Number.isSafeInteger(response.body.total_count) &&
+      response.body.total_count >= 0);
   return {
     ...response,
     headers: transformedGitHubHeaders(response.headers),
     body: {
       ...response.body,
-      ...(options.preserveTotalCount === true ? {} : { total_count: filtered.length }),
+      ...(preserveTotal ? {} : { total_count: filtered.length }),
       workflow_runs: filtered.slice(0, view.limit),
     },
   };
