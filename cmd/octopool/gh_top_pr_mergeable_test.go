@@ -82,7 +82,11 @@ func TestRunGHPRViewMergeableProjection(t *testing.T) {
 				calls := 0
 				relayTestServer(t, func(request map[string]any) any {
 					calls++
-					checkPRMergeableRequest(t, request)
+					if strings.Contains(fields, "mergeable") {
+						checkPRMergeableRequest(t, request)
+					} else if headers, _ := request["headers"].(map[string]any); headers["x-octopool-public-shape"] != "pr-summary-v2" || headers["cache-control"] != "max-age=0" {
+						t.Errorf("summary control headers=%#v", headers)
+					}
 					return prMergeableFixture(test.value, test.present)
 				})
 				var out bytes.Buffer

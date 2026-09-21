@@ -426,13 +426,22 @@ states and human-format output remain unchanged. Unsupported issue fields such a
 absent values become `"UNKNOWN"`. This uses only REST `mergeable`, not `mergeable_state`,
 draft/lifecycle status, checks, or merge policy. Raw `gh api` REST reads retain their
 boolean, null, or absent `mergeable` values.
-`gh pr view --json mergeCommit` reads fresh REST metadata and returns `{"oid":"<sha>"}`
+`gh pr view --json mergeCommit` reads fresh PR metadata and returns `{"oid":"<sha>"}`
 for a merged PR or `null` for an unmerged PR. An open or closed-unmerged PR's synthetic
 test merge SHA is never exported as its merged commit. Missing merge status or an
 invalid merged-commit SHA requests guarded native fallback before printing output.
 Raw `gh api` reads retain `merge_commit_sha`. `mergeStateStatus` remains unsupported
 and delegates to real `gh`, including alongside `mergeable` or `mergeCommit`;
 `gh pr list --json mergeable` and `gh pr list --json mergeCommit` also delegate.
+Supported summary-only combinations use the `pr-summary-v2` public page shape, including
+`mergeCommit`, `merged`, `isDraft`, `author`, and `headRepositoryOwner`. Login-only page
+identities use the shared profile lookup for actor types and node IDs; supplied node IDs
+must still match the profile. Closed-unmerged pages omit draft status, and missing page
+authors or head owners are omitted. When a requested field needs an omitted value, the
+CLI retries once through the relay without the shape header, retaining `max-age=0` when
+required. This exact REST retry works with `OCTOPOOL_NO_FALLBACK=1` and completes before
+hydration or output. Adding API-only fields such as `mergeable` or `headRepository` skips
+the page shape. See [the complete supported field set](token-free.md#bounded-cli-shapes).
 PR views also relay `headRepository`, `headRepositoryOwner`, `assignees`, and
 `statusCheckRollup` to reduce local GitHub quota usage through shared transports and
 eligible caching, including under active string rewrite protection. Fork metadata

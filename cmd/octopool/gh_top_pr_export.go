@@ -16,6 +16,14 @@ func relayPRViewAuthor(ctx context.Context, client ghRelayClient, raw any, users
 	if login == "" {
 		return nil, localFallbackError{Reason: "unsupported pull request author identity"}
 	}
+	if _, hasType := user["type"]; !hasType {
+		profile, err := relayPRUser(ctx, client, user, users)
+		if err != nil {
+			return nil, err
+		}
+		user = profile
+		login = firstString(profile, "login")
+	}
 	switch firstString(user, "type") {
 	case "Bot":
 		slug, ok := strings.CutSuffix(login, "[bot]")

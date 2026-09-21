@@ -145,6 +145,13 @@ bypass storage and use the anonymous API; a `304` never revives an old server-ca
 Repository/network activity feeds and unrelated routes do not carry the issue-event
 discriminator; they still carry the common publication epoch.
 
+PR summary versions vary by `x-octopool-public-shape`: `pr-summary-v1`, `pr-summary-v2`,
+and unshaped REST requests cannot reuse each other's entries. V2 adds bounded merge,
+draft, and actor projections; a requested value omitted by the page causes one exact
+relay retry without the shape header. The retry preserves the caller's freshness bound,
+and neither summary version changes TTLs or the CLI's live-read field rules. Older CLIs
+retain v1 support; no cache purge is needed.
+
 PR file-list routes may include a validated
 `route_hint.pr_head_sha` or closed/merged `route_hint.pr_state` discriminator. Clients
 that already know the current PR state can use that to avoid mixing entries across head

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -39,7 +40,15 @@ func TestRunGHPRViewMergeCommit(t *testing.T) {
 			calls := 0
 			rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
 				calls++
-				checkPRMergeableRequest(t, decodeCLIRequest(t, w, r))
+				request := decodeCLIRequest(t, w, r)
+				headers, _ := request["headers"].(map[string]any)
+				wantShape := ""
+				if calls == 1 && !strings.Contains(test.fields, "mergeable") {
+					wantShape = "pr-summary-v2"
+				}
+				if got, _ := headers["x-octopool-public-shape"].(string); got != wantShape || headers["cache-control"] != "max-age=0" {
+					t.Errorf("headers=%#v want shape=%q and live read", headers, wantShape)
+				}
 				writeCLIEnvelope(t, w, test.pr)
 			})
 			args := []string{"pr", "view", "7", "--repo", "openclaw/octopool", "--json", test.fields}
@@ -55,8 +64,12 @@ func TestRunGHPRViewMergeCommit(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if calls != 1 || out.String() != test.want {
-				t.Fatalf("calls=%d output=%q, want one fresh read and %q", calls, out.String(), test.want)
+			wantCalls := 1
+			if test.want == "" {
+				wantCalls = 2
+			}
+			if calls != wantCalls || out.String() != test.want {
+				t.Fatalf("calls=%d output=%q, want %d fresh reads and %q", calls, out.String(), wantCalls, test.want)
 			}
 		})
 	}

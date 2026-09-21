@@ -178,17 +178,17 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	if err != nil {
 		return err
 	}
-	prEnvelope, err := client.do(ctx, request)
+	pr, err := relayPRViewBody(ctx, client, request)
 	if err != nil {
 		return err
 	}
-	body, err := envelopeBodyBytes(prEnvelope)
-	if err != nil {
-		return err
-	}
-	var pr map[string]any
-	if err := json.Unmarshal(body, &pr); err != nil {
-		return err
+	if headers["x-octopool-public-shape"] == publicShapePullRequestSummary && prSummaryNeedsExactRead(pr, opts.json) {
+		// Missing page facts need exact REST, with the same freshness and relay policy.
+		delete(request.headers, "x-octopool-public-shape")
+		pr, err = relayPRViewBody(ctx, client, request)
+		if err != nil {
+			return err
+		}
 	}
 	normalizePRViewState(pr)
 	normalizePRViewMergeable(pr)
@@ -327,6 +327,47 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 		return err
 	}
 	return writeBytes(ctx, stdout, filtered, opts.jq)
+}
+
+func relayPRViewBody(ctx context.Context, client ghRelayClient, request ghAPIRequest) (map[string]any, error) {
+	envelope, err := client.do(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return nil, err
+	}
+	var pr map[string]any
+	if err := json.Unmarshal(body, &pr); err != nil {
+		return nil, err
+	}
+	return pr, nil
+}
+
+func prSummaryNeedsExactRead(pr map[string]any, fields []string) bool {
+	for _, field := range fields {
+		switch field {
+		case "isDraft":
+			if _, ok := pr["draft"].(bool); !ok {
+				return true
+			}
+		case "author":
+			if _, present := pr["user"]; !present {
+				return true
+			}
+		case "headRepositoryOwner":
+			if _, present := valueAtPath(pr, "head", "user"); !present {
+				return true
+			}
+		case "merged", "mergeCommit":
+			merged, ok := pr["merged"].(bool)
+			if !ok || (field == "mergeCommit" && merged && !rewriteCommitSHA.MatchString(firstString(pr, "merge_commit_sha"))) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func normalizePRViewState(pr map[string]any) {

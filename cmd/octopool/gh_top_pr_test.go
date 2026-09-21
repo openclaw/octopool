@@ -21,7 +21,7 @@ func TestRunGHPRViewHydratesFiles(t *testing.T) {
 				t.Fatalf("head read order: PR calls=%d file calls=%d", prCalls, fileCalls)
 			}
 			headers := body["headers"].(map[string]any)
-			if headers["x-octopool-public-shape"] != "pr-summary-v1" || headers["cache-control"] != "max-age=0" {
+			if headers["x-octopool-public-shape"] != "pr-summary-v2" || headers["cache-control"] != "max-age=0" {
 				t.Fatalf("PR headers = %#v", headers)
 			}
 			return map[string]any{
@@ -297,7 +297,7 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 			if _, ok := headers["if-none-match"]; ok {
 				t.Fatalf("unexpected cache-bypass header: %#v", headers)
 			}
-			if headers["x-octopool-public-shape"] != "pr-summary-v1" {
+			if headers["x-octopool-public-shape"] != "pr-summary-v2" {
 				t.Fatalf("expected public PR summary shape, got %#v", headers)
 			}
 		}

@@ -64,7 +64,7 @@ func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
 		t.Fatalf("issue list action=%v err=%v", result.action, result.err)
 	}
 
-	wantShapes := []string{"pr-list-v1", "", "pr-summary-v1", "", "issue-summary-v1", "", "issue-list-v1"}
+	wantShapes := []string{"pr-list-v1", "", "pr-summary-v2", "", "issue-summary-v1", "", "issue-list-v1"}
 	if len(requests) != len(wantShapes) {
 		t.Fatalf("requests = %d", len(requests))
 	}

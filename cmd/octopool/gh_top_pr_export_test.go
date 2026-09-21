@@ -282,8 +282,8 @@ func TestRunGHPRViewAuthorNativeShape(t *testing.T) {
 					req := decodeCLIRequest(t, w, r)
 					switch req["path"] {
 					case "/repos/acme/repo/pulls/1":
-						if headers, _ := req["headers"].(map[string]any); headers["x-octopool-public-shape"] != nil {
-							t.Error("author needs full REST identity")
+						if headers, _ := req["headers"].(map[string]any); headers["x-octopool-public-shape"] != "pr-summary-v2" {
+							t.Error("author should request the public summary")
 						}
 						writeCLIEnvelope(t, w, map[string]any{"user": test.author, "number": 1})
 					case "/users/alice":

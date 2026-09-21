@@ -27,9 +27,8 @@ func TestCLIEndToEndPRViewLifecycleProjection(t *testing.T) {
 			"state": "open", "draft": true, "head": map[string]any{"sha": prStateTestHead},
 			"updated_at": prStateTestTime, "merged_at": nil,
 		}
-		if headers["x-octopool-public-shape"] == "pr-summary-v1" {
+		if headers["x-octopool-public-shape"] == "pr-summary-v2" {
 			pr["state"] = "DRAFT"
-			delete(pr, "draft")
 			delete(pr, "updated_at")
 		}
 		writeCLIEnvelope(t, w, pr)
@@ -103,12 +102,17 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 					} {
 						t.Run(fields, func(t *testing.T) {
 							// REST may also serve a public shape after a page parser misses.
-							wantShape := !strings.Contains(fields, "isDraft") && !strings.Contains(fields, "updatedAt")
+							wantShape := !strings.Contains(fields, "updatedAt")
+							wantRetry := wantShape && transport == "web" && lifecycle.webState == "CLOSED" && strings.Contains(fields, "isDraft")
+							metadataCalls := 1
+							if wantRetry {
+								metadataCalls++
+							}
 							wantFiles := strings.Contains(fields, "files")
 							prCalls, fileCalls := 0, 0
 							relayTestServer(t, func(request map[string]any) any {
 								if request["path"] == "/repos/openclaw/clawsweeper/pulls/1025/files" {
-									if !wantFiles || prCalls != 1 || fileCalls != 0 {
+									if !wantFiles || prCalls != metadataCalls || fileCalls != 0 {
 										t.Fatalf("unexpected file read: PR=%d files=%d", prCalls, fileCalls)
 									}
 									fileCalls++
@@ -128,16 +132,16 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 								prCalls++
 								headers, _ := request["headers"].(map[string]any)
 								shape, _ := headers["x-octopool-public-shape"].(string)
-								if prCalls == 2 && wantFiles {
-									if fileCalls != 1 || shape != "pr-summary-v1" || headers["cache-control"] != "max-age=0" {
+								if prCalls == metadataCalls+1 && wantFiles {
+									if fileCalls != 1 || shape != "pr-summary-v2" || headers["cache-control"] != "max-age=0" {
 										t.Fatalf("final head read: files=%d headers=%#v", fileCalls, headers)
 									}
 									return map[string]any{"head": map[string]any{"sha": prStateTestHead}}
 								}
-								if prCalls != 1 || fileCalls != 0 {
+								if prCalls > metadataCalls || fileCalls != 0 {
 									t.Fatalf("unexpected PR read: PR=%d files=%d", prCalls, fileCalls)
 								}
-								if (wantShape && shape != "pr-summary-v1") || (!wantShape && shape != "") {
+								if (wantShape && prCalls == 1 && shape != "pr-summary-v2") || ((!wantShape || prCalls == 2) && shape != "") {
 									t.Fatalf("shape = %q, want public shape = %v", shape, wantShape)
 								}
 								if wantFiles && headers["cache-control"] != "max-age=0" {
@@ -154,10 +158,11 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 								if lifecycle.merged {
 									pr["merged_at"] = prStateTestTime
 								}
-								if wantShape && transport == "web" {
+								if wantShape && transport == "web" && prCalls == 1 {
 									pr["state"] = lifecycle.webState
-									delete(pr, "draft")
-									delete(pr, "merged")
+									if lifecycle.webState == "CLOSED" {
+										delete(pr, "draft")
+									}
 									delete(pr, "updated_at")
 								}
 								return pr
@@ -187,9 +192,9 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 							if !reflect.DeepEqual(got, want) {
 								t.Errorf("projection = %#v, want %#v", got, want)
 							}
-							wantPRCalls, wantFileCalls := 1, 0
+							wantPRCalls, wantFileCalls := metadataCalls, 0
 							if wantFiles {
-								wantPRCalls, wantFileCalls = 2, 1
+								wantPRCalls, wantFileCalls = metadataCalls+1, 1
 							}
 							if prCalls != wantPRCalls || fileCalls != wantFileCalls {
 								t.Errorf("requests: PR=%d files=%d, want %d/%d", prCalls, fileCalls, wantPRCalls, wantFileCalls)

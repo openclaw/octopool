@@ -87,7 +87,7 @@ exact REST instead, including jobs and lazy workflow-name metadata. Human run ou
 watch still use the bounded Actions page shapes below. See the [CLI export contract](cli.md)
 for native defaults, requested/returned attempt ownership, safe-integer limits and bounds.
 
-Current shape IDs are `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summary-v1`,
+Current shape IDs are `pr-summary-v2`, `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summary-v1`,
 `issue-list-v1`, `label-list-v1`, `workflow-list-v1`, `workflow-view-v1`,
 `actions-summary-v1`, and `actions-jobs-v1`. The `release-summary-v1` wire shape uses
 the exact anonymous API as described below.
@@ -109,7 +109,8 @@ the exact anonymous API as described below.
 Supported field sets:
 
 - PR view: `number`, `title`, `state`, `url`, `createdAt`, `closedAt`, `mergedAt`,
-  `headRefName`, `headRefOid`, `baseRefName`.
+  `headRefName`, `headRefOid`, `baseRefName`, `mergeCommit`, `merged`, `isDraft`,
+  `author`, `headRepositoryOwner`.
 - PR files: `path`, `additions`, `deletions`, `changeType`, and `originalPath`; the
   `pr-files-v1` shape uses exact anonymous API data plus a verified head discriminator,
   not a reduced public-page parser.
@@ -124,6 +125,19 @@ Supported field sets:
 - Actions summary shapes supply human/watch run metadata; their reconstructed names and
   timestamps are not native machine-export evidence.
 - Actions jobs shapes add bounded job and step metadata for human/watch output, not run JSON.
+
+`pr-summary-v2` supplies exact CLI projections, not a complete REST PR body. It always
+includes `merged`, and includes `merge_commit_sha` only for merged PRs with a full commit
+SHA. Unmerged PRs project `mergeCommit: null`; their REST test-merge SHA is not reconstructed.
+The page proves draft status for open and merged PRs, but omits `draft` for closed-unmerged
+PRs. Authors and head owners supply login-only identities, hydrated through `/users/{login}`
+for node IDs, actor types, and names. Missing identities are omitted, not guessed.
+If a requested projection needs an omitted value, the CLI repeats the PR read through
+the relay without the public-shape header, preserving its freshness headers. This stays
+within the relay even with `OCTOPOOL_NO_FALLBACK=1`. Fields not needed by the request do
+not trigger this retry. `headRepository` and `mergeable` remain API-only; `mergedBy`
+remains unsupported by the CLI. Older CLIs can still request the original `pr-summary-v1`
+field set. Deploy the Worker and upgrade the CLI to use v2.
 
 Workflow pagination uses
 `https://github.com/{owner}/{repo}/actions/workflows_partial?query=&page={page}`. Actions
