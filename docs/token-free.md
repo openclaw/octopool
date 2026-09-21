@@ -89,7 +89,7 @@ for native defaults, requested/returned attempt ownership, safe-integer limits a
 
 Current shape IDs are `pr-summary-v2`, `pr-summary-v1`, `pr-files-v1`, `pr-list-v1`, `issue-summary-v1`,
 `issue-list-v1`, `label-list-v1`, `workflow-list-v1`, `workflow-view-v1`,
-`actions-summary-v1`, and `actions-jobs-v1`. The `release-summary-v1` wire shape uses
+`actions-summary-v1`, `actions-jobs-v1`, and `release-metadata-v1`. The `release-summary-v1` wire shape uses
 the exact anonymous API as described below.
 
 | Relay request                                                         | Public source                                                                                                       | Shape/limits                                                       |
@@ -105,6 +105,8 @@ the exact anonymous API as described below.
 | `GET /repos/{owner}/{repo}/actions/workflows/{workflow}/runs`         | `https://github.com/{owner}/{repo}/actions/workflows/{workflow}`                                                    | Up to 25 unfiltered runs; shared per-workflow public-page superset |
 | `GET /repos/{owner}/{repo}/actions/runs/{id}`                         | `https://github.com/{owner}/{repo}/actions/runs/{id}`                                                               | Run summary; no query                                              |
 | `GET /repos/{owner}/{repo}/actions/runs/{id}/attempts/{attempt}/jobs` | `https://github.com/{owner}/{repo}/actions/runs/{id}/job_groups_batch?attempt={attempt}`, then each public job page | Exact attempt; up to 25 job pages                                  |
+| `GET /repos/{owner}/{repo}/releases/tags/{tag}`                       | `https://github.com/{owner}/{repo}/releases/tag/{tag}`                                                              | Release metadata fields only; no query                             |
+| `GET /repos/{owner}/{repo}/releases/latest`                           | `https://github.com/{owner}/{repo}/releases/latest`, then the same repository's release-tag page                    | Release metadata fields only; no query                             |
 
 Supported field sets:
 
@@ -125,6 +127,15 @@ Supported field sets:
 - Actions summary shapes supply human/watch run metadata; their reconstructed names and
   timestamps are not native machine-export evidence.
 - Actions jobs shapes add bounded job and step metadata for human/watch output, not run JSON.
+- Release view metadata: `tagName`, `url`, `isDraft`, `isPrerelease`, `publishedAt`.
+
+Release metadata requires a complete release header, matching repository/tag breadcrumb,
+public-repository marker, and publication timestamp. Prerelease labels are read only from
+the release header, never from user-written notes. Latest-release pages must also carry
+the latest label. A malformed or ambiguous header falls through to the exact anonymous
+API. Names, raw Markdown, creation timestamps, lists, numeric release-ID routes, query
+parameters, custom media, and caller conditionals retain their existing API handling.
+The metadata shape has its own cache keys; it cannot satisfy exact release-body reads.
 
 `pr-summary-v2` supplies exact CLI projections, not a complete REST PR body. It always
 includes `merged`, and includes `merge_commit_sha` only for merged PRs with a full commit
@@ -178,14 +189,14 @@ The contents cache generation retires old reconstructed JSON responses; see
 ### Exact release bodies
 
 `gh release view [tag] --json` uses the exact anonymous API for both latest and tagged
-releases, including metadata-only projections. Its `release-summary-v1` shape supports
+releases whenever the selected fields include `name`, `body`, or `createdAt`. Its `release-summary-v1` shape supports
 `tagName`, `name`, `url`, `isDraft`, `isPrerelease`, `createdAt`, `publishedAt`, and `body`.
 The decoded `body` string preserves the API's raw Markdown byte for byte, including
 headings, tight lists, reference links, code fences, whitespace, line endings, and an
 explicitly empty string. Cache reads preserve that same source string.
 
 Rendered release HTML does not prove the original Markdown. Octopool does not reconstruct
-it or substitute a changelog. Release cache misses therefore consume anonymous API quota
+it or substitute a changelog. These exact release cache misses consume anonymous API quota
 instead of using the public release page. If the API is unavailable, only an eligible
 exact cached response may be served through the existing bounded stale policy; otherwise
 the existing guarded local-`gh` fallback applies. Releases never use pooled credentials,

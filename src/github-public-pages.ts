@@ -9,12 +9,13 @@ import {
   scalarQuery,
   validScalarQuery,
 } from "./github-public-utils";
-import { defaultGitHubJSONAccept } from "./github-response";
+import { defaultGitHubJSONAccept, transformedGitHubHeaders } from "./github-response";
 import {
   parseIssueHTML,
   parseIssueListHTML,
   parseLabelListHTML,
   parsePullRequestHTML,
+  parseReleaseMetadataHTML,
   parseWorkflowListHTML,
   parseWorkflowPageCount,
 } from "./github-html";
@@ -267,4 +268,43 @@ function searchQualifier(key: string, value: string): string | undefined {
 
 function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function releaseMetadataPageRequest(
+  env: Env,
+  request: RelayRequest,
+  route: RouteInfo,
+): WebRequest | undefined {
+  if (
+    request.method !== "GET" ||
+    route.owner === undefined ||
+    route.repo === undefined ||
+    request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.releaseMetadata ||
+    !defaultGitHubJSONAccept(request.headers?.accept) ||
+    Object.keys(request.query ?? {}).length !== 0 ||
+    request.headers?.["if-none-match"] !== undefined ||
+    request.headers?.["if-modified-since"] !== undefined
+  )
+    return undefined;
+  let tag: string | undefined;
+  let suffix = "latest";
+  if (route.kind === "release_view") {
+    const encodedTag = /\/releases\/tags\/([^/?#]+)$/.exec(request.path)?.[1];
+    tag = encodedTag === undefined ? undefined : decodePathStrict(encodedTag);
+    if (tag === undefined || tag === "") return undefined;
+    suffix = `tag/${encodeURIComponent(tag)}`;
+  } else if (route.kind !== "release_latest") return undefined;
+  const url = `https://github.com/${encodedPathSegments([route.owner, route.repo, "releases"])}/${suffix}`;
+  return htmlWebRequest(env, url, (body, headers, status, responseURL) => {
+    const parsed = parseReleaseMetadataHTML(
+      new TextDecoder().decode(body),
+      route.owner!,
+      route.repo!,
+      responseURL,
+      tag,
+    );
+    if (parsed === undefined) return undefined;
+    const response = publicJSONResponse(headers, status, parsed);
+    return { ...response, headers: transformedGitHubHeaders(response.headers) };
+  });
 }

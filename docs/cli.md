@@ -365,6 +365,22 @@ human-format reads. Supported `--json` fields are intentionally conservative. Co
 names, such as `url`, `author`, `headRefName`, `headRefOid`, `baseRefName`,
 `baseRefOid`, `isDraft`, `databaseId`, `workflowName`, and `nameWithOwner`.
 
+Release views can read metadata from public GitHub pages when every requested `--json`
+field is in `tagName,url,isDraft,isPrerelease,publishedAt`:
+
+```sh
+octopool gh release view -R openclaw/octopool --json tagName,url,publishedAt
+octopool gh release view v0.6.9 -R openclaw/octopool --json tagName,isPrerelease
+```
+
+This works for tagged releases and the latest release. `--jq` applies after selecting
+the fields, and `OCTOPOOL_FRESH=1` still fetches current metadata. Requests containing
+`name`, `body`, or `createdAt`, as well as release lists, retain exact anonymous API
+responses. The publication time never substitutes for the creation time, and rendered
+notes never substitute for raw Markdown. If page metadata is incomplete, Octopool tries
+the exact anonymous API and keeps the existing guarded fallback behavior. CLI and Worker
+must both support the metadata shape to use the page; older Workers retain the API path.
+
 `gh repo view --json id` returns the repository's GraphQL node ID before `--jq`,
 matching native `gh`. Missing, empty, or non-string node IDs use guarded native
 fallback before any JSON is printed; `OCTOPOOL_NO_FALLBACK=1` keeps these cases as

@@ -128,6 +128,10 @@ var supportedReleaseViewFields = supportedFields(
 	"tagName", "name", "url", "isDraft", "isPrerelease", "createdAt", "publishedAt", "body",
 )
 
+var supportedReleaseMetadataFields = supportedFields(
+	"tagName", "url", "isDraft", "isPrerelease", "publishedAt",
+)
+
 var supportedCheckRunFields = supportedFields(
 	"bucket", "completedAt", "description", "event", "link", "name", "startedAt", "state", "workflow",
 )

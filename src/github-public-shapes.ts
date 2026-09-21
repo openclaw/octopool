@@ -15,6 +15,7 @@ export const PUBLIC_SHAPES = {
   workflowList: "workflow-list-v1",
   workflowView: "workflow-view-v1",
   releaseSummary: "release-summary-v1",
+  releaseMetadata: "release-metadata-v1",
 } as const;
 
 // These fixed public projections are also generated into the CLI's query allowlist.

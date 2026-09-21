@@ -132,9 +132,19 @@ representations.
 
 Release views and latest-release reads with `release-summary-v1` similarly include
 `release-summary-raw-v2`. Existing clients cannot reuse the old HTML-derived bodies
-from edge, D1, stale fallback, fill coalescing, or conditional revalidation. Only shaped releases carry this representation discriminator; raw REST entries still
-carry the common publication epoch. The generation applies
-to metadata-only projections too, since they share the same response body.
+from edge, D1, stale fallback, fill coalescing, or conditional revalidation. This
+discriminator applies to `release-summary-v1`; raw REST entries still carry the common
+publication epoch. Existing clients retain this generation even for metadata-only
+projections, since their shape can also request the full response body.
+
+Release views selecting only `tagName`, `url`, `isDraft`, `isPrerelease`, and `publishedAt`
+use the separate `release-metadata-v1` shape. Its public-page response contains only
+those proven fields; the shape header keeps its cache entries separate from exact
+release summaries and raw REST in every cache path. HTML validators are omitted from
+the derived JSON, so an API `304` cannot revive page-derived metadata. Existing release
+TTLs, age bounds, visibility checks, and cache publication still apply. Forced-fresh
+reads fetch the page again. Mixed selections containing `name`, `body`, or `createdAt`
+keep the exact API shape; metadata never supplies those fields or a list response.
 
 Issue timelines and the three issue-event list/view routes include `issue-events-public-v2`
 for every representation, including raw REST and identity-specific keys. Older pooled bodies

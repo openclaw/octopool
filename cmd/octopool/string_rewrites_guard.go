@@ -142,7 +142,7 @@ func rewriteInternalShapeHeader(key, value string) bool {
 	if key != "x-octopool-public-shape" {
 		return false
 	}
-	return slices.Contains([]string{publicShapeActionsSummary, publicShapeActionsJobs, publicShapeIssueSummary, publicShapeIssueList, publicShapeIssueSearch, publicShapePullRequestList, publicShapePullRequestSummary, publicShapePullRequestFiles, publicShapePullRequestCISummary, publicShapePullRequestCIRollup, publicShapePullRequestMergeSnapshot, publicShapeLabelList, publicShapeWorkflowList, publicShapeWorkflowView, publicShapeReleaseSummary}, value)
+	return slices.Contains([]string{publicShapeActionsSummary, publicShapeActionsJobs, publicShapeIssueSummary, publicShapeIssueList, publicShapeIssueSearch, publicShapePullRequestList, publicShapePullRequestSummary, publicShapePullRequestFiles, publicShapePullRequestCISummary, publicShapePullRequestCIRollup, publicShapePullRequestMergeSnapshot, publicShapeLabelList, publicShapeWorkflowList, publicShapeWorkflowView, publicShapeReleaseSummary, publicShapeReleaseMetadata}, value)
 }
 
 var rewriteTagReadPath = regexp.MustCompile(`^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/git/ref/tags/[A-Za-z0-9_.-]+$`)
@@ -277,6 +277,9 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	}
 	switch args[1] {
 	case "view", "diff", "checks", "watch":
+		if command == "release view" && len(flags.positionals) == 0 {
+			break
+		}
 		if args[0] != "repo" {
 			if len(flags.positionals) != 1 {
 				return errRewriteBlocked
@@ -327,6 +330,8 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	}
 	if len(flags.positionals) == 1 && args[0] != "search" && !(prBranchRead && !isDigits(flags.positionals[0])) {
 		path += "/" + flags.positionals[0]
+	} else if command == "release view" && len(flags.positionals) == 0 {
+		path += "/latest"
 	}
 	request := ghAPIRequest{method: "GET", path: path, query: map[string]any{}}
 	if args[0] == "search" {

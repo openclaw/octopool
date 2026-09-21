@@ -125,10 +125,14 @@ func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghRes
 		} else if len(opts.positionals) > 1 {
 			return ghDelegated()
 		}
+		shape := publicShapeReleaseSummary
+		if supportedJSONFields(opts, supportedReleaseMetadataFields) {
+			shape = publicShapeReleaseMetadata
+		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    path,
-			headers: map[string]string{"x-octopool-public-shape": publicShapeReleaseSummary},
+			headers: map[string]string{"x-octopool-public-shape": shape},
 		}, opts, fieldMapRelease))
 	default:
 		return ghDelegated()

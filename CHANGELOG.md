@@ -5,6 +5,7 @@
 ### Features
 
 - Serve PR merge commit, draft, author, and head-owner projections from the public PR page with `pr-summary-v2`, hydrating login-only identities and retrying incomplete projections through exact relay reads while preserving freshness.
+- Read public release tags, URLs, publication times, and draft/prerelease flags from GitHub pages for metadata-only release views, retaining exact API responses for names, raw Markdown, creation times, and release lists.
 
 ### Fixes
 

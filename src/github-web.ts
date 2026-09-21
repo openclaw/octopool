@@ -5,7 +5,7 @@ import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./githu
 import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
-import { summaryPageRequest } from "./github-public-pages";
+import { releaseMetadataPageRequest, summaryPageRequest } from "./github-public-pages";
 import { githubResponseHeaders } from "./github-response";
 import { rateFromHeaders } from "./github-rate";
 import { githubResponseLocalFallbackReason } from "./local-fallback";
@@ -160,6 +160,8 @@ function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteIn
   if (release !== undefined) {
     out.push(release);
   }
+  const releaseMetadata = releaseMetadataPageRequest(env, request, route);
+  if (releaseMetadata !== undefined) out.push(releaseMetadata);
   const publicApi = publicAPIRequest(env, request, route);
   if (publicApi !== undefined) {
     out.push(publicApi);
