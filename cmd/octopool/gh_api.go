@@ -24,6 +24,7 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	if err != nil {
 		return ghAPIRequest{}, false, err
 	}
+	hostname := "github.com"
 	request := ghAPIRequest{
 		method:  "GET",
 		query:   map[string]any{},
@@ -32,6 +33,12 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		switch arg {
+		case "--hostname":
+			index++
+			if index >= len(args) {
+				return request, false, errors.New("--hostname requires a value")
+			}
+			hostname = args[index]
 		case "--method", "-X":
 			index++
 			if index >= len(args) {
@@ -74,6 +81,10 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 				} else {
 					request.slurp = enabled
 				}
+				continue
+			}
+			if strings.HasPrefix(arg, "--hostname=") {
+				hostname = strings.TrimPrefix(arg, "--hostname=")
 				continue
 			}
 			if strings.HasPrefix(arg, "--method=") {
@@ -129,7 +140,7 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	}
 	// Fresh /user reads must skip the saved-login shortcut.
 	request.headers = relayReadHeaders(request.method, request.headers)
-	return request, request.method != "GET", nil
+	return request, request.method != "GET" || hostname != "github.com", nil
 }
 
 func normalizeGHAPIQueryArgs(args []string) ([]string, error) {
@@ -174,6 +185,9 @@ func normalizeGHAPIQueryArgs(args []string) ([]string, error) {
 		if !safeRelayRequest(request) {
 			return args, nil
 		}
+	}
+	if opts.hostname != "" {
+		opts.output = append(opts.output, "--hostname="+opts.hostname)
 	}
 	return append([]string{apiQueryEndpoint(request), "--method=GET"}, opts.output...), nil
 }

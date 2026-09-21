@@ -1,4 +1,5 @@
 import { HttpError } from "./http";
+import { landingGraphQLRequest } from "./github-landing";
 import { isPublicIssueSearchQuery, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
 import {
@@ -99,6 +100,7 @@ export function validateRelayRequest(value: unknown): RelayRequest {
 }
 
 export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteInfo {
+  const landing = landingGraphQLRequest(request);
   for (const rule of rules) {
     const match = rule.pattern.exec(request.path);
     if (match === null) {
@@ -154,8 +156,8 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     const runAttempt = rawRunAttempt === undefined ? undefined : Number(rawRunAttempt);
     const info: RouteInfo = {
       kind: rule.kind,
-      resource: rule.resource,
-      routeKey: routeKeyForMatch(request.method, rule, match),
+      resource: landing === undefined ? rule.resource : "graphql",
+      routeKey: `${routeKeyForMatch(request.method, rule, match)}${landing === undefined ? "" : ` ${request.headers?.["x-octopool-public-shape"]}`}`,
       ...(tokenFreeOnly ? { tokenFreeOnly: true } : {}),
       ...(runAttempt !== undefined && Number.isSafeInteger(runAttempt) && runAttempt > 0
         ? { run_attempt: runAttempt }

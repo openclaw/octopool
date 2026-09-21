@@ -51,7 +51,7 @@ func TestProtectionReadsStrictPreparation(t *testing.T) {
 			}
 			prepared := &rewritePreparation{}
 			t.Cleanup(prepared.cleanup)
-			args := []string{"api", endpoint, "--jq", "type", "--paginate", "--slurp", "--include", "--silent"}
+			args := []string{"api", endpoint, "--hostname=github.com", "--jq", "type", "--paginate", "--slurp", "--include", "--silent"}
 			// Call the strict owner directly: a successful best-effort dispatch must
 			// not hide a missing manifest route or unsupported preparation result.
 			if err := prepareRewriteAPI(policy, args, strings.NewReader("unused stdin"), prepared); err != nil {
@@ -234,7 +234,7 @@ func TestProtectionReadsSafeUnsupportedBestEffort(t *testing.T) {
 	for _, flags := range [][]string{
 		{"--method=POST"}, {"--method=PATCH"}, {"--method=PUT"},
 		{"--input=-", "--method=GET"}, {"-f", "page=1", "--method=GET"}, {"-Fpage=1"},
-		{"--hostname=github.com"}, {"--template=internal-model"},
+		{"--template=internal-model"},
 	} {
 		argsList = append(argsList, append([]string{"api", "repos/acme/demo/rulesets"}, flags...))
 	}

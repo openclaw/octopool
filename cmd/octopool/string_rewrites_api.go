@@ -11,6 +11,7 @@ import (
 
 type rewriteAPIOptions struct {
 	endpoint string
+	hostname string
 	method   string
 	input    string
 	inputSet bool
@@ -23,7 +24,7 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 	result := rewriteAPIOptions{headers: map[string]string{}}
 	seen := map[string]bool{}
 	jqCount := 0
-	values := rewriteFlagNames("--method,-X --input --field,-F --raw-field,-f --header,-H --jq,-q")
+	values := rewriteFlagNames("--method,-X --input --field,-F --raw-field,-f --header,-H --jq,-q --hostname")
 	booleans := rewriteFlagNames("--include,-i --silent --paginate --slurp")
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -66,12 +67,14 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 		}
 		i += count - 1
 		if flag.name != "--field" && flag.name != "--raw-field" && flag.name != "--header" {
-			if seen[flag.name] && flag.name != "--jq" {
+			if seen[flag.name] && flag.name != "--jq" && flag.name != "--hostname" {
 				return result, errRewriteBlocked
 			}
 			seen[flag.name] = true
 		}
 		switch flag.name {
+		case "--hostname":
+			result.hostname = flag.value
 		case "--method":
 			if flag.value == "" {
 				return result, errRewriteBlocked
@@ -109,6 +112,9 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 			}
 			result.output = append(result.output, flag.name+"="+flag.value)
 		}
+	}
+	if seen["--hostname"] && result.hostname != "github.com" {
+		return result, errRewriteUnsupported
 	}
 	if result.endpoint == "" {
 		return result, errRewriteBlocked

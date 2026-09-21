@@ -1,5 +1,6 @@
 import { encodeOpaqueBytes } from "./encoding";
 import type { GitHubEgressEnv } from "./github-egress";
+import { landingGraphQLRequest } from "./github-landing";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import { githubResponseHeaders, isSecondaryRateLimit } from "./github-response";
@@ -64,11 +65,22 @@ async function callGitHubAPI(
   route: RouteInfo,
   token?: string,
 ): Promise<GitHubRelayResponse> {
-  const url = githubUrl(request);
+  const landing = landingGraphQLRequest(request);
+  if (landing !== undefined && token === undefined) {
+    throw new HttpError(
+      502,
+      "github_auth_required",
+      "Public landing queries require a pooled identity",
+    );
+  }
+  const url = landing === undefined ? githubUrl(request) : "https://api.github.com/graphql";
   const timeoutMs = requestTimeoutMs(env);
+  const headers = githubHeaders(token, request.headers);
+  if (landing !== undefined) headers.set("content-type", "application/json");
   const response = await fetchGitHubResponse(env, url, {
-    method: "GET",
-    headers: githubHeaders(token, request.headers),
+    method: landing === undefined ? "GET" : "POST",
+    headers,
+    ...(landing === undefined ? {} : { body: JSON.stringify(landing) }),
     redirect: "manual",
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -79,7 +91,13 @@ async function callGitHubAPI(
     await cancelResponseBody(response);
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
   }
-  return readGitHubResponse(response, responseCapBytes(env));
+  const result = await readGitHubResponse(response, responseCapBytes(env));
+  if (landing !== undefined) {
+    // GraphQL POST revalidation always fetches the full snapshot once.
+    delete result.headers.etag;
+    delete result.headers["last-modified"];
+  }
+  return result;
 }
 
 async function readGitHubResponse(

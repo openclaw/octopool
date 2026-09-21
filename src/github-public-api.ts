@@ -1,4 +1,5 @@
 import { responseCapBytes } from "./github-limits";
+import { isLandingGraphQLRoute } from "./github-landing";
 import { appendRelayQuery } from "./github-path";
 import { publicJSONResponse, parseJSONBytes, scalarQuery } from "./github-public-utils";
 import { defaultGitHubJSONAccept } from "./github-response";
@@ -39,6 +40,7 @@ export function publicAPIRequest(
 ): WebRequest | undefined {
   if (
     request.method !== "GET" ||
+    isLandingGraphQLRoute(route) ||
     releaseRoute(route) ||
     !capabilitiesForRouteKind(route.kind).publicApi ||
     !defaultGitHubJSONAccept(request.headers?.accept)
@@ -66,6 +68,7 @@ export function publicAPIRequest(
 }
 
 export function supportsAnonymousGitHubAPI(request: RelayRequest, route: RouteInfo): boolean {
+  if (isLandingGraphQLRoute(route)) return false;
   return (
     (releaseRoute(route) && defaultGitHubJSONAccept(request.headers?.accept)) ||
     (request.method === "GET" &&

@@ -17,6 +17,7 @@ import { queries } from "./generated/sql";
 import { defaultGitHubJSONAccept } from "./github-response";
 import { scalarQuery } from "./github-public-utils";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
+import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
 import { isRecord } from "./object";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { isIssueEventRoute } from "./route-manifest";
@@ -218,6 +219,7 @@ export async function readStaleGitHubCache(
   route: RouteInfo,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
+  if (isLandingGraphQLRoute(route)) return undefined;
   const row = await env.DB.prepare(queries.readGitHubCacheAny)
     .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
     .first<CacheRow>();
@@ -233,6 +235,7 @@ export async function readStaleGitHubCache(
 }
 
 export function staleCacheSeconds(route: RouteInfo, freshTtlSeconds?: number): number {
+  if (isLandingGraphQLRoute(route)) return 0;
   const policy = cachePolicyForRouteKind(route.kind);
   if (
     policy.terminalStaleSeconds !== undefined &&
@@ -312,7 +315,10 @@ export async function writeGitHubCache(
   if (response.status < 200 || response.status >= 300) {
     return "failed";
   }
-  if (!cacheResponseEligible(route.kind, response.status)) {
+  if (
+    !cacheResponseEligible(route.kind, response.status) ||
+    (isLandingGraphQLRoute(route) && !landingGraphQLCacheable(response))
+  ) {
     return "none";
   }
   const ttlSeconds = cacheTTLSeconds(route, response);
@@ -442,6 +448,7 @@ function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse)
 }
 
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
+  if (isLandingGraphQLRoute(route)) return 60;
   const policy = cachePolicyForRouteKind(route.kind);
   const seconds = freshTTLSeconds(policy.fresh, route, response);
   return policy.freshCapSeconds === undefined ? seconds : Math.min(policy.freshCapSeconds, seconds);

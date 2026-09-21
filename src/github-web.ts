@@ -1,4 +1,5 @@
 import { requestTimeoutMs } from "./github-limits";
+import { isLandingGraphQLRoute } from "./github-landing";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./github-public-api";
 import { actionsPageRequest } from "./github-public-actions";
@@ -139,6 +140,7 @@ function conditionalHeaders(headers: Record<string, string> | undefined): Record
 }
 
 function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteInfo): WebRequest[] {
+  if (isLandingGraphQLRoute(route)) return [];
   const media = mediaFormat(request.headers?.accept);
   if (media !== undefined) {
     const mediaRequest = mediaWebRequest(env, request, route, media);

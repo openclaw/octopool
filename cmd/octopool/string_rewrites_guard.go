@@ -134,7 +134,7 @@ func rewriteInternalShapeHeader(key, value string) bool {
 	if key != "x-octopool-public-shape" {
 		return false
 	}
-	return slices.Contains([]string{publicShapeActionsSummary, publicShapeActionsJobs, publicShapeIssueSummary, publicShapeIssueList, publicShapeIssueSearch, publicShapePullRequestList, publicShapePullRequestSummary, publicShapePullRequestFiles, publicShapeLabelList, publicShapeWorkflowList, publicShapeWorkflowView, publicShapeReleaseSummary}, value)
+	return slices.Contains([]string{publicShapeActionsSummary, publicShapeActionsJobs, publicShapeIssueSummary, publicShapeIssueList, publicShapeIssueSearch, publicShapePullRequestList, publicShapePullRequestSummary, publicShapePullRequestFiles, publicShapePullRequestCISummary, publicShapePullRequestCIRollup, publicShapePullRequestMergeSnapshot, publicShapeLabelList, publicShapeWorkflowList, publicShapeWorkflowView, publicShapeReleaseSummary}, value)
 }
 
 var rewriteTagReadPath = regexp.MustCompile(`^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/git/ref/tags/[A-Za-z0-9_.-]+$`)

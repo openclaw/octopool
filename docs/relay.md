@@ -32,7 +32,7 @@ Request body:
 - `query` values are strings or string arrays. Keys are rejected if they look
   secret-bearing (`token`, `secret`, `password`, `api_key`, …).
 - `headers` are filtered down to `accept`, `x-github-api-version`, `if-none-match`,
-  `if-modified-since`, `cache-control`. Everything else is dropped.
+  `if-modified-since`, `cache-control`, and `x-octopool-public-shape`. Everything else is dropped.
 - A `cache-control: max-age=N` request directive bounds acceptable cache staleness: a
   fresh shared-cache entry older than `N` seconds is treated as a miss and refilled, and
   the refill writes through to the shared cache, unlike conditional headers, which bypass
@@ -273,6 +273,34 @@ for seven days only after the owning run completes, and is gated by the pool's `
 policy. Cached logs get at most a one-hour zero-contact window before an authenticated
 existence probe honors upstream deletion; active-run and failed-preflight logs retain the
 direct-fetch bypass.
+
+### Fixed public GraphQL landing reads
+
+`GET /repos/{owner}/{repo}/pulls/{number}` supports three additional
+`x-octopool-public-shape` values. The Worker constructs the exact upstream query
+from its allowlist in `src/github-public-shapes.ts`; callers cannot supply GraphQL.
+The existing `pr_view` owner routes these projections through the pool's `graphql`
+budget instead of REST's `core` budget.
+
+| Shape                  | Public response                                                                                             | Query parameters  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------- |
+| `pr-ci-summary-v1`     | PR state, mergeability, head, rollup state and check/status counts                                          | None              |
+| `pr-ci-rollup-v1`      | PR state, mergeability, head and up to 100 rollup contexts, including check suite/workflow IDs              | Optional `cursor` |
+| `pr-merge-snapshot-v1` | Repository identity, main ref, PR identity/head/base, mergeability, merge commit and auto-merge/queue state | None              |
+
+The envelope's `body` is the unchanged GraphQL JSON response, including `data` and
+any `errors`. Successful non-null PR responses cache for 60 seconds without stale
+fallback; `cache-control: max-age=0` refreshes one projection through the pool.
+GraphQL errors keep their upstream HTTP status and never populate the body cache.
+Consumers must inspect `errors` even on HTTP 200, as the CLI does.
+
+Only default JSON media is accepted. Conditional validators, extra query parameters,
+non-scalar/empty cursors, cursors longer than 512 characters or containing control
+characters, and cursors on other shapes are refused before upstream dispatch. The
+public-repository guard, caller/pool policy, string protection, response caps and
+pooled identity eligibility still apply. There is no anonymous REST or page substitute
+for these GraphQL projections. `viewerMergeBodyText`, arbitrary queries and mutations
+are outside this shared-cache contract and remain caller-owned native operations.
 
 ### Native protection reads
 

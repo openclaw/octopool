@@ -328,6 +328,11 @@ These supported relay routes are not token-free:
 - Actions job logs.
 - GitHub code search.
 - `GET /rate_limit`.
+- The public landing shapes `pr-ci-summary-v1`, `pr-ci-rollup-v1`, and
+  `pr-merge-snapshot-v1` on `GET /repos/{owner}/{repo}/pulls/{number}`. These use
+  fixed GraphQL queries with a pooled identity, including explicit refreshes;
+  they never use anonymous API or public-page transports. Ordinary REST requests
+  on the same path keep the anonymous transport listed above.
 - Private repository reads.
 - Any mutation or non-`GET` request.
 - Any route or media type not listed above.

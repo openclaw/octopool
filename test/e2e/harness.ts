@@ -192,8 +192,10 @@ export function githubUpstream(responses: {
 }
 
 export function bearer(input: RequestInfo | URL, init?: RequestInit): string | undefined {
-  const request = new Request(input, init);
-  const authorization = request.headers.get("authorization");
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
+  const authorization = headers.get("authorization");
   return authorization?.startsWith("Bearer ") === true ? authorization.slice(7) : undefined;
 }
 

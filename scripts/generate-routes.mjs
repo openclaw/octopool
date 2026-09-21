@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { PUBLIC_SHAPES } from "../src/github-public-shapes.ts";
+import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "../src/github-public-shapes.ts";
 import { isNativeReadRoute, ROUTES } from "../src/route-manifest.ts";
 
 const outputPath = new URL("../cmd/octopool/routes_generated.go", import.meta.url);
@@ -27,6 +27,10 @@ const lines = [
   ...Object.entries(PUBLIC_SHAPES).map(
     ([name, value]) =>
       `\tpublicShape${name[0].toUpperCase()}${name.slice(1)} = ${JSON.stringify(value)}`,
+  ),
+  ...Object.entries(GITHUB_LANDING_QUERIES).map(
+    ([name, value]) =>
+      `\tgithubLandingQuery${name[0].toUpperCase()}${name.slice(1)} = ${JSON.stringify(value)}`,
   ),
   ")",
   "",

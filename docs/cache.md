@@ -26,6 +26,23 @@ quota cooldown does not invalidate an otherwise eligible cached body. This preve
 warm pooled response from needlessly hitting GitHub again just because the shared
 anonymous key is empty.
 
+### Public PR landing snapshots
+
+The fixed `pr-ci-summary-v1`, `pr-ci-rollup-v1`, and `pr-merge-snapshot-v1`
+projections use pooled GraphQL reads after the normal public-repository guard.
+The shape and detail cursor vary the existing cache key; a raw REST PR response,
+a different projection, and another cursor can never satisfy the request.
+Snapshots stay fresh for at most 60 seconds, including completed CI and merged PRs.
+They have no stale fallback: a previous merge snapshot cannot authorize a later landing.
+
+`cache-control: max-age=0` performs one fresh pooled GraphQL query for that
+projection and writes its result through the normal cache. It does not disable caching
+for subsequent requests or bypass the pool. Repository visibility verification remains
+an independent requirement and can issue a separate guarded metadata read. GraphQL
+POSTs never use REST/page substitutes or conditional response validators. HTTP-200
+GraphQL errors and null repository/PR results are returned without caching; quota
+headers update the identity's GraphQL budget, independently of REST's core budget.
+
 Expired API-origin entries with an `etag` or `last-modified` validator are conditionally
 revalidated through the API before the normal token-free/API/pool fill chain. Anonymous REST
 entries are distinguished from web/raw/page entries by their stored `x-ratelimit-resource`

@@ -31,6 +31,7 @@ import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
+import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
 import { HttpError, jsonResponse } from "./http";
 import { isRecord } from "./object";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
@@ -1913,6 +1914,7 @@ async function cachedResponseAvailable(
   stale = false,
 ): Promise<boolean> {
   if (!cacheResponseEligible(route.kind, cached.status)) return false;
+  if (isLandingGraphQLRoute(route) && !landingGraphQLCacheable(cached)) return false;
   const identityAvailable = stale
     ? staleCachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity)
     : cachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity);

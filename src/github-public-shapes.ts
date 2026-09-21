@@ -6,11 +6,22 @@ export const PUBLIC_SHAPES = {
   issueSearch: "issue-search-v1",
   pullRequestList: "pr-list-v1",
   pullRequestSummary: "pr-summary-v1",
+  pullRequestCISummary: "pr-ci-summary-v1",
+  pullRequestCIRollup: "pr-ci-rollup-v1",
+  pullRequestMergeSnapshot: "pr-merge-snapshot-v1",
   pullRequestFiles: "pr-files-v1",
   labelList: "label-list-v1",
   workflowList: "workflow-list-v1",
   workflowView: "workflow-view-v1",
   releaseSummary: "release-summary-v1",
+} as const;
+
+// These fixed public projections are also generated into the CLI's query allowlist.
+// Viewer-specific fields and caller-supplied GraphQL never reach pooled credentials.
+export const GITHUB_LANDING_QUERIES = {
+  pullRequestCISummary: `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){state mergeable headRefOid statusCheckRollup{state contexts(first:1){checkRunCountsByState{state count} statusContextCountsByState{state count}}}}}}`,
+  pullRequestCIRollup: `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){state mergeable headRefOid statusCheckRollup{state contexts(first:100,after:$cursor){totalCount pageInfo{hasNextPage endCursor} nodes{kind:__typename ... on CheckRun{name status conclusion databaseId checkSuite{databaseId workflowRun{databaseId event workflow{databaseId}}}} ... on StatusContext{context state}}}}}}}`,
+  pullRequestMergeSnapshot: `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){id databaseId url nameWithOwner ref(qualifiedName:"refs/heads/main"){target{oid}} pullRequest(number:$number){id number url state headRefOid baseRefName isDraft mergeCommit{oid} autoMergeRequest{mergeMethod} isInMergeQueue isMergeQueueEnabled mergeable mergeStateStatus}}}`,
 } as const;
 
 export function isPublicIssueSearchQuery(

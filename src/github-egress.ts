@@ -67,7 +67,7 @@ export function withGitHubEgress(env: Env, rules: readonly StringRewriteRule[]):
           compiled,
         );
         if (init?.body !== undefined && init.body !== null) {
-          // Only internal authentication probes have bodies; relay data stays GET-only.
+          // Internal probes and fixed public GraphQL projections have JSON bodies.
           if (typeof init.body !== "string") throw stringRewriteEgressDenied();
           assertNoStringRewriteMatch(init.body, compiled);
           const inspect = (value: unknown): void => {

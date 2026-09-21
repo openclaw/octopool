@@ -143,6 +143,11 @@ web-synthesized and legacy-cached responses fall back to array-length and `total
 shape heuristics. Longer result sets and unprovable header-less shapes fall through
 to the real `gh` for a complete response.
 
+`--hostname github.com` and `--hostname=github.com` keep supported reads on the
+relay, including under active protection rules and with scalar query fields or
+pagination. Other explicit hosts are not relayed. Existing protected native commands
+retain their GitHub.com host pinning.
+
 Explicit `--method GET` calls can pass scalar query parameters with `-f`/`--raw-field`
 or `-F`/`--field`. They share cache entries with the equivalent URL query, including
 under active protection rules. Typed integers use native numeric conversion and typed
@@ -188,11 +193,36 @@ against Octopool's pool-health endpoint, then prints the saved login without spe
 API or pooled-identity quota. Token/URL overrides, other projections, headers, queries, and
 full user-profile reads retain the normal relay or real-`gh` behavior.
 
+### Known landing GraphQL reads
+
+The shim recognizes the exact public PR CI summary, paginated CI detail, and merge
+snapshot queries used by OpenClaw's landing tools. Their canonical definitions live in
+`GITHUB_LANDING_QUERIES` in `src/github-public-shapes.ts`. Whitespace and optional commas
+may vary; fields, aliases, arguments, and variable declarations must match. The CLI accepts
+only their `owner`, `name`, typed integer `pr`/`number`, and optional detail `cursor` fields.
+It translates each read to one canonical shaped PR request; the Worker executes its own
+fixed GraphQL query with a pooled identity. The response remains GraphQL JSON, including
+`--jq` projection and a failing exit status for GraphQL errors.
+
+These three shapes share a 60-second cache with no outage stale fallback. Use
+`-H 'Cache-Control: max-age=0'` on an individual query, or `OCTOPOOL_FRESH=1`, when a
+landing decision requires current evidence. Each refresh makes one GraphQL resource
+request through the pool and republishes the response for other readers; independent
+visibility and caller-authentication checks retain their own lifetimes. Cursor pages have
+separate cache keys, and callers must continue checking head/snapshot consistency across
+pages. Cache hits and fresh requests retain authoritative outbound protection.
+
+Viewer-dependent merge previews, arbitrary GraphQL, mutations, extra variables, file
+inputs, and unsupported output modes stay with native `gh`. Private repositories retain
+guarded local fallback. A CLI connected to an older Worker rejects its raw REST response
+before any output and uses guarded fallback; upgrade both components for pooled GraphQL.
+No general GraphQL proxy or caller-controlled upstream query is exposed.
+
 ### Quota provenance and merge diagnostics
 
 Native GraphQL delegation prints `octopool: graphql delegated to personal token` on
-stderr. This includes unsupported PR exports, native PR checks, and raw `gh api graphql`;
-relay-backed reads do not print it. When the last observation has fewer than 500 remaining,
+stderr. This includes unsupported PR exports, native PR checks, and unrecognized
+`gh api graphql` queries; relay-backed reads do not print it. When the last observation has fewer than 500 remaining,
 the notice labels the remaining count and reset as a REST `/rate_limit` estimate, cached
 for up to 60 seconds and not a retry deadline. The shim reads this endpoint once through
 native `gh` before delegation, using the personal credential's cache. It never substitutes
