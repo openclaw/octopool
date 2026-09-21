@@ -32,6 +32,7 @@ export async function coalesceGitHubCacheMiss(
   for (;;) {
     const acquisition = await acquireOwnedCacheFill(coordinator, bodyPublicationResource(cacheKey));
     if (acquisition.kind === "owner") {
+      if (options.maxAgeSeconds === 0) return { owner: acquisition.owner };
       try {
         const rechecked = await readShared();
         if (rechecked !== undefined && (await accepted(rechecked.cached))) {
@@ -45,6 +46,8 @@ export async function coalesceGitHubCacheMiss(
       }
     }
 
+    // Zero-age followers still wait for ownership, but cannot reuse its published body.
+    if (options.maxAgeSeconds === 0) continue;
     let cached: CachedGitHubResponse | undefined;
     if (acquisition.kind === "completed" && acquisition.outcome === "shared") {
       cached = (

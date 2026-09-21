@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { callAnonymousGitHubAPI, callGitHubWeb } from "../src/github-web";
+import {
+  callAnonymousGitHubAPI,
+  callGitHubWeb,
+  hasNoQuotaGitHubWebRequest,
+} from "../src/github-web";
 import { fetchPublicPage } from "../src/github-web-transport";
 import { releaseHTML, releaseMarkdown } from "./fixtures/release-summary";
 import { contentsKinds, contentsLinks } from "./fixtures/contents-links";
@@ -20,6 +24,28 @@ describe("github web provider", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { headers: {}, query: {}, expected: false },
+    { headers: { "x-octopool-public-shape": "pr-summary-v1" }, query: {}, expected: true },
+    {
+      headers: { "x-octopool-public-shape": "pr-summary-v1" },
+      query: { page: "2" },
+      expected: false,
+    },
+    { headers: { accept: "application/vnd.github.v3.diff" }, query: {}, expected: true },
+  ])("detects actual no-quota candidates: %j", ({ headers, query, expected }) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls/11",
+      headers,
+      query,
+    });
+    expect(hasNoQuotaGitHubWebRequest(env(), request, classifyRoute(request, policy))).toBe(
+      expected,
+    );
   });
 
   it("keeps custom-media PR diffs on their single public candidate", async () => {

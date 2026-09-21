@@ -18,6 +18,9 @@ import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import { ownedWork } from "./owned-work";
 import { exactRun, historicalHead, runPage } from "../fixtures/actions-ownership";
+import { queries } from "../../src/generated/sql";
+import { requestWithEnv } from "./identity-routing-support";
+import { observePublicationD1 } from "./publication-d1-observer";
 
 const RUN_PATH = "/repos/openclaw/octopool/actions/runs/123";
 
@@ -28,6 +31,161 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end cache revalidation", () => {
+  it.each([
+    { shaped: true, pageWorks: true },
+    { shaped: true, pageWorks: false },
+    { shaped: false, pageWorks: true },
+  ])("orders PR pages before stored API validators: %j", async ({ shaped, pageWorks }) => {
+    await seedPool();
+    const path = "/repos/openclaw/octopool/pulls/11";
+    const options = { headers: shaped ? { "x-octopool-public-shape": "pr-summary-v1" } : {} };
+    const calls: string[] = [];
+    let warm = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        expect(bearer(request)).toBeUndefined();
+        if (new URL(request.url).hostname === "github.com") {
+          calls.push("page");
+          if (warm || !pageWorks) return new Response(null, { status: 503 });
+          return new Response(
+            `<script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({
+              payload: {
+                pullRequestsLayoutRoute: {
+                  pullRequest: {
+                    number: 11,
+                    relayId: "PR_fixture",
+                    title: "Live page",
+                    state: "OPEN",
+                    createdTime: "2026-09-20T00:00:00Z",
+                    closedTime: null,
+                    mergedTime: null,
+                    headBranch: "fix",
+                    headSha: "a".repeat(40),
+                    baseBranch: "main",
+                  },
+                  repository: { ownerLogin: "openclaw", name: "octopool" },
+                },
+              },
+            })}</script>`,
+          );
+        }
+        expect(request.url).toBe(`https://api.github.com${path}`);
+        calls.push(request.headers.get("if-none-match") ?? "api");
+        return warm
+          ? jsonResponse({ number: 11, title: "Stored API" }, 200, apiHeaders('"stored"'))
+          : new Response(null, { status: 304, headers: apiHeaders('"stored"') });
+      }),
+    );
+    expect((await relay(path, undefined, options)).status).toBe(200);
+    await expireCacheEntry("pr_view");
+    warm = false;
+    calls.length = 0;
+    const response = await relay(path, undefined, options);
+    expect(response.status).toBe(200);
+    const usedPage = shaped && pageWorks;
+    expect(await response.json()).toMatchObject({
+      body: { title: usedPage ? "Live page" : "Stored API" },
+      relay: { cache: usedPage ? "miss" : "hit" },
+    });
+    expect(calls).toEqual(usedPage ? ["page"] : shaped ? ["page", '"stored"'] : ['"stored"']);
+    expect(
+      await env.DB.prepare(
+        "SELECT backend, fallback_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+      ).first(),
+    ).toEqual({
+      backend: usedPage ? "github_web" : "github_api",
+      fallback_reason: usedPage ? null : "cache_revalidated",
+    });
+  });
+
+  it("skips zero-age body reads through identity fallback while retaining validators and owners", async () => {
+    await seedPool({ secondary: true });
+    let warm = true;
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const token = bearer(request);
+        if (warm) return jsonResponse({ id: 123 }, 200, apiHeaders('"stored"'));
+        if (token === "test-org-token") return jsonResponse({ private: false });
+        calls.push(token ?? request.headers.get("if-none-match") ?? "anonymous");
+        if (token === "test-secondary-token")
+          return jsonResponse({ id: 123 }, 200, rateHeaders({ remaining: 4999 }));
+        return new Response(null, { status: 429 });
+      }),
+    );
+    expect((await relay(RUN_PATH)).status).toBe(200);
+    warm = false;
+    const reads: string[] = [];
+    const db = observePublicationD1(env.DB, {
+      before: async (sql) => {
+        reads.push(sql);
+      },
+    });
+    const edge = vi.spyOn(caches.default, "match");
+    const response = await requestWithEnv({ DB: db }, RUN_PATH, {
+      headers: { "cache-control": "max-age=0" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      identity: { id: "secondary" },
+      body: { id: 123 },
+    });
+    expect(calls).toEqual(['"stored"', "test-primary-token", "test-secondary-token"]);
+    expect(reads.filter((sql) => sql === queries.readGitHubCache)).toHaveLength(0);
+    expect(reads.filter((sql) => sql === queries.readGitHubCacheAny)).toHaveLength(3);
+    expect(
+      edge.mock.calls.filter(([request]) =>
+        String(request instanceof Request ? request.url : request).includes(
+          "github-publication-v1",
+        ),
+      ),
+    ).toHaveLength(0);
+    // Successful publication proves the upstream path retained its fenced fill owner.
+    expect(
+      await env.DB.prepare(
+        "SELECT identity_id FROM github_cache_entries WHERE identity_id = 'secondary'",
+      ).first(),
+    ).toEqual({ identity_id: "secondary" });
+  });
+
+  it("does not retry depleted anonymous quota for completed-jobs proof", async () => {
+    await seedPool();
+    const path = `${RUN_PATH}/attempts/2/jobs`;
+    const body = {
+      total_count: 1,
+      jobs: [{ id: 42, run_id: 123, run_attempt: 2, status: "completed" }],
+    };
+    let warm = true;
+    const anonymous: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        if (bearer(request) === "test-org-token") return jsonResponse({ private: false });
+        if (bearer(request) === "test-primary-token")
+          return jsonResponse(body, 200, rateHeaders({ remaining: 4999 }));
+        if (new URL(request.url).hostname === "github.com")
+          return new Response(null, { status: 404 });
+        if (new URL(request.url).pathname === path) {
+          if (warm) return jsonResponse(body, 200, apiHeaders('"jobs"'));
+          expect(request.headers.get("if-none-match")).toBe('"jobs"');
+        }
+        if (!warm) anonymous.push(new URL(request.url).pathname);
+        return new Response(null, { status: 429 });
+      }),
+    );
+    expect((await relay(path)).status).toBe(200);
+    warm = false;
+    expect(
+      (await relay(path, undefined, { headers: { "cache-control": "max-age=0" } })).status,
+    ).toBe(200);
+    expect(anonymous).toEqual([path]);
+  });
+
   it.each<{
     scenario: string;
     status: number;
@@ -144,7 +302,7 @@ describe("Worker end-to-end cache revalidation", () => {
   });
 
   it.each([false, true])(
-    "retains the public HTML alternative and its policy guard after throttling (denied: %s)",
+    "prefers the public HTML alternative and retains its policy guard (denied: %s)",
     async (denied) => {
       await seedPool();
       const path = "/repos/openclaw/Peekaboo/actions/runs/42";
@@ -184,7 +342,7 @@ describe("Worker end-to-end cache revalidation", () => {
         expect(policy.status).toBe(200);
       }
       const response = await relay(path, undefined, options);
-      expect(anonymous).toBe(1);
+      expect(anonymous).toBe(0);
       if (denied) {
         expect(response.status).toBe(403);
         expect(await response.json()).toMatchObject({ error: { code: "string_rewrite_denied" } });

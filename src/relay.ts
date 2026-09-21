@@ -28,7 +28,7 @@ import {
   transformedGitHubHeaders,
 } from "./github-response";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
-import { callAnonymousGitHubAPI, callGitHubWeb } from "./github-web";
+import { callAnonymousGitHubAPI, callGitHubWeb, hasNoQuotaGitHubWebRequest } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
@@ -125,6 +125,7 @@ type ActiveRelay = RelayBase & {
   identity: Identity | undefined;
   paginatedIdentityRateRecorded: boolean;
   anonymousRateLimited: boolean;
+  noQuotaAttempted: boolean;
 };
 
 type RelaySuccess = {
@@ -281,6 +282,7 @@ async function prepareRelay(
     identity: undefined,
     paginatedIdentityRateRecorded: false,
     anonymousRateLimited: false,
+    noQuotaAttempted: false,
   };
 }
 
@@ -470,6 +472,14 @@ async function attemptStaleRelayCacheRevalidation(
     }
     if (!usesTokenFreeAPI && !(await guardRevalidationPublicRepo(state))) {
       return undefined;
+    }
+    if (
+      usesTokenFreeAPI &&
+      hasNoQuotaGitHubWebRequest(state.env, state.cacheRequest, state.route)
+    ) {
+      // A 304 spends the same API quota as a GET. Try the page before its validator.
+      const page = await callTokenFreeBackend(state, true);
+      if (page !== undefined) return page;
     }
     const github = await callRevalidationAPI(state, candidates[0]!, usesTokenFreeAPI);
     if (github === undefined) {
@@ -710,10 +720,15 @@ async function restoreSharedCacheFillState(
   return coalesceRelayCacheMiss(state);
 }
 
-async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | undefined> {
+async function callTokenFreeBackend(
+  state: ActiveRelay,
+  noQuotaOnly = false,
+): Promise<Response | undefined> {
   if (state.cacheKey === undefined && !isIssueEventRoute(state.route.kind)) {
     return undefined;
   }
+  const skipNoQuota = state.noQuotaAttempted;
+  if (noQuotaOnly) state.noQuotaAttempted = true;
   // Caller conditionals bypass storage, but must still use anonymous visibility.
   const { response, observedAt } = await observeAnonymousPublicRepo(
     state.env,
@@ -722,7 +737,8 @@ async function callTokenFreeBackend(state: ActiveRelay): Promise<Response | unde
       state.cacheKey === undefined
         ? (await callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route)).response
         : callGitHubWeb(state.env, state.cacheRequest, state.route, {
-            skipAnonymousAPI: state.anonymousRateLimited,
+            skipAnonymousAPI: noQuotaOnly || state.anonymousRateLimited,
+            skipNoQuota,
           }),
   );
   if (response === undefined) {
@@ -1710,7 +1726,9 @@ async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> 
     return { ...state.route, run_attempt_completed: true };
   }
   try {
-    const response = await callGitHubWeb(state.env, request, route);
+    const response = await callGitHubWeb(state.env, request, route, {
+      skipAnonymousAPI: state.anonymousRateLimited,
+    });
     if (runAttemptCompleted(response, state.route.run_attempt, path)) {
       return { ...state.route, run_attempt_completed: true };
     }
@@ -1810,7 +1828,7 @@ async function serveFreshIdentityCache(
   state: ActiveRelay,
   identities: Identity[],
 ): Promise<Response | undefined> {
-  if (!state.cacheEnabled) {
+  if (!state.cacheEnabled || state.maxAgeSeconds === 0) {
     return undefined;
   }
   for (const identity of identities) {

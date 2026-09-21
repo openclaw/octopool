@@ -61,6 +61,32 @@ describe("cache miss coalescing", () => {
     }
   });
 
+  it.each(["shared", "edge_only"] as const)(
+    "waits for %s publication then acquires zero-age ownership without reading bodies",
+    async (outcome) => {
+      const coordinator = fakeCacheFillCoordinator([
+        { kind: "completed", outcome },
+        { kind: "owner", token: "live-owner" },
+      ]);
+      const readShared = vi.fn(async () => sharedRead());
+      const readEdge = vi.fn(async () => sharedRead().cached);
+      const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+        maxAgeSeconds: 0,
+        readShared,
+        readEdge,
+      });
+      try {
+        expect(result.owner?.capability.owner_token).toBe("live-owner");
+        expect(result.cached).toBeUndefined();
+        expect(coordinator.acquirePublication).toHaveBeenCalledTimes(2);
+        expect(readShared).not.toHaveBeenCalled();
+        expect(readEdge).not.toHaveBeenCalled();
+      } finally {
+        await result.owner?.fail();
+      }
+    },
+  );
+
   it("rereads the shared cache once after completion", async () => {
     const coordinator = fakeCacheFillCoordinator([{ kind: "completed", outcome: "shared" }]);
     const readShared = vi.fn(async () => sharedRead());

@@ -46,11 +46,13 @@ GraphQL errors and null repository/PR results are returned without caching; quot
 headers update the identity's GraphQL budget, independently of REST's core budget.
 
 Expired API-origin entries with an `etag` or `last-modified` validator are conditionally
-revalidated through the API before the normal token-free/API/pool fill chain. Anonymous REST
+revalidated through the API before the normal API/pool fill chain; available no-quota page
+transports run first, with conditional API revalidation retained when the page fails. Anonymous REST
 entries are distinguished from web/raw/page entries by their stored `x-ratelimit-resource`
 header; identity-backed entries are always API-origin. A `304` reruns cache-hit integrity,
 then republishes the stored body with TTLs recomputed from that body. Web-origin validators
-are never sent across transports.
+are never sent across transports. Successful GitHub REST `304` validations consume primary
+rate-limit quota, for both anonymous and authenticated requests; they save body bytes, not quota.
 
 If token-free API revalidation reports a rate limit (`429`, exhausted `403`, or a valid
 `Retry-After` classified by the existing fallback policy), that request skips a second
@@ -208,6 +210,8 @@ the current time. Old entries remain eligible for conditional requests; a succes
 the shared cache. Positive bounds let concurrent readers share an acceptable refill;
 zero-bound readers each require upstream validation. The CLI's `gh pr checks` resolves
 the PR head SHA with `max-age=60`.
+Zero-age reads skip body-cache lookups that cannot satisfy the age bound, while retaining
+validator discovery and serialized fill ownership, including waiting for an existing fill.
 
 ### Token-free GitHub reads
 
@@ -632,7 +636,8 @@ Hits are still audited, with the cached identity attributed. Each audit row reco
 status as `hit`, `stale`, `miss`, `bypass`, or `unknown`, which powers `octopool stats` and
 the dashboard hit-rate/top-route views. Coalesced followers are marked separately. Stats
 count fresh and stale hits as `cache_served_responses`, including bodies reused after a
-successful `304` refresh. Miss and bypass rows count as `uncached_outcomes`, including
+successful `304` refresh. Revalidated hits measure body reuse, not avoided upstream requests
+or saved GitHub quota. Miss and bypass rows count as `uncached_outcomes`, including
 failed requests and local fallbacks. The body-reuse rate retains the historical
 `cache_hit_rate` field; its eligible variant excludes failed misses and deliberate local
 fallback responses. Successful `304` refreshes retain `hit` with

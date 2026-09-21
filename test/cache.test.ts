@@ -7,6 +7,7 @@ import {
   githubCacheRevalidationHeaders,
   githubCacheKey,
   pruneExpiredGitHubCache,
+  readEdgeGitHubCache,
   readGitHubCache,
   readStaleGitHubCache,
   requestCacheMaxAgeSeconds,
@@ -340,6 +341,32 @@ describe("github cache policy", () => {
       await expect(readGitHubCache(env, "cache-key")).resolves.toMatchObject({ body });
     },
   );
+
+  it("skips zero-age body reads but still discovers stored validators without an age bound", async () => {
+    const match = vi.fn(async () => undefined);
+    vi.stubGlobal("caches", { default: { match } });
+    const env = cacheRowEnv({
+      response_headers_json: JSON.stringify({ etag: '"stored"', "x-ratelimit-resource": "core" }),
+      created_at: sqliteUTC(Date.now() - 90_000),
+      expires_at: sqliteUTC(Date.now() - 30_000),
+    });
+    const prepare = vi.spyOn(env.DB, "prepare");
+    const route = classifyRoute(
+      { pool: "maintainers", method: "GET", path: "/repos/openclaw/octopool/pulls/11" },
+      policy,
+    );
+
+    await expect(readGitHubCache(env, "cache-key", undefined, 0)).resolves.toBeUndefined();
+    await expect(readEdgeGitHubCache("cache-key", 0)).resolves.toBeUndefined();
+    await expect(readStaleGitHubCache(env, "cache-key", route, 0)).resolves.toBeUndefined();
+    expect(match).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+
+    const candidate = await readStaleGitHubCache(env, "cache-key", route);
+    expect(candidate).toBeDefined();
+    expect(githubCacheRevalidationHeaders(candidate!)).toEqual({ "if-none-match": '"stored"' });
+    expect(prepare).toHaveBeenCalledOnce();
+  });
 
   it("falls through a too-old edge entry to a newer D1 fill without evicting it", async () => {
     const edgeEntry = {

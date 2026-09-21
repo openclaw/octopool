@@ -7,7 +7,8 @@ still pass Octopool's public-repo guard.
 There are two different token-free transports:
 
 - **Anonymous GitHub API:** REST-shaped JSON from `api.github.com`, without an
-  `Authorization` header. These consume GitHub's shared anonymous API quota and still
+  `Authorization` header. These consume GitHub's shared anonymous API quota, including
+  successful `304 Not Modified` validations, and still
   pass Octopool's normal response sanitization.
 - **No-API-quota sources:** public `github.com` pages and Git smart HTTP endpoints.
   These do not consume GitHub API quota. Some return exact REST shapes; others are bounded shapes used only by supported top-level `gh --json`
@@ -19,7 +20,9 @@ contact GitHub, so a cache hit is not proof of zero upstream requests.
 ## Selection rules
 
 - When a route has both transports, Octopool tries no-API-quota alternatives before the
-  anonymous API, then a pooled PAT/App token where permitted.
+  anonymous API, then a pooled PAT/App token where permitted. Previously, stale API
+  revalidation preceded this phase; shaped page transports now run before anonymous
+  conditional revalidation too, retaining the stored validator as fallback if the page fails.
 - Diff and patch media use public web endpoints directly.
 - A parser that cannot prove completeness or exactness returns no result. Octopool then
   tries the anonymous API in the same request cycle or falls through to the pooled identity.
