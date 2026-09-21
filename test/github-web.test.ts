@@ -949,26 +949,29 @@ describe("github web provider", () => {
   });
 
   it("prefers embedded issue data for shaped issue views", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(
-      new Response(
-        embeddedPage("IssueViewerViewQuery", {
-          issue: {
-            __typename: "Issue",
-            number: 5,
-            title: "Sign in fails",
-            body: "Public body",
-            state: "CLOSED",
-            url: "https://github.com/openclaw/octopool/issues/5",
-            createdAt: "2026-05-27T23:17:12Z",
-            updatedAt: "2026-05-27T23:19:04Z",
-            author: actor("phoward38", "Patrick Howard"),
-            labels: connection([]),
-            assignedActors: connection([]),
-            milestone: null,
-          },
-        }),
-      ),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          embeddedPage("IssueViewerViewQuery", {
+            issue: {
+              __typename: "Issue",
+              number: 5,
+              title: "Sign in fails",
+              body: "Public body",
+              state: "CLOSED",
+              url: "https://github.com/openclaw/octopool/issues/5",
+              createdAt: "2026-05-27T23:17:12Z",
+              updatedAt: "2026-05-27T23:19:04Z",
+              author: actor("phoward38", "Patrick Howard"),
+              labels: connection([]),
+              assignedActors: { nodes: [] },
+              milestone: null,
+            },
+          }),
+        ),
+      )
+      .mockResolvedValue(new Response("API rate limit exceeded", { status: 429 }));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
@@ -999,8 +1002,6 @@ describe("github web provider", () => {
       created_at: "2026-05-27T23:17:12Z",
       updated_at: "2026-05-27T23:19:04Z",
       labels: [],
-      assignees: [],
-      milestone: null,
     });
   });
 
@@ -1125,7 +1126,7 @@ describe("github web provider", () => {
       closedAt: "2026-05-27T23:19:04Z",
       author: actor("phoward38", "Patrick Howard"),
       labels: connection([]),
-      assignedActors: connection([]),
+      assignedActors: { nodes: [] },
       milestone: null,
     };
     const prNode = {
@@ -1140,10 +1141,15 @@ describe("github web provider", () => {
       author: actor("RomneyDa", "Dallin Romney"),
       labels: connection([]),
     };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(issueListPage([issueNode])))
-      .mockResolvedValueOnce(new Response(issueListPage([prNode])));
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.hostname === "api.github.com") {
+        return new Response("API rate limit exceeded", { status: 429 });
+      }
+      return new Response(
+        issueListPage(url.searchParams.get("q") === "is:pr" ? [prNode] : [issueNode]),
+      );
+    });
     vi.stubGlobal("fetch", fetchMock);
     const issueRequest = validateRelayRequest({
       pool: "maintainers",

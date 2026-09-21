@@ -1,5 +1,5 @@
 // Release-header structure from anonymous Octopool and TypeScript release pages;
-// unrelated navigation, author controls, signatures, and release notes are omitted.
+// the comparison placeholder retains GitHub's implicitly closed paragraph markup.
 export function releaseMetadataHTML(tag = "v0.6.9", badge = ""): string {
   const label = badge === "" ? "" : `<span class="Label Label--large">${badge}</span>`;
   return `<!DOCTYPE html><html><head>
@@ -11,6 +11,9 @@ export function releaseMetadataHTML(tag = "v0.6.9", badge = ""): string {
     <div class="d-flex flex-row flex-1 tmp-mb-3 wb-break-word"><div class="flex-1">
       <h1 class="tmp-mr-3 d-inline">Rendered release name</h1>${label}
     </div><div class="d-md-none">${label}</div></div>
+    <div class="d-flex tmp-mb-3"><details><summary>Compare</summary>
+      <div class="dropdown-menu"><p class="Banner-title"><h2 class="f6 text-normal">Sorry, something went wrong.</h2></p></div>
+    </details></div>
   </div>
   <div class="tmp-mb-3 tmp-pb-md-4 border-md-bottom">
     <div class="d-flex flex-row flex-wrap color-fg-muted flex-items-end">

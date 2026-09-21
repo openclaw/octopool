@@ -77,12 +77,16 @@ export function parseReleaseMetadataHTML(
   if (
     header.length !== 1 ||
     publication.length !== 1 ||
-    !completeRegion(header[0]!) ||
+    !completeElement(header[0]!) ||
     !completeRegion(publication[0]!) ||
     card.sourceCodeLocation?.endTag === undefined
   )
     return undefined;
-  const headerElements = elements(header[0]!);
+  const metadata = children(header[0]!).filter((element) =>
+    hasClasses(element, "d-flex", "flex-row", "flex-1", "wb-break-word"),
+  );
+  if (metadata.length !== 1 || !completeRegion(metadata[0]!)) return undefined;
+  const headerElements = elements(metadata[0]!);
   const titles = headerElements.filter(
     (element) => element.tagName === "h1" && hasClasses(element, "d-inline"),
   );
@@ -193,17 +197,19 @@ function text(node: Node): string {
 
 function completeRegion(region: Element): boolean {
   // Inferred closing tags and reparented markup cannot prove a complete header.
-  return [region, ...elements(region)].every((element) => {
-    const location = element.sourceCodeLocation;
-    const parent = element.parentNode;
-    const parentLocation =
-      parent !== null && "tagName" in parent ? parent.sourceCodeLocation : undefined;
-    return (
-      location?.startTag !== undefined &&
-      (VOID.has(element.tagName) || location.endTag !== undefined) &&
-      parentLocation?.startTag !== undefined &&
-      location.startOffset >= parentLocation.startTag.endOffset &&
-      location.endOffset <= (parentLocation.endTag?.startOffset ?? parentLocation.endOffset)
-    );
-  });
+  return [region, ...elements(region)].every(completeElement);
+}
+
+function completeElement(element: Element): boolean {
+  const location = element.sourceCodeLocation;
+  const parent = element.parentNode;
+  const parentLocation =
+    parent !== null && "tagName" in parent ? parent.sourceCodeLocation : undefined;
+  return (
+    location?.startTag !== undefined &&
+    (VOID.has(element.tagName) || location.endTag !== undefined) &&
+    parentLocation?.startTag !== undefined &&
+    location.startOffset >= parentLocation.startTag.endOffset &&
+    location.endOffset <= (parentLocation.endTag?.startOffset ?? parentLocation.endOffset)
+  );
 }

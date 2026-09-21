@@ -137,6 +137,11 @@ API. Names, raw Markdown, creation timestamps, lists, numeric release-ID routes,
 parameters, custom media, and caller conditionals retain their existing API handling.
 The metadata shape has its own cache keys; it cannot satisfy exact release-body reads.
 
+Issue summary and list shapes validate only their documented fields. Missing pagination
+metadata for unselected assignees does not discard an otherwise complete page. Labels
+still require explicit completeness; requests selecting assignees or milestones use
+the exact API representation.
+
 `pr-summary-v2` supplies exact CLI projections, not a complete REST PR body. It always
 includes `merged`, and includes `merge_commit_sha` only for merged PRs with a full commit
 SHA. Unmerged PRs project `mergeCommit: null`; their REST test-merge SHA is not reconstructed.

@@ -18,7 +18,8 @@ describe("release metadata HTML at the Worker boundary", () => {
     { name: "latest redirect", tag: "v0.6.9", latest: true, badge: "Latest" },
     { name: "prerelease tagged", tag: "v0.6.9-beta", latest: false, badge: "Pre-release" },
     { name: "slash tag", tag: "release/1.0", latest: false, badge: "" },
-  ])("serves and isolates proven metadata: $name", async ({ tag, latest, badge }) => {
+    { name: "comparison controls", tag: "v0.6.9", latest: false, badge: "" },
+  ])("serves and isolates proven metadata: $name", async ({ name, tag, latest, badge }) => {
     const suffix = latest ? "latest" : `tags/${encodeURIComponent(tag)}`;
     const path = `${repo}/releases/${suffix}`;
     const tagURL = `https://github.com/openclaw/octopool/releases/tag/${encodeURIComponent(tag)}`;
@@ -32,10 +33,17 @@ describe("release metadata HTML at the Worker boundary", () => {
           return jsonResponse({ private: false });
         if (request.url === "https://github.com/openclaw/octopool/releases/latest")
           return new Response(null, { status: 302, headers: { location: tagURL } });
-        if (request.url === tagURL)
-          return new Response(releaseMetadataHTML(tag, badge), {
+        if (request.url === tagURL) {
+          let html = releaseMetadataHTML(tag, badge);
+          if (name === "comparison controls")
+            html = html.replace(
+              "<summary>Compare</summary>",
+              '<summary>Compare</summary><h1 class="d-inline">Compare tags</h1><span class="Label Label--large">Pre-release</span>',
+            );
+          return new Response(html, {
             headers: { "content-type": "text/html", etag: '"html-only"' },
           });
+        }
         return jsonResponse({ message: "anonymous quota exhausted" }, 429);
       }),
     );
@@ -88,6 +96,7 @@ describe("release metadata HTML at the Worker boundary", () => {
   it.each([
     "missing timestamp",
     "truncated header",
+    "malformed metadata",
     "wrong breadcrumb",
     "wrong redirect repository",
     "wrong redirect tag",
@@ -110,6 +119,11 @@ describe("release metadata HTML at the Worker boundary", () => {
     if (scenario === "missing timestamp")
       html = html.replace('datetime="2026-09-20T19:08:46Z"', "");
     if (scenario === "truncated header") html = html.slice(0, html.indexOf("</h1>"));
+    if (scenario === "malformed metadata")
+      html = html.replace(
+        "Rendered release name",
+        "Rendered release name<p><h2>Invalid nesting</h2></p>",
+      );
     if (scenario === "wrong breadcrumb")
       html = html.replace("/releases/tag/v0.6.9", "/releases/tag/other");
     if (scenario === "draft badge") html = releaseMetadataHTML(tag, "Draft");
