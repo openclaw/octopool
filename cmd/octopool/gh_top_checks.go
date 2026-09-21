@@ -158,7 +158,7 @@ func prCheckItemsForSHAWithHeaders(ctx context.Context, client ghRelayClient, re
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, contexts)
+	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, headers, contexts)
 	if err != nil {
 		return nil, err
 	}

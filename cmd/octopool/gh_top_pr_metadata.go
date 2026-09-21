@@ -50,7 +50,7 @@ func relayPRStatusCheckRollup(ctx context.Context, client ghRelayClient, repo, s
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, items)
+	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, nil, items)
 	if err != nil {
 		return nil, err
 	}

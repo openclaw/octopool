@@ -1208,6 +1208,7 @@ func assertExitCode(t *testing.T, err error, code int) {
 }
 
 func TestPRChecksFreshMetadataPagesAndMaps(t *testing.T) {
+	t.Setenv("OCTOPOOL_FRESH", "")
 	f := newPRChecksFixture()
 	for i := 0; i < 100; i++ {
 		f.runs = append(f.runs, map[string]any{"id": 1000 + i, "head_sha": metadataHead, "check_suite_id": 1000 + i, "workflow_id": 401, "name": "wrong", "event": "push"})

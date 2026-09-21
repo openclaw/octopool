@@ -441,8 +441,12 @@ names use a shared per-command profile lookup. The rollup preserves native `gh`
 `CheckRun` and `StatusContext` fields and resolves workflow names by check-suite ID
 through head-filtered Actions runs and the complete raw workflow catalogue, including
 inactive workflows. It shares this verified association with `pr checks`, without using
-run names, display titles, or body-supplied URLs. Check/status
-pages and workflow lookups read live; after all hydration, a final live PR head check
+run names, display titles, or body-supplied URLs. Rollup check/status pages and
+head-filtered Actions runs read live. Workflow names use the shared one-hour catalogue
+cache; if a verified run's workflow ID has no catalogue name, the complete catalogue
+is retried once live before refusing the association. Missing run associations do not
+trigger this retry. `OCTOPOOL_FRESH=1` still reads every catalogue page live without an
+extra catalogue retry. After all hydration, a final live PR head check
 rejects a moving head before any JSON is printed. A matching SHA is not an atomic
 snapshot: checks can change on the same commit. Both `pr checks` and the rollup require
 consistent page totals, unique upstream IDs, and complete pages, bounded to 1,000 items
@@ -534,10 +538,13 @@ verified PR head SHA, allowing file pages to share a five-minute state-scoped ca
 `gh pr checks` uses the shared cache throughout ordinary acquisition: its PR
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share
 one upstream PR read at most 60 seconds old, and the check/status reads for that SHA use
-the normal cache TTLs, as do its raw Actions metadata reads. Each collection is bounded
-to 10 pages of 100 entries. Ordinary acquisition uses at most 41 logical data operations,
+the normal cache TTLs, as do its raw Actions metadata reads. Workflow names use the shared
+one-hour catalogue cache, with the same one-shot live catalogue retry for missing names
+as rollups. Each collection is bounded to 10 pages of 100 entries. Before any catalogue
+retry, ordinary acquisition uses at most 41 logical data operations,
 or 21 without Actions associations; an actual empty result takes 3. These are not limits
-on policy reads, transport attempts, retries, or an entire watch session. Every data
+on policy reads, transport attempts, retries, or an entire watch session. A missing-name
+retry adds at most 10 catalogue operations and does not refetch runs or checks. Every data
 operation retains authoritative policy checks through the relay client.
 
 Check-run and status collections for the same SHA are acquired concurrently. When
@@ -1215,7 +1222,9 @@ Three things keep that honest:
   `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`,
   `closedAt`, or `statusCheckRollup` send `cache-control: max-age=0` automatically. These are the values callers
   branch on, so they require an upstream fetch or successful conditional revalidation.
-  Descriptive fields (`title`, `body`, `labels`, `author`) stay cached.
+  Descriptive fields (`title`, `body`, `labels`, `author`) stay cached. Rollup check/status
+  pages and head-filtered runs read live; workflow names use the shared one-hour catalogue
+  cache with one live retry if a verified run's workflow name is missing.
 - **Cached decision reads announce themselves.** When a PR, issue, run, or checks route is
   served from the shared cache, the CLI prints one line to stderr naming the route, whether
   it was a hit or a stale serve, and when it refreshes. stdout stays untouched, so `--json`
