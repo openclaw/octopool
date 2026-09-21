@@ -8,7 +8,7 @@
 
 ### Fixes
 
-- Keep explicit GitHub.com API reads on the relay and cache the landing tools' exact public PR CI and merge-snapshot GraphQL queries with pooled identities, bounded freshness, and one-query revalidation; viewer-dependent previews retain local credentials.
+- Keep explicit GitHub.com API reads on the relay and pool the landing tools' exact public PR CI and merge-snapshot GraphQL queries, preserving live reads by default, opt-in bounded reuse, local protection rules, and upstream failures; viewer-dependent previews retain local credentials.
 - Reuse complete raw Actions jobs pages across smaller page sizes without changing REST bodies, source expiry, identity eligibility, or explicit freshness.
 - Avoid repeating an anonymous API request after rate-limited cache revalidation, retaining public HTML fallback, live visibility and identity checks, and normal anonymous attempts on later requests.
 - Acquire PR check-runs and statuses concurrently to reduce checks, rollup, and watch latency while preserving per-request policy checks, bounded pagination, output order, and terminal errors before native fallback.

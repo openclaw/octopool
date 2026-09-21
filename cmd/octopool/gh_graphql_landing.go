@@ -12,6 +12,19 @@ import (
 
 var landingGraphQLToken = regexp.MustCompile(`[_A-Za-z][_0-9A-Za-z]*|[0-9]+|"(?:\\.|[^"\\])*"|[!$():{}]|\.\.\.`)
 
+func landingGraphQLQuery(shape string) string {
+	switch shape {
+	case publicShapePullRequestCISummary:
+		return githubLandingQueryPullRequestCISummary
+	case publicShapePullRequestCIRollup:
+		return githubLandingQueryPullRequestCIRollup
+	case publicShapePullRequestMergeSnapshot:
+		return githubLandingQueryPullRequestMergeSnapshot
+	default:
+		return ""
+	}
+}
+
 // Compare GraphQL tokens, not stripped text: whitespace between two names must
 // never turn an unsupported query into an allowlisted one.
 func landingGraphQLTokens(query string) string {
@@ -89,6 +102,11 @@ func parseLandingGraphQL(args []string) (ghAPIRequest, bool) {
 		return ghAPIRequest{}, false
 	}
 	request.headers["x-octopool-public-shape"] = shape
+	// These queries previously observed GitHub directly, including final landing
+	// confirmations. Reuse requires an explicit caller cache policy.
+	if request.headers["cache-control"] == "" {
+		request.headers["cache-control"] = "max-age=0"
+	}
 	if cursor, present := fields["cursor"]; present {
 		if cursor.value == "" || len(cursor.value) > 512 || strings.ContainsAny(cursor.value, "\x00\t\r\n{}") || !landingGraphQLString(cursor) {
 			return ghAPIRequest{}, false
@@ -120,6 +138,9 @@ func relayLandingGraphQL(ctx context.Context, request ghAPIRequest, stdout io.Wr
 	envelope, err := client.do(ctx, request)
 	if err != nil {
 		return err
+	}
+	if envelope.Status >= 400 {
+		return writeGHBody(ctx, stdout, envelope, request.jq)
 	}
 	var response struct {
 		Errors []json.RawMessage          `json:"errors"`

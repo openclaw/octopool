@@ -11,18 +11,23 @@ import (
 )
 
 func TestGHAPIHostnameLandingReadsRelay(t *testing.T) {
+	t.Setenv("OCTOPOOL_FRESH", "")
 	for _, policy := range []string{rewriteEmptyTestPolicy, rewriteActiveTestPolicy} {
 		for _, test := range []struct {
-			name, path string
-			flags      []string
-			query      map[string]any
-			body       any
-			want       string
+			name, path         string
+			flags              []string
+			query              map[string]any
+			body               any
+			want, cacheControl string
 		}{
-			{"pull", "repos/acme/repo/pulls/7", []string{"--hostname", "github.com"}, nil, map[string]any{"number": 7}, `{"number":7}`},
-			{"merge-ref", "repos/acme/repo/git/ref/pull/7/merge", []string{"--hostname=github.com"}, nil, map[string]any{"ref": "refs/pull/7/merge"}, `{"ref":"refs/pull/7/merge"}`},
-			{"reviews", "repos/acme/repo/pulls/7/reviews?per_page=100", []string{"--hostname", "github.com", "--paginate", "--slurp"}, map[string]any{"page": "1", "per_page": "100"}, []any{}, `[[]]`},
-			{"check-runs", "repos/acme/repo/commits/0123456789abcdef0123456789abcdef01234567/check-runs", []string{"--hostname=github.com", "-X", "GET", "-f", "filter=latest", "-F", "per_page=100"}, map[string]any{"filter": "latest", "per_page": "100"}, map[string]any{"total_count": 0, "check_runs": []any{}}, `{"check_runs":[],"total_count":0}`},
+			{"pull", "repos/acme/repo/pulls/7", []string{"--hostname", "github.com"}, nil, map[string]any{"number": 7}, `{"number":7}`, "max-age=0"},
+			{"merge-ref", "repos/acme/repo/git/ref/pull/7/merge", []string{"--hostname=github.com"}, nil, map[string]any{"ref": "refs/pull/7/merge"}, `{"ref":"refs/pull/7/merge"}`, "max-age=0"},
+			{"reviews", "repos/acme/repo/pulls/7/reviews?per_page=100", []string{"--hostname", "github.com", "--paginate", "--slurp"}, map[string]any{"page": "1", "per_page": "100"}, []any{}, `[[]]`, "max-age=0"},
+			{"check-runs", "repos/acme/repo/commits/0123456789abcdef0123456789abcdef01234567/check-runs", []string{"--hostname=github.com", "-X", "GET", "-f", "filter=latest", "-F", "per_page=100"}, map[string]any{"filter": "latest", "per_page": "100"}, map[string]any{"total_count": 0, "check_runs": []any{}}, `{"check_runs":[],"total_count":0}`, "max-age=0"},
+			{"explicit-cache-bound", "repos/acme/repo/pulls/7", []string{"--hostname", "github.com", "-H", "Cache-Control: max-age=30"}, nil, map[string]any{"number": 7}, `{"number":7}`, "max-age=30"},
+			{"explicit-cache-bound-fields", "repos/acme/repo/pulls/7/reviews", []string{"--hostname=github.com", "-X", "GET", "-F", "per_page=100", "--header=Cache-Control: max-age=30"}, map[string]any{"per_page": "100"}, []any{}, `[]`, "max-age=30"},
+			{"unqualified-cache-default", "repos/acme/repo/pulls/7", nil, nil, map[string]any{"number": 7}, `{"number":7}`, ""},
+			{"unqualified-cache-default-fields", "repos/acme/repo/pulls/7/reviews", []string{"-X", "GET", "-F", "per_page=100"}, map[string]any{"per_page": "100"}, []any{}, `[]`, ""},
 		} {
 			t.Run(policy+"/"+test.name, func(t *testing.T) {
 				calls := 0
@@ -32,7 +37,8 @@ func TestGHAPIHostnameLandingReadsRelay(t *testing.T) {
 					path, _, _ := strings.Cut(test.path, "?")
 					headers, _ := request["headers"].(map[string]any)
 					query, _ := request["query"].(map[string]any)
-					if request["method"] != "GET" || request["path"] != "/"+path || !reflect.DeepEqual(query, test.query) || headers["cache-control"] != "max-age=0" {
+					cacheControl, _ := headers["cache-control"].(string)
+					if request["method"] != "GET" || request["path"] != "/"+path || !reflect.DeepEqual(query, test.query) || cacheControl != test.cacheControl {
 						t.Errorf("landing request changed: %#v", request)
 					}
 					writeCLIEnvelope(t, w, test.body)
@@ -41,7 +47,6 @@ func TestGHAPIHostnameLandingReadsRelay(t *testing.T) {
 				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 				capture := captureRewriteGH(t)
 				args := append([]string{"api", test.path}, test.flags...)
-				args = append(args, "-H", "Cache-Control: max-age=0")
 				var out, stderr bytes.Buffer
 				if err := runGH(t.Context(), args, &out, &stderr); err != nil || calls != 1 || strings.TrimSpace(out.String()) != test.want {
 					t.Fatalf("err=%v calls=%d out=%q stderr=%q", err, calls, out.String(), stderr.String())
@@ -63,6 +68,8 @@ func TestGHAPIHostnameNativeBoundaries(t *testing.T) {
 		{"enterprise-equals", "", []string{"--hostname=enterprise.example"}},
 		{"last-host-wins", "", []string{"--hostname=github.com", "--hostname", "enterprise.example"}},
 		{"empty-host", "", []string{"--hostname="}},
+		{"empty-host-get-fields", "enterprise.example", []string{"--hostname=", "--method=GET", "-F", "per_page=100"}},
+		{"empty-last-host-get-fields", "enterprise.example", []string{"--hostname=github.com", "--hostname", "", "--method=GET", "-f", "state=open"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			rewriteTestServer(t, rewriteEmptyTestPolicy, nil)

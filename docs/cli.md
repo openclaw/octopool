@@ -147,6 +147,9 @@ to the real `gh` for a complete response.
 relay, including under active protection rules and with scalar query fields or
 pagination. Other explicit hosts are not relayed. Existing protected native commands
 retain their GitHub.com host pinning.
+These explicit-host reads request `max-age=0` by default to preserve their previous
+live-read behavior. An explicit `Cache-Control` header controls reuse; unqualified
+REST reads keep their existing cache policy.
 
 Explicit `--method GET` calls can pass scalar query parameters with `-f`/`--raw-field`
 or `-F`/`--field`. They share cache entries with the equivalent URL query, including
@@ -204,13 +207,18 @@ It translates each read to one canonical shaped PR request; the Worker executes 
 fixed GraphQL query with a pooled identity. The response remains GraphQL JSON, including
 `--jq` projection and a failing exit status for GraphQL errors.
 
-These three shapes share a 60-second cache with no outage stale fallback. Use
-`-H 'Cache-Control: max-age=0'` on an individual query, or `OCTOPOOL_FRESH=1`, when a
-landing decision requires current evidence. Each refresh makes one GraphQL resource
+The Worker keeps these three shapes in a 60-second cache with no outage stale fallback.
+The CLI requests `max-age=0` by default, preserving the independent live observations
+that existing landing and CI-confirmation tools relied on before pooling. An explicit
+`-H 'Cache-Control: max-age=30'` can opt into bounded reuse for advisory reads; mandatory
+observations retain `max-age=0`. Each refresh makes one GraphQL resource
 request through the pool and republishes the response for other readers; independent
 visibility and caller-authentication checks retain their own lifetimes. Cursor pages have
 separate cache keys, and callers must continue checking head/snapshot consistency across
-pages. Cache hits and fresh requests retain authoritative outbound protection.
+pages. Cache hits and fresh requests retain authoritative outbound protection, including
+the logical `/graphql` endpoint and fixed query text under both server and local rules.
+Every request admission reloads those rules. Upstream HTTP and GraphQL failures remain
+errors; they never masquerade as an older Worker and trigger personal-token fallback.
 
 Viewer-dependent merge previews, arbitrary GraphQL, mutations, extra variables, file
 inputs, and unsupported output modes stay with native `gh`. Private repositories retain
@@ -1140,8 +1148,8 @@ An encoded `%09` remains encoded on the wire; it is not treated as a stripped li
 This includes direct `octopool request` with local rules and approved local fallbacks.
 Allowlisted top-level reads may fall back to native gh after Octopool pins and checks the
 repository, numeric/ref selector, JSON field projection, filters, and composed request. This
-covers readiness/CI projections, issue comment projections, and PR head filters whose fixed
-GraphQL shapes are not representable by the relay. Numeric `pr ready` (or a checked
+covers readiness/CI projections, issue comment projections, and PR head filters whose
+GraphQL shapes are outside the relay's fixed allowlist. Numeric `pr ready` (or a checked
 current/explicit nonnumeric Git branch) and metadata-only PR/issue edits with add/remove label
 or assignee flags are also allowed without free-form text. Exact-head
 `pr merge --squash --match-head-commit` with a numeric selector is converted, when the final

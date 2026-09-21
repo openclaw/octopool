@@ -25,6 +25,7 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 		return ghAPIRequest{}, false, err
 	}
 	hostname := "github.com"
+	hostnameExplicit := false
 	request := ghAPIRequest{
 		method:  "GET",
 		query:   map[string]any{},
@@ -39,6 +40,7 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 				return request, false, errors.New("--hostname requires a value")
 			}
 			hostname = args[index]
+			hostnameExplicit = true
 		case "--method", "-X":
 			index++
 			if index >= len(args) {
@@ -85,6 +87,7 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 			}
 			if strings.HasPrefix(arg, "--hostname=") {
 				hostname = strings.TrimPrefix(arg, "--hostname=")
+				hostnameExplicit = true
 				continue
 			}
 			if strings.HasPrefix(arg, "--method=") {
@@ -137,6 +140,11 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	}
 	if !strings.HasPrefix(request.path, "/") {
 		request.path = "/" + request.path
+	}
+	// Explicit-host reads previously went directly to GitHub, including landing
+	// confirmations. Keep them live unless the caller supplies a cache policy.
+	if _, explicitCache := request.headers["cache-control"]; hostnameExplicit && hostname == "github.com" && request.method == "GET" && !explicitCache {
+		request.headers["cache-control"] = "max-age=0"
 	}
 	// Fresh /user reads must skip the saved-login shortcut.
 	request.headers = relayReadHeaders(request.method, request.headers)

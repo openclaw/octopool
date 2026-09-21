@@ -34,6 +34,8 @@ The shape and detail cursor vary the existing cache key; a raw REST PR response,
 a different projection, and another cursor can never satisfy the request.
 Snapshots stay fresh for at most 60 seconds, including completed CI and merged PRs.
 They have no stale fallback: a previous merge snapshot cannot authorize a later landing.
+The CLI's recognized landing queries request a live read by default; callers must
+explicitly opt into a positive maximum age to reuse a snapshot for advisory work.
 
 `cache-control: max-age=0` performs one fresh pooled GraphQL query for that
 projection and writes its result through the normal cache. It does not disable caching
