@@ -1,0 +1,2241 @@
+<strong>2,500+ workflow runs</strong>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96313569765"
+  data-url="/openclaw/openclaw/actions/workflow-run/96313569765"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35575012764" class="d-flex flex-items-center width-full mb-1" aria-label="waiting for another serialized run to finish:  Run 483062 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483062:
+        <span class="color-fg-muted">
+            Commit <a class="Link--muted Link--inTextBlock" href="/openclaw/openclaw/commit/11263ceb18ca9385b79f688dc718f3861ea62472">11263ce</a>
+            pushed
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:52:17Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Pending</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="main" href="/openclaw/openclaw/tree/refs/heads/main">main</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="main" href="/openclaw/openclaw/tree/refs/heads/main">main</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:52:17Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Pending</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35575012764/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96313556739"
+  data-url="/openclaw/openclaw/actions/workflow-run/96313556739"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35575007986" class="d-flex flex-items-center width-full mb-1" aria-label="queued:  Run 483061 of CI. CI release gate f045c72eb2049e9e6e121b2e3fe2e25da98cbbcd">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI release gate f045c72eb2049e9e6e121b2e3fe2e25da98cbbcd
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483061:
+        <span class="color-fg-muted">
+            Manually run
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/fuller-stack-dev/hovercard" href="/fuller-stack-dev">fuller-stack-dev</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:52:14Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/doctor-planned-config-references-136025" href="/openclaw/openclaw/tree/refs/heads/fix/doctor-planned-config-references-136025">fix/doctor-planned-config-references-136025</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/doctor-planned-config-references-136025" href="/openclaw/openclaw/tree/refs/heads/fix/doctor-planned-config-references-136025">fix/doctor-planned-config-references-136025</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:52:14Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/147453" class="dropdown-item btn-link">
+                      View #147453
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35575007986/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96313499296"
+  data-url="/openclaw/openclaw/actions/workflow-run/96313499296"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574986404" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483060 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483060:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/142190/hovercard" href="/openclaw/openclaw/pull/142190">#142190</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/Shagrat2/hovercard" href="/Shagrat2">Shagrat2</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:51:58Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="Shagrat2:fix/tts-media-supplement" href="/Shagrat2/openclaw/tree/refs/heads/fix/tts-media-supplement">Shagrat2:fix/tts-media-supplement</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="Shagrat2:fix/tts-media-supplement" href="/Shagrat2/openclaw/tree/refs/heads/fix/tts-media-supplement">Shagrat2:fix/tts-media-supplement</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:51:58Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/142190" class="dropdown-item btn-link">
+                      View #142190
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574986404/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96313430496"
+  data-url="/openclaw/openclaw/actions/workflow-run/96313430496"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574959546" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483059 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483059:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154565/hovercard" href="/openclaw/openclaw/pull/154565">#154565</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/roboclaw-bot/hovercard" href="/roboclaw-bot">roboclaw-bot</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:51:38Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/release96-status-readiness-47f" href="/openclaw/openclaw/tree/refs/heads/fix/release96-status-readiness-47f">fix/release96-status-readiness-47f</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/release96-status-readiness-47f" href="/openclaw/openclaw/tree/refs/heads/fix/release96-status-readiness-47f">fix/release96-status-readiness-47f</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:51:38Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154565" class="dropdown-item btn-link">
+                      View #154565
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574959546/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96313201407"
+  data-url="/openclaw/openclaw/actions/workflow-run/96313201407"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574876188" class="d-flex flex-items-center width-full mb-1" aria-label="skipped:  Run 483058 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483058:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154592/hovercard" href="/openclaw/openclaw/pull/154592">#154592</a>
+            opened
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:50:34Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        1s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/chrome-wheel-crash" href="/openclaw/openclaw/tree/refs/heads/codex/chrome-wheel-crash">codex/chrome-wheel-crash</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/chrome-wheel-crash" href="/openclaw/openclaw/tree/refs/heads/codex/chrome-wheel-crash">codex/chrome-wheel-crash</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:50:34Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        1s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154592" class="dropdown-item btn-link">
+                      View #154592
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574876188/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312985455"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312985455"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574795146" class="d-flex flex-items-center width-full mb-1" aria-label="skipped:  Run 483057 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483057:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/147453/hovercard" href="/openclaw/openclaw/pull/147453">#147453</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/fuller-stack-dev/hovercard" href="/fuller-stack-dev">fuller-stack-dev</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:49:33Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        2s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/doctor-planned-config-references-136025" href="/openclaw/openclaw/tree/refs/heads/fix/doctor-planned-config-references-136025">fix/doctor-planned-config-references-136025</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/doctor-planned-config-references-136025" href="/openclaw/openclaw/tree/refs/heads/fix/doctor-planned-config-references-136025">fix/doctor-planned-config-references-136025</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:49:33Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        2s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/147453" class="dropdown-item btn-link">
+                      View #147453
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574795146/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312962279"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312962279"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574786748" class="d-flex flex-items-center width-full mb-1" aria-label="queued:  Run 483056 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483056:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154591/hovercard" href="/openclaw/openclaw/pull/154591">#154591</a>
+            ready_for_review
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:49:26Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/delivery-receipt-prune-read-reuse" href="/openclaw/openclaw/tree/refs/heads/codex/delivery-receipt-prune-read-reuse">codex/delivery-receipt-prune-read-reuse</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/delivery-receipt-prune-read-reuse" href="/openclaw/openclaw/tree/refs/heads/codex/delivery-receipt-prune-read-reuse">codex/delivery-receipt-prune-read-reuse</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:49:26Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154591" class="dropdown-item btn-link">
+                      View #154591
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574786748/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312877487"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312877487"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574757671" class="d-flex flex-items-center width-full mb-1" aria-label="skipped:  Run 483055 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483055:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154591/hovercard" href="/openclaw/openclaw/pull/154591">#154591</a>
+            opened
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:49:03Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        2s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/delivery-receipt-prune-read-reuse" href="/openclaw/openclaw/tree/refs/heads/codex/delivery-receipt-prune-read-reuse">codex/delivery-receipt-prune-read-reuse</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/delivery-receipt-prune-read-reuse" href="/openclaw/openclaw/tree/refs/heads/codex/delivery-receipt-prune-read-reuse">codex/delivery-receipt-prune-read-reuse</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:49:03Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        2s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154591" class="dropdown-item btn-link">
+                      View #154591
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574757671/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312773667"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312773667"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574719242" class="d-flex flex-items-center width-full mb-1" aria-label="queued:  Run 483054 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483054:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154135/hovercard" href="/openclaw/openclaw/pull/154135">#154135</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:48:35Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/search-settings" href="/openclaw/openclaw/tree/refs/heads/codex/search-settings">codex/search-settings</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/search-settings" href="/openclaw/openclaw/tree/refs/heads/codex/search-settings">codex/search-settings</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:48:35Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154135" class="dropdown-item btn-link">
+                      View #154135
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574719242/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312735577"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312735577"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574705211" class="d-flex flex-items-center width-full mb-1" aria-label="queued:  Run 483053 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483053:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154334/hovercard" href="/openclaw/openclaw/pull/154334">#154334</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/vincentkoc/hovercard" href="/vincentkoc">vincentkoc</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:48:24Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/ci-update-auxiliary-identity" href="/openclaw/openclaw/tree/refs/heads/codex/ci-update-auxiliary-identity">codex/ci-update-auxiliary-identity</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/ci-update-auxiliary-identity" href="/openclaw/openclaw/tree/refs/heads/codex/ci-update-auxiliary-identity">codex/ci-update-auxiliary-identity</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:48:24Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154334" class="dropdown-item btn-link">
+                      View #154334
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574705211/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312591698"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312591698"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574651303" class="d-flex flex-items-center width-full mb-1" aria-label="cancelled:  Run 483052 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483052:
+        <span class="color-fg-muted">
+            Commit <a class="Link--muted Link--inTextBlock" href="/openclaw/openclaw/commit/609fa2d9cfbfc45d1a105d596a34faa58addfd85">609fa2d</a>
+            pushed
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:47:43Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        4m 36s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="main" href="/openclaw/openclaw/tree/refs/heads/main">main</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="main" href="/openclaw/openclaw/tree/refs/heads/main">main</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:47:43Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        4m 36s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574651303/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312526821"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312526821"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574627227" class="d-flex flex-items-center width-full mb-1" aria-label="queued:  Run 483051 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483051:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154430/hovercard" href="/openclaw/openclaw/pull/154430">#154430</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/vincentkoc/hovercard" href="/vincentkoc">vincentkoc</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:47:25Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/chat-stream-fragment-promotion-20260921" href="/openclaw/openclaw/tree/refs/heads/fix/chat-stream-fragment-promotion-20260921">fix/chat-stream-fragment-promotion-20260921</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="fix/chat-stream-fragment-promotion-20260921" href="/openclaw/openclaw/tree/refs/heads/fix/chat-stream-fragment-promotion-20260921">fix/chat-stream-fragment-promotion-20260921</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:47:25Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">Queued</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154430" class="dropdown-item btn-link">
+                      View #154430
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574627227/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312323669"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312323669"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574553502" class="d-flex flex-items-center width-full mb-1" aria-label="cancelled:  Run 483050 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483050:
+        <span class="color-fg-muted">
+            Commit <a class="Link--muted Link--inTextBlock" href="/openclaw/openclaw/commit/7205715961f0222bab7f77811d37d83b7bccada0">7205715</a>
+            pushed
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:46:29Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        1m 16s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="main" href="/openclaw/openclaw/tree/refs/heads/main">main</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="main" href="/openclaw/openclaw/tree/refs/heads/main">main</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:46:29Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        1m 16s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574553502/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312244608"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312244608"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574525080" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483049 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483049:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/139164/hovercard" href="/openclaw/openclaw/pull/139164">#139164</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/ly85206559/hovercard" href="/ly85206559">ly85206559</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:46:07Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="ly85206559:codex/fix-project-recents-global-owner" href="/ly85206559/openclaw/tree/refs/heads/codex/fix-project-recents-global-owner">ly85206559:codex/fix-project-recents-global-owner</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="ly85206559:codex/fix-project-recents-global-owner" href="/ly85206559/openclaw/tree/refs/heads/codex/fix-project-recents-global-owner">ly85206559:codex/fix-project-recents-global-owner</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:46:07Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/139164" class="dropdown-item btn-link">
+                      View #139164
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574525080/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312091331"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312091331"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574469521" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483048 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483048:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154588/hovercard" href="/openclaw/openclaw/pull/154588">#154588</a>
+            ready_for_review
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:45:27Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/perf-managed-env-reference-walk" href="/openclaw/openclaw/tree/refs/heads/codex/perf-managed-env-reference-walk">codex/perf-managed-env-reference-walk</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/perf-managed-env-reference-walk" href="/openclaw/openclaw/tree/refs/heads/codex/perf-managed-env-reference-walk">codex/perf-managed-env-reference-walk</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:45:27Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154588" class="dropdown-item btn-link">
+                      View #154588
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574469521/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96312071344"
+  data-url="/openclaw/openclaw/actions/workflow-run/96312071344"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574462018" class="d-flex flex-items-center width-full mb-1" aria-label="skipped:  Run 483047 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483047:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154590/hovercard" href="/openclaw/openclaw/pull/154590">#154590</a>
+            opened
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:45:22Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        1s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/team-perf-session-selection-reuse-20260921" href="/openclaw/openclaw/tree/refs/heads/codex/team-perf-session-selection-reuse-20260921">codex/team-perf-session-selection-reuse-20260921</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/team-perf-session-selection-reuse-20260921" href="/openclaw/openclaw/tree/refs/heads/codex/team-perf-session-selection-reuse-20260921">codex/team-perf-session-selection-reuse-20260921</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:45:22Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        1s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154590" class="dropdown-item btn-link">
+                      View #154590
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574462018/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311940449"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311940449"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574411489" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483046 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483046:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154585/hovercard" href="/openclaw/openclaw/pull/154585">#154585</a>
+            ready_for_review
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:46Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/bun-ui-test-runtime" href="/openclaw/openclaw/tree/refs/heads/codex/bun-ui-test-runtime">codex/bun-ui-test-runtime</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/bun-ui-test-runtime" href="/openclaw/openclaw/tree/refs/heads/codex/bun-ui-test-runtime">codex/bun-ui-test-runtime</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:46Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154585" class="dropdown-item btn-link">
+                      View #154585
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574411489/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311866460"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311866460"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574382969" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483045 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483045:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154575/hovercard" href="/openclaw/openclaw/pull/154575">#154575</a>
+            ready_for_review
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:25Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/team-perf-scoped-subagent-waits-20260921" href="/openclaw/openclaw/tree/refs/heads/codex/team-perf-scoped-subagent-waits-20260921">codex/team-perf-scoped-subagent-waits-20260921</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/team-perf-scoped-subagent-waits-20260921" href="/openclaw/openclaw/tree/refs/heads/codex/team-perf-scoped-subagent-waits-20260921">codex/team-perf-scoped-subagent-waits-20260921</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:25Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154575" class="dropdown-item btn-link">
+                      View #154575
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574382969/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311851023"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311851023"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574376990" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483044 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483044:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154586/hovercard" href="/openclaw/openclaw/pull/154586">#154586</a>
+            ready_for_review
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/MoerAI/hovercard" href="/MoerAI">MoerAI</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:20Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="MoerAI:fix/secrets-row-action-clipping" href="/MoerAI/openclaw/tree/refs/heads/fix/secrets-row-action-clipping">MoerAI:fix/secrets-row-action-clipping</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="MoerAI:fix/secrets-row-action-clipping" href="/MoerAI/openclaw/tree/refs/heads/fix/secrets-row-action-clipping">MoerAI:fix/secrets-row-action-clipping</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:20Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154586" class="dropdown-item btn-link">
+                      View #154586
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574376990/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311847903"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311847903"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574375694" class="d-flex flex-items-center width-full mb-1" aria-label="skipped:  Run 483043 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483043:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154589/hovercard" href="/openclaw/openclaw/pull/154589">#154589</a>
+            opened
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:19Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        2s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/fix-rail-tabstop339" href="/openclaw/openclaw/tree/refs/heads/codex/fix-rail-tabstop339">codex/fix-rail-tabstop339</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/fix-rail-tabstop339" href="/openclaw/openclaw/tree/refs/heads/codex/fix-rail-tabstop339">codex/fix-rail-tabstop339</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:19Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        2s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154589" class="dropdown-item btn-link">
+                      View #154589
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574375694/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311841523"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311841523"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574373240" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483042 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483042:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154160/hovercard" href="/openclaw/openclaw/pull/154160">#154160</a>
+            synchronize
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/roboclaw-bot/hovercard" href="/roboclaw-bot">roboclaw-bot</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:18Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="openclaw/remove-unnecessary-check-and-merge-pr" href="/openclaw/openclaw/tree/refs/heads/openclaw/remove-unnecessary-check-and-merge-pr">openclaw/remove-unnecessary-check-and-merge-pr</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="openclaw/remove-unnecessary-check-and-merge-pr" href="/openclaw/openclaw/tree/refs/heads/openclaw/remove-unnecessary-check-and-merge-pr">openclaw/remove-unnecessary-check-and-merge-pr</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:18Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154160" class="dropdown-item btn-link">
+                      View #154160
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574373240/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311833701"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311833701"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574370360" class="d-flex flex-items-center width-full mb-1" aria-label="skipped:  Run 483041 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483041:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154588/hovercard" href="/openclaw/openclaw/pull/154588">#154588</a>
+            opened
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:15Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        3s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/perf-managed-env-reference-walk" href="/openclaw/openclaw/tree/refs/heads/codex/perf-managed-env-reference-walk">codex/perf-managed-env-reference-walk</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/perf-managed-env-reference-walk" href="/openclaw/openclaw/tree/refs/heads/codex/perf-managed-env-reference-walk">codex/perf-managed-env-reference-walk</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:15Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        3s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154588" class="dropdown-item btn-link">
+                      View #154588
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574370360/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311822622"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311822622"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574366134" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483040 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483040:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154574/hovercard" href="/openclaw/openclaw/pull/154574">#154574</a>
+            ready_for_review
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/steipete/hovercard" href="/steipete">steipete</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:12Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/test-temp-directory-modes" href="/openclaw/openclaw/tree/refs/heads/codex/test-temp-directory-modes">codex/test-temp-directory-modes</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="codex/test-temp-directory-modes" href="/openclaw/openclaw/tree/refs/heads/codex/test-temp-directory-modes">codex/test-temp-directory-modes</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:12Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154574" class="dropdown-item btn-link">
+                      View #154574
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574366134/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311789027"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311789027"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574353931" class="d-flex flex-items-center width-full mb-1" aria-label="currently running:  Run 483039 of CI.">
+<div >
+    <div style="height:16px; width:16px; margin-top: 2px">
+    </div>
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483039:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154587/hovercard" href="/openclaw/openclaw/pull/154587">#154587</a>
+            opened
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/holny/hovercard" href="/holny">holny</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:03Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+          <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="holny:fix/154510-auth-order-clear-shared" href="/holny/openclaw/tree/refs/heads/fix/154510-auth-order-clear-shared">holny:fix/154510-auth-order-clear-shared</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="holny:fix/154510-auth-order-clear-shared" href="/holny/openclaw/tree/refs/heads/fix/154510-auth-order-clear-shared">holny:fix/154510-auth-order-clear-shared</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:44:03Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="d-inline d-md-block lh-condensed pr-2 pr-md-0" >
+    <span class="text-italic color-fg-muted">In progress</span>
+  </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154587" class="dropdown-item btn-link">
+                      View #154587
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574353931/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="Box-row js-socket-channel js-updatable-content" id="check_suite_96311748723"
+  data-url="/openclaw/openclaw/actions/workflow-run/96311748723"
+  data-batched="30000"
+  >
+  <div class="d-table col-12">
+    <div class="d-table-cell v-align-top col-11 col-md-6 position-relative">
+      <a href="/openclaw/openclaw/actions/runs/35574338988" class="d-flex flex-items-center width-full mb-1" aria-label="skipped:  Run 483038 of CI.">
+<div >
+</div>
+          <span class="h4 Link--primary text-bold width-full markdown-title css-truncate css-truncate-target pl-2" style="min-width: 95%">
+            CI
+          </span>
+        </a>
+      <span class="d-block text-small color-fg-muted mb-1 mb-md-0 tmp-pl-4">
+        <span class="text-bold" >CI</span>
+        #483038:
+        <span class="color-fg-muted">
+            Pull request <a class="Link--muted Link--inTextBlock" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/154586/hovercard" href="/openclaw/openclaw/pull/154586">#154586</a>
+            opened
+            by
+              <a class="Link--muted Link--inTextBlock" data-hovercard-type="user" data-hovercard-url="/users/MoerAI/hovercard" href="/MoerAI">MoerAI</a>
+        </span>
+      </span>
+      <div class="d-block d-md-none text-small tmp-pl-4">
+        <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:43:52Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+            <span class="color-fg-muted" >
+      <span>
+        1s
+      </span>
+    </span>
+          <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="MoerAI:fix/secrets-row-action-clipping" href="/MoerAI/openclaw/tree/refs/heads/fix/secrets-row-action-clipping">MoerAI:fix/secrets-row-action-clipping</a>
+      </div>
+    </div>
+    <div class="d-none d-md-table-cell v-align-middle col-4 pl-2 tmp-px-md-3 position-relative">
+        <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="MoerAI:fix/secrets-row-action-clipping" href="/MoerAI/openclaw/tree/refs/heads/fix/secrets-row-action-clipping">MoerAI:fix/secrets-row-action-clipping</a>
+    </div>
+    <div class="d-table-cell v-align-middle col-1 col-md-3 text-small">
+      <div class="d-flex flex-justify-between flex-items-center">
+        <div class="d-none d-md-block">
+          <span class="lh-condensed color-fg-muted my-1 pr-2 d-flex" >
+  <div class="mr-1">
+  </div>
+  <relative-time
+    datetime="2026-09-21T07:43:52Z"
+    threshold="PT1H"
+    hour="numeric"
+    minute="numeric"
+      day=""
+      month=""
+      prefix="Today at "
+  ></relative-time>
+</span>
+              <span class="color-fg-muted" >
+      <span>
+        1s
+      </span>
+    </span>
+        </div>
+        <div class="text-right">
+            <details class="details-overlay details-reset position-relative d-inline-block "  >
+                <summary aria-haspopup="menu" data-view-component="true" class="timeline-comment-action btn-link">    
+</summary>
+              <ul class="dropdown-menu dropdown-menu-sw show-more-popover color-fg-default anim-scale-in" style="width: 185px">
+                  <li>
+                    <a href="/openclaw/openclaw/pull/154586" class="dropdown-item btn-link">
+                      View #154586
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/openclaw/openclaw/actions/runs/35574338988/workflow" class="dropdown-item btn-link" >
+                      <span >View workflow file</span>
+                    </a>
+                  </li>
+              </ul>
+            </details>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

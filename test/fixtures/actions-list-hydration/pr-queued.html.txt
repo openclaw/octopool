@@ -1,0 +1,148 @@
+<page-header data-view-component="true" class="PageHeader mb-0 tmp-mb-0 ml-0 tmp-ml-0 ml-sm-0 tmp-ml-sm-0 ml-md-3 tmp-ml-md-3">
+  <div class="PageHeader-contextBar">
+        <span class="PageHeader-parentLink">
+           <a href="/openclaw/openclaw/actions/workflows/ci.yml" data-view-component="true" class="Link"><svg aria-hidden="true" data-component="Octicon" height="16" viewBox="0 0 16 16" version="1.1" width="16" data-view-component="true" class="octicon octicon-arrow-left"></svg>
+              <span class="PageHeader-parentLink-label"> CI</span></a>        </span>
+  </div>
+  <div class="PageHeader-titleBar">
+    <div class="PageHeader-titleWrap--hasLeadingVisual PageHeader-titleWrap PageHeader-titleWrap--medium">
+        <span data-view-component="true" class="PageHeader-leadingVisual actions-workflow-runs-status">        <span class="hide-sm hide-md">
+<div  class="d-flex flex-items-center height-full" >
+    <svg data-component="Octicon" width="22" height="22" class="octicon octicon-dot-fill hx_dot-fill-pending-icon" aria-label="queued: " viewBox="0 0 16 16" version="1.1" role="img"></svg>
+</div>
+        </span>
+        <span class="hide-lg hide-xl">
+<div  class="d-flex" >
+    <svg data-component="Octicon" width="16" height="16" class="octicon octicon-dot-fill hx_dot-fill-pending-icon" aria-label="queued: " viewBox="0 0 16 16" version="1.1" role="img"></svg>
+</div>
+        </span>
+</span>
+      <h1 data-view-component="true" class="PageHeader-title lh-default">        <span>
+          <span class="markdown-title" >
+            CI
+          </span>
+            <span class="color-fg-muted" style="font-weight: 400">#483060</span>
+        </span>
+</h1>
+      </div>
+        <span data-view-component="true" class="PageHeader-actions">        <div class="d-none d-md-flex flex-self-start ml-n1 ml-md-0">
+            <a rel="nofollow" class="btn" href="/login?return_to=https%3A%2F%2Fgithub.com%2Fopenclaw%2Fopenclaw%2Factions%2Fruns%2F35574986404">Sign in to view logs</a>
+        </div>
+          <div class="d-md-none d-flex flex-self-start ml-2">
+            <details class="dropdown details-reset details-overlay d-inline-block">
+              <summary style="width: 32px; height: 32px;" class="btn px-0 text-center" aria-haspopup="true">
+                <svg aria-label="Show options" role="img" data-component="Octicon" height="16" viewBox="0 0 16 16" version="1.1" width="16" data-view-component="true" class="octicon octicon-kebab-horizontal"></svg>
+              </summary>
+              <ul style="width: 210px" class="dropdown-menu dropdown-menu-sw anim-scale-in">
+                  <li>
+                    <a rel="nofollow" class="dropdown-item" href="/login?return_to=https%3A%2F%2Fgithub.com%2Fopenclaw%2Fopenclaw%2Factions%2Fruns%2F35574986404">Sign in to view logs</a>
+                  </li>
+              </ul>
+            </details>
+          </div>
+</span>
+  </div>
+    <div data-view-component="true" class="PageHeader-navigation hide-whenRegular mt-0 tmp-mt-0 ml-n3 tmp-ml-n3">        <button id="dialog-show-dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e" data-show-dialog-id="dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e" type="button" data-view-component="true" class="Truncate Button--invisible Button--medium Button Button--invisible-noVisuals color-fg-default flex-items-center ml-1 tmp-ml-1">  <span class="Button-content">
+    <span class="Button-label"><div class="d-flex flex-items-center">
+              <h2 data-view-component="true" class="Truncate lh-default h3 mr-2 tmp-mr-2">
+    <span data-view-component="true" class="Truncate-text">Summary</span>
+</h2>              <svg aria-hidden="true" data-component="Octicon" height="16" viewBox="0 0 16 16" version="1.1" width="16" data-view-component="true" class="octicon octicon-triangle-down flex-shrink-0 color-fg-default"></svg>
+            </div></span>
+  </span>
+</button>
+<dialog-helper>
+  <dialog dialog_id="dialog-with-html-fragment" preload="true" height="large" id="dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e" aria-modal="true" aria-labelledby="dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e-title" aria-describedby="dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e-description" data-view-component="true" class="Overlay Overlay-whenNarrow Overlay--size-medium Overlay--motion-scaleFade Overlay--placement-bottom-whenNarrow Overlay--disableScroll width-full">
+    <div data-view-component="true" class="Overlay-header Overlay-header--divided pl-3 tmp-pl-3">
+  <div class="Overlay-headerContentWrap">
+    <div class="Overlay-titleWrap">
+      <h1 class="Overlay-title sr-only" id="dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e-title">
+        CI
+      </h1>
+                    <h2 class="d-flex flex-items-start">
+<div  class="d-flex flex-items-center pr-2" >
+    <svg data-component="Octicon" width="16" height="16" style="height: 30px;" class="octicon octicon-dot-fill hx_dot-fill-pending-icon" aria-label="queued: " viewBox="0 0 16 16" version="1.1" role="img"></svg>
+</div>
+              <span class="markdown-title">
+                CI<span class="color-fg-muted" style="font-weight: 400"> #483060</span>
+              </span>
+            </h2>
+    </div>
+    <div class="Overlay-actionWrap">
+      <button data-close-dialog-id="dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e" aria-label="Close" aria-label="Close" type="button" data-view-component="true" class="close-button Overlay-closeButton"><svg aria-hidden="true" data-component="Octicon" height="16" viewBox="0 0 16 16" version="1.1" width="16" data-view-component="true" class="octicon octicon-x"></svg></button>
+    </div>
+  </div>
+</div>
+      <scrollable-region data-labelled-by="dialog-0eaaa7ce-1ad7-4eae-815e-945ad22b7d1e-title">
+        <div data-view-component="true" class="Overlay-body">            <include-fragment loading="lazy" src="/openclaw/openclaw/actions/runs/35574986404/navigation_partial?attempt=1&amp;selected_tab=summary" data-nonce="v2:06aff38e-41d4-b9bf-8727-e242149fd0f2" data-view-component="true">
+  <div data-show-on-forbidden-error hidden>
+    <div class="Box">
+  <div class="blankslate-container">
+    <div data-view-component="true" class="blankslate blankslate-spacious color-bg-default rounded-2">
+      <h3 data-view-component="true" class="blankslate-heading">        Uh oh!
+</h3>
+      <p data-view-component="true" class="blankslate-description">        <p class="color-fg-muted my-2 mb-2 ws-normal">There was an error while loading. <a class="Link--inTextBlock" data-turbo="false" href="" aria-label="Please reload this page">Please reload this page</a>.</p>
+</p>
+</div>  </div>
+</div>  </div>
+</include-fragment>
+</div>
+      </scrollable-region>
+</dialog></dialog-helper>
+</div>
+</page-header>
+<react-partial
+  partial-name="actions-run-jobs-list"
+  data-ssr="false"
+  data-attempted-ssr="false"
+  data-react-profiling="false"
+>
+  <script type="application/json" data-target="react-partial.embeddedData">{"props":{"summaryHref":"/openclaw/openclaw/actions/runs/35574986404","summarySelected":true,"jobGroups":[],"showRunDetails":true,"usageHref":"/openclaw/openclaw/actions/runs/35574986404/usage","usageSelected":false,"workflowFileHref":"/openclaw/openclaw/actions/runs/35574986404/workflow","workflowFileSelected":false,"agenticWorkflowFileSelected":false,"lockfileSelected":false,"usageHotkey":"g u","workflowFileHotkey":"g f","jobGroupsFetchUrl":"/openclaw/openclaw/actions/runs/35574986404/job_groups_batch?attempt=1","viewingCurrent":true,"liveUpdateUrl":"/openclaw/openclaw/actions/runs/35574986404/navigation_partial?selected_tab=summary"}}</script>
+  <div data-target="react-partial.reactRoot"></div>
+</react-partial>
+<div role="region" aria-label="Workflow run summary" class="js-updatable-content js-socket-channel actions-workflow-stats actions-fullwidth-module color-bg-default Box color-shadow-small tmp-mb-3 tmp-pb-3 tmp-px-3 border border-top-0 border-md-top rounded"
+      data-url="/openclaw/openclaw/actions/runs/35574986404/summary_partial"
+    >
+    <div class="p-md-1 d-flex flex-wrap">
+      <div class="col tmp-mt-md-3 tmp-mr-6">
+        <span class="mb-1 d-block text-small color-fg-muted">
+          Triggered via pull request
+            <relative-time tense="past" datetime="2026-09-21T07:51:58Z" data-view-component="true">September 21, 2026 07:51</relative-time>
+        </span>
+        <div class="d-flex flex-wrap col-triggered-content flex-items-center color-fg-muted">
+            <a class="Link--primary text-semibold mr-1 no-underline" data-hovercard-type="user" data-hovercard-url="/users/Shagrat2/hovercard" href="/Shagrat2">Shagrat2</a>
+          <div class="d-flex flex-items-baseline color-fg-default mr-1">
+              <span class="mr-1">synchronize</span>
+              <a class="Link--primary" data-hovercard-type="pull_request" data-hovercard-url="/openclaw/openclaw/pull/142190/hovercard" href="/openclaw/openclaw/pull/142190">#142190</a>
+          </div>
+            <a target="_parent" class="d-inline-block branch-name css-truncate css-truncate-target my-0 my-md-1" style="max-width: 200px;" title="Shagrat2:fix/tts-media-supplement" href="/Shagrat2/openclaw/tree/refs/heads/fix/tts-media-supplement">Shagrat2:fix/tts-media-supplement</a>
+        </div>
+      </div>
+      <div class="col-12 d-md-none mt-2 pt-2 border-bottom"></div>
+      <div class="col tmp-mt-3 tmp-mr-3 tmp-mr-sm-6 tmp-ml-lg-3">
+        <span class="mb-1 d-block text-small color-fg-muted">Status</span>
+        <span class="h4 color-fg-default">Queued</span>
+      </div>
+      <div class="col tmp-mt-3 tmp-mr-3 tmp-mr-sm-6 tmp-ml-lg-3">
+        <span class="mb-1 d-block text-small color-fg-muted">Total duration</span>
+          <a href="/openclaw/openclaw/actions/runs/35574986404/usage"
+            class="h4 Link--inTextBlock Link--primary color-fg-default" data-hotkey="g u"
+            >
+            &ndash;
+          </a>
+      </div>
+      <div class="tmp-mt-3 tmp-ml-lg-3">
+        <span class="mb-1 d-block text-small color-fg-muted">Artifacts</span>
+          <span class="h4 color-fg-default">
+          &ndash;
+          </span>
+      </div>
+    </div>
+  </div>
+<div role="region" aria-label="Workflow run graph" class="js-updatable-content js-socket-channel"
+        data-url="/openclaw/openclaw/actions/runs/35574986404/graph_partial"
+      ><div class="p-2 color-bg-inset rounded position-relative" style="z-index: 1;">
+      <h2 class="d-flex flex-items-center h4">
+        <a class="Link--primary no-underline" href="/openclaw/openclaw/actions/runs/35574986404/workflow">ci.yml</a>
+      </h2>
+    <div class="text-small color-fg-muted">on: pull_request</div>
+  </div></div>

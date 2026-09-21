@@ -219,10 +219,11 @@ export function parseActionsRunHTML(
     contents.filter(
       (element) =>
         element.tagName === "relative-time" &&
-        /^Triggered via\s+/.test(actionsText(adjacentNode(element, -1))),
+        /^(?:Triggered via\s+.+|Manually triggered)$/.test(actionsText(adjacentNode(element, -1))),
     ),
   );
-  const trigger = /^Triggered via\s+(.+)$/.exec(actionsText(adjacentNode(timestamp, -1)));
+  const triggerText = actionsText(adjacentNode(timestamp, -1));
+  const trigger = /^Triggered via\s+(.+)$/.exec(triggerText);
   const event = actionsRunEvent(elements, runPath, [summary, header, navigation], trigger?.[1]);
   const createdAt = attribute(timestamp, "datetime");
   const sha = actionsCommitSHA(contents, owner, repo)?.sha;
@@ -233,6 +234,7 @@ export function parseActionsRunHTML(
     state === undefined ||
     runNumber === undefined ||
     event === undefined ||
+    (triggerText === "Manually triggered" && event !== "workflow_dispatch") ||
     createdAt === undefined ||
     sha === undefined ||
     branch === undefined

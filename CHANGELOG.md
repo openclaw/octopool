@@ -9,6 +9,7 @@
 
 ### Fixes
 
+- Parse manually triggered Actions run timestamps with exact graph evidence, cap list-page hydration at eight cards and one second overall, and abort failed enrichment without publishing partial lists.
 - Report schema and field requirements for invalid guarded REST payloads while preserving rewrite-policy confidentiality and blocked-error compatibility.
 - Accept all GitHub REST merge methods and omitted merge defaults under string rewrite protection, resolving and pinning the current PR head when `sha` is omitted.
 - Keep supported issue views and complete issue lists readable from public HTML when API quota is exhausted, without requiring unused assignee pagination data; requested labels still require completeness, and assignee/milestone selections retain exact API handling.

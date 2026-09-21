@@ -6,16 +6,23 @@ export async function readBodyCapped(
   response: Response,
   capBytes: number,
   tooLarge: () => Error,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   if (response.body === null) {
     return new Uint8Array();
   }
   const reader = response.body.getReader();
+  const abort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      signal?.throwIfAborted();
       if (done) {
         break;
       }
@@ -34,6 +41,7 @@ export async function readBodyCapped(
       chunks.push(value);
     }
   } finally {
+    signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
   const body = new Uint8Array(size);

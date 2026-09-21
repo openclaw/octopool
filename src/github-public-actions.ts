@@ -21,11 +21,14 @@ import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { fetchPublicPage, fetchWebResponse, readWebBody } from "./github-web-transport";
 import { cancelResponseBody } from "./response-body";
 import { transformedGitHubHeaders } from "./github-response";
+import { rethrowStringRewriteDenial } from "./github-egress";
 import type { GitHubEgressEnv } from "./github-egress";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
 const MAX_PUBLIC_JOB_PAGES = 25;
+const MAX_RUN_LIST_HYDRATIONS = 8;
+const RUN_LIST_TIMEOUT_MS = 1000;
 
 export function actionsPageRequest(
   env: GitHubEgressEnv,
@@ -83,7 +86,7 @@ function actionsRunListRequest(
   if (query.search !== "") {
     url.searchParams.set("query", query.search);
   }
-  return htmlWebRequest(env, url.toString(), async (body, headers, status) => {
+  const web = htmlWebRequest(env, url.toString(), async (body, headers, status, _url, signal) => {
     const parsed = parseActionsRunListHTML(
       new TextDecoder().decode(body),
       route.owner!,
@@ -99,23 +102,41 @@ function actionsRunListRequest(
     ) {
       return undefined;
     }
-    parsed.workflow_runs = parsed.workflow_runs.slice(0, query.perPage);
-    const runs = await Promise.all(
-      parsed.workflow_runs.map((run) =>
-        isFullGitSHA(run.head_sha) && typeof run.event === "string"
-          ? run
-          : enrichActionsRun(env, route, run),
-      ),
-    );
-    if (runs.some((run) => run === undefined)) {
+    // Count the whole page before truncation: canonical fills select all 25 cards.
+    if (parsed.workflow_runs.filter(needsRunEnrichment).length > MAX_RUN_LIST_HYDRATIONS) {
       return undefined;
     }
-    parsed.workflow_runs = runs as Record<string, unknown>[];
-    return publicJSONResponse(headers, status, {
-      total_count: parsed.total_count,
-      workflow_runs: runs,
-    });
+    const controller = new AbortController();
+    const enrichmentSignal =
+      signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
+    try {
+      const runs = await Promise.all(
+        parsed.workflow_runs.slice(0, query.perPage).map(async (run) => {
+          const complete = needsRunEnrichment(run)
+            ? await enrichActionsRun(env, route, run, enrichmentSignal)
+            : run;
+          if (complete === undefined) throw new Error("Incomplete Actions run enrichment");
+          return complete;
+        }),
+      );
+      enrichmentSignal.throwIfAborted();
+      return publicJSONResponse(headers, status, {
+        total_count: parsed.total_count,
+        workflow_runs: runs,
+      });
+    } catch (error) {
+      rethrowStringRewriteDenial(error);
+      return undefined;
+    } finally {
+      controller.abort();
+    }
   });
+  // This includes list/redirect bodies, parsing, run pages and commit patches.
+  return { ...web, timeoutMs: RUN_LIST_TIMEOUT_MS };
+}
+
+function needsRunEnrichment(run: Record<string, unknown>): boolean {
+  return !isFullGitSHA(run.head_sha) || typeof run.event !== "string";
 }
 
 function actionsRunRequest(
@@ -299,6 +320,7 @@ async function enrichActionsRun(
   env: GitHubEgressEnv,
   route: RouteInfo,
   run: Record<string, unknown>,
+  signal: AbortSignal,
 ): Promise<Record<string, unknown> | undefined> {
   if (
     route.owner === undefined ||
@@ -312,13 +334,15 @@ async function enrichActionsRun(
     `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions", "runs", String(run.id)])}`,
     responseCapBytes(env),
     env,
+    "text/html",
+    { signal, timeoutMs: Math.min(requestTimeoutMs(env), 5000) },
   );
   const parsed =
     page === undefined ? undefined : parseActionsRunHTML(page, route.owner, route.repo, run.id);
-  if (parsed === undefined) {
+  if (parsed === undefined || (typeof run.event === "string" && run.event !== parsed.event)) {
     return undefined;
   }
-  const complete = await completeActionsRunSHA(env, route, { ...run, ...parsed });
+  const complete = await completeActionsRunSHA(env, route, { ...run, ...parsed }, signal);
   if (
     complete === undefined ||
     (typeof run.head_sha === "string" &&
@@ -334,6 +358,7 @@ async function completeActionsRunSHA(
   env: GitHubEgressEnv,
   route: RouteInfo,
   run: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown> | undefined> {
   if (isFullGitSHA(run.head_sha)) {
     return run;
@@ -351,6 +376,7 @@ async function completeActionsRunSHA(
     responseCapBytes(env),
     env,
     "text/plain",
+    signal === undefined ? {} : { signal },
   );
   const sha = patch === undefined ? undefined : parseCommitPatchSHA(patch, run.head_sha);
   return sha === undefined ? undefined : { ...run, head_sha: sha };

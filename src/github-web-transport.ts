@@ -9,14 +9,17 @@ export async function fetchWebResponse(
   headers: Record<string, string>,
   timeoutMs: number,
   redirectNotModified = false,
+  signal?: AbortSignal,
 ): Promise<{ response: Response; url: string } | undefined> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const requestSignal = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
   let response: Response;
   try {
     response = await env.githubEgress.fetch(url, {
       method: "GET",
       headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: requestSignal,
     });
   } catch (error) {
     rethrowStringRewriteDenial(error);
@@ -52,7 +55,7 @@ export async function fetchWebResponse(
       method: "GET",
       headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal === undefined ? AbortSignal.timeout(timeoutMs) : requestSignal,
     });
     if (redirected.status >= 300 && redirected.status < 400) {
       await cancelResponseBody(redirected);
@@ -73,13 +76,23 @@ export async function fetchPublicPage(
   capBytes: number,
   env: GitHubEgressEnv,
   accept = "text/html",
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string | undefined> {
+  const timeoutMs = Math.min(requestTimeoutMs(env), options.timeoutMs ?? Infinity);
+  const signal =
+    options.signal === undefined && options.timeoutMs === undefined
+      ? undefined
+      : AbortSignal.any([
+          ...(options.signal === undefined ? [] : [options.signal]),
+          AbortSignal.timeout(timeoutMs),
+        ]);
   const fetched = await fetchWebResponse(
     env,
     url,
     { accept, "user-agent": "octopool" },
-    requestTimeoutMs(env),
+    timeoutMs,
     true,
+    signal,
   );
   if (fetched === undefined) {
     return undefined;
@@ -89,17 +102,22 @@ export async function fetchPublicPage(
     return undefined;
   }
   try {
-    return new TextDecoder().decode(await readWebBody(fetched.response, capBytes));
+    return new TextDecoder().decode(await readWebBody(fetched.response, capBytes, signal));
   } catch {
     return undefined;
   }
 }
 
-export function readWebBody(response: Response, capBytes: number): Promise<Uint8Array> {
+export function readWebBody(
+  response: Response,
+  capBytes: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
   return readBodyCapped(
     response,
     capBytes,
     () => new HttpError(502, "github_web_response_too_large", "GitHub web response is too large"),
+    signal,
   );
 }
 
