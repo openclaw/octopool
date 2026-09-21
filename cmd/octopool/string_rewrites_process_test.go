@@ -1566,6 +1566,51 @@ func TestStringRewriteBestEffortClone(t *testing.T) {
 	}
 }
 
+func TestStringRewriteSingletonFallback(t *testing.T) {
+	policyStore, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+
+	for _, test := range []struct {
+		name        string
+		argument    string
+		replacement string
+		want        string
+	}{
+		{name: "browse", argument: "browse", want: "browse"},
+		{name: "rewritten extension", argument: "internal-model", want: "public"},
+		{name: "residual match", argument: "internal-model", replacement: "internal-model"},
+		{name: "policy material", argument: `{"pattern":"internal-model","replacement":"public"}`},
+		{name: "invalid UTF-8", argument: "extension\xff"},
+		{name: "alternate repository host", argument: "--repo=ghe.example/acme/repo"},
+		{name: "rewritten alternate repository host", argument: "internal-model", replacement: "--repo=ghe.example/acme/repo"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			policy := rewriteActiveTestPolicy
+			if test.replacement != "" {
+				policy = strings.Replace(policy, `"replacement":"public"`, `"replacement":"`+test.replacement+`"`, 1)
+			}
+			policyStore.Store(policy)
+			capturePath := captureRewriteGH(t)
+			err := runGH(t.Context(), []string{test.argument}, io.Discard, io.Discard)
+			if test.want == "" {
+				if !errors.Is(err, errRewriteBlocked) {
+					t.Fatalf("unsafe singleton error=%v", err)
+				}
+				if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
+					t.Fatal("unsafe singleton reached child")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			capture := readRewriteCapture(t, capturePath)
+			if !slices.Equal(capture.Args, []string{test.want}) || capture.Env["GH_HOST"] != "github.com" || capture.Env["GH_REPO"] != "" {
+				t.Fatalf("unexpected singleton dispatch: args=%v env=%v", capture.Args, capture.Env)
+			}
+		})
+	}
+}
+
 func TestStringRewriteBestEffortFallback(t *testing.T) {
 	policyStore, _ := rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 

@@ -5,6 +5,7 @@
 ### Fixes
 
 - Keep pending configuration and caller-membership lookups within one Worker request, preventing unrelated policy reads from hanging on abandoned loads while preserving the shared 30-second cache of settled values.
+- Allow single-argument native commands such as `gh browse` through guarded fallback, fixing repository discovery in OpenClaw's `scripts/pr review-init` while retaining string rewriting and unsafe-input rejection.
 - Allow protected `gh pr merge --auto --squash` with a full submission head SHA and explicitly sanitized subject/body, retaining private body snapshots, final policy checks, native exit codes, and distinguishable pre-dispatch diagnostics.
 
 ## 0.7.0 - 2026-09-21

@@ -1117,7 +1117,9 @@ Attachment bytes are not text- or vision-inspected, so callers remain responsibl
 the media itself before publication.
 
 Commands and flags outside the modeled vocabulary use a bounded best-effort pass-through
-instead of being denied solely for being new or unfamiliar. Octopool rewrites every visible
+instead of being denied solely for being new or unfamiliar. This includes commands with
+only one argument, such as `gh browse`; adding a flag is not required to reach guarded
+native execution. Octopool rewrites every visible
 argument, snapshots and filters `--input` files or `--input=-`, snapshots typed
 `-F`/`--field key=@source` text without changing its formatting, and filters stdin when the
 command explicitly declares it (currently `workflow run --json`). Nonempty declared JSON

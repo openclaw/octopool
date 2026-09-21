@@ -154,7 +154,7 @@ func rewriteReadPath(path string) bool {
 
 func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rewritePreparation) error {
 	if len(args) < 2 {
-		return errRewriteBlocked
+		return errRewriteUnsupported
 	}
 	command := args[0] + " " + args[1]
 	if command == "run rerun" {
