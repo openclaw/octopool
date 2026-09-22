@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Share cached workflow jobs and commit check runs between omitted filters and explicit `filter=latest`, preserving all-execution reads, pagination, identity eligibility and explicit freshness.
+
 - Reuse cached responses across omitted and explicit default GitHub API versions, and serve active workflow filenames from complete cached catalogues while preserving source expiry, explicit freshness, identity eligibility and public visibility.
 
 - Explain when JSON field bundles require native gh and when `--include` selects caller credentials, preserving routing, freshness, protection checks, and native output.

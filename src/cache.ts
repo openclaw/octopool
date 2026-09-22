@@ -84,7 +84,7 @@ export async function githubCacheKey(
     pool,
     method: request.method,
     path: request.path,
-    query: normalizedCacheQuery(request.query ?? {}, route.kind),
+    query: normalizedCacheQuery(request.query ?? {}, route),
     headers: stableRecord(varyHeaders),
     route_key: route.routeKey,
     state: cacheStateDiscriminator(route),
@@ -508,12 +508,20 @@ function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, stri
 
 function normalizedCacheQuery(
   input: Record<string, string | string[]>,
-  kind: RouteInfo["kind"],
+  route: RouteInfo,
 ): Record<string, string | string[]> {
   const out: Record<string, string | string[]> = {};
   for (const key of Object.keys(input).sort()) {
     const value = input[key];
-    if (value === undefined || (kind !== "compare" && defaultQueryValue(key, value))) {
+    if (
+      value === undefined ||
+      (route.kind !== "compare" && defaultQueryValue(key, value)) ||
+      (key === "filter" &&
+        value === "latest" &&
+        (route.kind === "commit_check_runs" ||
+          route.kind === "commit_check_runs_ref" ||
+          (route.kind === "run_jobs" && route.run_attempt === undefined)))
+    ) {
       continue;
     }
     out[key] = Array.isArray(value) ? [...value] : value;

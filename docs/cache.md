@@ -93,6 +93,12 @@ Default pagination
 media types, non-default API versions and non-default query values still produce distinct entries. The key is
 pool-scoped, so pools never share cache entries.
 
+For raw REST reads, omitted `filter` and explicit `filter=latest` also share an entry
+for commit check-run lists and the base workflow-run jobs endpoint. GitHub defines `latest` as the default
+on these routes. `filter=all`, repeated filter parameters, attempt-qualified jobs,
+and filters on unrelated routes retain separate keys. This normalization changes no
+upstream query, freshness bound, or cache lifetime.
+
 Shaped Actions run lists with non-default JSON media carry
 `query_semantics: actions-run-list-filter-v1`. Older pooled revalidation could publish
 an unfiltered canonical body under a filtered request key; this marker retires those
@@ -578,7 +584,8 @@ URLs while returned attempts own jobs acquisition; [CLI documentation](cli.md) d
 the native defaults, explicit safe-integer boundary, lazy names and whole-command fallback.
 
 Raw default-JSON first-page jobs requests with a smaller page size can reuse a fresh
-raw `per_page=100` entry for the same path and exact filter. Its `total_count` must equal
+raw `per_page=100` entry for the same path and equivalent filter (omitted and `latest`
+are equivalent on the base jobs endpoint). Its `total_count` must equal
 the jobs array length, the entire array must fit the requested page, and it must have no
 `Link` header. This includes empty lists. Octopool returns the complete REST body unchanged,
 including extra fields, while omitting source representation validators and lengths.

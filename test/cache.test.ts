@@ -108,6 +108,18 @@ describe("github cache policy", () => {
     );
   });
 
+  it.each([
+    "/repos/openclaw/openclaw/actions/runs/42/attempts/2/jobs",
+    "/repos/openclaw/openclaw/actions/runs",
+    "/repos/openclaw/openclaw/commits/main/check-suites",
+  ])("preserves explicit filters outside documented defaults: %s", async (path) => {
+    const request = validateRelayRequest({ pool: "maintainers", method: "GET", path });
+    const route = classifyRoute(request, policy);
+    expect(
+      await githubCacheKey(request.pool, { ...request, query: { filter: "latest" } }, route),
+    ).not.toBe(await githubCacheKey(request.pool, request, route));
+  });
+
   it.each([undefined, { id: "primary", kind: "pat" as const }])(
     "keeps compare pagination presence separate and retires old keys for %j",
     async (identity) => {
