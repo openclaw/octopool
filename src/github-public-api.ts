@@ -2,7 +2,7 @@ import { responseCapBytes } from "./github-limits";
 import { isLandingGraphQLRoute } from "./github-landing";
 import { appendRelayQuery } from "./github-path";
 import { publicJSONResponse, parseJSONBytes, scalarQuery } from "./github-public-utils";
-import { defaultGitHubJSONAccept } from "./github-response";
+import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-response";
 import type { WebRequest } from "./github-web-types";
 import { queries } from "./generated/sql";
 import { capabilitiesForRouteKind } from "./route-manifest";
@@ -101,7 +101,7 @@ function publicAPIHeaders(request: RelayRequest): Record<string, string> {
   return {
     accept: "application/vnd.github+json",
     "user-agent": "octopool",
-    "x-github-api-version": request.headers?.["x-github-api-version"] ?? "2022-11-28",
+    "x-github-api-version": request.headers?.["x-github-api-version"] ?? DEFAULT_GITHUB_API_VERSION,
   };
 }
 

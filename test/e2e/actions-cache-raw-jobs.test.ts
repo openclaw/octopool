@@ -225,7 +225,7 @@ describe("complete raw jobs page reuse", () => {
         ...(test.scenario === "forced fresh" ? { "cache-control": "max-age=0" } : {}),
         ...(test.scenario === "conditional request" ? { "if-none-match": '"client"' } : {}),
         ...(test.scenario === "different API version"
-          ? { "x-github-api-version": "2022-11-28" }
+          ? { "x-github-api-version": "2099-01-01" }
           : {}),
         ...(test.scenario === "custom media" ? { accept: "application/vnd.github.raw+json" } : {}),
       },

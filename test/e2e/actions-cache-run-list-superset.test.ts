@@ -255,7 +255,7 @@ describe("Actions run-list superset", () => {
           ...(test.constraint === "age" ? { "cache-control": "max-age=30" } : {}),
           ...(test.constraint === "live" ? { "cache-control": "max-age=0" } : {}),
           ...(test.constraint === "media" ? { accept: "application/vnd.github.raw+json" } : {}),
-          ...(test.constraint === "version" ? { "x-github-api-version": "2022-11-28" } : {}),
+          ...(test.constraint === "version" ? { "x-github-api-version": "2099-01-01" } : {}),
           ...(test.constraint === "conditional" ? { "if-none-match": '"other"' } : {}),
         },
       };

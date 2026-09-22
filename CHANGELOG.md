@@ -4,6 +4,8 @@
 
 ### Fixes
 
+- Reuse cached responses across omitted and explicit default GitHub API versions, and serve active workflow filenames from complete cached catalogues while preserving source expiry, explicit freshness, identity eligibility and public visibility.
+
 - Explain when JSON field bundles require native gh and when `--include` selects caller credentials, preserving routing, freshness, protection checks, and native output.
 
 ## 0.7.1 - 2026-09-21

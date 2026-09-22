@@ -88,8 +88,9 @@ the server-owned publication protocol epoch (`publication-v1`). Every body key, 
 raw REST, identity, canonical, stale, and conditional-revalidation candidates, changes
 with this epoch. Readers never fall back to a previous epoch.
 Default pagination
-(`page=1`, `per_page=30`) and default JSON `accept` variants are folded together; custom
-media types and non-default query values still produce distinct entries. The key is
+(`page=1`, `per_page=30`), default JSON `accept` variants, and an explicit
+`x-github-api-version: 2022-11-28` (the transport default) are folded together; custom
+media types, non-default API versions and non-default query values still produce distinct entries. The key is
 pool-scoped, so pools never share cache entries.
 
 Shaped Actions run lists with non-default JSON media carry
@@ -455,14 +456,18 @@ A raw, queryless numeric workflow view can reuse its matching object from a fres
 `page=1&per_page=100` workflow-list cache entry. This avoids fetching the same workflow
 metadata again when a machine-readable run list hydrates workflow names before a run
 view. Reuse requires one unambiguous numeric ID and API URL match; the complete REST
-object is returned unchanged. A missing item never proves that the workflow is absent,
-and a cold catalogue is not fetched just to answer a view.
+object is returned unchanged. Plain `.yml`/`.yaml` filenames can reuse the catalogue too,
+but only when it is complete (`total_count` matches its rows and there is no pagination
+link), exactly one row has that `.github/workflows/` path, and that row is active with a
+valid numeric ID and matching repository API URL. Partial lists and ambiguous or inactive
+filename mappings retain the ordinary view fetch. A missing item never proves that the
+workflow is absent, and a cold catalogue is not fetched just to answer a view.
 
 The lookup preserves the pool, API version, JSON media key, source expiry, requested
 maximum age, current identity eligibility, and public-repository guard. Anonymous entries
 are checked before loading pooled identities. It publishes no view alias and does not
 refresh the source. List validators, lengths, and pagination links are omitted from the
-derived view. Shaped/HTML metadata, custom media, filename selectors, query parameters,
+derived view. Shaped/HTML metadata, custom media, query parameters,
 conditionals, and forced-live reads retain their existing paths. Optional lookup failures
 continue through the ordinary view fill; policy and visibility denials still propagate.
 

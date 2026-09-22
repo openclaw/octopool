@@ -14,7 +14,7 @@ import {
 } from "./cache-policy";
 import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
-import { defaultGitHubJSONAccept } from "./github-response";
+import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-response";
 import { scalarQuery } from "./github-public-utils";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
@@ -497,7 +497,7 @@ function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, stri
   if (accept !== undefined && !defaultGitHubJSONAccept(accept, false)) {
     out.accept = accept.toLowerCase();
   }
-  if (version !== undefined) {
+  if (version !== undefined && version !== DEFAULT_GITHUB_API_VERSION) {
     out["x-github-api-version"] = version;
   }
   if (publicShape !== undefined && publicShape !== PUBLIC_SHAPES.issueSearch) {

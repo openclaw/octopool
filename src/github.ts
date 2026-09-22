@@ -3,7 +3,11 @@ import type { GitHubEgressEnv } from "./github-egress";
 import { landingGraphQLRequest } from "./github-landing";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
-import { githubResponseHeaders, isSecondaryRateLimit } from "./github-response";
+import {
+  DEFAULT_GITHUB_API_VERSION,
+  githubResponseHeaders,
+  isSecondaryRateLimit,
+} from "./github-response";
 import { HttpError } from "./http";
 import { cancelResponseBody, readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
@@ -209,7 +213,10 @@ function githubHeaders(
     headers.set("authorization", `Bearer ${token}`);
   }
   headers.set("user-agent", "octopool");
-  headers.set("x-github-api-version", input?.["x-github-api-version"] ?? "2022-11-28");
+  headers.set(
+    "x-github-api-version",
+    input?.["x-github-api-version"] ?? DEFAULT_GITHUB_API_VERSION,
+  );
   if (input?.["if-none-match"] !== undefined) {
     headers.set("if-none-match", input["if-none-match"]);
   }

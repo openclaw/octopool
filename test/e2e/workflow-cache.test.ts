@@ -40,6 +40,7 @@ describe("workflow catalogue cache reuse", () => {
     expected: "hit" | "miss" | "bypass" | "denied";
     pooled?: boolean;
     edge?: boolean;
+    filename?: boolean;
   }>([
     { scenario: "anonymous edge entry", expected: "hit", edge: true },
     { scenario: "anonymous shared entry", expected: "hit" },
@@ -55,16 +56,24 @@ describe("workflow catalogue cache reuse", () => {
     { scenario: "duplicate item", expected: "miss" },
     { scenario: "wrong repository URL", expected: "miss" },
     { scenario: "string item ID", expected: "miss" },
+    { scenario: "explicit default API version", expected: "hit" },
     { scenario: "different API version", expected: "miss" },
     { scenario: "custom media", expected: "miss" },
     { scenario: "shaped view", expected: "miss" },
     { scenario: "shaped source", expected: "miss" },
     { scenario: "query parameters", expected: "miss" },
-    { scenario: "filename selector", expected: "miss" },
+    { scenario: "filename selector", expected: "hit", filename: true },
+    { scenario: "duplicate workflow path", expected: "miss", filename: true },
+    { scenario: "partial filename catalogue", expected: "miss", filename: true },
+    { scenario: "inactive filename", expected: "miss", filename: true },
+    { scenario: "wrong repository URL", expected: "miss", filename: true },
+    { scenario: "string item ID", expected: "miss", filename: true },
+    { scenario: "forced live read", expected: "miss", filename: true },
+    { scenario: "removed identity scope", expected: "miss", filename: true, pooled: true },
     { scenario: "conditional read", expected: "bypass" },
     { scenario: "optional cache read failure", expected: "miss" },
     { scenario: "cold cache", expected: "miss" },
-  ])("preserves the raw view contract: $scenario", async (test) => {
+  ])("preserves the raw view contract: $scenario (filename=$filename)", async (test) => {
     let warming = true;
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
@@ -80,18 +89,27 @@ describe("workflow catalogue cache reuse", () => {
           ? { ...workflow, url: workflow.url.replace("/octopool/", "/other/") }
           : test.scenario === "string item ID"
             ? { ...workflow, id: "123" }
-            : workflow;
+            : test.scenario === "inactive filename"
+              ? { ...workflow, state: "disabled_manually" }
+              : workflow;
       const workflows =
         test.scenario === "missing item"
           ? []
-          : test.scenario === "duplicate item"
-            ? [item, item]
-            : [item];
-      return jsonResponse(list ? { total_count: 101, workflows } : workflow, 200, {
-        etag: list ? '"catalogue"' : '"view"',
-        "last-modified": "Thu, 01 Jan 2026 00:00:00 GMT",
-        ...(list ? { link: '<https://api.github.com/next>; rel="next"' } : {}),
-      });
+          : test.scenario === "duplicate workflow path"
+            ? [item, { ...item, id: 456, url: `https://api.github.com${LIST}/456` }]
+            : test.scenario === "duplicate item"
+              ? [item, item]
+              : [item];
+      const complete = test.filename && test.scenario !== "partial filename catalogue";
+      return jsonResponse(
+        list ? { total_count: complete ? workflows.length : 101, workflows } : workflow,
+        200,
+        {
+          etag: list ? '"catalogue"' : '"view"',
+          "last-modified": "Thu, 01 Jan 2026 00:00:00 GMT",
+          ...(list && !complete ? { link: '<https://api.github.com/next>; rel="next"' } : {}),
+        },
+      );
     });
     vi.stubGlobal("fetch", upstream);
     const warm = await relay(LIST, undefined, {
@@ -136,9 +154,11 @@ describe("workflow catalogue cache reuse", () => {
           ? { "cache-control": "max-age=30" }
           : {}),
         ...(test.scenario === "forced live read" ? { "cache-control": "max-age=0" } : {}),
-        ...(test.scenario === "different API version"
+        ...(test.scenario === "explicit default API version"
           ? { "x-github-api-version": "2022-11-28" }
-          : {}),
+          : test.scenario === "different API version"
+            ? { "x-github-api-version": "2099-01-01" }
+            : {}),
         ...(test.scenario === "custom media" ? { accept: "application/vnd.github.raw+json" } : {}),
         ...(test.scenario === "shaped view"
           ? { "x-octopool-public-shape": "workflow-view-v1" }
@@ -155,7 +175,7 @@ describe("workflow catalogue cache reuse", () => {
         }
       },
     });
-    const path = test.scenario === "filename selector" ? `${LIST}/ci.yml` : VIEW;
+    const path = test.filename ? `${LIST}/ci.yml` : VIEW;
     const response =
       test.scenario === "optional cache read failure"
         ? await requestWithEnv({ DB: db }, path, options)

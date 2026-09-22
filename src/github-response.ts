@@ -1,5 +1,7 @@
 import { isRecord } from "./object";
 
+export const DEFAULT_GITHUB_API_VERSION = "2022-11-28";
+
 const TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524]);
 const REPRESENTATION_HEADERS = new Set(["etag", "last-modified", "content-length", "link"]);
 

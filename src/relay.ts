@@ -1260,8 +1260,13 @@ async function readWorkflowCatalogueCache(
     !defaultGitHubJSONAccept(state.request.headers?.accept)
   )
     return undefined;
-  const match = /^(.*\/actions\/workflows)\/([1-9][0-9]*)$/.exec(state.request.path);
-  if (match === null || !Number.isSafeInteger(Number(match[2]))) return undefined;
+  const match = /^(.*\/actions\/workflows)\/([1-9][0-9]*|[A-Za-z0-9_.-]+\.ya?ml)$/.exec(
+    state.request.path,
+  );
+  if (match === null) return undefined;
+  const selector = match[2]!;
+  const filename = selector.endsWith(".yml") || selector.endsWith(".yaml");
+  if (!filename && !Number.isSafeInteger(Number(selector))) return undefined;
   const request: RelayRequest = {
     ...state.request,
     path: match[1]!,
@@ -1269,6 +1274,7 @@ async function readWorkflowCatalogueCache(
   };
   const route = classifyRoute(request, state.policy);
   const expectedURL = `https://api.github.com${state.request.path}`;
+  const expectedPath = `.github/workflows/${selector}`;
   const probe = async (identity?: Identity) => {
     const key = await githubCacheKey(request.pool, request, route, identity);
     const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
@@ -1280,15 +1286,29 @@ async function readWorkflowCatalogueCache(
       !Array.isArray(cached.body.workflows)
     )
       return undefined;
+    // Numeric IDs are unique within a partial page; filenames need the complete
+    // catalogue to rule out an older workflow with the same path on another page.
+    if (
+      filename &&
+      (cached.body.total_count !== cached.body.workflows.length ||
+        Object.keys(cached.headers).some((key) => key.toLowerCase() === "link"))
+    )
+      return undefined;
     const matches = cached.body.workflows.filter(
-      (item) => isRecord(item) && (String(item.id) === match[2] || item.url === expectedURL),
+      (item) =>
+        isRecord(item) &&
+        (filename
+          ? item.path === expectedPath
+          : String(item.id) === selector || item.url === expectedURL),
     );
     const item = matches[0];
     if (
       matches.length !== 1 ||
       !isRecord(item) ||
-      item.id !== Number(match[2]) ||
-      item.url !== expectedURL ||
+      !Number.isSafeInteger(item.id) ||
+      Number(item.id) <= 0 ||
+      (filename ? item.state !== "active" : item.id !== Number(selector)) ||
+      item.url !== `https://api.github.com${match[1]}/${item.id}` ||
       !(await cachedResponseAvailable(state.env, request.pool, route, cached, identity))
     )
       return undefined;
