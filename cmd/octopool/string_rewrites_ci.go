@@ -83,9 +83,9 @@ func workflowRunsQuery(opts rewriteAPIOptions, request ghAPIRequest) (ghAPIReque
 			if !rewriteCommitSHA.MatchString(value) {
 				return request, errRewriteBlocked
 			}
-		case "per_page":
+		case "page", "per_page":
 			n, err := strconv.Atoi(value)
-			if err != nil || !isDigits(value) || n < 1 || n > 100 {
+			if err != nil || !isDigits(value) || n < 1 || (key == "per_page" && n > 100) {
 				return request, errRewriteBlocked
 			}
 		default:

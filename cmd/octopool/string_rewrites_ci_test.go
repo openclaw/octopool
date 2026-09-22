@@ -87,31 +87,44 @@ func TestStringRewriteWorkflowRunsQuery(t *testing.T) {
 	policy := testRewritePolicy(t, stringRewriteRule{"private", "public"})
 	endpoint := "repos/acme/repo/actions/workflows/ci.yml/runs"
 	sha := strings.Repeat("a", 40)
-	for _, method := range [][]string{nil, {"--method", "GET"}, {"-XGET"}} {
-		args := append([]string{"api", endpoint}, method...)
-		args = append(args, "-f", "event=pull_request", "-F", "head_sha="+sha, "-fbranch=feature/topic", "-Fper_page=100", "-fstatus=completed")
-		p := &rewritePreparation{}
-		if err := prepareRewriteAPI(policy, args, nil, p); err != nil {
-			t.Fatal(err)
-		}
-		request, fallback, err := parseGHAPIArgs(args[1:])
-		if err != nil || fallback || request.method != "GET" || request.query["head_sha"] != sha || request.query["per_page"] != "100" || request.query["branch"] != "feature/topic" {
-			t.Fatalf("request=%+v fallback=%v err=%v", request, fallback, err)
-		}
-		if strings.Contains(strings.Join(p.args, " "), "--field") || !strings.Contains(p.args[1], "branch=feature%2Ftopic") {
-			t.Fatalf("fields not pinned: %q", p.args)
+	for _, pageArgs := range [][]string{{endpoint, "-fpage=101"}, {endpoint + "?page=101"}} {
+		for _, method := range [][]string{nil, {"--method", "GET"}, {"-XGET"}} {
+			args := append([]string{"api"}, pageArgs...)
+			args = append(args, method...)
+			args = append(args, "-f", "event=pull_request", "-F", "head_sha="+sha, "-fbranch=feature/topic", "-Fper_page=100", "-fstatus=completed")
+			p := &rewritePreparation{}
+			if err := prepareRewriteAPI(policy, args, nil, p); err != nil {
+				t.Fatal(err)
+			}
+			request, fallback, err := parseGHAPIArgs(args[1:])
+			if err != nil || fallback || request.method != "GET" || request.query["head_sha"] != sha || request.query["per_page"] != "100" || request.query["page"] != "101" || request.query["branch"] != "feature/topic" {
+				t.Fatalf("request=%+v fallback=%v err=%v", request, fallback, err)
+			}
+			if strings.Contains(strings.Join(p.args, " "), "--field") || !strings.Contains(p.args[1], "branch=feature%2Ftopic") {
+				t.Fatalf("fields not pinned: %q", p.args)
+			}
 		}
 	}
 	for _, fields := range [][]string{
 		{"-f", "unknown=value"}, {"-F", "branch=@file"}, {"-f", "head_sha=bad"},
 		{"-f", "event=pull_request", "-F", "event=push"}, {"-F", "per_page=101"},
-		{"-F", "per_page=0"}, {"-F", "branch={branch}"}, {"-f", "branch=private"},
+		{"-F", "per_page=0"}, {"-F", "branch={branch}"}, {"-f", "page=1", "-f", "branch=private"},
+		{"-f", "page=1", "-F", "page=2"},
 		{"-f", "branch="}, {"--input=-"}, {"-XPOST", "-f", "event=push"},
 	} {
 		p := &rewritePreparation{}
 		args := append([]string{"api", endpoint}, fields...)
 		if err := prepareRewriteAPI(policy, args, nil, p); err == nil {
 			t.Fatalf("accepted %q", args)
+		}
+	}
+	for _, value := range []string{"", "0", "-1", "+1", "1.5", "1e3", " 1", "1 ", "1x", "9223372036854775808", "@file", "{page}"} {
+		for _, flag := range []string{"-f", "-F"} {
+			p := &rewritePreparation{}
+			args := []string{"api", endpoint, flag, "page=" + value}
+			if err := prepareRewriteAPI(policy, args, nil, p); err == nil {
+				t.Fatalf("accepted %q", args)
+			}
 		}
 	}
 	// Existing query-only GETs keep their broader native/relay vocabulary.
@@ -131,7 +144,7 @@ func TestCIRetryAndWorkflowRunsDispatch(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
 		}
-		if request.Method != "GET" || request.Path != "/repos/acme/repo/actions/workflows/ci.yml/runs" || request.Query["event"] != "pull_request" {
+		if request.Method != "GET" || request.Path != "/repos/acme/repo/actions/workflows/ci.yml/runs" || request.Query["event"] != "pull_request" || request.Query["page"] != "2" {
 			t.Errorf("request=%+v", request)
 		}
 		writeCLIEnvelope(t, w, map[string]any{"workflow_runs": []any{}})
@@ -146,7 +159,7 @@ func TestCIRetryAndWorkflowRunsDispatch(t *testing.T) {
 		t.Fatalf("capture=%+v stderr=%q", got, stderr.String())
 	}
 	stdout.Reset()
-	if err := runGH(t.Context(), []string{"api", "repos/acme/repo/actions/workflows/ci.yml/runs", "-f", "event=pull_request"}, &stdout, &stderr); err != nil {
+	if err := runGH(t.Context(), []string{"api", "repos/acme/repo/actions/workflows/ci.yml/runs", "-f", "event=pull_request", "-Fpage=2"}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(stdout.String(), "workflow_runs") {
@@ -155,26 +168,53 @@ func TestCIRetryAndWorkflowRunsDispatch(t *testing.T) {
 }
 
 func TestWorkflowRunReadFallbackKeepsGET(t *testing.T) {
-	for _, policy := range []string{rewriteEmptyTestPolicy, rewriteActiveTestPolicy} {
-		t.Run(policy, func(t *testing.T) {
-			rewriteTestServer(t, policy, func(w http.ResponseWriter, r *http.Request) {
-				var request map[string]any
-				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["method"] != "GET" {
-					t.Fatalf("workflow read changed method: %+v %v", request, err)
+	for _, test := range []struct {
+		name     string
+		args     []string
+		endpoint string
+		include  bool
+	}{
+		{
+			name:     "relay fallback",
+			args:     []string{"api", "repos/acme/repo/actions/workflows/ci.yml/runs", "-f", "event=pull_request", "-Fpage=2"},
+			endpoint: "/repos/acme/repo/actions/workflows/ci.yml/runs?event=pull_request&page=2",
+		},
+		{
+			name:     "native include",
+			args:     []string{"api", "--method", "GET", "repos/acme/repo/actions/workflows/123/runs", "--include", "-f", "branch=feature/topic", "-f", "event=workflow_dispatch", "-f", "per_page=20", "-f", "page=1", "--hostname", "github.com", "-H", "Cache-Control: max-age=0"},
+			endpoint: "/repos/acme/repo/actions/workflows/123/runs?branch=feature%2Ftopic&event=workflow_dispatch&page=1&per_page=20",
+			include:  true,
+		},
+	} {
+		for _, policy := range []struct{ name, body string }{{"empty", rewriteEmptyTestPolicy}, {"active", rewriteActiveTestPolicy}} {
+			t.Run(test.name+"/"+policy.name, func(t *testing.T) {
+				rewriteTestServer(t, policy.body, func(w http.ResponseWriter, r *http.Request) {
+					if test.include {
+						t.Error("native include unexpectedly used relay credentials")
+					}
+					var request map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request["method"] != "GET" {
+						t.Fatalf("workflow read changed method: %+v %v", request, err)
+					}
+					writeCLIFallback(t, w, "repo_not_public")
+				})
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+				capturePath := captureRewriteGH(t)
+				var stdout, stderr bytes.Buffer
+				if err := runGH(t.Context(), test.args, &stdout, &stderr); err != nil {
+					t.Fatal(err)
 				}
-				writeCLIFallback(t, w, "repo_not_public")
+				capture := readRewriteCapture(t, capturePath)
+				if !slices.Contains(capture.Args, "--method=GET") || !slices.Contains(capture.Args, test.endpoint) || capture.Stdin != "" || stdout.String() != "child stdout\n" {
+					t.Fatalf("fallback lost the read: %q", capture.Args)
+				}
+				if test.include && (!slices.Contains(capture.Args, "--include=true") || !slices.Contains(capture.Args, "--hostname=github.com") || !slices.Contains(capture.Args, "--header=cache-control: max-age=0")) {
+					t.Fatalf("native include lost output, host or freshness options: %q", capture.Args)
+				}
+				if test.include && !strings.Contains(stderr.String(), "--include uses native gh and caller credentials") {
+					t.Fatalf("missing native include route explanation: %q", stderr.String())
+				}
 			})
-			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
-			capturePath := captureRewriteGH(t)
-			var stdout, stderr bytes.Buffer
-			args := []string{"api", "repos/acme/repo/actions/workflows/ci.yml/runs", "-f", "event=pull_request"}
-			if err := runGH(t.Context(), args, &stdout, &stderr); err != nil {
-				t.Fatal(err)
-			}
-			capture := readRewriteCapture(t, capturePath)
-			if !slices.Contains(capture.Args, "--method=GET") || !slices.Contains(capture.Args, "/repos/acme/repo/actions/workflows/ci.yml/runs?event=pull_request") {
-				t.Fatalf("fallback lost the read: %q", capture.Args)
-			}
-		})
+		}
 	}
 }

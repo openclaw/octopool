@@ -368,7 +368,7 @@ gh run rerun 26360397003 --failed -R openclaw/openclaw
 gh api -X POST repos/openclaw/openclaw/actions/runs/26360397003/rerun
 gh api --method POST repos/openclaw/openclaw/actions/runs/26360397003/rerun-failed-jobs
 gh api -X POST repos/openclaw/openclaw/actions/jobs/123456789/rerun
-gh api --method GET repos/openclaw/openclaw/actions/workflows/ci.yml/runs -f event=pull_request -F per_page=100
+gh api --method GET repos/openclaw/openclaw/actions/workflows/ci.yml/runs -f event=pull_request -F per_page=100 -F page=2
 ```
 
 `run rerun ID [--failed] [-R owner/repo]` pins one positive decimal run ID and repository;
@@ -378,7 +378,8 @@ must fit a signed 64-bit integer; zero, leading zeroes, and ambiguous selectors 
 The Worker remains read-only. Retries never use pooled credentials.
 
 Workflow-run reads accept literal `event`, `head_sha` (40 hex characters), `branch`, `status`,
-and `per_page` (1–100) query fields through `-f`/`--raw-field` or `-F`/`--field`.
+`page` (positive decimal integer), and `per_page` (1–100) query fields through
+`-f`/`--raw-field` or `-F`/`--field`.
 For this exact route, fields default to GET even without `--method GET`; they are encoded
 into the checked query before relay dispatch. Duplicate/unknown fields, typed file sources,
 placeholders, and request bodies are rejected on this modeled path.
