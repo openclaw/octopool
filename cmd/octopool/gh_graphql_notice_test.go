@@ -13,6 +13,8 @@ import (
 // Existing stream tests allow the new notice once; dedicated tests below assert
 // its presence, quota details, and absence on REST/relay-only commands.
 func withoutGraphQLNotice(stderr string) string {
+	stderr = strings.Replace(stderr, ghNativeJSONNotice+"\n", "", 1)
+	stderr = strings.Replace(stderr, ghNativeIncludeNotice+"\n", "", 1)
 	return strings.Replace(stderr, "octopool: graphql delegated to personal token\n", "", 1)
 }
 

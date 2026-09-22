@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Explain when JSON field bundles require native gh and when `--include` selects caller credentials, preserving routing, freshness, protection checks, and native output.
+
 ## 0.7.1 - 2026-09-21
 
 ### Fixes

@@ -168,6 +168,12 @@ func execRealGHWithStdinAndEnv(
 		env = envWithGitHubHost(env)
 	}
 	cmd.Env = env
+	// Merge header capture is internal, not a caller-selected include mode.
+	if diagnostic == nil {
+		if notice := nativeReadRoutingNotice(prepared.args); notice != "" {
+			fmt.Fprintln(stderr, notice)
+		}
+	}
 	var graphQLOutput *ghGraphQLStderr
 	if delegatedGHUsesGraphQL(prepared.args) {
 		graphQLOutput = newGHGraphQLStderr(stderr, func() *ghGraphQLQuota {

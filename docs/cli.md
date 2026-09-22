@@ -226,6 +226,26 @@ guarded local fallback. A CLI connected to an older Worker rejects its raw REST 
 before any output and uses guarded fallback; upgrade both components for pooled GraphQL.
 No general GraphQL proxy or caller-controlled upstream query is exposed.
 
+### Read routing and freshness
+
+`--json` selects output fields; it does not guarantee a relay read. A bundle containing
+unsupported fields such as PR `mergeStateStatus` or issue `comments` delegates the entire
+export to native gh. The shim now explains this on stderr before native execution, after
+protection checks. Request only fields the consumer needs, but retain required merge,
+permission and review decisions. Separate descriptive and decision reads only when the
+consumer can preserve consistency across observations.
+
+`gh api --include` (or `-i`) selects native gh and caller credentials, and now prints a
+routing notice on stderr. It changes the reader identity and quota, not just response
+framing or freshness. Use `OCTOPOOL_FRESH=1` or `Cache-Control: max-age=0` for a supported
+relay read. Supported pagination and explicit `--hostname github.com` can still relay.
+
+For final CI decisions, verify the exact run ID, expected head SHA and run attempt using a
+fresh read or exact-run watcher. Broad and filtered run lists can lag on a fresh upstream
+acquisition. A fresh MISS returning an older list is not evidence of expired Octopool
+cache reuse; changing to `--include` is not a guaranteed fresh-list workaround. Cache HITs
+can follow successful revalidation and do not measure avoided GitHub requests.
+
 ### Quota provenance and merge diagnostics
 
 Native GraphQL delegation prints `octopool: graphql delegated to personal token` on
@@ -1347,7 +1367,9 @@ These are dev/CI escape hatches, not the everyday UX:
   decision-shaped route (PR/issue/run/checks) is served from the shared cache.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns
   `fallback_local` or a shim relay read times out, including during an active watch, useful
-  for proving relay/cache coverage.
+  for probing known-supported relay reads. Deliberately unsupported command shapes still
+  delegate directly, so success alone is not universal proof of relay use. Check the actual
+  execution context and routing evidence; a separate sandbox wrapper may not use Octopool.
 - `OCTOPOOL_RELAY_RETRIES` — how many times transient pool-exhaustion fallbacks
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
   `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and
