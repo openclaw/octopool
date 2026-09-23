@@ -478,8 +478,9 @@ references), virtual tables and SQLite statistics tables fail explicitly before
 destructive restoration.
 
 `test/e2e/d1-baseline.ts` isolates a version-specific local runtime contract:
-Miniflare `5.20260804.0-alpha` implements
-`PRAGMA miniflare_d1_export(?,?,?);`, also used by Wrangler `4.120.1`. The D1 binding
+Miniflare `5.20260815.0-alpha` in the test pool implements
+`PRAGMA miniflare_d1_export(?,?,?);`, also used by Wrangler `4.135.0` with
+Miniflare `5.20260918.0-alpha`. The D1 binding
 accepts numeric flags `bind(0, 0)` for schema plus data with no table filter. Its
 single result row is an array of **complete SQL statements**, which the adapter
 validates and submits individually through `D1.batch`. It must never be joined
