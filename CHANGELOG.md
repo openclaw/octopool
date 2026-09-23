@@ -2,10 +2,18 @@
 
 ## Unreleased
 
+## 0.7.3 - 2026-09-23
+
+**Highlights:** Verify release-asset integrity throughout capture and bind cached merge snapshots to their source branches.
+
 ### Fixes
 
 - Verify release-asset bytes before, during, and after staging so same-tick mutations with restored timestamps cannot silently change uploads. Thanks @steipete for the report (#167).
 - Carry source branch names in public merge snapshots and retire prior cache representations from the canonical query, preserving fresh receipt reads and guarded fallback for older Workers. Thanks @steipete (#169).
+
+### Upgrade notes
+
+- Upgrade the CLI for release-asset integrity checks. Upgrade the CLI and Worker together for source-branch merge snapshots; older Workers retain guarded native fallback. No database migration or cache purge is required.
 
 ## 0.7.2 - 2026-09-23
 
