@@ -44,6 +44,10 @@ func copyRewriteSnapshot(ctx context.Context, output io.WriteCloser, input io.Re
 			err = errRewriteBlocked
 		}
 	}()
+	return copyRewriteBytes(ctx, output, input, expected, limit)
+}
+
+func copyRewriteBytes(ctx context.Context, output io.Writer, input io.Reader, expected, limit int64) (copied int64, err error) {
 	if expected < 0 || expected > limit {
 		return 0, errRewriteBlocked
 	}

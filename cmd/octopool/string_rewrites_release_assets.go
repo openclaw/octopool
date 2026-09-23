@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"io"
 	"os"
 	"path/filepath"
@@ -139,6 +141,18 @@ func sameRewriteAssetInfo(a, b os.FileInfo) bool {
 
 type rewriteSnapshotCopy func(context.Context, io.WriteCloser, io.Reader, int64, int64) (int64, error)
 
+func digestRewriteReleaseAsset(ctx context.Context, input io.ReadSeeker, expected, limit int64) ([]byte, error) {
+	if _, err := input.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	digest := sha256.New()
+	if _, err := copyRewriteBytes(ctx, digest, input, expected, limit); err != nil {
+		return nil, err
+	}
+	_, err := input.Seek(0, io.SeekStart)
+	return digest.Sum(nil), err
+}
+
 func (prepared *rewritePreparation) snapshotReleaseAsset(asset rewriteReleaseAsset, limit int64, copySnapshot rewriteSnapshotCopy) (string, int64, error) {
 	if err := prepared.context().Err(); err != nil {
 		return "", 0, err
@@ -153,6 +167,10 @@ func (prepared *rewritePreparation) snapshotReleaseAsset(asset rewriteReleaseAss
 	if err != nil || changeErr != nil || !sameRewriteAssetInfo(asset.info, info) || change != asset.change {
 		return "", 0, errRewriteBlocked
 	}
+	beforeDigest, err := digestRewriteReleaseAsset(prepared.context(), input, info.Size(), limit)
+	if err != nil {
+		return "", 0, errRewriteBlocked
+	}
 	if err := prepared.ensureSnapshotDirectory(); err != nil {
 		return "", 0, err
 	}
@@ -165,8 +183,19 @@ func (prepared *rewritePreparation) snapshotReleaseAsset(asset rewriteReleaseAss
 	if err != nil {
 		return "", 0, errRewriteBlocked
 	}
-	copied, err := copySnapshot(prepared.context(), output, input, info.Size(), limit)
+	copyDigest := sha256.New()
+	checkedOutput := struct {
+		io.Writer
+		io.Closer
+	}{io.MultiWriter(output, copyDigest), output}
+	copied, err := copySnapshot(prepared.context(), checkedOutput, input, info.Size(), limit)
 	if err != nil {
+		return "", 0, errRewriteBlocked
+	}
+	// Metadata can stay identical within one filesystem timestamp tick. Compare
+	// the copied bytes and a second source read with the pre-copy digest.
+	afterDigest, err := digestRewriteReleaseAsset(prepared.context(), input, info.Size(), limit)
+	if err != nil || !bytes.Equal(beforeDigest, copyDigest.Sum(nil)) || !bytes.Equal(beforeDigest, afterDigest) {
 		return "", 0, errRewriteBlocked
 	}
 	after, err := input.Stat()

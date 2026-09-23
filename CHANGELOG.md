@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Verify release-asset bytes before, during, and after staging so same-tick mutations with restored timestamps cannot silently change uploads. Thanks @steipete for the report (#167).
+
 ## 0.7.2 - 2026-09-23
 
 ### Fixes

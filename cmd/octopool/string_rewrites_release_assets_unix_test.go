@@ -18,7 +18,7 @@ func TestReleaseAssetsUnixReplacementAndMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"replacement before open", "symlink before open", "fifo before open", "replacement during copy", "truncate", "growth", "in-place", "restored mtime", "cancel"} {
+	for _, kind := range []string{"replacement before open", "symlink before open", "fifo before open", "replacement during copy", "truncate", "growth", "in-place", "restored mtime", "restored mtime behind copy", "cancel"} {
 		t.Run(kind, func(t *testing.T) {
 			data := bytes.Repeat([]byte{0, 0xff, 'a', 'b'}, rewriteSnapshotBuffer)
 			source := releaseAssetFile(t, "original.zip", data)
@@ -70,18 +70,22 @@ func TestReleaseAssetsUnixReplacementAndMutation(t *testing.T) {
 						if err := os.Truncate(source, int64(len(data)+1)); err != nil {
 							t.Fatal(err)
 						}
-					case "in-place", "restored mtime":
+					case "in-place", "restored mtime", "restored mtime behind copy":
 						f, err := os.OpenFile(source, os.O_WRONLY, 0)
 						if err != nil {
 							t.Fatal(err)
 						}
-						_, writeErr := f.WriteAt([]byte("changed"), rewriteSnapshotBuffer+10)
+						offset := int64(rewriteSnapshotBuffer + 10)
+						if kind == "restored mtime behind copy" {
+							offset = 10
+						}
+						_, writeErr := f.WriteAt([]byte("changed"), offset)
 						closeErr := f.Close()
 						if writeErr != nil || closeErr != nil {
 							t.Fatal(writeErr, closeErr)
 						}
 						mod := time.Unix(123456789, 0)
-						if kind == "restored mtime" {
+						if kind != "in-place" {
 							mod = before.ModTime()
 						}
 						if err := os.Chtimes(source, mod, mod); err != nil {

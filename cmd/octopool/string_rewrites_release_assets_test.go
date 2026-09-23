@@ -457,6 +457,34 @@ func TestReleaseAssetsBoundedCopyFailures(t *testing.T) {
 	}
 }
 
+func TestReleaseAssetsSnapshotContentMismatch(t *testing.T) {
+	policy, err := compileStringRewriteRules([]stringRewriteRule{{Pattern: "private-term", Replacement: "public"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := bytes.Repeat([]byte("x"), rewriteSnapshotBuffer+1)
+	source := releaseAssetFile(t, "archive.zip", data)
+	prepared := &rewritePreparation{}
+	defer prepared.cleanup()
+	assets, err := prepared.releaseAssets(policy, []string{source}, defaultRewriteReleaseLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copySnapshot := func(ctx context.Context, out io.WriteCloser, in io.Reader, expected, limit int64) (int64, error) {
+		// Model a transient mutation visible only to the copy, with stable metadata
+		// and identical source bytes before and after it.
+		chunk := make([]byte, rewriteSnapshotBuffer)
+		if _, err := io.ReadFull(in, chunk); err != nil {
+			t.Fatal(err)
+		}
+		chunk[0] ^= 1
+		return copyRewriteSnapshot(ctx, out, io.MultiReader(bytes.NewReader(chunk), in), expected, limit)
+	}
+	if _, _, err := prepared.snapshotReleaseAsset(assets[0], defaultRewriteReleaseLimits.file, copySnapshot); err == nil {
+		t.Fatal("changed snapshot bytes accepted")
+	}
+}
+
 type errReleaseReader struct{}
 
 func (errReleaseReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }

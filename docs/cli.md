@@ -1098,8 +1098,11 @@ remain supported for release assets when their paths contain no release operand 
 
 Every asset is copied in 64 KiB chunks into exclusively created private snapshot files
 before native `gh` starts, preserving names, order, and opaque bytes. Descriptor identity
-and before/after file metadata reject observed replacement, size changes, or in-place
-mutation. Unix opens do not follow symlink operands and cannot block on a substituted
+and before/after file metadata reject observed replacement and size changes. Bounded
+SHA-256 passes compare the source before and after copying with the bytes written to
+the snapshot, rejecting in-place mutation even when file timestamps are unchanged.
+This reads each source three times with constant memory; the same size limits and
+cancellation checks apply to every pass. Unix opens do not follow symlink operands and cannot block on a substituted
 FIFO. Windows requires persistent filesystem ACLs, creates staging with a protected
 current-user-only inheritable ACL, pins directory handles against deletion, and excludes
 source write/delete sharing while capturing. Cancellation is checked between chunks and
@@ -1109,8 +1112,9 @@ cancellation; uncatchable termination and power loss can leave temporary files b
 Assets, including checksums and provenance, are opaque: Octopool does not rewrite,
 unpack, rebuild, sign, or certify their contents as secret-free. The caller owns artifact
 review, provenance, and a reviewed, frozen source directory. Staging isolates subsequent
-source changes; metadata checks cannot prove correspondence with earlier verification
-against arbitrary hostile local writers before capture. There is no digest handoff.
+source changes; these checks cannot prove correspondence with earlier verification
+or prevent arbitrary hostile local writers from coordinating changes during capture.
+There is no digest handoff.
 Local preparation is all-or-nothing, but remote draft creation and upload are not a
 transaction. A failed child can leave a partial remote draft. Octopool does not delete
 drafts, replace assets, clobber, retry uploads, or publish after failure. This capability
