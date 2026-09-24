@@ -62,9 +62,9 @@ The pool coordinator's location hint in `src/pool-coordinator.ts`
 calls do not cross regions.
 
 The `PoolCoordinator` and `PolicyCoordinator` Durable Object classes are provisioned by
-migration tags `v1` and `v2` in `wrangler.jsonc` on `wrangler deploy`. Existing deployments
-must follow the [policy coordinator upgrade](#policy-coordinator-upgrade) before enabling
-warm policy reads. The policy object's initial location hint also targets the D1 primary;
+migration tags `v1` and `v2` in `wrangler.jsonc` on `wrangler deploy`. See the
+[policy coordinator upgrade](#policy-coordinator-upgrade) for freshness and rollback behavior.
+The policy object's initial location hint also targets the D1 primary;
 keep its fixed `string-rewrite-policy` name unchanged across deployments.
 
 ### 3. Add secrets
@@ -384,21 +384,26 @@ setting, not a per-pool override.
 Each protected CLI operation downloads a fresh policy; the Worker separately obtains the
 authoritative snapshot from `PolicyCoordinator` for each relay request after authentication and
 normalization, before classification, repository probes, caches, upstream calls, or
-audit metadata. A policy change therefore affects the next request even in a warm
+audit metadata. An admin API change through the coordinator affects the next request even in a warm
 isolate or on a cache hit. An in-flight operation uses the snapshot checked before its
 dispatch; changing a policy does not recall an already dispatched request. Older CLIs retain
-their old behavior; policy writers must follow the cutover requirements below.
+their old behavior; writes by older Workers follow the 60-second visibility bound below.
 
 Each policy download and relay policy load costs one call to the dedicated global object.
-It holds a validated, compiled snapshot in memory, loads the D1 primary once when cold, and
+It holds a validated, compiled snapshot in memory, loads the D1 primary when cold or expired, and
 serializes D1 revision-CAS writes with snapshot installation before acknowledging success.
-A GET or relay policy load starting after a successful PUT observes that revision or newer.
-Warm reads issue no policy SQL and share no pool/publication coordinator critical section.
+Admin API writes through the coordinator are immediately visible to subsequent GETs and relay
+policy loads. Any other write, including older Workers, manual D1 edits, and restores, is visible
+within 60 seconds. The maximum snapshot age is measured from the start of its D1 load or write,
+so a slow response cannot extend that bound. The first read at expiry reloads from the primary
+under the existing gate; concurrent reads share that reload and never receive expired rules.
+Unexpired reads issue no policy SQL and share no pool/publication coordinator critical section.
 Relay requests still compile their request-scoped rules because compiled RE2 instances cannot
 cross the object boundary. No policy is cached outside the object. Even empty policies require
-an authoritative object read; there is no stale-read window, replica shortcut, or offline
-fallback. Eviction reloads the primary. Failed writes invalidate the snapshot before any
+an authoritative object read; there is no expired-policy fallback, replica shortcut, or offline
+allowance. Eviction reloads the primary. Failed writes invalidate the snapshot before any
 possibly committed D1 change; subsequent reads fail closed until primary reconciliation succeeds.
+Expired-snapshot reload failures likewise return 503 unavailable, never the old policy.
 Measure DO request/CPU/duration cost, response bytes, queue time, cold-load frequency and
 latency with representative rules before claiming cost or tail-latency savings.
 
@@ -442,29 +447,23 @@ there is no new D1 schema migration or CLI change. All policy access uses the si
 `string-rewrite-policy` object. Never rename it, split it by pool, or send traffic to two
 independent policy namespaces backed by the same D1 row.
 
-Before the first deployment, stop admin policy PUTs and direct D1 policy writes at every
-ingress (custom domains, proxy, workers.dev, and service bindings), and drain in-flight
-writers. Keep that fence in place while deploying the Worker with migration `v2`. Do not
-use a gradual mixed-version rollout: old Workers can acknowledge direct D1 writes without
-invalidating the new object's snapshot. Confirm every serving Worker version uses the
-coordinator and no old invocation can still commit before reopening writes. Verify an
-authenticated admin GET and a caller GET report the same reviewed revision. Then, during
-the authorized rollout, PUT the reviewed rules with that expected revision and confirm
-subsequent admin/caller GETs through every ingress observe the acknowledged revision or newer.
-Do not log rule contents in rollout evidence. If old-writer exclusion cannot be established,
-keep writes fenced and stop the cutover.
+No policy write fence or exclusion of mixed Worker versions is required. Admin API writes
+mediated by the coordinator are immediately visible. During a mixed-version rollout, writes
+by an older Worker bypass the coordinator and become visible within 60 seconds, just like
+manual D1 edits and restores. Reads require a successful primary reload after snapshot expiry;
+failures fail closed with `503 string_rewrite_policy_unavailable` instead of expired rules.
+During the authorized rollout, verify authenticated admin/caller GETs through each ingress
+observe the reviewed policy within that bound. Do not log rule contents in rollout evidence.
 
-Rollback to a pre-coordinator Worker requires the same write fence and drain, plus stopping
-all coordinator readers before reopening direct-D1 writers. Keep migration `v2` and its
-binding/class in any rollback build; roll back application behavior with a forward deploy
-if the platform cannot roll back across the DO migration. Before returning to coordinator
-reads, fence/drain direct writers and restart the existing policy object so it reloads the
-primary. Do not switch to a new object name as a shortcut.
+Keep migration `v2` and its binding/class in rollback builds; roll back application behavior
+with a forward deploy if the platform cannot roll back across the DO migration. Returning
+to coordinator reads does not require an object restart: direct-D1 changes are picked up at
+the next snapshot expiry, within 60 seconds. Keep the existing object name and namespace.
 
-For emergency direct D1 repair, quiesce all policy traffic and drain active operations,
-restore the reviewed singleton row, then restart the policy object before reopening reads
-or writes. Verify the primary revision matches authenticated policy GETs. Manual D1 edits
-while the object is warm cannot notify it and are not a supported publication path.
+For emergency direct D1 repair, restore the reviewed singleton row and verify authenticated
+policy GETs match the primary within 60 seconds. A restart is not required. Prefer the
+revision-checked admin API for normal edits because it publishes immediately; missing or
+corrupt rows still require storage repair, and failed reloads never authorize fallback.
 
 The Worker remains GET-only. Local GitHub writes use the caller's own credentials and
 need the updated CLI's supported content preparation. Direct real `gh`, browsers, Git

@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { queries } from "../../src/generated/sql";
 import worker from "../../src/index";
-import { policyCoordinatorStub } from "../../src/policy-coordinator";
+import { POLICY_SNAPSHOT_MAX_AGE_MS, policyCoordinatorStub } from "../../src/policy-coordinator";
 import { CALLER_TOKEN, callWorker, POOL, relay, runWithContext, seedPool } from "./harness";
 import { observePolicyD1 } from "./policy-d1-observer";
 import { ownedWork } from "./owned-work";
@@ -30,6 +30,76 @@ async function unavailable(response: Response) {
 }
 
 describe("global policy coordinator", () => {
+  it("reloads an expired snapshot exactly once for concurrent GETs", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const release = ownedWork.gate();
+    let reads = 0;
+    await observePolicyD1({
+      before: async (sql) => {
+        if (sql === queries.getStringRewritePolicy && ++reads === 2) await release.promise;
+      },
+    });
+    expect((await read()).status).toBe(200);
+    clock.mockReturnValue(now + POLICY_SNAPSHOT_MAX_AGE_MS - 1);
+    expect((await read()).status).toBe(200);
+    expect(reads).toBe(1);
+    clock.mockReturnValue(now + POLICY_SNAPSHOT_MAX_AGE_MS);
+    let finished = 0;
+    const readers = Array.from({ length: 12 }, () =>
+      read().then(async (response) => {
+        finished++;
+        expect(response.status).toBe(200);
+        return response.json();
+      }),
+    );
+    await expect.poll(() => reads).toBe(2);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(finished).toBe(0);
+    release.release();
+    for (const snapshot of await Promise.all(readers))
+      expect(snapshot).toMatchObject({ revision: 1, rules: [] });
+    expect(reads).toBe(2);
+  });
+
+  it("observes an out-of-band D1 revision bump after the snapshot expires", async () => {
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    expect(await (await read()).json()).toMatchObject({ revision: 1, rules: [] });
+    await env.DB.prepare("UPDATE string_rewrite_policy SET revision = revision + 1, rules_json = ?")
+      .bind(JSON.stringify(rules))
+      .run();
+    clock.mockReturnValue(now + POLICY_SNAPSHOT_MAX_AGE_MS - 1);
+    expect(await (await read()).json()).toMatchObject({ revision: 1, rules: [] });
+    clock.mockReturnValue(now + POLICY_SNAPSHOT_MAX_AGE_MS);
+    expect(await (await read()).json()).toMatchObject({ revision: 2, rules });
+    expect((await put(2, [])).status).toBe(200);
+    expect(await (await read()).json()).toMatchObject({ revision: 3, rules: [] });
+  });
+
+  it("fails closed on an expired snapshot reload failure without serving the old policy", async () => {
+    await seedPool();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    expect(await (await read()).json()).toMatchObject({ revision: 1, rules: [] });
+    let fail = true;
+    await observePolicyD1({
+      before: async (sql) => {
+        if (fail && sql === queries.getStringRewritePolicy) throw new Error("primary unavailable");
+      },
+    });
+    clock.mockReturnValue(now + POLICY_SNAPSHOT_MAX_AGE_MS);
+    await unavailable(await read());
+    await unavailable(
+      await callWorker(`/v1/pools/${POOL}/string-rewrites`, {
+        headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+      }),
+    );
+    await unavailable(await relay("/repos/example/demo"));
+    fail = false;
+    expect(await (await read()).json()).toMatchObject({ revision: 1, rules: [] });
+  });
+
   it("fails closed when a previously warm coordinator becomes unavailable", async () => {
     await seedPool();
     expect((await read()).status).toBe(200);

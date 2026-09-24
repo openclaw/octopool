@@ -20,7 +20,13 @@ export type StringRewritePolicy = {
   rules: StringRewriteRule[];
 };
 
-type Snapshot = { policy: StringRewritePolicy; compiled: CompiledStringRewriteRule[] };
+export const POLICY_SNAPSHOT_MAX_AGE_MS = 60_000;
+
+type Snapshot = {
+  policy: StringRewritePolicy;
+  compiled: CompiledStringRewriteRule[];
+  loadedAt: number;
+};
 
 export function stringRewritePolicyUnavailable(): HttpError {
   return new HttpError(
@@ -41,16 +47,23 @@ export class PolicyCoordinator extends DurableObject<Env> {
 
   override async fetch(request: Request): Promise<Response> {
     try {
-      if (request.method === "GET" && this.snapshot !== undefined) {
-        return jsonResponse(this.snapshot.policy);
+      const current = this.freshSnapshot();
+      if (request.method === "GET" && current !== undefined) {
+        return jsonResponse(current.policy);
       }
       // Parse the bounded body before taking the gate; slow uploads do not block reads.
       const update = request.method === "PUT" ? await parseUpdate(request) : undefined;
       return await this.ctx.blockConcurrencyWhile(async () => {
         // Catch inside the gate so expected failures do not reset the object.
         try {
-          this.snapshot ??= await this.readPrimary();
-          if (update === undefined) return jsonResponse(this.snapshot.policy);
+          let snapshot = this.freshSnapshot();
+          if (snapshot === undefined) {
+            // An expired snapshot cannot survive a failed refresh.
+            this.snapshot = undefined;
+            snapshot = await this.readPrimary();
+            this.snapshot = snapshot;
+          }
+          if (update === undefined) return jsonResponse(snapshot.policy);
           return await this.replace(update.expectedRevision, update.rules);
         } catch (error) {
           return errorResponse(
@@ -63,13 +76,22 @@ export class PolicyCoordinator extends DurableObject<Env> {
     }
   }
 
+  private freshSnapshot(): Snapshot | undefined {
+    const snapshot = this.snapshot;
+    if (snapshot === undefined) return undefined;
+    const age = Date.now() - snapshot.loadedAt;
+    return age >= 0 && age < POLICY_SNAPSHOT_MAX_AGE_MS ? snapshot : undefined;
+  }
+
   private async readPrimary(): Promise<Snapshot> {
+    // Start the age before I/O so a delayed response cannot extend freshness.
+    const loadedAt = Date.now();
     try {
       // Missing migration/row is not an empty policy; replicas cannot bootstrap authority.
       const row: unknown = await this.env.DB.withSession("first-primary")
         .prepare(queries.getStringRewritePolicy)
         .first();
-      return compileSnapshot(row);
+      return compileSnapshot(row, loadedAt);
     } catch {
       throw stringRewritePolicyUnavailable();
     }
@@ -93,6 +115,7 @@ export class PolicyCoordinator extends DurableObject<Env> {
     // A write can commit without an acknowledgement, or installation can fail.
     // Discard the old snapshot before either is possible; the next read reconciles at primary.
     this.snapshot = undefined;
+    const loadedAt = Date.now();
     try {
       const result = await this.env.DB.withSession("first-primary")
         .prepare(queries.replaceStringRewritePolicy)
@@ -101,7 +124,10 @@ export class PolicyCoordinator extends DurableObject<Env> {
       if (result === null) throw conflict();
       if (result.revision !== expectedRevision + 1 || result.updated_at !== updatedAt)
         throw stringRewritePolicyUnavailable();
-      const snapshot = compileSnapshot({ schema_version: 1, ...result, rules_json: rulesJSON });
+      const snapshot = compileSnapshot(
+        { schema_version: 1, ...result, rules_json: rulesJSON },
+        loadedAt,
+      );
       const response = jsonResponse({
         schema_version: 1,
         revision: snapshot.policy.revision,
@@ -122,7 +148,7 @@ function revision(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
 
-function compileSnapshot(row: unknown): Snapshot {
+function compileSnapshot(row: unknown, loadedAt: number): Snapshot {
   if (
     !isRecord(row) ||
     row.schema_version !== 1 ||
@@ -145,7 +171,7 @@ function compileSnapshot(row: unknown): Snapshot {
     STRING_REWRITE_LIMITS.policyBytes,
     stringRewritePolicyUnavailable,
   );
-  return { policy, compiled };
+  return { policy, compiled, loadedAt };
 }
 
 async function parseUpdate(
