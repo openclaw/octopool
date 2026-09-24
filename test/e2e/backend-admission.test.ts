@@ -3,6 +3,10 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterEach, expect, it, vi } from "vitest";
 import { hashToken } from "../../src/auth";
 import { backendAdmissionStub } from "../../src/backend-admission";
+import { BackendWork, backendWorkSignal } from "../../src/backend-work";
+import { GITHUB_EDGE_CACHE_NAMESPACE, readEdgeGitHubCache } from "../../src/cache";
+import { deleteEdgeJSON } from "../../src/edge-cache";
+import { queries } from "../../src/generated/sql";
 import worker from "../../src/index";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import {
@@ -13,15 +17,18 @@ import {
   githubUpstream,
   jsonResponse,
   relay,
+  rateHeaders,
   runWithContext,
   seedPool,
 } from "./harness";
 import { ownedWork } from "./owned-work";
 import { requestWithEnv } from "./identity-routing-support";
+import { observePublicationD1 } from "./publication-d1-observer";
 
 const path = (id: number) => `/repos/openclaw/octopool/check-runs/${id}/annotations`;
 const admission = () => backendAdmissionStub(env, POOL);
 const client = JSON.stringify(["caller", "test-mac"]);
+const limit = BackendWork.limit(env);
 afterEach(() => vi.useRealTimers());
 
 async function permitRows() {
@@ -39,7 +46,7 @@ async function addToken(id: string, name: string) {
 }
 
 it.each(["anonymous", "identity"])(
-  "admits six %s misses, denies exactly one, and exempts warm hits and a second client",
+  "admits the configured limit of %s misses, denies exactly one, and exempts warm hits and a second client",
   async (backend) => {
     await seedPool();
     await addToken("other-token", "other-mac");
@@ -64,14 +71,14 @@ it.each(["anonymous", "identity"])(
     );
     expect((await relay(path(100))).status).toBe(200);
     const completed: Response[] = [];
-    const requests = Array.from({ length: 7 }, (_, i) =>
+    const requests = Array.from({ length: limit + 1 }, (_, i) =>
       relay(path(i + 1)).then((response) => {
         completed.push(response);
         return response;
       }),
     );
     try {
-      await expect.poll(() => entered).toBe(6);
+      await expect.poll(() => entered).toBe(limit);
       await expect.poll(() => completed.length).toBe(1);
       expect(completed[0]!.status).toBe(424);
       expect(await completed[0]!.clone().json()).toMatchObject({
@@ -98,7 +105,7 @@ it.each(["anonymous", "identity"])(
         .bind(await hashToken("rotated-token"))
         .run();
       expect((await relay(path(102), "rotated-token")).status).toBe(424);
-      expect(await permitRows()).toHaveLength(6);
+      expect(await permitRows()).toHaveLength(limit);
       const denied = await env.DB.prepare(
         "SELECT caller_token_id, client_name, fallback_reason FROM audit_events WHERE error_code = 'fallback_local' ORDER BY caller_token_id",
       ).all();
@@ -134,13 +141,13 @@ it.each(["anonymous", "identity"])(
         ]),
       });
       console.log(
-        `admission ${backend}: 7 misses -> 6 admitted + 1 relay_overloaded; warm hit=200; second client=200; rotated token=424; audit/stats attributed`,
+        `admission ${backend}: ${limit + 1} misses -> ${limit} admitted + 1 relay_overloaded; warm hit=200; second client=200; rotated token=424; audit/stats attributed`,
       );
     } finally {
       gate.release();
       await Promise.all(requests);
     }
-    expect(completed.filter((response) => response.status === 200)).toHaveLength(6);
+    expect(completed.filter((response) => response.status === 200)).toHaveLength(limit);
     expect(await permitRows()).toHaveLength(0);
   },
 );
@@ -181,6 +188,97 @@ it("fails closed on a lost grant acknowledgement and cleans up the committed per
   });
   expect(upstream).not.toHaveBeenCalled();
   expect(await permitRows()).toHaveLength(0);
+});
+
+it("finishes audit, rate snapshots and edge warming after normal completion aborts backend egress", async () => {
+  await seedPool();
+  const backgroundGate = ownedWork.gate();
+  const entered = new Set<string>();
+  let signal: AbortSignal | undefined;
+  const traced = {
+    ...env,
+    DB: observePublicationD1(env.DB, {
+      before: async (sql) => {
+        if (sql === queries.readGitHubCache) signal = backendWorkSignal();
+        if (sql === queries.insertAudit || sql === queries.upsertPublicApiRate) {
+          entered.add(sql);
+          await backgroundGate.promise;
+        }
+      },
+    }),
+  };
+  const upstream = vi.fn<typeof fetch>(async () =>
+    jsonResponse([], 200, rateHeaders({ remaining: 59 })),
+  );
+  vi.stubGlobal("fetch", upstream);
+  const request = () =>
+    new Request("https://octopool.dev/v1/github/request", {
+      method: "POST",
+      headers: { authorization: `Bearer ${CALLER_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ pool: POOL, method: "GET", path: path(1) }),
+    });
+  let returned = false;
+  const miss = runWithContext(async (ctx) => {
+    const response = await worker.fetch(request(), traced, ctx);
+    expect(response.status).toBe(200);
+    expect(signal?.aborted).toBe(true);
+    returned = true;
+  });
+  let cacheKey!: string;
+  try {
+    await expect.poll(() => returned).toBe(true);
+    expect(entered).toEqual(new Set([queries.insertAudit, queries.upsertPublicApiRate]));
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events").first("n")).toBe(0);
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS n FROM github_public_api_rates").first("n"),
+    ).toBe(0);
+    // Miss publication (including its edge write) is finished before the response.
+    cacheKey = (await env.DB.prepare("SELECT cache_key FROM github_cache_entries").first<string>(
+      "cache_key",
+    ))!;
+    expect((await readEdgeGitHubCache(cacheKey))?.body).toEqual([]);
+  } finally {
+    backgroundGate.release();
+    await miss;
+  }
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events").first("n")).toBe(1);
+  expect(
+    await env.DB.prepare("SELECT remaining FROM github_public_api_rates").first("remaining"),
+  ).toBe(59);
+
+  await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, cacheKey);
+  const edgeGate = ownedWork.gate();
+  const edgeEntered = ownedWork.gate();
+  const native = caches.default;
+  vi.stubGlobal("caches", {
+    default: {
+      match: native.match.bind(native),
+      delete: native.delete.bind(native),
+      put: async (key: Request, response: Response) => {
+        edgeEntered.release();
+        await edgeGate.promise;
+        return native.put(key, response);
+      },
+    },
+  });
+  returned = false;
+  const hit = runWithContext(async (ctx) => {
+    const response = await worker.fetch(request(), traced, ctx);
+    expect(await response.json()).toMatchObject({ relay: { cache: "hit" } });
+    expect(signal?.aborted).toBe(true);
+    returned = true;
+  });
+  try {
+    await edgeEntered.promise;
+    await expect.poll(() => returned).toBe(true);
+    expect(await readEdgeGitHubCache(cacheKey)).toBeUndefined();
+  } finally {
+    edgeGate.release();
+    await hit;
+  }
+  expect((await readEdgeGitHubCache(cacheKey))?.body).toEqual([]);
+  expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events").first("n")).toBe(2);
+  expect(upstream).toHaveBeenCalledTimes(1);
 });
 
 it("keeps admission independent of the pool object's publication gate", async () => {

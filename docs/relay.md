@@ -396,7 +396,7 @@ request queue backed up, the relay returns `424 fallback_local` with reason
 `internal_error`, so the shim can back off and delegate to real `gh`.
 
 The same response applies when a client's backend-work allowance is full or its permit
-expires. The default is six concurrent backend-work requests per authenticated caller/client
+expires. The default is eight concurrent backend-work requests per authenticated caller/client
 in each pool, configurable with `CLIENT_BACKEND_CONCURRENCY`. Fresh cache-only hits bypass
 admission, including eligible identity-cache entries; misses, revalidations, and live
 probes require a permit. See [backend-work admission](operations.md#backend-work-admission)

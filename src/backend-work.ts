@@ -49,7 +49,7 @@ export class BackendWork {
   ) {}
 
   static limit(env: Env): number {
-    return parsePositiveInt(env.CLIENT_BACKEND_CONCURRENCY, 6);
+    return parsePositiveInt(env.CLIENT_BACKEND_CONCURRENCY, 8);
   }
 
   check(): void {

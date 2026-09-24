@@ -163,7 +163,7 @@ Plain vars (in `wrangler.jsonc`):
 - `MAX_RESPONSE_BYTES` — single response-body cap for every route (2 MiB default; the hosted
   deployment sets 4 MiB).
 - `REQUEST_TIMEOUT_MS` — 15s default.
-- `CLIENT_BACKEND_CONCURRENCY` — 6 default; concurrent backend-work requests per
+- `CLIENT_BACKEND_CONCURRENCY` — 8 default; concurrent backend-work requests per
   authenticated caller/client in each pool (positive integer).
 - `ORG_VERIFY_TTL_SECONDS` — 24h default; how long an org-membership verification stays
   fresh before octopool re-checks at request time.
@@ -565,9 +565,14 @@ the coordinator's constructor and storage cleanup.
 
 Each pool has a separate `BackendAdmission` Durable Object. It admits up to
 `CLIENT_BACKEND_CONCURRENCY` requests per authenticated `(caller_id, client_name)`;
-the default is 6. The client name comes from the stored token row, never a request
-header. Tokens rotated for the same client keep the same allowance. Different clients
-have independent allowances, including two clients belonging to the same caller.
+the default is 8. This equals the CLI's default machine-wide relay-read limit
+(`OCTOPOOL_RELAY_CONCURRENCY`), so up-to-date CLIs queue locally for up to 30 seconds.
+With matching defaults, the server cap is a backstop for older CLIs, disabled local
+limiters, or a local limiter that fails open. Keep customized client and server limits
+aligned to avoid unnecessary native fallback. The client name comes from the stored
+token row, never a request header. Tokens rotated for the same client keep the same
+allowance. Different clients have independent allowances, including two clients
+belonging to the same caller.
 This is a concurrency cap, not a fair queue or a pool-wide ceiling; separately
 enrolled client names have separate allowances.
 
@@ -591,6 +596,11 @@ survive object restart. Expired rows do not count and drain in batches of 64 on 
 an idle object may retain expired rows until its next request. Already submitted storage
 operations cannot be recalled and may finish after cancellation under the existing
 publication fencing rules.
+
+Normal response completion also aborts the request's backend-egress signal. Cache
+publication is awaited before the response; background audit inserts, D1-to-edge warming,
+and rate snapshots use storage operations without that signal or the active-work guard,
+so their `waitUntil` work can finish after the response.
 
 Denials return `424 fallback_local` with reason `relay_overloaded`. The CLI's default
 budget already retries once after one second, then attempts guarded native fallback;

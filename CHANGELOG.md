@@ -4,7 +4,7 @@
 
 ### Features
 
-- Limit each authenticated caller/client to six concurrent backend-work requests per pool, with configurable admission, renewable durable leases, unthrottled fresh cache-only hits, and client-attributed `relay_overloaded` fallbacks.
+- Limit each authenticated caller/client to eight concurrent backend-work requests per pool, matching the CLI's default machine-wide slots, with configurable admission, renewable durable leases, unthrottled fresh cache-only hits, and client-attributed `relay_overloaded` fallbacks.
 
 ### Fixes
 
@@ -14,7 +14,7 @@
 ### Upgrade notes
 
 - Deploy the Worker with Durable Object migration `v2` (`PolicyCoordinator`). No CLI change, D1 schema migration, or policy write fence is required; writes from older Workers, manual D1 edits, and restores are picked up within 60 seconds, and reload failures fail closed.
-- Deploy the Worker with the new `BACKEND_ADMISSION` binding and `v3` SQLite Durable Object migration; `CLIENT_BACKEND_CONCURRENCY` defaults to 6. Existing CLIs already retry and handle the overload fallback; no CLI upgrade, D1 migration, cache purge, or re-login is required.
+- Deploy the Worker with the new `BACKEND_ADMISSION` binding and `v3` SQLite Durable Object migration; `CLIENT_BACKEND_CONCURRENCY` defaults to 8. Existing CLIs already retry and handle the overload fallback; no CLI upgrade, D1 migration, cache purge, or re-login is required.
 
 ## 0.8.0 - 2026-09-24
 

@@ -22,7 +22,7 @@ function fixture() {
     },
   } as unknown as ExecutionContext;
   const input = new AbortController();
-  const work = new BackendWork(admission, '["caller","client"]', 6);
+  const work = new BackendWork(admission, '["caller","client"]', BackendWork.limit({} as Env));
   const run = (handler: () => Promise<unknown>) =>
     work.run(input.signal, ctx, handler).then(
       (value) => ({ value }),
@@ -34,6 +34,12 @@ function fixture() {
     });
   return { admission, background, input, run, untilAbort };
 }
+
+it("defaults to eight CLI slots and honors a configured server limit", () => {
+  for (const value of [undefined, "", "invalid"])
+    expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: value } as Env)).toBe(8);
+  expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: "3" } as unknown as Env)).toBe(3);
+});
 
 it("coalesces acquisition only inside one request and releases on success", async () => {
   const f = fixture();
