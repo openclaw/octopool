@@ -1,7 +1,7 @@
 # Deployment & Operations
 
 Octopool runs as a Cloudflare Worker (`octopool`) plus Durable Object classes
-(`PoolCoordinator` and `PolicyCoordinator`) and a D1 database. The OpenClaw deployment serves the authoritative
+(`PoolCoordinator`, `PolicyCoordinator`, and `BackendAdmission`) and a D1 database. The OpenClaw deployment serves the authoritative
 data plane at `octopool.openclaw.ai`; a thin `octopool.dev` Worker in the domain's
 Cloudflare account forwards into it so both hosts share one cache. Self-hosters can
 ignore that proxy and deploy only the main Worker.
@@ -61,8 +61,8 @@ The pool coordinator's location hint in `src/pool-coordinator.ts`
 (`poolCoordinatorStub`) should match the D1 location so per-request coordinator
 calls do not cross regions.
 
-The `PoolCoordinator` and `PolicyCoordinator` Durable Object classes are provisioned by
-migration tags `v1` and `v2` in `wrangler.jsonc` on `wrangler deploy`. See the
+The `PoolCoordinator`, `PolicyCoordinator`, and `BackendAdmission` Durable Object classes are provisioned by
+migration tags `v1`, `v2`, and `v3`, respectively, in `wrangler.jsonc` on `wrangler deploy`. See the
 [policy coordinator upgrade](#policy-coordinator-upgrade) for freshness and rollback behavior.
 The policy object's initial location hint also targets the D1 primary;
 keep its fixed `string-rewrite-policy` name unchanged across deployments.
@@ -145,6 +145,8 @@ The hosted OpenClaw deployment keeps both Workers in the OpenClaw Services accou
   migration tag `v1`).
 - Durable Object `PolicyCoordinator` (binding `POLICY_COORDINATOR`, SQLite-backed class,
   migration tag `v2`; D1 remains the durable policy store).
+- Durable Object `BackendAdmission` (binding `BACKEND_ADMISSION`, SQLite-backed,
+  migration tag `v3`), with one independent admission object per pool.
 - D1 database `octopool-wnam` (binding `DB`).
 
 Both hosted Worker deploys use the Molty item `OpenClaw Services Cloudflare API Token`;
@@ -161,6 +163,8 @@ Plain vars (in `wrangler.jsonc`):
 - `MAX_RESPONSE_BYTES` — single response-body cap for every route (2 MiB default; the hosted
   deployment sets 4 MiB).
 - `REQUEST_TIMEOUT_MS` — 15s default.
+- `CLIENT_BACKEND_CONCURRENCY` — 6 default; concurrent backend-work requests per
+  authenticated caller/client in each pool (positive integer).
 - `ORG_VERIFY_TTL_SECONDS` — 24h default; how long an org-membership verification stays
   fresh before octopool re-checks at request time.
 - `GITHUB_OAUTH_CLIENT_ID` — GitHub App OAuth client id used for browser sign-in.
@@ -556,6 +560,49 @@ failure in the pinned runtime. `evictAllDurableObjects()` only reaches the curre
 Worker's explicit Durable Object bindings and does **not** establish D1 dormancy
 through its service binding. Per-stub eviction remains appropriate for testing
 the coordinator's constructor and storage cleanup.
+
+## Backend-work admission
+
+Each pool has a separate `BackendAdmission` Durable Object. It admits up to
+`CLIENT_BACKEND_CONCURRENCY` requests per authenticated `(caller_id, client_name)`;
+the default is 6. The client name comes from the stored token row, never a request
+header. Tokens rotated for the same client keep the same allowance. Different clients
+have independent allowances, including two clients belonging to the same caller.
+This is a concurrency cap, not a fair queue or a pool-wide ceiling; separately
+enrolled client names have separate allowances.
+
+Fresh reusable shared and identity-cache responses do not acquire permits. Misses,
+forced-fresh reads, conditional revalidations, and cache-bypass reads acquire one permit
+before publication coordination or backend fetching. It covers token-free and pooled
+transports, visibility probes, identity retries, pagination, and cache publication.
+A cached body that still needs a live visibility, PR-state, or log-completion probe
+does backend work and needs a permit. Authentication, membership verification, protection
+policy loads, and cache eligibility reads precede this gate; it does not replace bounded
+client-side launch concurrency. Native-only handoffs do not acquire permits.
+
+Admission performs only synchronous local SQLite decisions, independently of the pool
+coordinator's publication block and D1 round trips. A permit lasts 30 seconds, renews
+every 10 seconds, and has a fixed 60-second overall admitted-work deadline. Pending
+acquisition and renewal promises belong only to the current Worker request. Renewal
+failure, expiry, the overall deadline, and detectable caller cancellation abort active
+GitHub requests and prevent new backend work. Completion releases the exact permit;
+failed cleanup or a terminated request loses its slot at durable expiry. Live counts
+survive object restart. Expired rows do not count and drain in batches of 64 on admission;
+an idle object may retain expired rows until its next request. Already submitted storage
+operations cannot be recalled and may finish after cancellation under the existing
+publication fencing rules.
+
+Denials return `424 fallback_local` with reason `relay_overloaded`. The CLI's default
+budget already retries once after one second, then attempts guarded native fallback;
+`OCTOPOOL_NO_FALLBACK=1` disables that handoff. Audit records include the authenticated
+caller, token ID, client name, and `fallback_reason=relay_overloaded`. Inspect
+`octopool stats --client <name>` for that client's fallbacks and the fallback-reason
+aggregate for overloads. Infrastructure overload shares this reason. Permits store only
+a random ID, caller/client key, expiry, and deadline, with no request contents.
+
+Upgrades must include the new `BACKEND_ADMISSION` binding and `v3` SQLite-class migration
+from `wrangler.jsonc`. No D1 migration or CLI update is needed. During a rolling upgrade,
+old Worker invocations do not participate in admission.
 
 ## Coordinator expiry retention
 

@@ -1,5 +1,7 @@
 import type { PublicationOwner } from "./cache-publication";
 import { authenticateCaller } from "./auth";
+import { backendAdmissionStub } from "./backend-admission";
+import { BackendWork, admitBackendWork, assertBackendWorkActive } from "./backend-work";
 import {
   withGitHubEgress,
   type GitHubEgressEnv,
@@ -224,17 +226,30 @@ async function relayGitHubRequest(
     coordinator: poolCoordinatorStub(env, relayRequest.pool),
   };
   let active: ActiveRelay | undefined;
+  const backend = new BackendWork(
+    backendAdmissionStub(env, relayRequest.pool),
+    JSON.stringify([caller.id, caller.client_name]),
+    BackendWork.limit(env),
+  );
   try {
-    active = await prepareRelay(base, policy);
-    return await executeRelay(active);
+    return await backend.run(request.signal, ctx, async () => {
+      try {
+        active = await prepareRelay(base, policy);
+        return await executeRelay(active);
+      } catch (error) {
+        const failure = error instanceof IdentityOperationError ? error.failure : error;
+        // Admission failures are audited outside the cancelled scope. Ordinary
+        // outage recovery still owns its permit if stale serving needs a probe.
+        if (failure instanceof HttpError && failure.code === "relay_overloaded") throw failure;
+        return await handleRelayError(base, active, failure);
+      } finally {
+        await active?.cacheFill?.fail();
+      }
+    });
   } catch (error) {
-    return await handleRelayError(
-      base,
-      active,
-      error instanceof IdentityOperationError ? error.failure : error,
-    );
-  } finally {
-    await active?.cacheFill?.fail();
+    if (error instanceof HttpError && error.code === "relay_overloaded")
+      return handleRelayError(base, active, error);
+    throw error;
   }
 }
 
@@ -334,6 +349,21 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   const rawJobs = await readRawRunJobsCache(state);
   if (rawJobs !== undefined) return serveFreshCachedRelayResponse(state, rawJobs);
 
+  if (
+    state.cacheKey !== undefined &&
+    capabilitiesForRouteKind(state.route.kind).fallback === "pool"
+  ) {
+    try {
+      const identities = await loadIdentities(state.env, state.request.pool, state.route);
+      const identityCached = await serveFreshIdentityCache(state, identities);
+      if (identityCached !== undefined) return identityCached;
+    } catch (error) {
+      // Preserve the opportunistic identity-cache probe: an identity-list
+      // outage must not prevent a healthy token-free fill.
+      rethrowStringRewriteDenial(error);
+    }
+  }
+  await admitBackendWork();
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
     return serveFreshCachedRelayResponse(state, coalesced, { coalesced: true });
@@ -449,10 +479,6 @@ async function attemptStaleRelayCacheRevalidation(
     capabilities.fallback === "pool"
       ? await loadIdentities(state.env, state.request.pool, state.route)
       : [];
-  // Identity entries share the route's freshness contract. Check them before
-  // revalidation or token-free reads, which would otherwise bypass warm bodies.
-  const identityCached = await serveFreshIdentityCache(state, identities);
-  if (identityCached !== undefined) return identityCached;
   await rememberIdentityCacheKeys(state, identities);
   const candidates = await staleRevalidationCandidates(state);
   if (candidates.length === 0) {
@@ -981,6 +1007,7 @@ async function switchRelayCacheKey(
 }
 
 async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): Promise<Response> {
+  assertBackendWorkActive();
   const observedAt = result.observedAt ?? Date.now();
   const cacheStatus = result.revalidated === true ? "hit" : state.cacheStatus;
   if (runJobsSupersetIncomplete(result.github, state.runJobsSuperset)) {
@@ -1033,8 +1060,10 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     return executeRelay(state);
   }
   if (state.terminalLogCacheKey !== undefined) {
+    assertBackendWorkActive();
     await publishTerminalLogCache(state.env, state.terminalLogCacheKey, result.github);
   }
+  assertBackendWorkActive();
   const clientResponse = filterRunJobsSuperset(
     filterRunListSuperset(result.github, state.runListView, {
       preserveTotalCount: state.runListExactFallback,
@@ -1164,7 +1193,7 @@ async function handleRelayError(
 ): Promise<Response> {
   // Do not persist a derived route key containing protected material, or turn
   // a transport denial into a stale-cache/local fallback success.
-  rethrowStringRewriteDenial(error);
+  if (error instanceof HttpError && error.code === "string_rewrite_denied") throw error;
   const reported = localFallbackError(error) ?? error;
   const staleReason = staleFallbackReasonFromError(reported);
   if (active !== undefined && staleReason !== undefined) {
@@ -1541,6 +1570,7 @@ async function serveCachedGitHubResponse(
     coalesced?: boolean;
   },
 ): Promise<Response> {
+  assertBackendWorkActive();
   const sanitizedCached = sanitizeGitHubResponse(params.route, params.cached);
   ctx.waitUntil(
     insertAudit(env, {

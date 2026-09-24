@@ -16,6 +16,7 @@
     "DEFAULT_ALLOWED_OWNERS": "openclaw",
     "MAX_RESPONSE_BYTES": "4194304",
     "REQUEST_TIMEOUT_MS": "15000",
+    "CLIENT_BACKEND_CONCURRENCY": "6",
     "ORG_VERIFY_TTL_SECONDS": "86400",
     "GITHUB_OAUTH_CLIENT_ID": "Iv23lilUVXPNTPhNhUmZ",
     "GITHUB_OAUTH_CALLBACK_ORIGIN": "https://octopool.dev",
@@ -48,6 +49,10 @@
         "name": "POLICY_COORDINATOR",
         "class_name": "PolicyCoordinator",
       },
+      {
+        "name": "BACKEND_ADMISSION",
+        "class_name": "BackendAdmission",
+      },
     ],
   },
   "migrations": [
@@ -58,6 +63,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["PolicyCoordinator"],
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["BackendAdmission"],
     },
   ],
 }

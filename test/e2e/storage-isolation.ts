@@ -79,7 +79,7 @@ export class CacheWriteLedger {
   }
 }
 
-export async function clearCoordinators(namespace: Env["POOL_COORDINATOR"]): Promise<void> {
+export async function clearCoordinators(namespace: DurableObjectNamespace): Promise<void> {
   // listDurableObjectIds enumerates persisted .sqlite files, including IDs whose
   // instances are dormant and absent from native reset's live-actor map.
   for (const id of await listDurableObjectIds(namespace)) {
@@ -119,6 +119,7 @@ export async function restoreStorage(
   const policy = policyCoordinatorStub(env);
   await runInDurableObject(policy, () => undefined);
   await evictDurableObject(policy);
+  await clearCoordinators(env.BACKEND_ADMISSION);
   await clearActionLogs(env.ACTIONS_LOGS);
   await restoreD1Baseline(env.DB, baseline);
 }

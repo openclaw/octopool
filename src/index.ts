@@ -8,6 +8,7 @@ import { withConfigCacheScope } from "./config-cache";
 
 export { PoolCoordinator };
 export { PolicyCoordinator } from "./policy-coordinator";
+export { BackendAdmission } from "./backend-admission";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

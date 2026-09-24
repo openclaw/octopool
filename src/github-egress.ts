@@ -1,5 +1,6 @@
 import { HttpError } from "./http";
 import { bytesToBase64URL } from "./encoding";
+import { admitBackendWork, backendWorkSignal, rethrowBackendWorkError } from "./backend-work";
 import {
   assertNoStringRewriteMatch,
   compileStringRewriteRules,
@@ -88,8 +89,18 @@ export function withGitHubEgress(env: Env, rules: readonly StringRewriteRule[]):
           inspect(body);
         }
       }
+      await admitBackendWork();
+      const backendSignal = backendWorkSignal();
       return fetch(request.url, {
         ...init,
+        ...(backendSignal === undefined
+          ? {}
+          : {
+              signal:
+                init?.signal === undefined || init.signal === null
+                  ? backendSignal
+                  : AbortSignal.any([init.signal, backendSignal]),
+            }),
         headers: Object.fromEntries(request.headers),
         redirect: "manual",
       });
@@ -104,4 +115,7 @@ export function stringRewriteEgressDenied(): HttpError {
 
 export function rethrowStringRewriteDenial(error: unknown): void {
   if (error instanceof HttpError && error.code === "string_rewrite_denied") throw error;
+  // Opportunistic transports must not swallow admission refusal/cancellation
+  // and continue trying another backend after their lease is gone.
+  rethrowBackendWorkError(error);
 }

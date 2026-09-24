@@ -5,6 +5,7 @@ import { withConfigCacheScope } from "../../src/config-cache";
 
 export { PoolCoordinator } from "../../src/pool-coordinator";
 export { PolicyCoordinator } from "../../src/policy-coordinator";
+export { BackendAdmission } from "../../src/backend-admission";
 
 // This protocol negative needs a native request lifetime around the real relay.
 // The ordinary test setup still owns storage reset and graceful DO eviction.

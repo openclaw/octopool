@@ -14,6 +14,7 @@ import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { HttpError, parsePositiveInt } from "./http";
 import { capabilitiesForRouteKind } from "./route-manifest";
 import type { GitHubRelayResponse, RouteInfo } from "./types";
+import { admitBackendWork, assertBackendWorkActive } from "./backend-work";
 
 type GitHubRepoResponse = {
   private?: unknown;
@@ -141,6 +142,7 @@ export async function observeAnonymousPublicRepo<T extends GitHubRelayResponse |
   route: RouteInfo,
   observe: () => Promise<T>,
 ): Promise<GitHubObservation<T>> {
+  await admitBackendWork();
   if (!anonymousGitHubResponseProvesPublicRepo(route))
     return { response: await observe(), observedAt: Date.now() };
   const coordinator = publicProofCoordinatorStub(env);
@@ -151,6 +153,7 @@ export async function observeAnonymousPublicRepo<T extends GitHubRelayResponse |
   } catch {
     // Exactly one optional attempt, before observation; no late evidence adoption.
   }
+  assertBackendWorkActive();
   const fill = capability === undefined ? undefined : startOwnedCacheFill(coordinator, capability);
   try {
     const response = await observe();

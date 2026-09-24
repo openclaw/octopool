@@ -1,4 +1,5 @@
 import type { PublicationOwner } from "./cache-publication";
+import { admitBackendWork, assertBackendWorkActive } from "./backend-work";
 
 export type CacheFillOutcome = "shared" | "edge_only" | "none" | "failed" | "rejected" | "unknown";
 
@@ -42,14 +43,17 @@ export async function acquireOwnedCacheFill(
   { kind: "owner"; owner: OwnedCacheFill } | Exclude<CacheFillAcquisition, { kind: "owner" }>
 > {
   let acquisition: CacheFillAcquisition;
+  await admitBackendWork();
   try {
     acquisition = await coordinator.acquirePublication(cacheKey);
   } catch {
     // A Durable Object restart rejects its in-memory waiting RPCs. Re-entering
     // the durable acquisition state either waits on the surviving owner or
     // returns retry at its persisted expiry.
+    assertBackendWorkActive();
     acquisition = await coordinator.acquirePublication(cacheKey);
   }
+  assertBackendWorkActive();
   if (acquisition.kind !== "owner") {
     return acquisition;
   }
@@ -97,6 +101,7 @@ export function startOwnedCacheFill(
     }
     const current = (async () => {
       try {
+        assertBackendWorkActive();
         return await coordinator.renewPublication(capability);
       } catch {
         console.error("cache fill renewal failed");
@@ -145,6 +150,7 @@ export function startOwnedCacheFill(
       return { storage: "rejected", completion: "lost" };
     }
     try {
+      assertBackendWorkActive();
       const outcome = await publisher();
       const accepted = await complete(outcome, outcome === "shared" ? capability.id : undefined);
       return {
