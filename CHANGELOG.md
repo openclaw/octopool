@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Features
+
+- Relay public PR comment and commit JSON exports through fixed pooled GraphQL projections, preserving native shapes, local-account authorship, bounded pagination and guarded fallback; reviews remain native because pending reviews are viewer-dependent.
+
+### Upgrade notes
+
+- Deploy the Worker and upgrade the CLI together for pooled PR comments and commits; older Workers, unknown local comment viewers, review exports and collections beyond the supported bounds retain native fallback. No database migration or cache purge is required.
+
 ## 0.7.3 - 2026-09-23
 
 **Highlights:** Verify release-asset integrity throughout capture and bind cached merge snapshots to their source branches.

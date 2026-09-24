@@ -45,8 +45,8 @@ anonymous key is empty.
 
 ### Public PR landing snapshots
 
-The fixed `pr-ci-summary-v1`, `pr-ci-rollup-v1`, and `pr-merge-snapshot-v1`
-projections use pooled GraphQL reads after the normal public-repository guard.
+The fixed `pr-ci-summary-v1`, `pr-ci-rollup-v1`, `pr-merge-snapshot-v1`,
+`pr-comments-v1`, and `pr-commits-v1` projections use pooled GraphQL reads after the normal public-repository guard.
 The shape and detail cursor vary the existing cache key; a raw REST PR response,
 a different projection, and another cursor can never satisfy the request.
 The merge snapshot includes `headRefName` so a landing can bind the observed source

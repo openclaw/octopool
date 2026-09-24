@@ -37,6 +37,8 @@ type Envelope = {
 describe("public landing GraphQL cache", () => {
   it.each([
     ["pr-ci-summary-v1", "checkRunCountsByState", "pr"],
+    ["pr-comments-v1", "comments(first:100,after:$cursor)", "pr"],
+    ["pr-commits-v1", "commits(first:100,after:$cursor)", "pr"],
     ["pr-ci-rollup-v1", "contexts(first:100,after:$cursor)", "pr"],
     ["pr-merge-snapshot-v1", 'ref(qualifiedName:"refs/heads/main")', "number"],
   ])("pools %s, reuses it, and revalidates once with max-age=0", async (shape, field, variable) => {
@@ -175,43 +177,46 @@ describe("public landing GraphQL cache", () => {
     expect(queries).toBe(1);
   });
 
-  it("keeps GraphQL cursors and REST representations in separate cache entries", async () => {
-    await seedPool();
-    const queries: unknown[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) => {
-        const request = new Request(input, init);
-        if (request.url === "https://api.github.com/repos/openclaw/octopool")
-          return jsonResponse({ private: false });
-        if (request.url === "https://api.github.com/graphql") {
-          const body = (await request.json()) as { variables: { cursor?: string } };
-          queries.push(body.variables);
-          return jsonResponse(snapshot(body.variables.cursor ?? "first"));
-        }
-        expect(request.url).toBe(`https://api.github.com${path}`);
-        expect(bearer(request)).toBeUndefined();
-        return jsonResponse({ number: 42, state: "open" });
-      }),
-    );
-    const first = options("pr-ci-rollup-v1");
-    const next = { ...first, query: { cursor: "next-page" } };
-    await relay(path, undefined, first);
-    expect(await (await relay(path, undefined, next)).json<Envelope>()).toMatchObject({
-      body: snapshot("next-page"),
-    });
-    expect(await (await relay(path, undefined, first)).json<Envelope>()).toMatchObject({
-      body: snapshot("first"),
-      relay: { cache: "hit" },
-    });
-    expect(await (await relay(path)).json<Envelope>()).toMatchObject({
-      body: { number: 42, state: "open" },
-    });
-    expect(queries).toEqual([
-      { owner: "openclaw", name: "octopool", pr: 42 },
-      { owner: "openclaw", name: "octopool", pr: 42, cursor: "next-page" },
-    ]);
-  });
+  it.each(["pr-ci-rollup-v1", "pr-comments-v1", "pr-commits-v1"])(
+    "keeps %s cursors and REST representations in separate cache entries",
+    async (shape) => {
+      await seedPool();
+      const queries: unknown[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          if (request.url === "https://api.github.com/repos/openclaw/octopool")
+            return jsonResponse({ private: false });
+          if (request.url === "https://api.github.com/graphql") {
+            const body = (await request.json()) as { variables: { cursor?: string } };
+            queries.push(body.variables);
+            return jsonResponse(snapshot(body.variables.cursor ?? "first"));
+          }
+          expect(request.url).toBe(`https://api.github.com${path}`);
+          expect(bearer(request)).toBeUndefined();
+          return jsonResponse({ number: 42, state: "open" });
+        }),
+      );
+      const first = options(shape);
+      const next = { ...first, query: { cursor: "next-page" } };
+      await relay(path, undefined, first);
+      expect(await (await relay(path, undefined, next)).json<Envelope>()).toMatchObject({
+        body: snapshot("next-page"),
+      });
+      expect(await (await relay(path, undefined, first)).json<Envelope>()).toMatchObject({
+        body: snapshot("first"),
+        relay: { cache: "hit" },
+      });
+      expect(await (await relay(path)).json<Envelope>()).toMatchObject({
+        body: { number: 42, state: "open" },
+      });
+      expect(queries).toEqual([
+        { owner: "openclaw", name: "octopool", pr: 42 },
+        { owner: "openclaw", name: "octopool", pr: 42, cursor: "next-page" },
+      ]);
+    },
+  );
 
   it.each([
     { errors: [{ type: "FORBIDDEN", message: "Unavailable" }], ...snapshot("partial") },
@@ -332,16 +337,19 @@ describe("public landing GraphQL cache", () => {
     expect(upstream).not.toHaveBeenCalled();
   });
 
-  it("requires public visibility before using a pooled GraphQL identity", async () => {
-    await seedPool();
-    const upstream = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
-      expect(request.url).toBe("https://api.github.com/repos/openclaw/octopool");
-      expect(bearer(request)).toBe("test-org-token");
-      return jsonResponse({ private: true });
-    });
-    vi.stubGlobal("fetch", upstream);
-    expect((await relay(path, undefined, options("pr-ci-summary-v1"))).status).toBe(424);
-    expect(upstream).toHaveBeenCalledTimes(1);
-  });
+  it.each(["pr-ci-summary-v1", "pr-comments-v1", "pr-commits-v1"])(
+    "requires public visibility for %s before using a pooled GraphQL identity",
+    async (shape) => {
+      await seedPool();
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        expect(request.url).toBe("https://api.github.com/repos/openclaw/octopool");
+        expect(bearer(request)).toBe("test-org-token");
+        return jsonResponse({ private: true });
+      });
+      vi.stubGlobal("fetch", upstream);
+      expect((await relay(path, undefined, options(shape))).status).toBe(424);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
 });

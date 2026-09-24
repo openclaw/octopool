@@ -27,7 +27,9 @@ export function landingGraphQLRequest(
     request.headers?.["if-modified-since"] !== undefined ||
     Object.keys(request.query ?? {}).some((name) => name !== "cursor") ||
     (cursor !== undefined &&
-      (key !== "pullRequestCIRollup" ||
+      ((key !== "pullRequestCIRollup" &&
+        key !== "pullRequestComments" &&
+        key !== "pullRequestCommits") ||
         typeof cursor !== "string" ||
         cursor.length === 0 ||
         cursor.length > 512 ||

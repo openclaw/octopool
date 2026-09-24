@@ -25,20 +25,18 @@ func prDetailSelections() []struct {
 		flags []string
 		jq    bool
 	}{
-		{"commits", []string{"--json", "commits"}, false},
-		{"comments", []string{"--json", "comments"}, false},
 		{"reviews", []string{"--json", "reviews"}, false},
-		{"author_before_commits", []string{"--json", "number,author,commits"}, false},
-		{"files_before_comments", []string{"--json=files,comments,title"}, false},
+		{"author_before_reviews", []string{"--json", "number,author,commits,reviews"}, false},
+		{"files_before_reviews", []string{"--json=files,comments,title,reviews"}, false},
 		{"rollup_before_reviews", []string{"--json", "statusCheckRollup,reviews,number"}, false},
 		{"reordered_repeated", []string{"--json", `"reviews",author`, "--json=files,commits,comments,reviews,author,statusCheckRollup", "--json="}, false},
-		{"jq_native_owns_filter", []string{"--json", "author,commits,files", "--jq", "(", "-q", `"LOCAL JQ MUST NOT RUN"`}, true},
-		{"jq_short_equals_literal", []string{"--json=comments,number", "-q="}, true},
+		{"jq_native_owns_filter", []string{"--json", "author,commits,files,reviews", "--jq", "(", "-q", `"LOCAL JQ MUST NOT RUN"`}, true},
+		{"jq_short_equals_literal", []string{"--json=comments,number,reviews", "-q="}, true},
 	}
 }
 
 func TestPRDetailExportTypedBeforeClient(t *testing.T) {
-	for _, field := range []string{"commits", "comments", "reviews"} {
+	for _, field := range []string{"reviews"} {
 		t.Run(field, func(t *testing.T) {
 			isolateTestConfig(t)
 			t.Setenv("OCTOPOOL_TOKEN", "")
@@ -128,7 +126,7 @@ func TestRunGHPRDetailExportNativeBoundary(t *testing.T) {
 }
 
 func TestRunGHPRDetailExportPolicyBoundaries(t *testing.T) {
-	for _, field := range []string{"commits", "comments", "reviews"} {
+	for _, field := range []string{"reviews"} {
 		for _, stage := range []string{"initial-denial", "final-denial", "final-unavailable"} {
 			t.Run(field+"/"+stage, func(t *testing.T) {
 				var data atomic.Int64

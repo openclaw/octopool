@@ -158,11 +158,26 @@ func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, op
 }
 
 func relayPRView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
-	if hasJSONField(opts.json, "commits") || hasJSONField(opts.json, "comments") || hasJSONField(opts.json, "reviews") {
+	// Pending reviews belong to the local viewer, even on a public repository.
+	if hasJSONField(opts.json, "reviews") {
 		return localFallbackError{Reason: "unsupported_pr_detail_export"}
 	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return err
+	}
+	viewer := ""
+	if hasJSONField(opts.json, "comments") {
+		viewer, err = localPRCommentViewer(ctx, client)
+		if err != nil {
+			return err
+		}
+		if viewer == "" {
+			return localFallbackError{Reason: "unknown_pr_comment_viewer"}
+		}
+	}
 	headers := prViewHeaders(opts)
-	if hasJSONField(opts.json, "files") || needsLivePRRead(opts.json) || freshReadRequested() {
+	if hasJSONField(opts.json, "files") || hasJSONField(opts.json, "comments") || hasJSONField(opts.json, "commits") || needsLivePRRead(opts.json) || freshReadRequested() {
 		if headers == nil {
 			headers = map[string]string{}
 		}
@@ -173,10 +188,6 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	}
 	if !safeRelayRequest(request) {
 		return errors.New("internal error: top-level gh command built an unsupported relay request")
-	}
-	client, err := newGHRelayClient()
-	if err != nil {
-		return err
 	}
 	pr, err := relayPRViewBody(ctx, client, request)
 	if err != nil {
@@ -196,6 +207,15 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	users := map[string]map[string]any{}
 	for _, field := range opts.json {
 		switch field {
+		case "comments", "commits":
+			detail, err := relayPRDetail(ctx, client, repo, number, field, viewer, nestedStringValue(pr, "head", "sha"))
+			if err != nil {
+				return err
+			}
+			pr[field] = detail
+			if field == "commits" {
+				hydratedHeadSHA = nestedStringValue(pr, "head", "sha")
+			}
 		case "mergeCommit":
 			merged, ok := pr["merged"].(bool)
 			if !ok {
@@ -316,6 +336,15 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 		}
 		if currentSHA != hydratedHeadSHA {
 			return localFallbackError{Reason: "pull request head changed during metadata hydration"}
+		}
+	}
+	if viewer != "" {
+		currentViewer, err := localPRCommentViewer(ctx, client)
+		if err != nil {
+			return err
+		}
+		if viewer != currentViewer {
+			return localFallbackError{Reason: "pr_comment_viewer_changed"}
 		}
 	}
 	raw, err := json.Marshal(pr)

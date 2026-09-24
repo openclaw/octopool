@@ -276,7 +276,7 @@ direct-fetch bypass.
 
 ### Fixed public GraphQL landing reads
 
-`GET /repos/{owner}/{repo}/pulls/{number}` supports three additional
+`GET /repos/{owner}/{repo}/pulls/{number}` supports five additional
 `x-octopool-public-shape` values. The Worker constructs the exact upstream query
 from its allowlist in `src/github-public-shapes.ts`; callers cannot supply GraphQL.
 The existing `pr_view` owner routes these projections through the pool's `graphql`
@@ -287,12 +287,17 @@ budget instead of REST's `core` budget.
 | `pr-ci-summary-v1`     | PR state, mergeability, head, rollup state and check/status counts                                          | None              |
 | `pr-ci-rollup-v1`      | PR state, mergeability, head and up to 100 rollup contexts, including check suite/workflow IDs              | Optional `cursor` |
 | `pr-merge-snapshot-v1` | Repository identity, main ref, PR identity/head/base, mergeability, merge commit and auto-merge/queue state | None              |
+| `pr-comments-v1`       | PR identity and up to 100 public comments, without viewer fields                                            | Optional `cursor` |
+| `pr-commits-v1`        | PR identity/head and up to 100 commits with the first 100 authors                                           | Optional `cursor` |
 
 The envelope's `body` is the unchanged GraphQL JSON response, including `data` and
 any `errors`. Successful non-null PR responses cache for 60 seconds without stale
 fallback; `cache-control: max-age=0` refreshes one projection through the pool.
 GraphQL errors keep their upstream HTTP status and never populate the body cache.
 Consumers must inspect `errors` even on HTTP 200, as the CLI does.
+The PR-view CLI reads comment and commit projections live and reconstructs the
+[native export contract](pr-details.md). Reviews remain native because pending
+reviews depend on the requesting account.
 
 Only default JSON media is accepted. Conditional validators, extra query parameters,
 non-scalar/empty cursors, cursors longer than 512 characters or containing control

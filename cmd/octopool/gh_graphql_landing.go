@@ -14,6 +14,10 @@ var landingGraphQLToken = regexp.MustCompile(`[_A-Za-z][_0-9A-Za-z]*|[0-9]+|"(?:
 
 func landingGraphQLQuery(shape string) string {
 	switch shape {
+	case publicShapePullRequestComments:
+		return githubLandingQueryPullRequestComments
+	case publicShapePullRequestCommits:
+		return githubLandingQueryPullRequestCommits
 	case publicShapePullRequestCISummary:
 		return githubLandingQueryPullRequestCISummary
 	case publicShapePullRequestCIRollup:

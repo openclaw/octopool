@@ -515,20 +515,37 @@ or incomplete collections emit no partial JSON and follow the existing typed nat
 fallback, including fresh policy checks and host pinning under active rewrite rules.
 `OCTOPOOL_NO_FALLBACK=1` keeps these cases as failures. Repeated JSON fields are accepted
 and hydrated once.
-Otherwise eligible machine-readable `gh pr view` requests selecting any of `commits`,
-`comments`, or `reviews` hand the entire command to guarded native `gh` before any relay
-data read. Native GraphQL export fields cannot be proven from REST projections of these
-records. This includes mixed selections such as `--json number,files,commits`: native
-`gh` owns the complete export, the literal JSON and jq arguments, and stdout/stderr;
-Octopool does not hydrate a subset or run jq locally. The initial policy check and a
-fresh final native-dispatch policy check still apply. `OCTOPOOL_NO_FALLBACK=1` blocks
-this typed handoff with `unsupported_pr_detail_export`. Earlier direct-delegation cases
-(such as unknown fields or flags, empty JSON selection, missing jq, or an unmodeled
-selector) retain their existing guarded native behavior; this setting does not block
-all unsupported grammar. Raw REST `gh api` reads of `/repos/OWNER/REPO/pulls/N/commits`,
-`/repos/OWNER/REPO/issues/N/comments`, and `/repos/OWNER/REPO/pulls/N/reviews` remain
-supported shared reads with unprojected REST shapes. Human PR review rendering is
-unchanged. This boundary does not establish native parity for other nested exports.
+Machine-readable `gh pr view --json comments,commits` uses fixed public GraphQL
+projections, including combinations with supported basic fields. Comments paginate in
+GitHub connection order, up to 1,000 comments; commits relay only when the complete
+connection fits in 100 entries. Native gh 2.101.0 exports only the first 100 commits
+and first 100 authors per commit, so larger commit connections retain native handling.
+Both projections read live (`max-age=0`) by default, matching the landing projections.
+The Worker can reuse a projection for at most 60 seconds for explicitly bounded API
+reads; there is no stale fallback. Totals, PR identity, unique IDs and cursor progression
+must remain consistent. Commit hydration also verifies the PR head before and after.
+These checks do not make multiple reads an atomic snapshot.
+
+Comments export native `viewerDidAuthor` using the active local gh GitHub.com account,
+never the Octopool login. Two guarded native REST `/user` reads, before hydration and
+before output, resolve the active credential to an immutable user ID. These use caller
+REST quota; the comment queries use pooled GraphQL quota. Author IDs are compared
+locally and omitted from JSON. Persisted usernames cannot establish authorship after
+a rename and are never used.
+Environment-token overrides (`GH_TOKEN` or `GITHUB_TOKEN`), unavailable identity reads,
+changes of account, older Workers, inconsistent pages and bounds use guarded native
+fallback before any JSON is printed. `OCTOPOOL_NO_FALLBACK=1` blocks these typed handoffs.
+Zero-count reaction groups are omitted exactly as in native gh.
+
+Every request containing `reviews` still delegates in full, including
+`--json comments,reviews,commits`. Native reviews can contain the caller's private
+pending review, which a viewer-independent pooled projection cannot reproduce.
+`mergeStateStatus` also remains native. Unsupported grammar retains its existing
+native routing; raw REST commit/comment/review routes and human rendering are unchanged.
+See [the native export contract](pr-details.md) for selections, field classification,
+pagination and the deliberate review exclusion. Upgrade both the Worker and CLI for
+pooled comment and commit exports; no migration or cache purge is required.
+
 For relayed PR-view exports, `author`, `labels`, and `files` use native JSON projections.
 User authors export `id` (node ID), `is_bot`, `login`, and
 `name`; bot authors use native `is_bot` and `app/…` login keys. Labels export node IDs,
