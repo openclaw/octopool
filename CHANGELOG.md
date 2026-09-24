@@ -10,6 +10,7 @@
 
 - Cap concurrent CLI relay reads and policy fetches across processes at eight per user on each machine, configurable with `OCTOPOOL_RELAY_CONCURRENCY`, using crash-safe advisory slots and bounded fail-open waiting.
 - Serve string-rewrite policy through a dedicated global Durable Object with a maximum snapshot age of 60 seconds, preserving revision-checked publication, immediate visibility after admin API PUTs, and fail-closed recovery; writes outside the coordinator become visible within 60 seconds.
+- Replace the saved login atomically, so a `gh` invocation running during `octopool login` never reads a truncated token and silently falls back to native gh.
 
 ### Upgrade notes
 

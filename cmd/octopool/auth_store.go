@@ -49,10 +49,30 @@ func saveAuth(auth authFile) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	// Concurrent gh invocations read this file; replace it atomically so a
+	// reader never sees a truncated token (which silently falls back to gh).
+	temp, err := os.CreateTemp(filepath.Dir(path), ".auth-*.json")
+	if err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if err := temp.Chmod(0o600); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
 }
 
 func authPath() (string, error) {
