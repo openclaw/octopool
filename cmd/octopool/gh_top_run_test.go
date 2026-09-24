@@ -224,16 +224,10 @@ func TestRunJobsIdentityAndOwnership(t *testing.T) {
 		name, jobs, head string
 		valid            bool
 	}{
-		{"matching attempt", `[{"id":7,"run_attempt":2}]`, "", true},
-		{"null attempt", `[{"id":7,"run_attempt":null}]`, "", true},
-		{"future attempt", `[{"id":7,"run_attempt":3}]`, "", false},
-		{"zero attempt", `[{"id":7,"run_attempt":0}]`, "", false},
-		{"negative attempt", `[{"id":7,"run_attempt":-1}]`, "", false},
-		{"attempt then null", `[{"id":7,"run_attempt":1,"run_attempt":null}]`, "", false},
 		{"optional metadata", `[{"id":7}]`, "", true},
 		{"null metadata", `[{"id":7,"run_id":null,"head_sha":null}]`, "", true},
 		{"empty head", `[{"id":7,"run_id":42,"head_sha":""}]`, "", true},
-		{"reused job", `[{"id":7,"run_id":42,"head_sha":"owned","run_attempt":1}]`, "owned", false},
+		{"reused job", `[{"id":7,"run_id":42,"head_sha":"owned","run_attempt":1}]`, "owned", true},
 		{"safe id", `[{"id":9007199254740991}]`, "", true},
 		{"id then null", `[{"id":7,"id":null}]`, "", true},
 		{"duplicate ids", `[{"id":7},{"id":7}]`, "", false},
@@ -262,7 +256,7 @@ func TestRunJobsIdentityAndOwnership(t *testing.T) {
 				t.Fatal(err)
 			}
 			envelope := relayEnvelope{BodyEncoding: "json", Body: []byte(fmt.Sprintf(`{"total_count":%d,"jobs":%s}`, len(records), test.jobs))}
-			jobs, _, humanErr := runJobsPage(envelope, runJobOwner{id: "00042", headSHA: test.head, attempt: 2}, map[int64]bool{})
+			jobs, _, humanErr := runJobsPage(envelope, runJobOwner{id: "00042", headSHA: test.head}, map[int64]bool{})
 			machineJobs, _, machineErr := machineRunJobsPage(envelope, machineRun{ID: 42, HeadSha: test.head, Attempt: 2}, map[int64]bool{})
 			if (humanErr == nil) != test.valid || (machineErr == nil) != test.valid {
 				t.Fatalf("valid=%t human=%v machine=%v", test.valid, humanErr, machineErr)
@@ -430,7 +424,7 @@ func TestRunExportNestedShapes(t *testing.T) {
 	for _, steps := range []string{"absent", "null", "empty", "ordered_defaults_and_times"} {
 		t.Run(steps, func(t *testing.T) {
 			f := newRunExportFixture()
-			job := map[string]any{"id": 9, "run_id": 42, "head_sha": runExportHead, "run_attempt": 3, "name": nil, "conclusion": nil, "ignored": true}
+			job := map[string]any{"id": 9, "run_id": 42, "head_sha": runExportHead, "run_attempt": 1, "name": nil, "conclusion": nil, "ignored": true}
 			wantSteps := `[]`
 			switch steps {
 			case "null":
@@ -557,7 +551,7 @@ func TestRunExportNumericAndDecodeOwners(t *testing.T) {
 
 func TestRunExportIdentityAndCompleteness(t *testing.T) {
 	for _, test := range []struct{ name, reason string }{
-		{"empty_jobs", ""}, {"hundred_jobs", ""}, {"reused_success_and_optional_association", "workflow job did not match owned run attempt"},
+		{"empty_jobs", ""}, {"hundred_jobs", ""}, {"reused_success_and_optional_association", ""},
 		{"null_optional_association", ""}, {"null_step_element", "terminal"},
 		{"contradictory_run_then_null", "workflow job did not match owned run"}, {"contradictory_head_then_null", "workflow job did not match historical run head"},
 		{"over_hundred", "workflow jobs response is incomplete"},
@@ -603,7 +597,7 @@ func TestRunExportIdentityAndCompleteness(t *testing.T) {
 			case "reused_success_and_optional_association":
 				delete(job, "run_id")
 				delete(job, "head_sha")
-				job["run_attempt"] = 1 // Returned run attempt is 3; strict ownership refuses earlier jobs.
+				job["run_attempt"] = 1 // Returned run attempt is 3; reused successes are legitimate.
 			case "short_page":
 				body["total_count"] = 2
 			case "null_optional_association":

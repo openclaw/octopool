@@ -581,9 +581,10 @@ cardinality, positive unique IDs across pages, and no remaining next link. A sho
 before completion, inconsistent pagination, or more than 1,000 jobs requires guarded
 whole-command fallback before any output. Requested nonzero `--attempt` qualifies the
 output URL; returned `run_attempt` owns JSON `attempt` and the canonical jobs route.
-Supplied job run IDs, attempts, and nonempty head SHAs must match that run; older reused
-attempts also require fallback. Historical run identity/head evidence is checked without
-fetching today's branch head.
+Supplied job run IDs and nonempty head SHAs must match that run. Job attempts are not
+identity evidence: an attempt-qualified response may include successful jobs reused from
+older attempts after rerunning failed jobs. Historical run identity/head evidence is checked
+without fetching today's branch head.
 
 Only selected `workflowName` triggers metadata. View uses one verified workflow-ID lookup;
 filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists use
@@ -665,14 +666,14 @@ fresh completion confirmation, and final job hydration. Jobs are fetched only af
 completed run response, using its exact `run_attempt`. Missing or inconsistent job metadata
 fails explicitly without printing a partial job summary or a successful completion message.
 Job IDs must be positive, unique across all pages, and within the relay's safe-integer
-range. Supplied `run_id`, `run_attempt`, and nonempty `head_sha` must match the owning run;
+range. Supplied `run_id` and nonempty `head_sha` must match the owning run;
 optional ownership fields may be absent from public-page-derived jobs. Human run views
 and watch collect up to 10 pages of 100 using `actions-jobs-v1`; the Worker supports later
 pages through exact REST. Both validate the complete collection before rendering any jobs,
 including stable totals, full intermediate pages, and consistent pagination links. Human
 run views retain guarded fallback on invalid data; watch stops without handing off.
-Jobs reused from earlier attempts fail the attempt check, and Octopool does not reconstruct
-missing jobs from earlier attempts. With complete data,
+Octopool preserves the job set returned for that attempt, including reused successes when
+present, and does not reconstruct missing jobs from earlier attempts. With complete data,
 `--exit-status` returns 1 for a non-successful run; without it, a completed run returns 0.
 Read failures return nonzero with or without `--exit-status`. Unsupported command shapes
 still delegate, and an explicit `repo_not_public` refusal on the initial run lookup retains

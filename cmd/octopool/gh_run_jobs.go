@@ -30,14 +30,12 @@ func (a *runAssociation[T]) UnmarshalJSON(raw []byte) error {
 type runJobIdentity struct {
 	ID      int64
 	RunID   runAssociation[int64]  `json:"run_id"`
-	Attempt runAssociation[int64]  `json:"run_attempt"`
 	HeadSha runAssociation[string] `json:"head_sha"`
 }
 
 type runJobOwner struct {
 	id      string
 	headSHA string
-	attempt uint64
 }
 
 var (
@@ -45,16 +43,14 @@ var (
 	errUnprovedRunJobHead    = errors.New("workflow job head could not be verified against owned run")
 )
 
-// The seen set belongs to the entire collection, not a page.
+// The seen set belongs to the entire collection, not a page. Attempts are not
+// identity evidence: GitHub may return successful jobs reused from an older one.
 func (job runJobIdentity) validate(owner runJobOwner, seen map[int64]bool) error {
 	if job.ID <= 0 || !safeRunExportInteger(job.ID) || seen[job.ID] || !safeRunExportInteger(job.RunID.value) {
 		return errInvalidRunJobIdentity
 	}
 	if job.RunID.present && strconv.FormatInt(job.RunID.value, 10) != strings.TrimLeft(owner.id, "0") {
 		return errors.New("workflow job did not match owned run")
-	}
-	if job.Attempt.present && (job.Attempt.value <= 0 || !safeRunExportInteger(job.Attempt.value) || uint64(job.Attempt.value) != owner.attempt) {
-		return errors.New("workflow job did not match owned run attempt")
 	}
 	if job.HeadSha.present && job.HeadSha.value != "" {
 		if owner.headSHA == "" {

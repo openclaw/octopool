@@ -255,7 +255,7 @@ func machineRunJobsPage(envelope relayEnvelope, run machineRun, seen map[int64]b
 		return nil, 0, localFallbackError{Reason: "workflow jobs pagination exhausted"}
 	}
 	jobs := make([]machineJobExport, 0, len(records))
-	owner := runJobOwner{id: strconv.FormatInt(run.ID, 10), headSHA: run.HeadSha, attempt: run.Attempt}
+	owner := runJobOwner{id: strconv.FormatInt(run.ID, 10), headSHA: run.HeadSha}
 	for _, record := range records {
 		if bytes.TrimSpace(record)[0] != '{' {
 			return nil, 0, unsupportedRunExport()

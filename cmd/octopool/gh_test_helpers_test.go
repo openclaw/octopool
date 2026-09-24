@@ -301,7 +301,7 @@ func newRunExportFixture() *runExportFixture {
 
 func runExportJob(id int) map[string]any {
 	return map[string]any{
-		"id": id, "run_id": 42, "head_sha": runExportHead, "run_attempt": 3,
+		"id": id, "run_id": 42, "head_sha": runExportHead, "run_attempt": 1,
 		"name": "build", "status": "completed", "conclusion": "success",
 		"started_at": "2026-01-02T03:04:06Z", "completed_at": "2026-01-02T03:05:06Z",
 		"html_url": "https://github.com/acme/repo/actions/runs/42/job/" + strconv.Itoa(id), "steps": []any{},

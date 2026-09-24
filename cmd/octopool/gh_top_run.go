@@ -140,7 +140,6 @@ func positiveJSONInt(value any) (int, bool) {
 }
 
 func relayHumanRunJobs(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, extraHeaders map[string]string) ([]any, error) {
-	owner.attempt = uint64(attempt)
 	headers := map[string]string{"x-octopool-public-shape": publicShapeActionsJobs}
 	for key, value := range extraHeaders {
 		headers[key] = value

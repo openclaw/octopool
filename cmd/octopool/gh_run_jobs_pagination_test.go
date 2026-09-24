@@ -27,8 +27,7 @@ func TestRunJobsPagination(t *testing.T) {
 			{"bound", 1001, 1, true},
 			{"foreign_run", 156, 2, true},
 			{"foreign_head", 156, 2, true},
-			{"older_attempt", 156, 2, true},
-			{"future_attempt", 156, 2, true},
+			{"reused_prior_attempt", 156, 2, false},
 			{"last_next_link", 156, 2, true},
 			{"wrong_next_link", 156, 1, true},
 			{"oversized_page", 156, 1, true},
@@ -45,6 +44,11 @@ func TestRunJobsPagination(t *testing.T) {
 				var pages []int
 				fixture := newRunExportFixture()
 				fixture.run["conclusion"] = "success"
+				attempt := 3
+				if test.name == "reused_prior_attempt" {
+					attempt = 2
+				}
+				fixture.run["run_attempt"] = attempt
 				relayTestServer(t, func(request map[string]any) any {
 					path := request["path"].(string)
 					headers, _ := request["headers"].(map[string]any)
@@ -54,7 +58,7 @@ func TestRunJobsPagination(t *testing.T) {
 					if path == "/repos/acme/repo/actions/runs/42" {
 						return fixture.run
 					}
-					if path != "/repos/acme/repo/actions/runs/42/attempts/3/jobs" {
+					if path != fmt.Sprintf("/repos/acme/repo/actions/runs/42/attempts/%d/jobs", attempt) {
 						t.Fatalf("unexpected path: %s", path)
 					}
 					shape := headers["x-octopool-public-shape"]
@@ -82,7 +86,10 @@ func TestRunJobsPagination(t *testing.T) {
 						id := 2000 - start - i
 						jobs[i] = runExportJob(id)
 						jobs[i]["name"] = fmt.Sprintf("job-%04d", id)
-						jobs[i]["run_attempt"] = 3
+						jobs[i]["run_attempt"] = attempt
+						if test.name == "reused_prior_attempt" && i%2 == 0 {
+							jobs[i]["run_attempt"] = 1
+						}
 					}
 					if page == 2 {
 						switch test.name {
@@ -92,10 +99,6 @@ func TestRunJobsPagination(t *testing.T) {
 							jobs[0]["id"] = 2000
 						case "foreign_run":
 							jobs[0]["run_id"] = 43
-						case "older_attempt":
-							jobs[0]["run_attempt"] = 2
-						case "future_attempt":
-							jobs[0]["run_attempt"] = 4
 						case "foreign_head":
 							jobs[0]["head_sha"] = "foreign"
 						}

@@ -179,7 +179,6 @@ func TestGHRunWatchRejectsIncompleteJobs(t *testing.T) {
 			wantCalls := 1
 			if variant == "changed count" || variant == "short next page" {
 				wantCalls = 2
-
 			}
 			if jobCalls != wantCalls {
 				t.Fatalf("job calls=%d, want %d", jobCalls, wantCalls)
@@ -240,8 +239,8 @@ func TestGHRunWatchRerunAttemptAndExitStatus(t *testing.T) {
 						// Preserve reused successes if the attempt endpoint returns them;
 						// never fetch attempt 1 to reconstruct or replace this snapshot.
 						return map[string]any{"total_count": 3, "jobs": []map[string]any{
-							{"id": 1, "name": "actions", "run_attempt": 2, "conclusion": "success", "run_id": 42, "head_sha": "confirmed-head"},
-							{"id": 2, "name": "JavaScript", "run_attempt": 2, "conclusion": "success"},
+							{"id": 1, "name": "actions", "run_attempt": 1, "conclusion": "success", "run_id": 42, "head_sha": "confirmed-head"},
+							{"id": 2, "name": "JavaScript", "run_attempt": 1, "conclusion": "success"},
 							{"id": 3, "name": "Swift", "run_attempt": 2, "conclusion": conclusion},
 						}}
 					default:

@@ -8,7 +8,7 @@
 
 ### Fixes
 
-- Complete workflow job lists across up to 10 pages in CLI run view and watch, preserving job order and rejecting inconsistent totals, duplicate IDs, incomplete pages, and mismatched run, attempt, or head ownership before rendering.
+- Complete workflow job lists across up to 10 pages in CLI run view and watch, preserving job order and rejecting inconsistent totals, duplicate IDs, incomplete pages, and mismatched run or head ownership before rendering, while preserving successful jobs reused from earlier attempts.
 
 ### Upgrade notes
 
