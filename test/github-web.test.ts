@@ -2022,14 +2022,7 @@ describe("github web provider", () => {
 });
 
 function env(overrides: Record<string, string> = {}): GitHubEgressEnv {
-  return withGitHubEgress(
-    {
-      REQUEST_TIMEOUT_MS: "15000",
-      DB: { prepare: () => ({ bind: () => ({ run: async () => ({}) }) }) },
-      ...overrides,
-    } as unknown as Env,
-    [],
-  );
+  return withGitHubEgress({ REQUEST_TIMEOUT_MS: "15000", ...overrides } as unknown as Env, []);
 }
 
 function actionsListHTML(title: string): string {

@@ -656,21 +656,12 @@ replacement are guarded. IDs remain unique after completion/GC because `sqlite_s
 is retained. No payload has an owner foreign key or deletion cascade.
 
 Pool DOs notify/coalesce body waiters; one reserved global proof DO coordinates normalized
-repository names across pools and both verdicts. Before each of the three existing anonymous
-observations, optional proof warming checks the edge cache for the normalized owner/repo.
-A fresh positive receipt with more than half its original TTL remaining skips acquisition
-and republication. Otherwise a nonblocking acquisition precedes the observation.
-Busy/unknown acquisition still fetches normally but
+repository names across pools and both verdicts. A nonblocking attempt precedes each of the
+three existing anonymous observations. Busy/unknown acquisition still fetches normally but
 never persists that observation opportunistically. The scope releases before explicit proof
 guards, body-key switches, finalization, or canonical/exact continuation. Body ownership may
 precede proof ownership; proof ownership never waits for a body owner. Anonymous `304`
 revalidates a body, never repository visibility.
-
-Skipping warming still performs the anonymous fetch and captures its actual observation time.
-It neither extends the old proof's expiry nor grants a receipt to the new observation, and
-does not affect explicit guards or waiting followers' authoritative receipt checks. The
-unchanged coverage rule can require a visibility refresh on a later cache read when the
-new body's creation time is more than five seconds after the retained proof's check.
 
 Body fetch/304 validation time is captured with the initial response, before awaited proof
 publication, explicit guards or first-page aggregation. Internal response/time metadata
@@ -779,9 +770,7 @@ is public.
   the public repository page marker directly.
 - A successful public check is recorded in `github_public_repo_proofs` with a TTL
   (`PUBLIC_REPO_TTL_SECONDS`, default 30s; the hosted deployment sets 900s) and the edge
-  cache; subsequent cache hits reuse a fresh covering proof instead of re-hitting GitHub. Anonymous
-  observations skip optional proof republication while an edge proof has more than half its
-  recorded TTL remaining; explicit checks keep their existing coverage requirements. A
+  cache; subsequent cache hits reuse the fresh proof instead of re-hitting GitHub. A
   proof refresh stalls concurrent requests for that repo behind one probe, so a short
   TTL puts a periodic GitHub round trip on the cache-hit path — the trade against it is
   how long a repo that flips private can keep serving already-cached content.

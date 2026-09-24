@@ -141,10 +141,7 @@ export async function observeAnonymousPublicRepo<T extends GitHubRelayResponse |
   route: RouteInfo,
   observe: () => Promise<T>,
 ): Promise<GitHubObservation<T>> {
-  if (
-    !anonymousGitHubResponseProvesPublicRepo(route) ||
-    (await anonymousProofWarmingIsRecent(route))
-  )
+  if (!anonymousGitHubResponseProvesPublicRepo(route))
     return { response: await observe(), observedAt: Date.now() };
   const coordinator = publicProofCoordinatorStub(env);
   const resource = proofPublicationResource(route.owner!, route.repo!);
@@ -179,29 +176,6 @@ export async function observeAnonymousPublicRepo<T extends GitHubRelayResponse |
   } finally {
     await fill?.fail();
   }
-}
-
-async function anonymousProofWarmingIsRecent(route: RouteInfo): Promise<boolean> {
-  const proof = await readEdgeJSON<PublicRepoProof>(
-    EDGE_CACHE_NAMESPACE,
-    publicProofKey(route.owner!.toLowerCase(), route.repo!.toLowerCase()),
-  );
-  if (
-    proof === undefined ||
-    proof === null ||
-    !publicProofIsFresh(proof) ||
-    !publicProofIsPublic(proof) ||
-    !Number.isSafeInteger(proof.publication_id) ||
-    proof.publication_id < 1 ||
-    typeof proof.publication_token !== "string" ||
-    proof.publication_token.length === 0
-  )
-    return false;
-  const checkedAt = parseSQLiteTimestamp(proof.checked_at);
-  const expiresAt = parseSQLiteTimestamp(proof.expires_at);
-  const now = Date.now();
-  // Suppress optional warming only; this receipt never authorizes the new observation.
-  return checkedAt <= now && expiresAt - now > (expiresAt - checkedAt) / 2;
 }
 
 export function anonymousGitHubResponseProvesPublicRepo(route: RouteInfo): boolean {
