@@ -538,7 +538,7 @@ The per-call budget does not bound absolute storage during arbitrary bursts or g
 when idle rows are physically deleted. No timer, alarm, new RPC, or global object sweep is
 added. Deletions make SQLite space reusable, without promising file-size shrinkage or
 hosted billing savings. Hourly publication-owner cleanup
-retain their separate authority and budgets described in [Cache](cache.md).
+retains its separate authority and budget described in [Cache](cache.md).
 
 ## SQL catalog
 

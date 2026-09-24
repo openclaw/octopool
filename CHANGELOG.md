@@ -12,6 +12,7 @@
 - Retry transient CLI string-rewrite policy fetch failures up to twice with six-second retry limits while retaining the initial 30-second timeout, bounded Retry-After delays, fresh policy checks, terminal failures, and last-attempt diagnostics.
 - Remove inline publication-owner GC from each D1 acquisition, retaining atomic expired-owner takeover and bounded hourly cleanup.
 - Throttle advisory anonymous API quota snapshots per isolate and resource, publish exhaustion/reset changes promptly, and schedule persistence outside the response path when a request context is available.
+- Skip optional anonymous public-repository proof republication while a positive edge receipt retains more than half its TTL, preserving visibility coverage, immutable receipts and explicit guard checks.
 
 ### Upgrade notes
 
