@@ -301,7 +301,7 @@ func newRunExportFixture() *runExportFixture {
 
 func runExportJob(id int) map[string]any {
 	return map[string]any{
-		"id": id, "run_id": 42, "head_sha": runExportHead, "run_attempt": 1,
+		"id": id, "run_id": 42, "head_sha": runExportHead, "run_attempt": 3,
 		"name": "build", "status": "completed", "conclusion": "success",
 		"started_at": "2026-01-02T03:04:06Z", "completed_at": "2026-01-02T03:05:06Z",
 		"html_url": "https://github.com/acme/repo/actions/runs/42/job/" + strconv.Itoa(id), "steps": []any{},
@@ -318,8 +318,8 @@ func (f *runExportFixture) response(t *testing.T, req map[string]any) any {
 	switch {
 	case strings.HasPrefix(path, "/repos/acme/repo/actions/runs/") && strings.HasSuffix(path, "/jobs"):
 		q, _ := req["query"].(map[string]any)
-		if q["per_page"] != "100" || len(q) != 1 {
-			t.Errorf("ordinary jobs must use one canonical page100: %v", q)
+		if q["per_page"] != "100" || q["page"] != "1" || len(q) != 2 {
+			t.Errorf("ordinary jobs must start at canonical page100: %v", q)
 		}
 		return f.jobs
 	case strings.HasPrefix(path, "/repos/acme/repo/actions/runs/"):

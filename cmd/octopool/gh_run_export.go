@@ -201,15 +201,12 @@ func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string,
 		if run.Attempt == 0 {
 			return localFallbackError{Reason: "workflow run response did not include run_attempt"}
 		}
-		envelope, err := client.do(ctx, ghAPIRequest{
+		run.jobs, err = relayRunJobs(ctx, client, ghAPIRequest{
 			method: "GET",
 			path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.FormatUint(run.Attempt, 10), "jobs"),
-			query:  map[string]any{"per_page": "100"},
+		}, func(envelope relayEnvelope, seen map[int64]bool) ([]machineJobExport, int, error) {
+			return machineRunJobsPage(envelope, run, seen)
 		})
-		if err != nil {
-			return err
-		}
-		run.jobs, err = machineRunJobs(envelope, run)
 		if err != nil {
 			return err
 		}
@@ -227,58 +224,56 @@ func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string,
 	return writeRunExport(ctx, stdout, run.export(opts.json), opts.jq)
 }
 
-func machineRunJobs(envelope relayEnvelope, run machineRun) ([]machineJobExport, error) {
+func machineRunJobsPage(envelope relayEnvelope, run machineRun, seen map[int64]bool) ([]machineJobExport, int, error) {
 	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var response struct {
 		Total json.RawMessage `json:"total_count"`
 		Jobs  json.RawMessage `json:"jobs"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var total int64
 	if len(response.Total) == 0 || bytes.Equal(response.Total, []byte("null")) || json.Unmarshal(response.Total, &total) != nil || total < 0 {
-		return nil, localFallbackError{Reason: "workflow jobs response did not include a valid total_count"}
+		return nil, 0, localFallbackError{Reason: "workflow jobs response did not include a valid total_count"}
 	}
 	raw := bytes.TrimSpace(response.Jobs)
 	if len(raw) == 0 || raw[0] != '[' {
-		return nil, unsupportedRunExport()
+		return nil, 0, unsupportedRunExport()
 	}
 	var records []json.RawMessage
 	if err := json.Unmarshal(raw, &records); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if len(records) > 100 || total > int64(len(records)) {
-		return nil, localFallbackError{Reason: "workflow jobs response requires pagination"}
+	if len(records) > relayPageSize || total < int64(len(records)) {
+		return nil, 0, localFallbackError{Reason: "workflow jobs pagination contradicts total_count or page size"}
 	}
-	_, next := relayNextLink(envelope.Headers["link"])
-	if total != int64(len(records)) || next {
-		return nil, unsupportedRunExport()
+	if total > maxRelayPages*relayPageSize {
+		return nil, 0, localFallbackError{Reason: "workflow jobs pagination exhausted"}
 	}
 	jobs := make([]machineJobExport, 0, len(records))
-	seen := map[int64]bool{}
-	owner := runJobOwner{id: strconv.FormatInt(run.ID, 10), headSHA: run.HeadSha}
+	owner := runJobOwner{id: strconv.FormatInt(run.ID, 10), headSHA: run.HeadSha, attempt: run.Attempt}
 	for _, record := range records {
 		if bytes.TrimSpace(record)[0] != '{' {
-			return nil, unsupportedRunExport()
+			return nil, 0, unsupportedRunExport()
 		}
 		var job machineJob
 		if err := json.Unmarshal(record, &job); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if err := job.runJobIdentity.validate(owner, seen); err != nil {
 			if errors.Is(err, errInvalidRunJobIdentity) || errors.Is(err, errUnprovedRunJobHead) {
-				return nil, unsupportedRunExport()
+				return nil, 0, unsupportedRunExport()
 			}
-			return nil, err
+			return nil, 0, localFallbackError{Reason: err.Error()}
 		}
 		steps := make([]machineStepExport, 0, len(job.Steps))
 		for _, step := range job.Steps {
 			if !safeRunExportInteger(int64(step.Number)) {
-				return nil, unsupportedRunExport()
+				return nil, 0, unsupportedRunExport()
 			}
 			completed := step.CompletedAt
 			if completed.IsZero() {
@@ -292,7 +287,7 @@ func machineRunJobs(envelope relayEnvelope, run machineRun) ([]machineJobExport,
 		}
 		jobs = append(jobs, machineJobExport{job.ID, job.Name, job.Status, job.Conclusion, job.StartedAt, completed, job.URL, steps})
 	}
-	return jobs, nil
+	return jobs, int(total), nil
 }
 
 func (run machineRun) export(fields []string) map[string]any {

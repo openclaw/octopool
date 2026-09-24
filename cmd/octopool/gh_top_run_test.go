@@ -219,41 +219,21 @@ func TestRunGHRunListMapsDisplayTitle(t *testing.T) {
 	}
 }
 
-func TestRunJobsFallsBackWhenPaginationIsRequired(t *testing.T) {
-	for _, variant := range []string{"missing jobs", "excess jobs", "next link", "oversized page"} {
-		t.Run(variant, func(t *testing.T) {
-			body := `{"total_count":101,"jobs":[{"id":1}]}`
-			headers := map[string]string{}
-			switch variant {
-			case "excess jobs":
-				body = `{"total_count":0,"jobs":[{"id":1}]}`
-			case "next link":
-				body = `{"total_count":1,"jobs":[{"id":1}]}`
-				headers["Link"] = `<https://api.github.com/repos/acme/repo/actions/runs/42/attempts/2/jobs?page=2>; rel="next"`
-			case "oversized page":
-				var jobs []string
-				for id := 1; id <= relayPageSize+1; id++ {
-					jobs = append(jobs, fmt.Sprintf(`{"id":%d}`, id))
-				}
-				body = fmt.Sprintf(`{"total_count":%d,"jobs":[%s]}`, len(jobs), strings.Join(jobs, ","))
-			}
-			jobs, err := runJobs(relayEnvelope{Status: 200, BodyEncoding: "json", Body: []byte(body), Headers: headers}, runJobOwner{id: "42"})
-			if !isLocalFallback(err) || jobs != nil {
-				t.Fatalf("err=%v jobs=%v", err, jobs)
-			}
-		})
-	}
-}
-
 func TestRunJobsIdentityAndOwnership(t *testing.T) {
 	for _, test := range []struct {
 		name, jobs, head string
 		valid            bool
 	}{
+		{"matching attempt", `[{"id":7,"run_attempt":2}]`, "", true},
+		{"null attempt", `[{"id":7,"run_attempt":null}]`, "", true},
+		{"future attempt", `[{"id":7,"run_attempt":3}]`, "", false},
+		{"zero attempt", `[{"id":7,"run_attempt":0}]`, "", false},
+		{"negative attempt", `[{"id":7,"run_attempt":-1}]`, "", false},
+		{"attempt then null", `[{"id":7,"run_attempt":1,"run_attempt":null}]`, "", false},
 		{"optional metadata", `[{"id":7}]`, "", true},
 		{"null metadata", `[{"id":7,"run_id":null,"head_sha":null}]`, "", true},
 		{"empty head", `[{"id":7,"run_id":42,"head_sha":""}]`, "", true},
-		{"reused job", `[{"id":7,"run_id":42,"head_sha":"owned","run_attempt":1}]`, "owned", true},
+		{"reused job", `[{"id":7,"run_id":42,"head_sha":"owned","run_attempt":1}]`, "owned", false},
 		{"safe id", `[{"id":9007199254740991}]`, "", true},
 		{"id then null", `[{"id":7,"id":null}]`, "", true},
 		{"duplicate ids", `[{"id":7},{"id":7}]`, "", false},
@@ -282,8 +262,8 @@ func TestRunJobsIdentityAndOwnership(t *testing.T) {
 				t.Fatal(err)
 			}
 			envelope := relayEnvelope{BodyEncoding: "json", Body: []byte(fmt.Sprintf(`{"total_count":%d,"jobs":%s}`, len(records), test.jobs))}
-			jobs, humanErr := runJobs(envelope, runJobOwner{id: "00042", headSHA: test.head})
-			machineJobs, machineErr := machineRunJobs(envelope, machineRun{ID: 42, HeadSha: test.head, Attempt: 2})
+			jobs, _, humanErr := runJobsPage(envelope, runJobOwner{id: "00042", headSHA: test.head, attempt: 2}, map[int64]bool{})
+			machineJobs, _, machineErr := machineRunJobsPage(envelope, machineRun{ID: 42, HeadSha: test.head, Attempt: 2}, map[int64]bool{})
 			if (humanErr == nil) != test.valid || (machineErr == nil) != test.valid {
 				t.Fatalf("valid=%t human=%v machine=%v", test.valid, humanErr, machineErr)
 			}
@@ -450,7 +430,7 @@ func TestRunExportNestedShapes(t *testing.T) {
 	for _, steps := range []string{"absent", "null", "empty", "ordered_defaults_and_times"} {
 		t.Run(steps, func(t *testing.T) {
 			f := newRunExportFixture()
-			job := map[string]any{"id": 9, "run_id": 42, "head_sha": runExportHead, "run_attempt": 1, "name": nil, "conclusion": nil, "ignored": true}
+			job := map[string]any{"id": 9, "run_id": 42, "head_sha": runExportHead, "run_attempt": 3, "name": nil, "conclusion": nil, "ignored": true}
 			wantSteps := `[]`
 			switch steps {
 			case "null":
@@ -577,13 +557,13 @@ func TestRunExportNumericAndDecodeOwners(t *testing.T) {
 
 func TestRunExportIdentityAndCompleteness(t *testing.T) {
 	for _, test := range []struct{ name, reason string }{
-		{"empty_jobs", ""}, {"hundred_jobs", ""}, {"reused_success_and_optional_association", ""},
+		{"empty_jobs", ""}, {"hundred_jobs", ""}, {"reused_success_and_optional_association", "workflow job did not match owned run attempt"},
 		{"null_optional_association", ""}, {"null_step_element", "terminal"},
-		{"contradictory_run_then_null", "terminal"}, {"contradictory_head_then_null", "terminal"},
-		{"over_hundred", "workflow jobs response requires pagination"},
-		{"over_hundred_complete_array", "workflow jobs response requires pagination"},
-		{"short_page", "workflow jobs response requires pagination"},
-		{"excess_items", "unsupported_run_export"}, {"last_next", "unsupported_run_export"},
+		{"contradictory_run_then_null", "workflow job did not match owned run"}, {"contradictory_head_then_null", "workflow job did not match historical run head"},
+		{"over_hundred", "workflow jobs response is incomplete"},
+		{"over_hundred_complete_array", "workflow jobs pagination contradicts total_count or page size"},
+		{"short_page", "workflow jobs response is incomplete"},
+		{"excess_items", "workflow jobs pagination contradicts total_count or page size"}, {"last_next", "workflow jobs pagination contradicts total_count"},
 		{"missing_total", "workflow jobs response did not include a valid total_count"},
 		{"fractional_total", "workflow jobs response did not include a valid total_count"},
 		{"null_total", "workflow jobs response did not include a valid total_count"},
@@ -592,7 +572,7 @@ func TestRunExportIdentityAndCompleteness(t *testing.T) {
 		{"null_job", "unsupported_run_export"}, {"duplicate_job_id", "unsupported_run_export"},
 		{"missing_job_id", "unsupported_run_export"}, {"zero_job_id", "unsupported_run_export"},
 		{"missing_run_id", "unsupported_run_export"}, {"null_run_id", "unsupported_run_export"}, {"zero_run_id", "unsupported_run_export"},
-		{"mismatched_run_id", "terminal"}, {"mismatched_job_run", "terminal"}, {"mismatched_job_head", "terminal"},
+		{"mismatched_run_id", "terminal"}, {"mismatched_job_run", "workflow job did not match owned run"}, {"mismatched_job_head", "workflow job did not match historical run head"},
 		{"unproved_job_head", "unsupported_run_export"}, {"wrong_job_head_type", "terminal"}, {"wrong_job_run_type", "terminal"},
 		{"missing_attempt", "workflow run response did not include run_attempt"},
 		{"unknown_REST_fields_ignored", ""},
@@ -618,12 +598,12 @@ func TestRunExportIdentityAndCompleteness(t *testing.T) {
 				}
 				body["total_count"], body["jobs"] = count, jobs
 				if test.name == "over_hundred" {
-					body["total_count"] = 101
+					body["total_count"], body["jobs"] = 101, jobs[:99]
 				}
 			case "reused_success_and_optional_association":
 				delete(job, "run_id")
 				delete(job, "head_sha")
-				job["run_attempt"] = 1 // Returned run attempt is 3; reused successes are legitimate.
+				job["run_attempt"] = 1 // Returned run attempt is 3; strict ownership refuses earlier jobs.
 			case "short_page":
 				body["total_count"] = 2
 			case "null_optional_association":

@@ -575,12 +575,15 @@ defaults. Jobs always have eight keys and steps six, with non-null arrays in acq
 order. Only job/step completion times normalize zero instants; other timestamp offsets
 and fractional seconds retain native `time.Time` behavior.
 
-Run views also support `jobs`: one canonical returned-attempt page of 100, requiring a
-present valid total, exact cardinality, positive unique IDs, and no remaining next link.
-More than 100 jobs requires guarded whole-command fallback, not truncation. Requested
-nonzero `--attempt` qualifies the output URL; returned `run_attempt` owns JSON `attempt`
-and the canonical jobs route, including reused successes from older attempts. Historical
-run identity/head evidence is checked without fetching today's branch head.
+Run views also support `jobs`: up to 10 canonical returned-attempt pages of 100, preserving
+GitHub's acquisition order. Every page must report the same valid total, with exact final
+cardinality, positive unique IDs across pages, and no remaining next link. A short page
+before completion, inconsistent pagination, or more than 1,000 jobs requires guarded
+whole-command fallback before any output. Requested nonzero `--attempt` qualifies the
+output URL; returned `run_attempt` owns JSON `attempt` and the canonical jobs route.
+Supplied job run IDs, attempts, and nonempty head SHAs must match that run; older reused
+attempts also require fallback. Historical run identity/head evidence is checked without
+fetching today's branch head.
 
 Only selected `workflowName` triggers metadata. View uses one verified workflow-ID lookup;
 filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists use
@@ -588,15 +591,15 @@ the existing complete catalogue (at most 10 pages of 100), then one memoized dir
 per missing workflow ID. Only a genuine upstream 404 on that last list-specific lookup
 produces an empty name. Disabled workflows remain valid. Empty lists and unselected names
 do not fetch metadata. Logical data-operation bounds are 1 for scalar view, 2 with name,
-3 with jobs and name, 2 for filtered list with name, and 111 for unfiltered list with name.
+12 with jobs and name, 2 for filtered list with name, and 111 for unfiltered list with name.
 These exclude policy/transport retries. List responses may not exceed their effective
 requested limit (default 20, maximum 100); every read retains relay policy and freshness.
 
 Observed native integers outside ±(2^53−1), or unproved identity/collection shapes, use
 typed `unsupported_run_export` fallback before JSON or jq output, respecting `NO_FALLBACK`.
 The JS service may already have erased numeric or duplicate-key distinctions: this is not
-a lossless upstream transport guarantee. Malformed native fields and contradictory
-identities remain terminal errors, even for unselected modeled fields. Existing attempt,
+a lossless upstream transport guarantee. Malformed native fields and contradictory run identities remain terminal errors, even for
+unselected modeled fields. Contradictory job ownership uses guarded fallback. Existing attempt,
 job-total, pagination and catalogue refusal reasons remain distinct. Exports buffer all
 validation/hydration before output; successful JSON commands return success independently
 of run conclusion. Downstream writer/jq errors still fail and cannot be rolled back.
@@ -662,11 +665,14 @@ fresh completion confirmation, and final job hydration. Jobs are fetched only af
 completed run response, using its exact `run_attempt`. Missing or inconsistent job metadata
 fails explicitly without printing a partial job summary or a successful completion message.
 Job IDs must be positive, unique across all pages, and within the relay's safe-integer
-range. Supplied `run_id` and nonempty `head_sha` must match the owning run; optional
-ownership fields may be absent from public-page-derived jobs. Human run views validate
-the same job identities before rendering, retaining their guarded fallback on invalid data.
-Octopool preserves the job set returned for that attempt, including reused successes when
-present, and does not reconstruct missing jobs from earlier attempts. With complete data,
+range. Supplied `run_id`, `run_attempt`, and nonempty `head_sha` must match the owning run;
+optional ownership fields may be absent from public-page-derived jobs. Human run views
+and watch collect up to 10 pages of 100 using `actions-jobs-v1`; the Worker supports later
+pages through exact REST. Both validate the complete collection before rendering any jobs,
+including stable totals, full intermediate pages, and consistent pagination links. Human
+run views retain guarded fallback on invalid data; watch stops without handing off.
+Jobs reused from earlier attempts fail the attempt check, and Octopool does not reconstruct
+missing jobs from earlier attempts. With complete data,
 `--exit-status` returns 1 for a non-successful run; without it, a completed run returns 0.
 Read failures return nonzero with or without `--exit-status`. Unsupported command shapes
 still delegate, and an explicit `repo_not_public` refusal on the initial run lookup retains

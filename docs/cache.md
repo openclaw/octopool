@@ -573,8 +573,8 @@ cached aggregate. Revalidation recognizes older merged entries with more than 10
 and ignores their page validators, so an expired or forced refresh fetches every page
 again. Single-page validators, fresh cache hits, and bounded outage stale reads retain
 their existing behavior. No cache-key or TTL change is needed. This protects the complete
-stored aggregate; the current shaped response still returns at most 100 jobs, and watch
-fetches later pages separately.
+stored aggregate; each shaped response still returns at most 100 jobs, and human run view and watch
+fetch later pages separately.
 
 If a partial rerun exposes count metadata that disagrees with the returned job set, a count
 disagreement alone does not establish another page or prove which successful jobs were
@@ -584,9 +584,9 @@ caching it, inventing jobs, or treating a short page as a complete summary. Supp
 ordinary run-view fallback remains available. `filter=all`, later pages, unshaped REST
 requests, and unsupported query variants retain exact upstream semantics.
 
-Machine run-view jobs use one unshaped canonical returned-attempt page of 100, with their
-own completeness/identity validation before output. Watch's 10×100 collection and the
-Worker's 3×100 shaped superset remain separate. Requested attempts qualify machine output
+Machine run-view jobs use up to 10 unshaped canonical returned-attempt pages of 100, with
+completeness/identity validation before output. Human run view and watch share that CLI
+collection bound; the Worker's 3×100 shaped superset remains separate. Requested attempts qualify machine output
 URLs while returned attempts own jobs acquisition; [CLI documentation](cli.md) describes
 the native defaults, explicit safe-integer boundary, lazy names and whole-command fallback.
 

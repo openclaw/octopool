@@ -747,7 +747,7 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 				offset = relayPageSize
 			}
 			for index := 0; index < count; index++ {
-				jobs = append(jobs, map[string]any{"id": offset + index + 1, "name": "job", "status": "completed", "conclusion": "success", "run_id": 42, "head_sha": "owned-head", "run_attempt": 1})
+				jobs = append(jobs, map[string]any{"id": offset + index + 1, "name": "job", "status": "completed", "conclusion": "success", "run_id": 42, "head_sha": "owned-head", "run_attempt": 2})
 			}
 			return map[string]any{"total_count": 150, "jobs": jobs}
 		default:

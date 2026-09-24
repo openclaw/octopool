@@ -6,6 +6,10 @@
 
 - Relay public PR comment and commit JSON exports through fixed pooled GraphQL projections, preserving native shapes, local-account authorship, bounded pagination and guarded fallback; reviews remain native because pending reviews are viewer-dependent.
 
+### Fixes
+
+- Complete workflow job lists across up to 10 pages in CLI run view and watch, preserving job order and rejecting inconsistent totals, duplicate IDs, incomplete pages, and mismatched run, attempt, or head ownership before rendering.
+
 ### Upgrade notes
 
 - Deploy the Worker and upgrade the CLI together for pooled PR comments and commits; older Workers, unknown local comment viewers, review exports and collections beyond the supported bounds retain native fallback. No database migration or cache purge is required.

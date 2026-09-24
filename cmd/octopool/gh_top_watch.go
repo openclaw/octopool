@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -292,54 +291,9 @@ func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id st
 func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, backoff *watchBackoff) ([]any, error) {
 	var jobs []any
 	err := retryWatchTick(ctx, backoff, func() error {
-		jobs = jobs[:0]
-		seen := map[int64]bool{}
-		total := 0
-		for page := 1; page <= maxRelayPages; page++ {
-			envelope, err := client.do(ctx, ghAPIRequest{
-				method: "GET",
-				path:   repoPath(repo, "actions", "runs", owner.id, "attempts", strconv.Itoa(attempt), "jobs"),
-				query:  map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
-				headers: map[string]string{
-					"x-octopool-public-shape": publicShapeActionsJobs,
-					// The run just confirmed terminal; stale cached jobs from a
-					// previous attempt must not leak into the final summary.
-					"cache-control": "max-age=0",
-				},
-			})
-			if err != nil {
-				return err
-			}
-			pageJobs, pageTotal, err := runJobsPage(envelope, owner, seen)
-			if err != nil {
-				return err
-			}
-			if page == 1 {
-				total = pageTotal
-			} else if pageTotal != total {
-				return localFallbackError{Reason: "workflow jobs total_count changed during pagination"}
-			}
-			jobs = append(jobs, pageJobs...)
-			link, linked := relayResponseHeader(envelope.Headers, "link")
-			next, hasNext := relayNextLink(link)
-			if len(jobs) > total || (len(jobs) == total && hasNext) {
-				return localFallbackError{Reason: "workflow jobs pagination contradicts total_count"}
-			}
-			if len(jobs) == total {
-				return nil
-			}
-			// A short page is not proof of completion when the advertised total
-			// still includes missing jobs (for example, partial rerun metadata).
-			if len(pageJobs) < relayPageSize || (linked && !hasNext) {
-				return localFallbackError{Reason: "workflow jobs response is incomplete"}
-			}
-			if hasNext {
-				if nextPage, ok := relayLinkNumericPage(next); !ok || nextPage != page+1 {
-					return localFallbackError{Reason: "workflow jobs pagination link is inconsistent"}
-				}
-			}
-		}
-		return localFallbackError{Reason: "workflow jobs pagination exhausted"}
+		var err error
+		jobs, err = relayHumanRunJobs(ctx, client, repo, owner, attempt, watchFreshHeaders())
+		return err
 	})
 	return jobs, err
 }

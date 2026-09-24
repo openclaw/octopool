@@ -123,20 +123,7 @@ func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id st
 	if !ok {
 		return localFallbackError{Reason: "workflow run response did not include run_attempt"}
 	}
-	// per_page=100 with runJobs' incomplete-total fallback: >100-job runs
-	// delegate to real gh rather than truncating.
-	envelope, err = client.do(ctx, ghAPIRequest{
-		method: "GET",
-		path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(attempt), "jobs"),
-		query:  map[string]any{"per_page": "100"},
-		headers: map[string]string{
-			"x-octopool-public-shape": publicShapeActionsJobs,
-		},
-	})
-	if err != nil {
-		return err
-	}
-	jobs, err := runJobs(envelope, runJobOwner{id: id, headSHA: firstString(run, "head_sha")})
+	jobs, err := relayHumanRunJobs(ctx, client, repo, runJobOwner{id: id, headSHA: firstString(run, "head_sha")}, attempt, nil)
 	if err != nil {
 		return err
 	}
@@ -152,17 +139,19 @@ func positiveJSONInt(value any) (int, bool) {
 	return int(parsed), true
 }
 
-func runJobs(envelope relayEnvelope, owner runJobOwner) ([]any, error) {
-	jobs, total, err := runJobsPage(envelope, owner, map[int64]bool{})
-	if err != nil {
-		return nil, err
+func relayHumanRunJobs(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, extraHeaders map[string]string) ([]any, error) {
+	owner.attempt = uint64(attempt)
+	headers := map[string]string{"x-octopool-public-shape": publicShapeActionsJobs}
+	for key, value := range extraHeaders {
+		headers[key] = value
 	}
-	link, _ := relayResponseHeader(envelope.Headers, "link")
-	_, next := relayNextLink(link)
-	if total > len(jobs) || next {
-		return nil, localFallbackError{Reason: "workflow jobs response requires pagination"}
-	}
-	return jobs, nil
+	return relayRunJobs(ctx, client, ghAPIRequest{
+		method:  "GET",
+		path:    repoPath(repo, "actions", "runs", owner.id, "attempts", strconv.Itoa(attempt), "jobs"),
+		headers: headers,
+	}, func(envelope relayEnvelope, seen map[int64]bool) ([]any, int, error) {
+		return runJobsPage(envelope, owner, seen)
+	})
 }
 
 func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool) ([]any, int, error) {

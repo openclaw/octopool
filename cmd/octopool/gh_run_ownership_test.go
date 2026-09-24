@@ -203,8 +203,8 @@ func TestRunExportPolicyAndNativeBoundary(t *testing.T) {
 				for i := range jobs {
 					jobs[i] = runExportJob(i + 1)
 				}
-				f.jobs = map[string]any{"total_count": 101, "jobs": jobs}
-				wantCalls, wantPolicies, wantReason = 2, 3, "workflow jobs response requires pagination"
+				f.jobs = map[string]any{"total_count": 1001, "jobs": jobs}
+				wantCalls, wantPolicies, wantReason = 2, 3, "workflow jobs pagination exhausted"
 			}
 			if scenario == "domain_native" || scenario == "pagination_native" {
 				wantNative = true
