@@ -54,7 +54,7 @@ func TestStringRewritePolicyRetryStatuses(t *testing.T) {
 
 func TestStringRewritePolicyRetryAfter(t *testing.T) {
 	for _, code := range []int{429, 503} {
-		for _, value := range []string{"2", "20", "18446744073709551615", "date", "invalid", "-1"} {
+		for _, value := range []string{"2", "20", "9223372036854775807", "18446744073709551615", "date", "invalid", "-1"} {
 			t.Run(fmt.Sprintf("%d/%s", code, value), func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					isolateTestConfig(t)
@@ -84,7 +84,7 @@ func TestStringRewritePolicyRetryAfter(t *testing.T) {
 						if elapsed != 2*time.Second {
 							t.Fatalf("Retry-After not honored: %s", elapsed)
 						}
-					case "20", "18446744073709551615":
+					case "20", "9223372036854775807":
 						if elapsed != 3*time.Second {
 							t.Fatalf("Retry-After not capped: %s", elapsed)
 						}
@@ -96,6 +96,12 @@ func TestStringRewritePolicyRetryAfter(t *testing.T) {
 				})
 			})
 		}
+	}
+}
+
+func TestStringRewritePolicyRetryAfterNegative(t *testing.T) {
+	if delay := rewritePolicyRetryAfter("-1", time.Now()); delay != 0 {
+		t.Fatalf("negative Retry-After delay = %s, want 0", delay)
 	}
 }
 

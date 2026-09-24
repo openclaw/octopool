@@ -125,7 +125,10 @@ func retryableRewritePolicyTransport(err error) bool {
 
 func rewritePolicyRetryAfter(value string, now time.Time) time.Duration {
 	value = strings.TrimSpace(value)
-	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil {
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds < 0 {
+			return 0
+		}
 		if seconds > 3 {
 			seconds = 3
 		}
