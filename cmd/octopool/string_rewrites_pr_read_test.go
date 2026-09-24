@@ -359,6 +359,8 @@ func TestProtectedPRReadPolicyAndContextBoundaries(t *testing.T) {
 				wantPolicies := int64(2)
 				if stage == "initial" {
 					wantPolicies = 1
+				} else if stage == "unavailable" {
+					wantPolicies = 4
 				}
 				if policies.Load() != wantPolicies {
 					t.Fatalf("policy calls=%d want=%d", policies.Load(), wantPolicies)

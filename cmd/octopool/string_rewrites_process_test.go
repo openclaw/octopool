@@ -2877,6 +2877,9 @@ func TestStringRewritePRWatchPolicyFloor(t *testing.T) {
 				if ordinal == 1 {
 					return first, http.StatusOK
 				}
+				if test.finalCode == http.StatusServiceUnavailable {
+					return "", test.finalCode
+				}
 				if ordinal != 2 {
 					t.Error("unexpected extra policy read")
 					return "", http.StatusServiceUnavailable
@@ -2914,8 +2917,12 @@ func TestStringRewritePRWatchPolicyFloor(t *testing.T) {
 			if !slices.Equal(args, original) {
 				t.Error("caller argv mutated")
 			}
-			if policies.Load() != 2 || data.Load() != 0 {
-				t.Errorf("policy/data counts=%d/%d, want 2/0", policies.Load(), data.Load())
+			wantPolicies := int64(2)
+			if test.finalCode == http.StatusServiceUnavailable {
+				wantPolicies = 4
+			}
+			if policies.Load() != wantPolicies || data.Load() != 0 {
+				t.Errorf("policy/data counts=%d/%d, want %d/0", policies.Load(), data.Load(), wantPolicies)
 			}
 			if test.wantErr != nil {
 				if childErr == nil {

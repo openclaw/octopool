@@ -62,8 +62,12 @@ func TestStringRewritePolicyFailuresNeverRunChild(t *testing.T) {
 			if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 {
 				t.Fatalf("failure output=%q %q error=%v", out.String(), stderr.String(), err)
 			}
-			if shouldRunRealGH(err) || calls.Load() != 1 {
-				t.Fatal("policy failure was retryable/fallback eligible")
+			wantCalls := int64(1)
+			if test.code == 429 || test.code >= 500 {
+				wantCalls = 3
+			}
+			if shouldRunRealGH(err) || calls.Load() != wantCalls {
+				t.Fatalf("policy failure allowed fallback or wrong attempt count: %d", calls.Load())
 			}
 			class := rewritePolicyHTTPStatus
 			if test.code == 200 {
@@ -78,7 +82,7 @@ func TestStringRewritePolicyFailuresNeverRunChild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/acme/repo"}); !errors.Is(err, errRewritePolicy) || calls.Load() != 2 {
+			if _, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/acme/repo"}); !errors.Is(err, errRewritePolicy) || calls.Load() != 2*wantCalls {
 				t.Fatal("relay boundary retried or dispatched on policy failure")
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {
@@ -103,7 +107,11 @@ func TestStringRewritePolicyBeforeMalformedReadOptions(t *testing.T) {
 				capture := captureRewriteGH(t)
 				var out, stderr bytes.Buffer
 				err := runGH(t.Context(), append([]string{"pr", "list", "-R", "acme/repo"}, flags...), &out, &stderr)
-				if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || !slices.Equal(paths, []string{"/v1/pools/maintainers/string-rewrites"}) {
+				wantPaths := []string{"/v1/pools/maintainers/string-rewrites"}
+				if code == 503 {
+					wantPaths = slices.Repeat(wantPaths, 3)
+				}
+				if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || !slices.Equal(paths, wantPaths) {
 					t.Fatalf("policy precedence err=%v paths=%v out=%q stderr=%q", err, paths, out.String(), stderr.String())
 				}
 				if _, err := os.Stat(capture); !os.IsNotExist(err) {
@@ -517,8 +525,12 @@ func TestRewritePolicyTransportDiagnostics(t *testing.T) {
 			_, err := client.do(t.Context(), ghAPIRequest{method: "GET", path: "/repos/acme/repo"})
 			requireRewritePolicyDiagnostic(t, err, test.class, 0, "", started, "synthetic-dns-secret", "synthetic-host-secret",
 				"synthetic-operation-secret", "synthetic-network-secret", "synthetic-wrapper-secret", "synthetic-url-secret", "synthetic-token-secret", "synthetic-pool-secret")
-			if errors.Is(err, test.err) || calls != 1 {
-				t.Fatal("transport cause retained or policy retried")
+			wantCalls := 1
+			if test.class == rewritePolicyTimeoutClass {
+				wantCalls = 3
+			}
+			if errors.Is(err, test.err) || calls != wantCalls {
+				t.Fatalf("transport cause retained or wrong attempt count: %d", calls)
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {
 				t.Fatal("transport failure ran child")

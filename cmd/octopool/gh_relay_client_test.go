@@ -100,7 +100,7 @@ func TestGHRelayHTTPFailureDoesNotRetryRejections(t *testing.T) {
 func TestGHRelayRetryRechecksPolicy(t *testing.T) {
 	var calls atomic.Int64
 	policies := rewriteTestServerPolicySequence(t, func(call int64) (string, int) {
-		if call == 3 {
+		if call >= 3 {
 			return "synthetic policy outage", 503
 		}
 		return rewriteEmptyTestPolicy, 200
@@ -113,7 +113,7 @@ func TestGHRelayRetryRechecksPolicy(t *testing.T) {
 	useTestRelayRetryDelays(t, time.Millisecond)
 	var out, stderr bytes.Buffer
 	err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
-	if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || calls.Load() != 1 || policies.Load() != 3 {
+	if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || calls.Load() != 1 || policies.Load() != 5 {
 		t.Fatalf("err=%v output=%q stderr=%q relay=%d policies=%d", err, out.String(), stderr.String(), calls.Load(), policies.Load())
 	}
 }
@@ -128,7 +128,7 @@ func TestGHRelayPolicyTransportFailureIsTerminal(t *testing.T) {
 			useRewritePolicyTestTransport(t, func(request *http.Request) (*http.Response, error) {
 				if strings.HasSuffix(request.URL.Path, "/string-rewrites") {
 					policies++
-					if policies == 2 {
+					if policies >= 2 {
 						if mode == "policy timeout" {
 							return nil, &net.DNSError{Err: "synthetic timeout", IsTimeout: true}
 						}
@@ -141,7 +141,7 @@ func TestGHRelayPolicyTransportFailureIsTerminal(t *testing.T) {
 			useTestRelayRetryDelays(t, time.Millisecond)
 			var out, stderr bytes.Buffer
 			err := run(t.Context(), []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
-			if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || policies != 2 || resources.Load() != 0 {
+			if !errors.Is(err, errRewritePolicy) || out.Len() != 0 || stderr.Len() != 0 || policies != 4 || resources.Load() != 0 {
 				t.Fatalf("err=%v output=%q stderr=%q policies=%d resources=%d", err, out.String(), stderr.String(), policies, resources.Load())
 			}
 		})

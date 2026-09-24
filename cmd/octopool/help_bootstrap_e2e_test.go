@@ -229,14 +229,22 @@ func TestCLIHelpBootstrap(t *testing.T) {
 					t.Run("excluded", func(t *testing.T) {
 						for _, args := range excludedBootstrapHelp() {
 							t.Run(strings.Join(args, "_"), func(t *testing.T) {
-								before := fixture.calls.Load()
-								result, captures := fixture.run(t, args, nil, false, 0)
+								current := fixture
+								if state == "failed-503" {
+									// Isolate counters while overlapping real retry backoffs.
+									t.Parallel()
+									current = newBootstrapCLI(t, entry.bin, native, state, entry.shim)
+								}
+								before := current.calls.Load()
+								result, captures := current.run(t, args, nil, false, 0)
 								assertBootstrapBlocked(t, result, captures)
 								want := int64(1)
 								if state == "missing-login" {
 									want = 0
+								} else if state == "failed-503" {
+									want = 3
 								}
-								if got := fixture.calls.Load() - before; got != want {
+								if got := current.calls.Load() - before; got != want {
 									t.Errorf("policy calls=%d, want %d", got, want)
 								}
 							})

@@ -134,11 +134,11 @@ func TestRunGHPRDetailExportPolicyBoundaries(t *testing.T) {
 					if ordinal == 1 && stage != "initial-denial" {
 						return rewriteActiveTestPolicy, http.StatusOK
 					}
-					if ordinal > 2 {
-						t.Error("unexpected extra policy read")
-					}
 					if stage == "final-unavailable" {
 						return "", http.StatusServiceUnavailable
+					}
+					if ordinal > 2 {
+						t.Error("unexpected extra policy read")
 					}
 					return strings.ReplaceAll(rewriteActiveTestPolicy, "internal-model", "acme/repo"), http.StatusOK
 				}, func(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +157,8 @@ func TestRunGHPRDetailExportPolicyBoundaries(t *testing.T) {
 				wantPolicies, wantStderr := int64(2), "octopool: octopool requested local gh fallback: unsupported_pr_detail_export; falling back to real gh\n"
 				if stage == "initial-denial" {
 					wantPolicies, wantStderr = 1, ""
+				} else if stage == "final-unavailable" {
+					wantPolicies = 4
 				}
 				t.Logf("policies=%d data=%d err=%v stdout=%q stderr=%q", policies.Load(), data.Load(), err, out.String(), stderr.String())
 				if !errors.Is(err, wantErr) || isLocalFallback(err) || policies.Load() != wantPolicies || data.Load() != 0 || out.Len() != 0 || stderr.String() != wantStderr {

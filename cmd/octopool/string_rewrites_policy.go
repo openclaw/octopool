@@ -5,15 +5,21 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const rewritePolicyTimeout = 30 * time.Second
+const (
+	rewritePolicyTimeout      = 30 * time.Second
+	rewritePolicyRetryWindow  = 6 * time.Second
+	rewritePolicyRetryTimeout = 6 * time.Second
+)
 
 func validRewriteTimestamp(value string) bool {
 	_, err := time.Parse(time.RFC3339Nano, value)
@@ -51,8 +57,10 @@ func readRewriteFile(path string, stdin io.Reader, limit int) ([]byte, error) {
 }
 
 type rewritePolicyHTTPResult struct {
-	data    []byte
-	attempt rewritePolicyAttempt
+	data       []byte
+	attempt    rewritePolicyAttempt
+	retryable  bool
+	retryAfter time.Duration
 }
 
 func rewritePolicyHTTP(ctx context.Context, baseURL, path, token, method string, body []byte) (rewritePolicyHTTPResult, error) {
@@ -82,6 +90,7 @@ func rewritePolicyHTTP(ctx context.Context, baseURL, path, token, method string,
 	client := &http.Client{Timeout: rewritePolicyTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
+		result.retryable = retryableRewritePolicyTransport(err)
 		return result, result.attempt.failure(rewritePolicyTransportClass(err))
 	}
 	defer response.Body.Close()
@@ -91,10 +100,16 @@ func rewritePolicyHTTP(ctx context.Context, baseURL, path, token, method string,
 		return result, errRewriteConflict
 	}
 	if response.StatusCode != http.StatusOK {
+		switch response.StatusCode {
+		case 429, 500, 502, 503, 504, 520, 521, 522, 523, 524:
+			result.retryable = true
+			result.retryAfter = rewritePolicyRetryAfter(response.Header.Get("Retry-After"), time.Now())
+		}
 		return result, result.attempt.failure(rewritePolicyHTTPStatus)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, rewriteMaxDocument+1))
 	if err != nil {
+		result.retryable = retryableRewritePolicyTransport(err)
 		return result, result.attempt.failure(rewritePolicyResponseRead)
 	}
 	if len(data) > rewriteMaxDocument {
@@ -102,6 +117,53 @@ func rewritePolicyHTTP(ctx context.Context, baseURL, path, token, method string,
 	}
 	result.data = data
 	return result, nil
+}
+
+func retryableRewritePolicyTransport(err error) bool {
+	return !errors.Is(err, context.Canceled) && (relayTimeout(err) || transientRelayFailure(err))
+}
+
+func rewritePolicyRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil {
+		return time.Duration(min(seconds, 3)) * time.Second
+	}
+	if deadline, err := http.ParseTime(value); err == nil {
+		return min(max(deadline.Sub(now), 0), 3*time.Second)
+	}
+	return 0
+}
+
+func (client ghRelayClient) fetchStringRewritePolicy(ctx context.Context) (rewritePolicyHTTPResult, error) {
+	retryDeadline := time.Now().Add(rewritePolicyRetryWindow)
+	path := "/v1/pools/" + url.PathEscape(client.pool) + "/string-rewrites"
+	result, err := rewritePolicyHTTP(ctx, client.baseURL, path, client.token, http.MethodGet, nil)
+	for retry := 0; retry < 2; retry++ {
+		if err == nil || !result.retryable || ctx.Err() != nil || !time.Now().Before(retryDeadline) {
+			return result, err
+		}
+		backoff := 300 * time.Millisecond
+		if retry == 1 {
+			backoff = time.Second
+		}
+		// Jitter only the local backoff; never shorten the server's bounded delay.
+		delay := max(backoff*4/5+time.Duration(rand.Int64N(int64(backoff*2/5))), result.retryAfter)
+		timer := time.NewTimer(min(delay, time.Until(retryDeadline)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return result, err
+		case <-timer.C:
+			if ctx.Err() != nil || !time.Now().Before(retryDeadline) {
+				return result, err
+			}
+		}
+		// Preserve the initial request's timeout; only retry attempts get this cap.
+		retryCtx, cancel := context.WithTimeout(ctx, rewritePolicyRetryTimeout)
+		result, err = rewritePolicyHTTP(retryCtx, client.baseURL, path, client.token, http.MethodGet, nil)
+		cancel()
+	}
+	return result, err
 }
 
 func loadLocalStringRewritePolicy(attempt rewritePolicyAttempt) (stringRewritePolicy, error) {
@@ -129,7 +191,7 @@ func loadLocalStringRewritePolicy(attempt rewritePolicyAttempt) (stringRewritePo
 }
 
 func (client ghRelayClient) stringRewritePolicy(ctx context.Context) (stringRewritePolicy, error) {
-	result, err := rewritePolicyHTTP(ctx, client.baseURL, "/v1/pools/"+url.PathEscape(client.pool)+"/string-rewrites", client.token, http.MethodGet, nil)
+	result, err := client.fetchStringRewritePolicy(ctx)
 	if errors.Is(err, errRewriteConflict) {
 		return stringRewritePolicy{}, result.attempt.failure(rewritePolicyHTTPStatus)
 	}

@@ -935,8 +935,22 @@ Every protected `gh` command requires an Octopool login and a fresh authoritativ
 from `GET /v1/pools/<pool>/string-rewrites`. Each relay request and every final real-`gh`
 dispatch checks policy; a fallback cannot reuse approval for different arguments. There is
 no persistent policy cache, offline allowance, or fallback on authentication/policy errors.
-Policy HTTP requests reject redirects, use a 30-second deadline, and bound the response
-to 65,536 bytes. Empty invocations, singleton help/version, known built-in topic help,
+Policy HTTP requests reject redirects and bound the response to 65,536 bytes. Guarded
+policy GETs retain the existing 30-second timeout for the first attempt. After a transient
+failure, they may retry at most twice, only while less than six seconds have elapsed since
+the fetch started, including backoff. Each retry gets its own six-second timeout and may
+finish after that retry-start window closes. Transient HTTP 500/502/503/504
+and Cloudflare 520–524 responses, HTTP 429, connection resets, interrupted responses, and
+network timeouts retry with jittered backoffs of about 300 ms and one second. A valid
+`Retry-After` (seconds or HTTP date) on these HTTP failures sets a minimum delay, capped
+at three seconds and subject to the retry-start window. Earlier caller deadlines and
+cancellation still take precedence. A slow successful first attempt remains valid; a
+failure received six seconds or more after the fetch started cannot retry. Other HTTP
+statuses, invalid policy documents, and local-file or merge failures never retry.
+These retries are independent of `OCTOPOOL_RELAY_RETRIES`; exhausted failures remain
+terminal, without native fallback or policy caching. Admin policy requests retain their
+30-second deadline without automatic retries.
+Empty invocations, singleton help/version, known built-in topic help,
 and narrowly parsed GitHub authentication bootstrap commands remain available without a policy.
 
 Topic help accepts exactly `help <topic>`, `<topic> --help`, or `<topic> -h` for these
@@ -975,8 +989,10 @@ uploaded. Server rules run first, then local rules; identical entries are dedupl
 conflicting replacements are rejected, and combined limits still apply.
 
 Policy-load failures keep the existing message prefix and add bounded diagnostics to the
-normal stderr error line. There is no success diagnostic, stdout change, persistent log,
-automatic policy retry, or cached-policy fallback. A synthetic example:
+normal stderr error line. After retries, diagnostics describe the last HTTP attempt and
+its subsequent validation checks; cancellation during backoff retains that last failure.
+There is no success diagnostic, stdout change, persistent log, or cached-policy fallback.
+A synthetic example:
 
 ```text
 error: string rewrite policy unavailable or invalid (class=http_status attempt_utc=2026-09-01T12:34:56.123Z elapsed_ms=42 http_status=403 cf_ray=0123456789abcdef-SJC)
@@ -1003,8 +1019,9 @@ The fixed `class` identifies the failing check, not its underlying cause:
 to whole milliseconds. It includes GET/body reading and any subsequent server/local/merge
 checks reached, but excludes caller client setup and final stderr formatting. For `setup`
 only, both fields instead cover client setup. They do not measure a whole `gh` invocation;
-each guarded boundary reloads policy and starts another attempt. The 30-second context
-and HTTP-client deadlines do not bound later local/merge work. An earlier caller deadline
+each guarded boundary reloads policy, with a new timestamp for every HTTP attempt.
+Backoff and earlier attempts are excluded from `elapsed_ms`. The HTTP deadlines and
+retry-start window do not bound later local/merge work. An earlier caller deadline
 or cancellation still takes precedence.
 
 `http_status` is omitted without an observed response. For `server_validation`, `local_read`,
