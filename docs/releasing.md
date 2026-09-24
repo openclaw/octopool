@@ -34,6 +34,9 @@ durable release evidence; signing uses the OpenClaw Foundation Developer ID.
    substitute a personal-account Cloudflare token. R2/D1 bindings must be provisioned
    first (see docs/cache.md for the actions-logs bucket and its lifecycle rule), and
    `OCTOPOOL_PROXY_SECRET` must already exist on both Workers.
+   The first `PolicyCoordinator` deployment adds Durable Object migration `v2`; follow
+   the [write-fenced cutover and rollback procedure](operations.md#policy-coordinator-upgrade)
+   before deployment. A mixed rollout with old direct-D1 policy writers is unsafe.
 7. Record evidence in openclaw/releases: dispatch
    `openclaw-release-evidence.yml` with `release_id=octopool-X.Y.Z` and
    the Octopool CI/release workflow runs in `runs`. Leave `package_spec` and

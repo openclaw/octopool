@@ -220,12 +220,21 @@ successful response contains no rules:
 A stale or competing writer receives `409 string_rewrite_revision_conflict`; fetch and
 review the new policy before retrying. Use `rules: []` with the current revision to
 explicitly clear rules. Revisions are positive safe integers and increase on every
-successful PUT, including an unchanged ruleset. GET always reads the D1 primary; there is
-no policy cache, stale response, or offline fallback. All responses, including auth,
+successful PUT, including an unchanged ruleset. All GETs, relay policy loads, and PUTs use
+one deployment-wide `PolicyCoordinator` Durable Object. It validates and compiles the D1
+primary snapshot on cold start, then serves warm reads from memory. PUT performs the D1 CAS
+and installs the acknowledged snapshot before returning success; a read starting after
+that success observes that revision or newer. Concurrent reads see complete snapshots.
+An uncertain write discards the in-memory snapshot and requires a successful primary reload;
+a failed PUT may already have committed, so read and review before retrying. There is no
+stale response or offline fallback. Direct D1 edits bypass this authority and are unsupported
+outside the [controlled recovery/cutover procedure](operations.md#policy-coordinator-upgrade).
+All responses, including auth,
 validation, conflict, and storage errors, use `Cache-Control: no-store`.
 
 Malformed imports return `400 invalid_string_rewrite_policy`. Missing/corrupt policy or
-D1 failure returns `503 string_rewrite_policy_unavailable`, never `fallback_local`.
+failure to obtain authoritative policy from D1 or the coordinator returns
+`503 string_rewrite_policy_unavailable`, never `fallback_local`.
 Policy and denial errors contain only generic categories, not patterns, replacements,
 or matched content. The GET endpoints intentionally disclose rules to authenticated
 administrators and callers.

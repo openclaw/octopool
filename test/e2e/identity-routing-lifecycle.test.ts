@@ -1,6 +1,7 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import { policyCoordinatorStub } from "../../src/policy-coordinator";
 import { describe, expect, it, vi } from "vitest";
 import { clearConfigCache } from "../../src/config-cache";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
@@ -235,10 +236,12 @@ describe("identity routing lifecycle boundaries", () => {
         await expireEntries();
       }
       await appIdentity(installation);
-      if (failure === "denial")
+      if (failure === "denial") {
         await env.DB.prepare("UPDATE string_rewrite_policy SET rules_json = ?")
           .bind(JSON.stringify([{ pattern: "access_tokens", replacement: "blocked" }]))
           .run();
+        if (boundary === "revalidation") await evictDurableObject(policyCoordinatorStub(env));
+      }
       const cryptoFailure =
         failure === "crypto"
           ? vi

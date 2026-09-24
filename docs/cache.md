@@ -16,8 +16,16 @@ bounded, 256-entry isolate cache of settled values. Entries expire 30 seconds af
 load starts; a slow load never extends that deadline. Revoked caller tokens, retired
 identities, and pool policy edits may therefore take up to 30 seconds to reach a warm
 isolate. Authoritative identity rechecks use fresh D1 reads and bypass both settled and
-pending lookups. String-rewrite policy itself always reads the D1 primary and is not
-stored in this cache; its caller authentication still uses the configuration cache.
+pending lookups. String-rewrite policy uses a separate deployment-wide `PolicyCoordinator`
+Durable Object, outside this cache; its caller authentication still uses the configuration cache.
+The object loads and validates the D1 primary on cold start and keeps the compiled snapshot
+in memory. All admin writes run the existing D1 revision CAS through that same object and
+install the new snapshot before returning success. Every caller/admin GET and relay policy
+load consults it, so a read starting after a successful PUT observes that revision or newer.
+There is no isolate, edge, replica, TTL, or stale-policy fallback. Failed or uncertain writes
+discard the snapshot; reads must reload the primary successfully before serving policy again.
+Eviction also requires a fresh primary load. See the [policy coordinator cutover](operations.md#policy-coordinator-upgrade)
+before deployment or direct D1 recovery.
 
 Identical concurrent loads coalesce only within one Worker request, using an asynchronous
 context created at the fetch boundary. Different requests load cold entries independently

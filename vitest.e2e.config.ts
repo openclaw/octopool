@@ -14,6 +14,8 @@ export default defineConfig({
     cloudflareTest(async () => ({
       main: "./test/e2e/identity-routing-native-main.ts",
       wrangler: { configPath: "./wrangler.jsonc" },
+      // Both coordinator bindings/migrations come from Wrangler; the test main
+      // exports their production classes so policy reads cross the real DO boundary.
       miniflare: {
         serviceBindings: { IDENTITY_PROTOCOL: { name: "octopool" } },
         bindings: {

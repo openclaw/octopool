@@ -1,4 +1,7 @@
 import { env } from "cloudflare:workers";
+import { evictDurableObject } from "cloudflare:test";
+import { policyCoordinatorStub } from "../../src/policy-coordinator";
+import { observePolicyD1 } from "./policy-d1-observer";
 import { describe, expect, it, vi } from "vitest";
 import {
   CALLER_TOKEN,
@@ -538,6 +541,7 @@ describe("server read enforcement", () => {
       before,
     );
     await env.DB.prepare("DELETE FROM string_rewrite_policy").run();
+    await evictDurableObject(policyCoordinatorStub(env));
     expect((await warm("/v1/github/request", request)).status).toBe(503);
     expect(
       (await warm(callerPath, { headers: { authorization: `Bearer ${CALLER_TOKEN}` } })).status,
@@ -598,8 +602,10 @@ describe("server read enforcement", () => {
     await seedPool();
     const upstream = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", upstream);
-    vi.spyOn(env.DB, "withSession").mockImplementation(() => {
-      throw new Error("D1 DB is overloaded. Requests queued for too long. internal-model");
+    await observePolicyD1({
+      before: async () => {
+        throw new Error("D1 DB is overloaded. Requests queued for too long. internal-model");
+      },
     });
     const response = await relay("/repos/openclaw/octopool");
     expect(response.status).toBe(503);

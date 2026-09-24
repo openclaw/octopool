@@ -1,5 +1,7 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
+import { evictDurableObject } from "cloudflare:test";
+import { policyCoordinatorStub } from "../../src/policy-coordinator";
 import { describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../../src/cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
@@ -123,6 +125,7 @@ describe("Worker native protection reads", () => {
     expect(denied.status).toBe(403);
     expect(await denied.json()).toMatchObject({ error: { code: "string_rewrite_denied" } });
     await env.DB.prepare("DELETE FROM string_rewrite_policy").run();
+    await evictDurableObject(policyCoordinatorStub(env));
     const unavailable = await relay(rulesPath);
     expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toMatchObject({

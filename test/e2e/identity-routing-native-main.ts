@@ -4,6 +4,7 @@ import { configCacheLifetimeRequest } from "./config-cache-lifetime-fixture";
 import { withConfigCacheScope } from "../../src/config-cache";
 
 export { PoolCoordinator } from "../../src/pool-coordinator";
+export { PolicyCoordinator } from "../../src/policy-coordinator";
 
 // This protocol negative needs a native request lifetime around the real relay.
 // The ordinary test setup still owns storage reset and graceful DO eviction.

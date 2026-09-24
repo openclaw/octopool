@@ -1,6 +1,7 @@
 import { evictDurableObject, listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { restoreD1Baseline, type D1Baseline } from "./d1-baseline";
 import { OwnedWork } from "./owned-work";
+import { policyCoordinatorStub } from "../../src/policy-coordinator";
 
 // All caches stay native. Only puts forwarded through this ledger are owned;
 // this is deliberately not a purge of arbitrary, untracked Cache API contents.
@@ -108,12 +109,16 @@ export async function clearActionLogs(bucket: R2Bucket, pageSize = 1_000): Promi
 }
 
 export async function restoreStorage(
-  env: Pick<Env, "DB" | "POOL_COORDINATOR" | "ACTIONS_LOGS">,
+  env: Env,
   baseline: D1Baseline,
   caches: CacheWriteLedger,
 ): Promise<void> {
   await caches.clear();
   await clearCoordinators(env.POOL_COORDINATOR);
+  // The policy object has no local SQL files to enumerate: evict its fixed ID.
+  const policy = policyCoordinatorStub(env);
+  await runInDurableObject(policy, () => undefined);
+  await evictDurableObject(policy);
   await clearActionLogs(env.ACTIONS_LOGS);
   await restoreD1Baseline(env.DB, baseline);
 }

@@ -7,6 +7,7 @@ import { shouldUseWebError, webErrorResponse } from "./web-error";
 import { withConfigCacheScope } from "./config-cache";
 
 export { PoolCoordinator };
+export { PolicyCoordinator } from "./policy-coordinator";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

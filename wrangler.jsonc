@@ -44,12 +44,20 @@
         "name": "POOL_COORDINATOR",
         "class_name": "PoolCoordinator",
       },
+      {
+        "name": "POLICY_COORDINATOR",
+        "class_name": "PolicyCoordinator",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["PoolCoordinator"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["PolicyCoordinator"],
     },
   ],
 }

@@ -1,6 +1,7 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import { policyCoordinatorStub } from "../../src/policy-coordinator";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../../src/cache";
 import { ensurePool, loadPoolPolicy } from "../../src/db";
@@ -238,6 +239,7 @@ describe("Worker stored pool policy", () => {
     expect(denied.status).toBe(403);
     expect(await denied.json()).toMatchObject({ error: { code: "string_rewrite_denied" } });
     await env.DB.prepare("DELETE FROM string_rewrite_policy").run();
+    await evictDurableObject(policyCoordinatorStub(env));
     const unavailable = await relay("/repos/openclaw/octopool/rules/branches/main");
     expect(unavailable.status).toBe(503);
     expect(await unavailable.json()).toMatchObject({

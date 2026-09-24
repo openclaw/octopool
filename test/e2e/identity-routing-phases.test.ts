@@ -1,6 +1,7 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import { policyCoordinatorStub } from "../../src/policy-coordinator";
 import { describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readEdgeGitHubCache } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
@@ -415,6 +416,7 @@ describe("identity selection phase ownership", () => {
           ]),
         )
         .run();
+      await evictDurableObject(policyCoordinatorStub(env));
       const response = await requestWithEnv(
         {},
         "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs",
