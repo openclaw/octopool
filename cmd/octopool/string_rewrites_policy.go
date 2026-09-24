@@ -141,6 +141,8 @@ func rewritePolicyRetryAfter(value string, now time.Time) time.Duration {
 }
 
 func (client ghRelayClient) fetchStringRewritePolicy(ctx context.Context) (rewritePolicyHTTPResult, error) {
+	ctx, releaseSlot := withRelaySlot(ctx)
+	defer releaseSlot()
 	retryDeadline := time.Now().Add(rewritePolicyRetryWindow)
 	path := "/v1/pools/" + url.PathEscape(client.pool) + "/string-rewrites"
 	result, err := rewritePolicyHTTP(ctx, client.baseURL, path, client.token, http.MethodGet, nil)

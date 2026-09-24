@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Cap concurrent CLI relay reads and policy fetches across processes at eight per user on each machine, configurable with `OCTOPOOL_RELAY_CONCURRENCY`, using crash-safe advisory slots and bounded fail-open waiting.
+
 ## 0.8.0 - 2026-09-24
 
 **Highlights:** Relay PR comment and commit exports and 100+ job run views through Octopool, retry transient policy failures instead of failing commands, and cut D1 write load on the relay's hot path.

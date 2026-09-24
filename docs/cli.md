@@ -828,6 +828,25 @@ and pool fallbacks as failures. Watch ownership remains as described above: run 
 and PR-check watches never hand off a client timeout after printing progress. These limits
 apply per relay read, not to the entire command, policy checks, or native `gh` execution.
 
+To keep scripts spawning many `gh` processes from flooding the relay, CLI processes for
+the same user share eight advisory lock slots in the OS cache directory's
+`octopool/relay-slots` folder (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
+`~/.cache` on Linux, `%LOCALAPPDATA%` on Windows). One slot covers an attempt's policy
+fetch, including its policy retries, and relay POST, avoiding a second queue wait between
+policy approval and dispatch. Standalone policy fetches use the same slots. A crashed
+process releases its lock automatically; slot files stay in place and must not be deleted
+while commands are running.
+
+Slot acquisition polls with short jittered backoff for at most 30 seconds, then proceeds
+without a slot; unavailable cache directories or lock errors also proceed immediately.
+This is a best-effort cap, shared across pools and servers, and all processes should use
+the same `OCTOPOOL_RELAY_CONCURRENCY` setting and cache directory. Waiting adds command
+latency but happens before policy timeout/retry clocks and the relay read timeout start.
+Caller cancellation and earlier caller deadlines still apply. Relay retries acquire a new
+slot after their existing backoff; watch intervals, retry counts, timeout handling, and
+`OCTOPOOL_NO_FALLBACK` behavior are unchanged. Slots are released before relay retry
+backoff, native `gh`, `jq`, cache notices, or command output.
+
 Pagination is fail-closed: if bounded relay pagination cannot prove a complete PR detail,
 check set, or filtered issue list, the CLI delegates to real `gh` instead of returning a
 partial result. Non-integer `--limit`/`-L` values are rejected explicitly.
@@ -1430,6 +1449,10 @@ These are dev/CI escape hatches, not the everyday UX:
   supported `gh run watch`, which fails explicitly. Exhausted service errors remain failures
   instead of spending local GitHub quota. Default `1`; `0`
   disables retries.
+- `OCTOPOOL_RELAY_CONCURRENCY` — concurrent relay attempts and standalone policy fetches
+  across CLI processes for the same user on this machine (default `8`; `0` disables).
+  Nonnegative integers are accepted; invalid or negative values use the default. Each
+  acquisition waits up to 30 seconds before failing open without changing command errors.
 - `OCTOPOOL_RELAY_TIMEOUT_SECONDS` — per-attempt timeout for shim relay GET reads,
   including response-body reads. Default `20`; nonnegative integer values below `5`
   are clamped to `5` seconds. Invalid, negative, or unrepresentable durations use the

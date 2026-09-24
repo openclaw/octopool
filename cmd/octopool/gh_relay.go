@@ -298,6 +298,8 @@ func relayReadHeaders(method string, headers map[string]string) map[string]strin
 }
 
 func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
+	ctx, releaseSlot := withRelaySlot(ctx)
+	defer releaseSlot()
 	policy, err := client.stringRewritePolicy(ctx)
 	if err != nil {
 		return relayEnvelope{}, err
@@ -324,6 +326,7 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	// relay read gets this per-attempt header/body budget.
 	timeout := relayReadTimeout()
 	out, status, err := doRawWithTimeout(ctx, apiURL(client.baseURL, "/v1/github/request"), client.token, body, timeout)
+	releaseSlot()
 	if err != nil {
 		if ctx.Err() != nil {
 			return relayEnvelope{}, ctx.Err()
