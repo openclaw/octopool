@@ -8,6 +8,15 @@ import { queries } from "./generated/sql";
 import { capabilitiesForRouteKind } from "./route-manifest";
 import type { RelayRequest, RouteInfo } from "./types";
 
+const PUBLIC_API_RATE_WRITE_INTERVAL_MS = 15_000;
+type RateSnapshot = { writtenAt: number; remaining: number; resetAt: number };
+let rateSnapshots = new WeakMap<D1Database, Map<string, RateSnapshot>>();
+
+// The e2e harness resets D1 between tests in the same isolate.
+export function clearPublicAPIRateSnapshots(): void {
+  rateSnapshots = new WeakMap();
+}
+
 export function releaseAPIRequest(
   env: Env,
   request: RelayRequest,
@@ -81,6 +90,7 @@ export async function storePublicAPIRate(
   env: Env,
   resource: string,
   headers: Headers,
+  ctx?: Pick<ExecutionContext, "waitUntil">,
 ): Promise<void> {
   const limit = headerInt(headers, "x-ratelimit-limit");
   const remaining = headerInt(headers, "x-ratelimit-remaining");
@@ -88,13 +98,33 @@ export async function storePublicAPIRate(
   if (limit === undefined || remaining === undefined || resetAt === undefined || limit <= 0) {
     return;
   }
-  try {
-    await env.DB.prepare(queries.upsertPublicApiRate)
-      .bind(resource, limit, remaining, resetAt)
-      .run();
-  } catch {
-    // Rate persistence is advisory; public reads still work without it.
+  let snapshots = rateSnapshots.get(env.DB);
+  if (snapshots === undefined) {
+    snapshots = new Map();
+    rateSnapshots.set(env.DB, snapshots);
   }
+  const now = Date.now();
+  const previous = snapshots.get(resource);
+  if (
+    previous !== undefined &&
+    now - previous.writtenAt < PUBLIC_API_RATE_WRITE_INTERVAL_MS &&
+    previous.resetAt === resetAt &&
+    !(remaining === 0 && previous.remaining !== 0)
+  )
+    return;
+  // Reserve before I/O; never share a pending promise across request lifetimes.
+  snapshots.set(resource, { writtenAt: now, remaining, resetAt });
+  const write = (async () => {
+    try {
+      await env.DB.prepare(queries.upsertPublicApiRate)
+        .bind(resource, limit, remaining, resetAt)
+        .run();
+    } catch {
+      // Keep the interval on failure too: advisory writes must not amplify a D1 outage.
+    }
+  })();
+  if (ctx !== undefined) ctx.waitUntil(write);
+  else await write;
 }
 
 function publicAPIHeaders(request: RelayRequest): Record<string, string> {

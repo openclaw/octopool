@@ -26,7 +26,7 @@ export async function callGitHubWeb(
   env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
-  options: { skipAnonymousAPI?: boolean; skipNoQuota?: boolean } = {},
+  options: { skipAnonymousAPI?: boolean; skipNoQuota?: boolean; ctx?: ExecutionContext } = {},
 ): Promise<GitHubRelayResponse | undefined> {
   let requests = webRequests(env, request, route);
   if (requests.length === 0) {
@@ -51,7 +51,7 @@ export async function callGitHubWeb(
     }
     const { response, url: responseURL } = fetched;
     if (web.usesApiQuota) {
-      await storePublicAPIRate(env, route.resource, response.headers);
+      await storePublicAPIRate(env, route.resource, response.headers, options.ctx);
     }
     if (response.status < 200 || response.status >= 300) {
       await cancelResponseBody(response);
@@ -85,6 +85,7 @@ export async function callAnonymousGitHubAPI(
   env: GitHubEgressEnv,
   request: RelayRequest,
   route: RouteInfo,
+  ctx?: ExecutionContext,
 ): Promise<AnonymousGitHubAPIResult> {
   const api = webRequests(env, request, route).find((candidate) => candidate.usesApiQuota);
   if (api === undefined) {
@@ -100,7 +101,7 @@ export async function callAnonymousGitHubAPI(
     return {};
   }
   const { response, url: responseURL } = fetched;
-  await storePublicAPIRate(env, route.resource, response.headers);
+  await storePublicAPIRate(env, route.resource, response.headers, ctx);
   if (response.status === 304) {
     return {
       response: {

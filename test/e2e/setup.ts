@@ -5,6 +5,7 @@ import { initializeD1Baseline, type D1Baseline } from "./d1-baseline";
 import { IsolationLifecycle } from "./lifecycle";
 import { ownedWork } from "./owned-work";
 import { CacheWriteLedger, restoreStorage } from "./storage-isolation";
+import { clearPublicAPIRateSnapshots } from "../../src/github-public-api";
 
 type TestEnv = Env & { TEST_MIGRATIONS: D1Migration[] };
 // Match Vitest's unchanged default hook deadline; the watchdog only poisons
@@ -33,6 +34,7 @@ beforeEach(async ({ signal }) => {
   );
   await lifecycle.run(async () => {
     await restoreStorage(env, baseline, cacheLedger);
+    clearPublicAPIRateSnapshots();
     ownedWork.start();
     vi.stubGlobal("caches", cacheLedger.caches);
   });

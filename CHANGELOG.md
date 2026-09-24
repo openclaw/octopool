@@ -11,6 +11,7 @@
 - Complete workflow job lists across up to 10 pages in CLI run view and watch, preserving job order and rejecting inconsistent totals, duplicate IDs, incomplete pages, and mismatched run or head ownership before rendering, while preserving successful jobs reused from earlier attempts.
 - Retry transient CLI string-rewrite policy fetch failures up to twice with six-second retry limits while retaining the initial 30-second timeout, bounded Retry-After delays, fresh policy checks, terminal failures, and last-attempt diagnostics.
 - Remove inline publication-owner GC from each D1 acquisition, retaining atomic expired-owner takeover and bounded hourly cleanup.
+- Throttle advisory anonymous API quota snapshots per isolate and resource, publish exhaustion/reset changes promptly, and schedule persistence outside the response path when a request context is available.
 
 ### Upgrade notes
 

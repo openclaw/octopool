@@ -29,7 +29,7 @@ export function terminalLogCacheKey(request: RelayRequest): string {
 
 export async function terminalLogCacheProof(
   env: GitHubEgressEnv,
-  _ctx: ExecutionContext,
+  ctx: ExecutionContext,
   request: RelayRequest,
   route: RouteInfo,
   policy: PoolPolicy,
@@ -46,6 +46,7 @@ export async function terminalLogCacheProof(
       env,
       metadataRequest(request, `/repos/${route.owner}/${route.repo}/actions/jobs/${jobID}`),
       policy,
+      ctx,
     );
     return metadataProvesCompleted(job) ? { key: terminalLogCacheKey(request) } : undefined;
   } catch (error) {
@@ -149,10 +150,11 @@ async function fetchFreshMetadata(
   env: GitHubEgressEnv,
   request: RelayRequest,
   policy: PoolPolicy,
+  ctx: ExecutionContext,
 ): Promise<GitHubRelayResponse | undefined> {
   const route = classifyRoute(request, policy);
   const observation = await observeAnonymousPublicRepo(env, route, async () => {
-    const fetched = await callGitHubWeb(env, request, route);
+    const fetched = await callGitHubWeb(env, request, route, { ctx });
     return fetched === undefined ? undefined : sanitizeGitHubResponse(route, fetched);
   });
   return observation.response;

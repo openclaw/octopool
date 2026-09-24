@@ -87,6 +87,15 @@ API normally. Persisted anonymous rate snapshots remain advisory. Ordinary permi
 refusals, transport/server failures without rate-limit evidence, and policy denials keep
 their existing handling.
 
+Anonymous API rate snapshots are written at most once per resource per 15 seconds in each
+Worker isolate, except when remaining quota first reaches zero or the reset window changes.
+Repeated exhausted responses share that interval too. Requests with an execution context
+schedule the write with `waitUntil`; other callers await only eligible writes. Failed writes
+keep the interval and can retry on the next eligible observation. Current-response rate-limit
+classification still uses the response headers immediately. Health, stats, dashboard and
+identity selection do not read `github_public_api_rates`; it is an advisory operator snapshot,
+not an authoritative shared anonymous budget.
+
 ### Cache key
 
 SHA-256 (base64url) over a stable, sorted JSON of: pool, method, path, normalized

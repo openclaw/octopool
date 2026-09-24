@@ -575,7 +575,7 @@ async function callRevalidationAPI(
         state.env,
         state.route,
         async () => {
-          const attempt = await callAnonymousGitHubAPI(state.env, request, state.route);
+          const attempt = await callAnonymousGitHubAPI(state.env, request, state.route, state.ctx);
           if (attempt.rateLimited) state.anonymousRateLimited = true;
           return attempt.response;
         },
@@ -735,10 +735,12 @@ async function callTokenFreeBackend(
     state.route,
     async () =>
       state.cacheKey === undefined
-        ? (await callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route)).response
+        ? (await callAnonymousGitHubAPI(state.env, state.cacheRequest, state.route, state.ctx))
+            .response
         : callGitHubWeb(state.env, state.cacheRequest, state.route, {
             skipAnonymousAPI: noQuotaOnly || state.anonymousRateLimited,
             skipNoQuota,
+            ctx: state.ctx,
           }),
   );
   if (response === undefined) {
@@ -1127,7 +1129,12 @@ function anonymousRunJobsPage(
 ): (request: RelayRequest) => Promise<GitHubRelayResponse | undefined> {
   return async (request) => {
     const response = await callPublicGitHub(state.env, request, state.route);
-    await storePublicAPIRate(state.env, state.route.resource, new Headers(response.headers));
+    await storePublicAPIRate(
+      state.env,
+      state.route.resource,
+      new Headers(response.headers),
+      state.ctx,
+    );
     return sanitizeGitHubResponse(state.route, response);
   };
 }
@@ -1748,6 +1755,7 @@ async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> 
   try {
     const response = await callGitHubWeb(state.env, request, route, {
       skipAnonymousAPI: state.anonymousRateLimited,
+      ctx: state.ctx,
     });
     if (runAttemptCompleted(response, state.route.run_attempt, path)) {
       return { ...state.route, run_attempt_completed: true };
