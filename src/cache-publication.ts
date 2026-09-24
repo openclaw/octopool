@@ -3,7 +3,6 @@ import { queries } from "./generated/sql";
 // Restore/rebuild of the allocator behind issued IDs requires a new epoch.
 export const CACHE_PUBLICATION_EPOCH = "publication-v1";
 export const PUBLICATION_LEASE_MS = 8_000;
-export const PUBLICATION_ACQUIRE_GC_LIMIT = 16;
 
 export type PublicationOwner = Readonly<{
   id: number;
@@ -29,16 +28,10 @@ export async function tryPublicationOwner(
   env: Env,
   resource: string,
 ): Promise<PublicationOwner | undefined> {
-  const results = await env.DB.batch<PublicationOwner>([
-    env.DB.prepare(queries.deleteExpiredPublicationOwners).bind(PUBLICATION_ACQUIRE_GC_LIMIT),
-    env.DB.prepare(queries.acquirePublicationOwner).bind(
-      CACHE_PUBLICATION_EPOCH,
-      resource,
-      crypto.randomUUID(),
-      PUBLICATION_LEASE_MS,
-    ),
-  ]);
-  const owner = results[1]!.results[0];
+  const result = await env.DB.prepare(queries.acquirePublicationOwner)
+    .bind(CACHE_PUBLICATION_EPOCH, resource, crypto.randomUUID(), PUBLICATION_LEASE_MS)
+    .all<PublicationOwner>();
+  const owner = result.results[0];
   if (
     owner !== undefined &&
     (!Number.isSafeInteger(owner.id) ||
@@ -48,7 +41,7 @@ export async function tryPublicationOwner(
   ) {
     throw new Error("Invalid publication grant");
   }
-  // No capability escapes until the whole binding transaction committed.
+  // No capability escapes until the acquisition statement committed.
   return owner;
 }
 

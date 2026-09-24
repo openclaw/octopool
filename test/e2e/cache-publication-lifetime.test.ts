@@ -143,10 +143,7 @@ it("does not convert an uncertain acquisition into a grant or ownerless body fil
   await expect(tryPublicationOwner({ ...env, DB: db }, "cache:abandoned")).rejects.toThrow(
     "lost committed grant",
   );
-  expect(observed).toEqual([
-    queries.deleteExpiredPublicationOwners,
-    queries.acquirePublicationOwner,
-  ]);
+  expect(observed).toEqual([queries.acquirePublicationOwner]);
   expect(await coordinator().tryAcquirePublication("cache:abandoned")).toBeUndefined();
   expect(await env.DB.prepare("SELECT count(*) AS n FROM github_cache_entries").first("n")).toBe(0);
 });
@@ -209,13 +206,12 @@ it("records actual native statement and row costs for short body fill, contentio
     .bind(...publicationBinding(a))
     .first();
   expect(costs.map(({ query }) => query)).toEqual([
-    "deleteExpiredPublicationOwners",
     "acquirePublicationOwner",
     "renewPublicationOwner",
     "writeGitHubCache",
     "completePublicationOwner",
   ]);
-  console.log("native short body SQL costs (4 binding operations, 5 statements)", costs);
+  console.log("native short body SQL costs (4 binding operations, 4 statements)", costs);
   costs.length = 0;
   const publicOwner = (await tryPublicationOwner(traced, "public-repo:openclaw/octopool"))!;
   await db
@@ -236,8 +232,8 @@ it("records actual native statement and row costs for short body fill, contentio
     .prepare(queries.completePublicationOwner)
     .bind(...publicationBinding(publicOwner))
     .first();
-  expect(costs).toHaveLength(5);
-  console.log("native anonymous proof SQL costs (4 binding operations, 5 statements)", costs);
+  expect(costs).toHaveLength(4);
+  console.log("native anonymous proof SQL costs (4 binding operations, 4 statements)", costs);
   costs.length = 0;
   for (let i = 0; i < 33; i++) await coordinator().tryAcquirePublication(`cache:abandoned-${i}`);
   await env.DB.prepare("UPDATE cache_publication_owners SET lease_until_ms = 0").run();
@@ -250,9 +246,39 @@ it("records actual native statement and row costs for short body fill, contentio
       ).first<number>("n"))!,
     );
   }
-  expect(backlog).toEqual([17, 1, 0]);
-  expect(costs.filter(({ query }) => query === "deleteExpiredPublicationOwners")).toHaveLength(3);
-  console.log("native acquisition-scaled GC and busy cost", { backlog, costs });
+  expect(backlog).toEqual([33, 33, 33]);
+  expect(costs.map(({ query }) => query)).toEqual(Array(3).fill("acquirePublicationOwner"));
+  console.log("native acquisition without GC and busy cost", { backlog, costs });
+  await runScheduledMaintenance(traced);
+  expect(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM cache_publication_owners WHERE lease_until_ms = 0",
+    ).first("n"),
+  ).toBe(0);
+  expect(await coordinator().tryAcquirePublication("cache:busy")).toBeUndefined();
+});
+
+it("takes over an expired owner without collecting it or unrelated expired rows", async () => {
+  const old = (await tryPublicationOwner(env, "cache:takeover"))!;
+  await tryPublicationOwner(env, "cache:unrelated");
+  await env.DB.prepare("UPDATE cache_publication_owners SET lease_until_ms = 0").run();
+  const statements: string[] = [];
+  const db = observePublicationD1(env.DB, {
+    before: async (sql) => {
+      statements.push(sql);
+    },
+  });
+  const replacement = (await tryPublicationOwner({ ...env, DB: db }, old.resource_key))!;
+  expect(statements).toEqual([queries.acquirePublicationOwner]);
+  expect(replacement.id).toBeGreaterThan(old.id);
+  expect(replacement.owner_token).not.toBe(old.owner_token);
+  expect(replacement.lease_until_ms).toBeGreaterThan(Date.now());
+  expect(await coordinator().renewPublication(old)).toBe(false);
+  expect(await coordinator().completePublication(old, "shared")).toBe(false);
+  expect(await coordinator().tryAcquirePublication(old.resource_key)).toBeUndefined();
+  expect(
+    await env.DB.prepare("SELECT count(*) AS n FROM cache_publication_owners").first("n"),
+  ).toBe(2);
 });
 
 it("measures a real renewable fill through DO RPC and native SQL", async () => {
@@ -312,7 +338,7 @@ it("measures a real renewable fill through DO RPC and native SQL", async () => {
     expect(costs.filter(({ query }) => query === "writeGitHubCache")).toHaveLength(1);
     console.log("native renewable fill measured SQL", {
       statements: costs.length,
-      bindingOperations: costs.length - 1,
+      bindingOperations: costs.length,
       costs,
     });
   } finally {

@@ -690,21 +690,21 @@ extend that expiry, and failed/stale publication never deletes a replacement edg
 Independent hot body-plus-covering-proof hits add no publication D1/DO calls. Existing
 identity eligibility/auth-cache reads and audit writes retain their own contracts.
 
-Completed owners are deleted immediately. Every durable acquisition attempt batches an
-indexed atomic deletion of at most 16 expired owner rows with acquisition: one D1 binding
-operation, two SQL statements, including on contention. The same-statement busy prefilter
-avoids allocator advancement for a known-live owner. Each attempt can abandon at most one
-new owner; once expired, traffic can remove up to sixteen. This bounds per-attempt work,
-not absolute storage during an arbitrary burst or outage. Idle backlog has a separate
-hourly fallback of at most 20 × 500 owner deletions. Payload and expired-proof pruning have
+Completed owners are deleted immediately. Every durable acquisition attempt uses one D1
+binding operation and one SQL statement, including on contention. The same-statement busy
+prefilter avoids allocator advancement for a known-live owner; the conflict update takes
+over an expired owner without deleting it first. Unrelated expired owners remain until
+hourly maintenance, which deletes at most 20 × 500 owners per run. This bounds maintenance
+work, not absolute storage during an arbitrary burst or outage. Payload and expired-proof pruning have
 independent 20 × 500 budgets and never reset the sequence or delete live ownership.
 
 Native local D1 measurements for a short body fill, including the final renewal, were
-four binding operations / five SQL statements and 13 rows read / 11 written (empty owner
-backlog). A 16-row owner GC read 80 rows and wrote 16 using the expiry index. Three attempts
-removed an expired backlog of 33 as 17 → 1 → 0. Proof warming measured four binding operations / five statements and 14 rows read /
+four binding operations / four SQL statements and 13 rows read / 11 written (empty owner
+backlog). Acquisition leaves an unrelated expired backlog intact; hourly maintenance prunes it.
+The former inline GC ran 778,116 times for 4,813 deleted rows and 399,365 total D1 ms in
+the three-day September 23, 2026 insights sample. Proof warming measured four binding operations / four statements and 14 rows read /
 10 written in the same fixture, including acquisition, final renewal, proof write and completion; long observations add one renewal statement
-per active owner every three seconds. A 3.2-second renewable body fill measured five binding operations / six statements,
+per active owner every three seconds. A 3.2-second renewable body fill measured five binding operations / five statements,
 15 rows read / 13 written, including its periodic and final renewals. These are local
 runtime counters and logical calls, not hosted D1 billing or a throughput claim. See [operations](operations.md#cache-publication-upgrade-and-restore)
 for rollout, restore, and backlog monitoring requirements.

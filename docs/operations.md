@@ -207,11 +207,11 @@ Do not reuse an epoch name or copy old positives into it. The final safe ID is
 There is no dynamic epoch registry: retired code may still write its own old namespace.
 Drain its routing before claiming every request is repaired.
 
-Owner completion deletes immediately. Each D1 acquisition batches indexed GC of at most
-16 expired owners plus allocation (two SQL statements, one binding call). The hourly
-idle fallback is at most 10,000 expired owners, separately from proof/body/audit pruning.
-Traffic cleanup has sixteen removals per attempt versus at most one newly abandoned
-grant; the eight-second expiry, bursts, outages and no-traffic periods still determine
+Owner completion deletes immediately. Each D1 acquisition is one SQL statement and one
+binding call; expired ownership for the same resource is replaced atomically without GC.
+Hourly maintenance deletes at most 10,000 expired owners, separately from proof/body/audit
+pruning. Inline GC was removed after 778,116 statements deleted only 4,813 rows in the
+three-day September 23, 2026 sample. The eight-second expiry, bursts, outages and cron health determine
 transient occupancy. Monitor expired count and oldest expiry rather than claiming a
 fixed cardinality or treating a bounded batch as a bounded backlog. DELETE makes pages
 reusable and does not guarantee that the allocated SQLite file shrinks.
@@ -537,7 +537,7 @@ can leave the harmless indexes in place; older code simply stops this cleanup.
 The per-call budget does not bound absolute storage during arbitrary bursts or guarantee
 when idle rows are physically deleted. No timer, alarm, new RPC, or global object sweep is
 added. Deletions make SQLite space reusable, without promising file-size shrinkage or
-hosted billing savings. Publication-owner acquisition cleanup and its hourly fallback
+hosted billing savings. Hourly publication-owner cleanup
 retain their separate authority and budgets described in [Cache](cache.md).
 
 ## SQL catalog
