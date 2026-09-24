@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-09-24
+
+**Highlights:** Relay PR comment and commit exports and 100+ job run views through Octopool, retry transient policy failures instead of failing commands, and cut D1 write load on the relay's hot path.
 
 ### Features
 
@@ -15,7 +17,7 @@
 
 ### Upgrade notes
 
-- Deploy the Worker and upgrade the CLI together for pooled PR comments and commits; older Workers, unknown local comment viewers, review exports and collections beyond the supported bounds retain native fallback. No database migration or cache purge is required.
+- Upgrade the CLI for run views above 100 jobs and transient policy retries. Deploy the Worker and upgrade the CLI together for pooled PR comments and commits; older Workers, unknown local comment viewers, review exports and collections beyond the supported bounds retain native fallback. No database migration, re-login, or cache purge is required.
 
 ## 0.7.3 - 2026-09-23
 
