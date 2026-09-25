@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateLoginURLRequiresHTTPS(t *testing.T) {
@@ -93,6 +96,69 @@ func TestLocalGitHubAuthErrorGivesReauthenticationCommands(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected %q in error:\n%s", want, got)
 		}
+	}
+}
+
+func TestLocalGitHubTokenRunningLookupContextFailure(t *testing.T) {
+	for _, mode := range []string{"deadline", "canceled"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("GH_TOKEN", "")
+			t.Setenv("GITHUB_TOKEN", "")
+			ready := filepath.Join(t.TempDir(), "ready")
+			t.Setenv("OCTOPOOL_TEST_LOOKUP_READY", ready)
+			path := writeFakeGH(t, `#!/bin/sh
+[ "$*" = "auth token --hostname github.com" ] || exit 2
+printf 'synthetic-partial-credential\n'
+printf 'ready\n' >"$OCTOPOOL_TEST_LOOKUP_READY"
+exec sleep 30
+`)
+			ctx, cancel := context.WithCancel(context.Background())
+			want := context.Canceled
+			if mode == "deadline" {
+				cancel()
+				ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+				want = context.DeadlineExceeded
+			}
+			defer cancel()
+			type result struct {
+				token string
+				err   error
+			}
+			done := make(chan result, 1)
+			go func() {
+				token, err := localGitHubToken(ctx, path)
+				done <- result{token, err}
+			}()
+			startDeadline := time.Now().Add(2 * time.Second)
+			for {
+				if _, err := os.Stat(ready); err == nil {
+					break
+				}
+				if time.Now().After(startDeadline) {
+					t.Fatal("fixture credential lookup did not start")
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			if mode == "canceled" {
+				cancel()
+			}
+			select {
+			case got := <-done:
+				if got.token != "" || !errors.Is(got.err, want) {
+					t.Fatalf("lookup returned token=%t error=%v; want %v", got.token != "", got.err, want)
+				}
+				for _, forbidden := range []string{"auth login", "Refresh", "synthetic-partial-credential"} {
+					if strings.Contains(got.err.Error(), forbidden) {
+						t.Fatalf("lookup error contains %q", forbidden)
+					}
+				}
+				if mode == "deadline" && !strings.Contains(got.err.Error(), "timed out") {
+					t.Fatalf("expected timeout guidance: %v", got.err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("credential lookup did not stop after context failure")
+			}
+		})
 	}
 }
 

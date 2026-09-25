@@ -299,6 +299,9 @@ func localGitHubToken(ctx context.Context, ghPath string) (string, error) {
 	cmd := exec.CommandContext(child, path, "auth", "token", "--hostname", "github.com")
 	out, err := cmd.Output()
 	if err != nil {
+		if child.Err() != nil {
+			err = child.Err()
+		}
 		return "", localGitHubAuthError(path, err)
 	}
 	token := strings.TrimSpace(string(out))
@@ -309,5 +312,11 @@ func localGitHubToken(ctx context.Context, ghPath string) (string, error) {
 }
 
 func localGitHubAuthError(path string, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("GitHub CLI credential lookup timed out: %w\nCheck local gh and credential-store availability before retrying", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("GitHub CLI credential lookup canceled: %w", err)
+	}
 	return fmt.Errorf("gh auth token failed: %w\nRefresh GitHub CLI auth: %s auth login --hostname github.com --web\nThen retry: octopool login --gh-path %s", err, path, path)
 }
