@@ -396,7 +396,9 @@ Cloudflare's network-loss, reset, storage-timeout and overload messages, and DO 
 with `retryable === true` or `overloaded === true`. The shim delegates to native `gh`
 without a CLI upgrade. Original errors remain in Workers Logs; authenticated relay audit
 rows record `error_code: fallback_local` and `fallback_reason: relay_storage_unavailable`
-when the audit write succeeds. Unknown errors retain `500 internal_error`; GitHub
+when the audit write succeeds. Other runtime messages matching the existing `is overloaded`
+or `queued for too long` matcher retain `424 fallback_local` with reason `relay_overloaded`.
+Unknown errors retain `500 internal_error`; GitHub
 responses, explicit authentication/policy errors, admin endpoints and write rejection
 retain their existing behavior. This mapping adds no storage retries.
 

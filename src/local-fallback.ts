@@ -1,5 +1,5 @@
 import type { GitHubRate } from "./github-rate";
-import { HttpError } from "./http";
+import { backendOverloadedError, HttpError } from "./http";
 import { isTransientRelayStorageError } from "./relay-storage-error";
 
 export function localFallbackError(error: unknown): HttpError | undefined {
@@ -9,7 +9,7 @@ export function localFallbackError(error: unknown): HttpError | undefined {
       reason: "relay_storage_unavailable",
     });
   }
-  const typed = error instanceof HttpError ? error : undefined;
+  const typed = error instanceof HttpError ? error : backendOverloadedError(error);
   if (typed === undefined || !localFallbackReasons.has(typed.code)) {
     return undefined;
   }
