@@ -70,7 +70,13 @@ async function exercise(site: string, busy: boolean) {
         await coordinator.completePublication(incumbent!, "failed");
       }
       observations++;
-      return jsonResponse({ number: 42, status: "completed", run_attempt: 1 }, 200, apiHeaders);
+      return jsonResponse(
+        site === "terminal-metadata"
+          ? { id: 9, status: "completed", run_attempt: 1 }
+          : { number: 42, status: "completed", run_attempt: 1 },
+        200,
+        apiHeaders,
+      );
     }),
   );
   if (site === "terminal-metadata") {
