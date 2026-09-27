@@ -1,0 +1,49 @@
+<section aria-label="Check run summary" data-hpc class="js-selected-check-run d-flex flex-auto CheckRunContainer" >
+              <div class="flex-auto min-width-0">
+                <div id="check_run_106220362714" class="js-socket-channel js-updatable-content"
+
+  data-url="/openclaw/openclaw/commit/b4dbad652ea6d2d5adce64ece5b2062951526877/checks/106220362714">
+
+</div>
+
+<div classes="pb-2">
+
+</div>
+
+  <div id="logs"
+    class="CheckRun js-check-steps "
+     style="" >
+    <div
+        class="CheckRun-header-wrapping mb-2 d-flex flex-justify-between flex-md-items-start flex-items-center mb-1 tmp-py-3 tmp-pr-3 js-checks-log-toolbar tmp-pl-4 rounded-top-0 rounded-md-top-1"
+    >
+      <span class="CheckRun-log-title color-fg-default">
+        <div class="f4">
+            <span class="text-bold">preflight</span>
+        </div>
+        <span class="d-block f6 js-socket-channel js-updatable-content color-fg-muted"
+
+  data-url="/openclaw/openclaw/runs/106220362714/header">
+    succeeded
+    <relative-time datetime="2026-09-21T05:16:35Z" class="no-wrap">Sep 21, 2026</relative-time> in 48s
+</span>
+
+      </span>
+    </div>
+
+    <div
+      class="position-relative js-full-logs-container WorkflowRunLogsScroll"
+        data-actions_runner_emit_composite_markers
+        style="min-height: 500px"
+      >
+
+      <check-steps
+        class="js-socket-channel"
+        data-job-status="completed"
+
+        >
+      </check-steps>
+    </div>
+  </div>
+
+              </div>
+            </section>

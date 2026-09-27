@@ -442,6 +442,82 @@ export function parseActionsJobGroupsPageJSON(
   };
 }
 
+export function actionsJobHTMLProvesCompleted(
+  html: string,
+  owner: string,
+  repo: string,
+  jobID: string,
+): boolean {
+  if (!/^[1-9][0-9]*$/.test(jobID) || !Number.isSafeInteger(Number(jobID))) return false;
+  const document = actionsDocument(html);
+  if (document === undefined) return false;
+  const pageElements = actionsElements(document);
+  const region = onlyElement(
+    pageElements.filter(
+      (element) =>
+        element.tagName === "section" &&
+        attribute(element, "aria-label") === "Check run summary" &&
+        hasClass(element, "js-selected-check-run"),
+    ),
+  );
+  const elements = region === undefined ? undefined : ownedElements(region);
+  if (elements === undefined) return false;
+  const navigation = pageElements.filter(
+    (element) =>
+      element.tagName === "react-partial" &&
+      attribute(element, "partial-name") === "actions-run-jobs-list",
+  );
+  if (navigation.length > 0) {
+    const props = navigation.length === 1 ? actionsNavigationProps(navigation[0]!) : undefined;
+    if (
+      props?.summarySelected !== false ||
+      props.selectedJobId !== Number(jobID) ||
+      typeof props.summaryHref !== "string" ||
+      !new RegExp(`^/${escapeRegex(owner)}/${escapeRegex(repo)}/actions/runs/[1-9][0-9]*$`).test(
+        props.summaryHref,
+      ) ||
+      !disjointRegions([navigation[0]!, region!])
+    )
+      return false;
+  }
+  const jobMarkers = elements.filter((element) =>
+    /^check_run_[0-9]+$/.test(attribute(element, "id") ?? ""),
+  );
+  if (
+    jobMarkers.length > 1 ||
+    jobMarkers.some((element) => attribute(element, "id") !== `check_run_${jobID}`)
+  )
+    return false;
+  const header = onlyElement(
+    elements.filter((element) =>
+      /\/runs\/[0-9]+\/header$/.test(attribute(element, "data-url") ?? ""),
+    ),
+  );
+  if (
+    header === undefined ||
+    attribute(header, "data-url") !== `/${owner}/${repo}/runs/${jobID}/header`
+  )
+    return false;
+  const headerElements = ownedElements(header);
+  const time = onlyElement(
+    (headerElements ?? []).filter((element) => element.tagName === "relative-time"),
+  );
+  const completedAt = attribute(time, "datetime");
+  const label = actionsText(adjacentNode(time, -1)).toLowerCase();
+  const state = label.includes(":")
+    ? undefined
+    : runState(`${label === "succeeded" ? "completed successfully" : label}:`);
+  const steps = onlyElement(elements.filter((element) => element.tagName === "check-steps"));
+  // Completion belongs to this selected job, not the run or another job in the sidebar.
+  return (
+    headerElements !== undefined &&
+    completedAt !== undefined &&
+    Number.isFinite(Date.parse(completedAt)) &&
+    state?.status === "completed" &&
+    attribute(steps, "data-job-status") === "completed"
+  );
+}
+
 export function parseActionsJobHTML(
   html: string,
   summary: ActionsJobSummary,

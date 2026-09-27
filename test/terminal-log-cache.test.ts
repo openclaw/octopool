@@ -3,11 +3,13 @@ import { CACHE_PUBLICATION_EPOCH } from "../src/cache-publication";
 import { queries } from "../src/generated/sql";
 import { withGitHubEgress } from "../src/github-egress";
 import { callGitHubWeb } from "../src/github-web";
+import { completedJobPageProof } from "../src/github-public-actions";
 import { classifyRoute, defaultPolicy } from "../src/policy";
 import { terminalLogCacheKey, terminalLogCacheProof } from "../src/terminal-log-cache";
 import type { RelayRequest } from "../src/types";
 
 vi.mock("../src/github-web", () => ({ callGitHubWeb: vi.fn() }));
+vi.mock("../src/github-public-actions", () => ({ completedJobPageProof: vi.fn() }));
 vi.mock("../src/public-repos", () => ({
   observeAnonymousPublicRepo: async (_env: unknown, _route: unknown, fetch: () => unknown) => ({
     response: await fetch(),
@@ -26,6 +28,7 @@ afterEach(() => vi.restoreAllMocks());
 
 function setup(completed = false) {
   vi.mocked(callGitHubWeb).mockReset();
+  vi.mocked(completedJobPageProof).mockReset().mockResolvedValue(false);
   const first = vi.fn().mockResolvedValue(completed ? { completed: 1 } : null);
   const bind = vi.fn().mockReturnValue({ first });
   const prepare = vi.fn().mockReturnValue({ bind });
@@ -54,7 +57,22 @@ describe("terminal job completion proof", () => {
       "42",
     );
     expect(callGitHubWeb).not.toHaveBeenCalled();
+    expect(completedJobPageProof).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "cached_job_view" }));
+  });
+
+  it("uses the token-free page before the anonymous API", async () => {
+    const { log, prove } = setup();
+    vi.mocked(completedJobPageProof).mockResolvedValue(true);
+    await expect(prove()).resolves.toEqual({ key: terminalLogCacheKey(request) });
+    expect(completedJobPageProof).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      "openclaw",
+      "octopool",
+      "42",
+    );
+    expect(callGitHubWeb).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "web_page" }));
   });
 
   it("retains the anonymous fallback without passing client freshness or validators", async () => {

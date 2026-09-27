@@ -3,6 +3,7 @@ import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
 import { queries } from "./generated/sql";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { callGitHubWeb } from "./github-web";
+import { completedJobPageProof } from "./github-public-actions";
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { isRecord } from "./object";
 import { classifyRoute } from "./policy";
@@ -51,6 +52,10 @@ export async function terminalLogCacheProof(
     );
     if (await cachedJobProvesCompleted(env, metadata, jobID)) {
       outcome = "cached_job_view";
+      return { key: terminalLogCacheKey(request) };
+    }
+    if (await completedJobPageProof(env, route.owner, route.repo, jobID)) {
+      outcome = "web_page";
       return { key: terminalLogCacheKey(request) };
     }
     const job = await fetchFreshMetadata(env, metadata, policy, ctx);

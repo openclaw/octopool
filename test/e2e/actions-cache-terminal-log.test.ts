@@ -25,6 +25,53 @@ const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
 describe("terminal Actions log cache", () => {
   beforeEach(seedPool);
 
+  it("shares logs after a run_jobs-only collector read without any job metadata API call", async () => {
+    const jobsPath = "/repos/openclaw/octopool/actions/runs/99/jobs";
+    const pagePath = "/openclaw/octopool/runs/42";
+    const base = terminalLogUpstream("completed");
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === jobsPath)
+        return jsonResponse({ total_count: 1, jobs: [{ id: 42, status: "completed" }] });
+      if (url.pathname === LOG_PATH.replace(/\/logs$/, ""))
+        throw new Error("The collector never fetches job_view; proof must not spend API quota");
+      if (url.hostname === "github.com" && url.pathname === pagePath) {
+        expect(bearer(request)).toBeUndefined();
+        return new Response(`<section aria-label="Check run summary" class="js-selected-check-run">
+          <span data-url="/openclaw/octopool/runs/42/header">failed
+            <relative-time datetime="2026-09-21T05:16:35Z">Sep 21, 2026</relative-time>
+          </span><check-steps data-job-status="completed"></check-steps>
+        </section>`);
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", upstream);
+    expect((await relay(jobsPath)).status).toBe(200);
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM github_cache_entries WHERE route_kind = 'job_view'",
+      ).first("n"),
+    ).toBe(0);
+    upstream.mockClear();
+    const log = vi.spyOn(console, "log");
+    for (const cache of ["miss", "hit"]) {
+      expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+        body: "build log\n",
+        relay: { cache },
+      });
+    }
+    expect(jobMetadataCalls(upstream)).toBe(0);
+    expect(logBackendCalls(upstream)).toBe(1);
+    expect(downloadCalls(upstream)).toBe(1);
+    expect(
+      upstream.mock.calls.filter(
+        ([input, init]) => new URL(new Request(input, init).url).pathname === pagePath,
+      ),
+    ).toHaveLength(2);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "web_page" }));
+  });
+
   it("uses the exact pool/path index for completion evidence", async () => {
     const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${queries.readCompletedJobCacheProof}`)
       .bind("maintainers", LOG_PATH.replace(/\/logs$/, ""), CACHE_PUBLICATION_EPOCH, "42")

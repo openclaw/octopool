@@ -1,0 +1,10 @@
+# Terminal job completion fixtures
+
+Trimmed from credential-free public GitHub HTML fetched on 2026-09-27 UTC:
+
+- `completed-check-run.html.txt`: <https://github.com/openclaw/openclaw/runs/106220362714>, fetched at 02:29:47 UTC. HTTP 200 directly, no redirect; the retained capture was 551,357 bytes. The selected job section contains `id="check_run_106220362714"`, the exact job header `/openclaw/openclaw/runs/106220362714/header`, `succeeded`, completion time `2026-09-21T05:16:35Z`, and `check-steps[data-job-status="completed"]`.
+- `active-check-run.html.txt`: <https://github.com/openclaw/openclaw/runs/108534563744>, fetched at 02:33:23 UTC. HTTP 200 directly, no redirect; 311,059 bytes. The selected job section contains `id="check_run_108534563744"`, the exact job header `/openclaw/openclaw/runs/108534563744/header`, `Started`, start time `2026-09-27T02:31:26Z`, and `check-steps[data-job-status="in_progress"]`.
+
+The active job's canonical page, <https://github.com/openclaw/openclaw/actions/runs/36288751939/job/108534563744>, independently returned HTTP 200 with 213,400 bytes at 02:33:22 UTC and exposed the same header and status markers. Its public `job_groups_batch?attempt=1&batch=0&size=1` response identified job 108534563744 with `status: "in_progress"` and `conclusion: null`. No API or credential was used for these reads. Unlike canonical Actions pages, `/runs/{job_id}` returned the older check-run layout without `actions-run-jobs-list` navigation JSON.
+
+Each fixture retains the original selected `Check run summary` section, including the job identity node, header/status elements, and their ancestor nesting. Unrelated page chrome, template icons, step details, and ephemeral signed `data-channel` attributes were removed. Raw `.html.txt` preserves source structure without formatter repairs. Tests also reuse the existing canonical completed-job fixture in `../actions-current/`; queued and ambiguous cases are explicit mutations of the captured fixtures, not additional claimed live observations.

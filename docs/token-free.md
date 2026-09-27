@@ -402,7 +402,11 @@ GET /search/repositories
 <!-- token-free-api-routes:end -->
 
 Actions job logs are deliberately absent: log downloads require authenticated GitHub and follow
-signed redirects. Release list/latest/tag/id reads remove drafts from anonymous responses; asset
+signed redirects. Their internal completion proof can use the credential-free
+`https://github.com/{owner}/{repo}/runs/{job_id}` page before trying anonymous REST metadata;
+this does not reconstruct or replace ordinary `job_view` REST responses. See the
+[completed-log cache](cache.md#completed-actions-log-cache) for exact-job evidence checks.
+Release list/latest/tag/id reads remove drafts from anonymous responses; asset
 routes use the exact anonymous API response. Search requires pool policy `allow_search: true` and
 the relay's scoped query validation; `GET /search/code` is intentionally not token-free.
 

@@ -62,6 +62,9 @@ async function exercise(site: string, busy: boolean) {
     "fetch",
     vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
+      if (site === "terminal-metadata" && new URL(request.url).hostname === "github.com") {
+        return new Response(null, { status: 404 });
+      }
       expect(request.headers.has("authorization")).toBe(false);
       const capability = await owner();
       expect(capability).not.toBeNull();

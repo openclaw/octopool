@@ -447,19 +447,31 @@ adds an exact pool/path index covering anonymous and identity-specific job entri
 API-version variants. The lookup is one indexed query, without a repository-wide scan.
 Cached `run_jobs` bodies are not searched because there is no index by contained job ID.
 
-If D1 has no completion proof or is unavailable, the existing `callGitHubWeb` fallback
-fetches the exact job endpoint from the **anonymous REST API**. `job_view` has no HTML
-page transport; Actions HTML job parsing is used only by shaped run-job lists. This
-fallback consumes anonymous API quota and can fail when that quota is exhausted. It
-never adds a pooled-identity metadata call. If neither source proves completion, logs
-keep the large-payload bypass behavior. A cached completed run cannot prove a job terminal.
+If D1 has no completion proof or is unavailable, the relay tries
+`https://github.com/{owner}/{repo}/runs/{job_id}` without credentials or API quota. The
+page must have one unambiguous selected job section containing an exact repository/job
+header URL, a terminal conclusion with a valid completion timestamp, and
+`check-steps[data-job-status="completed"]`. Any navigation or check-run identity markers
+must agree. A redirect is accepted only when the final URL is the same short URL or the
+same repository's canonical `/actions/runs/{run_id}/job/{job_id}` page. The existing egress
+policy, response cap, and one timeout covering headers, redirects, and body apply. Wrong
+jobs, active/queued or ambiguous markup, unexpected destinations, oversized pages, and
+timeouts do not prove completion. This covers collectors that list `run_jobs` and read
+logs without ever fetching `job_view`.
+
+If the HTML proof also fails, the existing `callGitHubWeb` fallback fetches the exact job
+endpoint from the **anonymous REST API**. Ordinary `job_view` relay responses remain REST;
+the page provides only internal completion evidence. The final fallback consumes anonymous
+API quota and can fail when that quota is exhausted. No pooled-identity metadata call is
+added. If no source proves completion, logs keep the large-payload bypass behavior.
+A cached completed run cannot prove a job terminal.
 Structured Worker logs emit `octopool.actions_log.completion_proof` with pool, path,
-and outcome (`cached_job_view`, `anonymous_api`, `unproven`, or `error`), without changing
+and outcome (`cached_job_view`, `web_page`, `anonymous_api`, `unproven`, or `error`), without changing
 the HTTP response.
 
 Whole-run log archives remain native GitHub CLI fallback; only job-log routes use this
 cache. Cached completion does not renew public visibility: the existing public-repository
-guard still applies, and only a successful 2xx anonymous metadata response records a new
+guard still applies, and only a successful 2xx anonymous API metadata response records a new
 public-repository proof. A proven-terminal log uses the dedicated
 `ACTIONS_LOGS` R2 bucket, keyed by pool and exact job route path, so immutable log
 downloads are shared without putting their large payloads in D1. Jobs from separate

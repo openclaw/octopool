@@ -6,9 +6,40 @@ import {
   parseActionsRunListHTML,
 } from "../src/github-html-actions";
 import { callGitHubWeb } from "../src/github-web";
+import { completedJobPageProof } from "../src/github-public-actions";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
+  "proves a completed job through the token-free short page with no API requests",
+  async () => {
+    const originalFetch = globalThis.fetch;
+    const pages: { url: string; status: number; bytes: number; location: string | null }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      expect(new URL(url).origin).toBe("https://github.com");
+      expect(new Headers(init.headers).has("authorization")).toBe(false);
+      const response = await originalFetch(url, init);
+      pages.push({
+        url,
+        status: response.status,
+        bytes: (await response.clone().arrayBuffer()).byteLength,
+        location: response.headers.get("location"),
+      });
+      return response;
+    });
+    expect(
+      await completedJobPageProof(
+        withGitHubEgress({ REQUEST_TIMEOUT_MS: "30000" } as unknown as Env, []),
+        "openclaw",
+        "openclaw",
+        "106220362714",
+      ),
+    ).toBe(true);
+    console.log(JSON.stringify({ completion_proof: "web_page", pages }));
+  },
+  45000,
+);
 
 it.skipIf(process.env.OCTOPOOL_LIVE_GITHUB !== "1")(
   "parses a live completed public job page independently of the REST completion probe",

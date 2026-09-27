@@ -18,6 +18,7 @@ import {
   parseCommitPatchSHA,
 } from "./github-html";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
+import { actionsJobHTMLProvesCompleted } from "./github-html-actions";
 import { fetchPublicPage, fetchWebResponse, readWebBody } from "./github-web-transport";
 import { cancelResponseBody } from "./response-body";
 import { transformedGitHubHeaders } from "./github-response";
@@ -29,6 +30,54 @@ import type { RelayRequest, RouteInfo } from "./types";
 const MAX_PUBLIC_JOB_PAGES = 25;
 const MAX_RUN_LIST_HYDRATIONS = 8;
 const RUN_LIST_HYDRATION_TIMEOUT_MS = 2500;
+
+export async function completedJobPageProof(
+  env: GitHubEgressEnv,
+  owner: string,
+  repo: string,
+  jobID: string,
+): Promise<boolean> {
+  if (!/^[1-9][0-9]*$/.test(jobID) || !Number.isSafeInteger(Number(jobID))) return false;
+  const repoPath = `/${encodedPathSegments([owner, repo])}`;
+  const path = `${repoPath}/runs/${jobID}`;
+  const timeoutMs = requestTimeoutMs(env);
+  const signal = AbortSignal.timeout(timeoutMs);
+  const fetched = await fetchWebResponse(
+    env,
+    `https://github.com${path}`,
+    { accept: "text/html", "user-agent": "octopool" },
+    timeoutMs,
+    true,
+    signal,
+  );
+  if (fetched === undefined) return false;
+  const url = new URL(fetched.url);
+  const expectedPath =
+    url.pathname === path ||
+    (url.pathname.startsWith(`${repoPath}/actions/runs/`) &&
+      new RegExp(`^/actions/runs/[1-9][0-9]*/job/${jobID}$`).test(
+        url.pathname.slice(repoPath.length),
+      ));
+  if (
+    fetched.response.status !== 200 ||
+    url.origin !== "https://github.com" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    !expectedPath
+  ) {
+    await cancelResponseBody(fetched.response);
+    return false;
+  }
+  try {
+    const bytes = await readWebBody(fetched.response, responseCapBytes(env), signal);
+    return actionsJobHTMLProvesCompleted(new TextDecoder().decode(bytes), owner, repo, jobID);
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    return false;
+  }
+}
 
 export function actionsPageRequest(
   env: GitHubEgressEnv,
