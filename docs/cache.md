@@ -7,7 +7,7 @@ reduce load on pooled identities.
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
 `src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
-`0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`.
+`0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`/`0022`.
 
 ## Configuration lookups
 
@@ -437,13 +437,30 @@ retention. Ordinary reads remain bounded cache reads; use `OCTOPOOL_FRESH=1` for
 
 ## Completed Actions log cache
 
-`job_logs` requests fetch the job endpoint without using edge or D1 metadata cache and
-require that fresh job payload's own `status` to be `completed`. A cached completed run can
-therefore never make an active job from a re-run terminal. Whole-run log archives are
-not admitted by the relay route manifest and remain native GitHub CLI fallback; only
-job-log routes use this cache. Active, unknown, or failed job metadata probes keep
-the previous large-payload bypass behavior. Only a successful 2xx anonymous metadata
-response records a public-repository proof. A proven-terminal log uses the dedicated
+`job_logs` first checks D1 for a successful JSON `job_view` response in the same pool,
+at the exact job metadata path, with that job ID and `status: "completed"`. Completion
+is permanent for a job ID: a re-run creates new IDs. This proof can therefore use rows
+past both their freshness and stale-retention expiry, until normal cleanup removes them.
+It does not extend metadata response freshness or accept client-supplied completion claims.
+The current cache publication epoch still applies. Migration `0022_terminal_job_proof.sql`
+adds an exact pool/path index covering anonymous and identity-specific job entries, including
+API-version variants. The lookup is one indexed query, without a repository-wide scan.
+Cached `run_jobs` bodies are not searched because there is no index by contained job ID.
+
+If D1 has no completion proof or is unavailable, the existing `callGitHubWeb` fallback
+fetches the exact job endpoint from the **anonymous REST API**. `job_view` has no HTML
+page transport; Actions HTML job parsing is used only by shaped run-job lists. This
+fallback consumes anonymous API quota and can fail when that quota is exhausted. It
+never adds a pooled-identity metadata call. If neither source proves completion, logs
+keep the large-payload bypass behavior. A cached completed run cannot prove a job terminal.
+Structured Worker logs emit `octopool.actions_log.completion_proof` with pool, path,
+and outcome (`cached_job_view`, `anonymous_api`, `unproven`, or `error`), without changing
+the HTTP response.
+
+Whole-run log archives remain native GitHub CLI fallback; only job-log routes use this
+cache. Cached completion does not renew public visibility: the existing public-repository
+guard still applies, and only a successful 2xx anonymous metadata response records a new
+public-repository proof. A proven-terminal log uses the dedicated
 `ACTIONS_LOGS` R2 bucket, keyed by pool and exact job route path, so immutable log
 downloads are shared without putting their large payloads in D1. Jobs from separate
 run attempts retain their distinct job IDs.
@@ -451,13 +468,13 @@ run attempts retain their distinct job IDs.
 R2 stores the raw log bytes, content type, original body encoding, and a retention timestamp.
 Corrected writers also set the exact `body-codec: lossless-v1` object metadata marker.
 Objects with a missing or different marker are misses before serving or existence-only
-renewal. The Worker downloads the original bytes after fresh completion proof, then
+renewal. The Worker downloads the original bytes after completion proof, then
 replaces the object; a failed download or write leaves the previous object intact.
 Legacy base64 objects were already reversible but also miss once under this format
 contract. A late old writer produces another marker miss. The bucket prefix and
 seven-day lifecycle are unchanged; no purge or bucket migration is required.
 
-After the fresh terminal-status proof, an object younger than one hour can be served without
+After terminal-status proof, an object younger than one hour can be served without
 contacting the log endpoint. Older objects also make an authenticated log request without
 following its redirect: a validated `302 Location` confirms existence and refreshes the
 retention timestamp, while `404` purges the object and returns GitHub's deletion response.

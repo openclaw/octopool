@@ -3,13 +3,14 @@ import { env } from "cloudflare:workers";
 import { withGitHubEgress } from "../../src/github-egress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
+import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
+import { queries } from "../../src/generated/sql";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { terminalLogCacheKey, terminalLogCacheProof } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } from "./harness";
-import { historicalHead, runCard } from "../fixtures/actions-ownership";
 import { envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
 
 type RelayEnvelope = {
@@ -23,6 +24,15 @@ type RelayEnvelope = {
 const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
 describe("terminal Actions log cache", () => {
   beforeEach(seedPool);
+
+  it("uses the exact pool/path index for completion evidence", async () => {
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${queries.readCompletedJobCacheProof}`)
+      .bind("maintainers", LOG_PATH.replace(/\/logs$/, ""), CACHE_PUBLICATION_EPOCH, "42")
+      .all<{ detail: string }>();
+    expect(plan.results.map((row) => row.detail).join("\n")).toContain(
+      "USING INDEX idx_github_cache_job_proof (pool_id=? AND path=?)",
+    );
+  });
 
   it.each([opaqueBytes[0], opaqueBytes[2], opaqueBytes[5], opaqueBytes[6]])(
     "stores literal $name bytes in native R2 and reuses them after fresh completion",
@@ -132,73 +142,169 @@ describe("terminal Actions log cache", () => {
     expect(remove).not.toHaveBeenCalled();
   });
 
-  it.each(["in_progress", "unavailable"])(
-    "keeps fresh %s job metadata authoritative over misleading summaries and stored logs",
-    async (metadata) => {
-      vi.stubGlobal("fetch", terminalLogUpstream("completed"));
-      expect((await (await relay(LOG_PATH)).json<RelayEnvelope>()).relay.cache).toBe("miss");
-      const download = terminalLogUpstream("in_progress");
-      const upstream = vi.fn<typeof fetch>(async (input, init) => {
-        const request = new Request(input, init);
-        const url = new URL(request.url);
-        if (url.hostname === "github.com" && url.pathname === "/openclaw/octopool/actions") {
-          return new Response(
-            `<strong>1 workflow run</strong>${runCard(99, historicalHead, { state: "in progress", title: "Fix failed test Handle pushed commits" })}`.replaceAll(
-              "openclaw/Peekaboo",
-              "openclaw/octopool",
-            ),
-          );
-        }
-        if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
-          expect(bearer(request)).toBeUndefined();
-          expect(request.headers.has("x-octopool-public-shape")).toBe(false);
-          expect(request.headers.has("if-none-match")).toBe(false);
-          if (metadata === "unavailable") return jsonResponse({ message: "unavailable" }, 503);
-        }
-        return download(input, init);
-      });
-      vi.stubGlobal("fetch", upstream);
-      const list = await relay("/repos/openclaw/octopool/actions/runs", undefined, {
-        query: { limit: "1" },
-        headers: { "x-octopool-public-shape": "actions-summary-v1" },
-      });
-      expect((await list.json<RelayEnvelope>()).relay.cache).toBe("miss");
-      for (const suffix of ["runs/99", "jobs/42"]) {
-        for (const shape of [undefined, "actions-summary-v1"]) {
-          const request: RelayRequest = {
-            pool: "maintainers",
-            method: "GET",
-            path: `/repos/openclaw/octopool/actions/${suffix}`,
-            ...(shape === undefined ? {} : { headers: { "x-octopool-public-shape": shape } }),
-          };
-          const route = classifyRoute(request, defaultPolicy("openclaw"));
-          const key = await githubCacheKey(request.pool, request, route);
-          await writeGitHubCache(env, key, request, route, {
-            status: 200,
-            headers: {},
-            body: { id: 42, run_id: 99, status: "completed", run_attempt: 1 },
-            body_encoding: "json",
-          });
-          expect(await readGitHubCache(env, key)).toMatchObject({ body: { status: "completed" } });
-        }
+  it.each(["fresh", "stale", "expired"])(
+    "uses %s completed job evidence before anonymous metadata and serves the second log from R2",
+    async (age) => {
+      const key = await seedJobEvidence();
+      if (age !== "fresh") {
+        await env.DB.prepare(
+          `UPDATE github_cache_entries SET created_at = datetime('now', '-30 days'),
+           expires_at = datetime('now', '-29 days'),
+           stale_expires_at = datetime('now', ?) WHERE cache_key = ?`,
+        )
+          .bind(age === "stale" ? "+1 day" : "-28 days", key)
+          .run();
       }
-      const get = vi.spyOn(env.ACTIONS_LOGS, "get");
-      const put = vi.spyOn(env.ACTIONS_LOGS, "put");
-      try {
+      const upstream = terminalLogUpstream("in_progress");
+      vi.stubGlobal("fetch", upstream);
+      const log = vi.spyOn(console, "log");
+      for (const cache of ["miss", "hit"]) {
         expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
           body: "build log\n",
-          relay: { cache: "bypass" },
+          relay: { cache, cacheable: true },
         });
-        expect(jobMetadataCalls(upstream)).toBe(1);
-        expect(logBackendCalls(upstream)).toBe(1);
-        expect(get).not.toHaveBeenCalled();
-        expect(put).not.toHaveBeenCalled();
-      } finally {
-        get.mockRestore();
-        put.mockRestore();
       }
+      expect(jobMetadataCalls(upstream)).toBe(0);
+      expect(logBackendCalls(upstream)).toBe(1);
+      expect(downloadCalls(upstream)).toBe(1);
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "cached_job_view" }));
+      expect(
+        await env.DB.prepare("SELECT cache_status FROM audit_events ORDER BY rowid").all(),
+      ).toMatchObject({
+        results: [{ cache_status: "miss" }, { cache_status: "hit" }],
+      });
     },
   );
+
+  it("finds metadata obtained by the relay through a pooled identity and a different API version", async () => {
+    const metadataPath = LOG_PATH.replace(/\/logs$/, "");
+    const base = terminalLogUpstream("completed");
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname === metadataPath) {
+        return bearer(request) === "test-primary-token"
+          ? jsonResponse({ id: 42, status: "completed" })
+          : jsonResponse({ message: "API rate limit exceeded" }, 403);
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", upstream);
+    expect(
+      await (
+        await relay(metadataPath, undefined, {
+          headers: { "x-github-api-version": "2022-11-28" },
+        })
+      ).json<RelayEnvelope>(),
+    ).toMatchObject({ body: { id: 42, status: "completed" } });
+    expect(
+      await env.DB.prepare("SELECT identity_id FROM github_cache_entries WHERE path = ?")
+        .bind(metadataPath)
+        .first(),
+    ).toEqual({ identity_id: "primary" });
+    upstream.mockClear();
+    for (const cache of ["miss", "hit"]) {
+      expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+        relay: { cache },
+      });
+    }
+    expect(jobMetadataCalls(upstream)).toBe(0);
+    expect(logBackendCalls(upstream)).toBe(1);
+    expect(
+      upstream.mock.calls.filter(
+        ([input, init]) => new URL(new Request(input, init).url).pathname === metadataPath,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it.each([
+    { name: "active job", body: { id: 42, status: "in_progress" } },
+    { name: "different job body", body: { id: 43, status: "completed" } },
+    { name: "missing job ID", body: { status: "completed" } },
+    { name: "different job path", path: "/repos/openclaw/octopool/actions/jobs/43" },
+    { name: "different repo", path: "/repos/openclaw/other/actions/jobs/42" },
+    { name: "different owner", path: "/repos/other/octopool/actions/jobs/42" },
+    { name: "completed run", path: "/repos/openclaw/octopool/actions/runs/42" },
+    { name: "different pool", pool: "other" },
+    { name: "failed response", status: 503 },
+    { name: "non-JSON encoding", encoding: "text" },
+    { name: "malformed JSON", malformed: true },
+    { name: "retired publication epoch", epoch: "retired" },
+  ])("rejects cached $name evidence and bypasses when anonymous proof fails", async (fixture) => {
+    const key = await seedJobEvidence(fixture);
+    if (fixture.status !== undefined)
+      await env.DB.prepare("UPDATE github_cache_entries SET status = ? WHERE cache_key = ?")
+        .bind(fixture.status, key)
+        .run();
+    if (fixture.encoding !== undefined)
+      await env.DB.prepare("UPDATE github_cache_entries SET body_encoding = ? WHERE cache_key = ?")
+        .bind(fixture.encoding, key)
+        .run();
+    if (fixture.malformed)
+      await env.DB.prepare("UPDATE github_cache_entries SET body_json = '{' WHERE cache_key = ?")
+        .bind(key)
+        .run();
+    if (fixture.epoch !== undefined)
+      await env.DB.prepare(
+        "UPDATE github_cache_entries SET publication_epoch = ? WHERE cache_key = ?",
+      )
+        .bind(fixture.epoch, key)
+        .run();
+    const base = terminalLogUpstream("completed");
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname === LOG_PATH.replace(/\/logs$/, "")) {
+        expect(bearer(request)).toBeUndefined();
+        return jsonResponse({ message: "API rate limit exceeded" }, 403);
+      }
+      return base(input, init);
+    });
+    vi.stubGlobal("fetch", upstream);
+    const get = vi.spyOn(env.ACTIONS_LOGS, "get");
+    const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+    const log = vi.spyOn(console, "log");
+    expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+      body: "build log\n",
+      relay: { cache: "bypass" },
+    });
+    expect(jobMetadataCalls(upstream)).toBe(1);
+    expect(logBackendCalls(upstream)).toBe(1);
+    expect(get).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unproven" }));
+  });
+
+  it("uses anonymous completion when cached metadata is still in progress", async () => {
+    await seedJobEvidence({ body: { id: 42, status: "in_progress" } });
+    const upstream = terminalLogUpstream("completed");
+    vi.stubGlobal("fetch", upstream);
+    expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+      relay: { cache: "miss" },
+    });
+    expect(jobMetadataCalls(upstream)).toBe(1);
+    expect(logBackendCalls(upstream)).toBe(1);
+  });
+
+  it("does not use expired completion evidence as fresh public-repository proof", async () => {
+    const key = await seedJobEvidence();
+    await env.DB.prepare(
+      "UPDATE github_cache_entries SET expires_at = '2000-01-01', stale_expires_at = '2000-01-01' WHERE cache_key = ?",
+    )
+      .bind(key)
+      .run();
+    vi.stubGlobal("fetch", terminalLogUpstream("completed"));
+    await relay(LOG_PATH);
+    await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+    await deleteEdgeJSON("public-repo-publication-v1", "openclaw/octopool");
+    const upstream = vi.fn<typeof fetch>(async () => jsonResponse({ private: true }));
+    vi.stubGlobal("fetch", upstream);
+    const response = await relay(LOG_PATH);
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "repo_not_public" } },
+    });
+    expect(logBackendCalls(upstream)).toBe(0);
+    expect(jobMetadataCalls(upstream)).toBe(0);
+  });
 
   it.each([undefined, "max-age=60"])(
     "reuses a fresh completed log within %s",
@@ -689,4 +795,26 @@ async function ageTerminalLog(key: string, modifier: string): Promise<void> {
       "created-at": row!.created_at,
     },
   });
+}
+
+async function seedJobEvidence(options: { pool?: string; path?: string; body?: unknown } = {}) {
+  const request: RelayRequest = {
+    pool: options.pool ?? "maintainers",
+    method: "GET",
+    path: options.path ?? LOG_PATH.replace(/\/logs$/, ""),
+  };
+  if (request.pool !== "maintainers") {
+    await env.DB.prepare("INSERT INTO pools (id, name, policy_json) VALUES (?, ?, '{}')")
+      .bind(request.pool, request.pool)
+      .run();
+  }
+  const route = classifyRoute(request, defaultPolicy("openclaw"));
+  const key = await githubCacheKey(request.pool, request, route);
+  await writeGitHubCache(env, key, request, route, {
+    status: 200,
+    headers: {},
+    body: options.body ?? { id: 42, status: "completed" },
+    body_encoding: "json",
+  });
+  return key;
 }

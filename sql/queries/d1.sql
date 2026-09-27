@@ -93,6 +93,16 @@ WHERE cache_key = ?1
   AND publication_epoch = ?2
   AND stale_expires_at > CURRENT_TIMESTAMP;
 
+-- name: ReadCompletedJobCacheProof :one
+SELECT 1 AS completed
+FROM github_cache_entries
+WHERE pool_id = ?1 AND path = ?2 AND publication_epoch = ?3
+  AND method = 'GET' AND route_kind = 'job_view' AND status = 200 AND body_encoding = 'json'
+  AND CASE WHEN json_valid(body_json) THEN json_extract(body_json, '$.status') END = 'completed'
+  AND CASE WHEN json_valid(body_json) THEN json_type(body_json, '$.id') END = 'integer'
+  AND CASE WHEN json_valid(body_json) THEN CAST(json_extract(body_json, '$.id') AS TEXT) END = ?4
+LIMIT 1;
+
 -- name: WriteGitHubCache :one
 INSERT INTO github_cache_entries
   (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,

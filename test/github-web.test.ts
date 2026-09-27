@@ -26,6 +26,40 @@ describe("github web provider", () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([200, 403])(
+    "job metadata selects anonymous REST, not the Actions HTML parser (%s)",
+    async (status) => {
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool/actions/jobs/42",
+      });
+      const route = classifyRoute(request, policy);
+      const fetch = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify(
+              status === 200
+                ? { id: 42, status: "completed" }
+                : { message: "API rate limit exceeded" },
+            ),
+            { status },
+          ),
+        );
+      vi.stubGlobal("fetch", fetch);
+      expect(hasNoQuotaGitHubWebRequest(env(), request, route)).toBe(false);
+      const result = await callGitHubWeb(env(), request, route);
+      if (status === 200)
+        expect(result).toMatchObject({ body: { id: 42, status: "completed" }, backend: "github" });
+      else expect(result).toBeUndefined();
+      expect(fetch).toHaveBeenCalledOnce();
+      const [url, init] = fetch.mock.calls[0]!;
+      expect(url).toBe("https://api.github.com/repos/openclaw/octopool/actions/jobs/42");
+      expect(new Headers(init.headers).has("authorization")).toBe(false);
+    },
+  );
+
   it.each([
     { headers: {}, query: {}, expected: false },
     { headers: { "x-octopool-public-shape": "pr-summary-v1" }, query: {}, expected: true },
