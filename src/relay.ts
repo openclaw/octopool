@@ -1,7 +1,12 @@
 import type { PublicationOwner } from "./cache-publication";
 import { authenticateCaller } from "./auth";
 import { backendAdmissionStub } from "./backend-admission";
-import { BackendWork, admitBackendWork, assertBackendWorkActive } from "./backend-work";
+import {
+  BackendWork,
+  admitBackendWork,
+  assertBackendWorkActive,
+  withBackendWorkSignal,
+} from "./backend-work";
 import {
   withGitHubEgress,
   type GitHubEgressEnv,
@@ -94,6 +99,9 @@ import type {
   SelectionLeaseReason,
   SelectionRequest,
 } from "./types";
+
+const MAX_DEFERRED_TERMINAL_LOG_PROOFS = 4;
+let deferredTerminalLogProofs = 0;
 
 type RelayBase = {
   env: GitHubEgressEnv;
@@ -1710,33 +1718,48 @@ async function proveAndPublishTerminalLog(
   state: ActiveRelay,
   response: GitHubRelayResponse,
 ): Promise<boolean> {
+  if (deferredTerminalLogProofs >= MAX_DEFERRED_TERMINAL_LOG_PROOFS) {
+    recordTerminalLogProof(state.request, "deferred_skipped", true);
+    return false;
+  }
   let proven = false;
-  const backend = new BackendWork(
-    backendAdmissionStub(state.env, state.request.pool),
-    JSON.stringify([state.callerId, state.clientName]),
-    BackendWork.limit(state.env),
-  );
-  try {
-    // Leave time to record the miss within the HTTP waitUntil lifetime (30s).
-    await backend.run(AbortSignal.timeout(20_000), state.ctx, async () => {
-      await admitBackendWork();
-      const proof = await terminalLogCacheProof(
-        state.env,
-        state.ctx,
-        state.request,
-        state.route,
-        state.policy,
-        { deferred: true },
-      );
-      if (proof === undefined) return;
-      assertBackendWorkActive();
-      // R2 puts cannot be cancelled. Keep proven cacheability even if a started
-      // write outlives the scope; expired proof may never start a new write.
-      proven = true;
-      await publishTerminalLogCache(state.env, proof.key, response);
+  // Leave time to record the miss within the HTTP waitUntil lifetime (30s).
+  const signal = AbortSignal.timeout(20_000);
+  const expired = Promise.withResolvers<void>();
+  const expire = () => expired.resolve();
+  signal.addEventListener("abort", expire, { once: true });
+  if (signal.aborted) expire();
+  deferredTerminalLogProofs++;
+  const work = withBackendWorkSignal(signal, async () => {
+    const proof = await terminalLogCacheProof(
+      state.env,
+      state.ctx,
+      state.request,
+      state.route,
+      state.policy,
+      { deferred: true },
+    );
+    if (proof === undefined) return;
+    assertBackendWorkActive();
+    // R2 puts cannot be cancelled. Keep proven cacheability even if a started
+    // write outlives the scope; expired proof may never start a new write.
+    proven = true;
+    await publishTerminalLogCache(state.env, proof.key, response);
+  })
+    .catch((error: unknown) => {
+      if (!signal.aborted) console.error("deferred actions log completion proof failed", error);
+    })
+    .finally(() => {
+      // Count non-abortable storage until it settles, even after the audit deadline.
+      deferredTerminalLogProofs--;
     });
-  } catch (error) {
-    console.error("deferred actions log completion proof failed", error);
+  state.ctx.waitUntil(work);
+  try {
+    await Promise.race([work, expired.promise]);
+    if (signal.aborted)
+      console.error("deferred actions log completion proof failed", signal.reason);
+  } finally {
+    signal.removeEventListener("abort", expire);
   }
   return proven;
 }

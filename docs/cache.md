@@ -446,8 +446,12 @@ conditional requests retain their cache bypass.
 
 On an R2 miss, a successful, body-cap-compliant `200` log download returns without waiting
 for completion proof or R2 publication. The proof below runs through `ctx.waitUntil` in a
-separate backend scope with a 20-second deadline, leaving time to audit within the
-30-second background lifetime; only proven logs publish the exact bytes served. Failed,
+separate cancellation scope with a 20-second deadline, leaving time to audit within the
+30-second background lifetime; only proven logs publish the exact bytes served. Deferred
+proof never consumes a caller/client backend permit. Each isolate allows four in-flight
+proof/publication tasks; excess misses skip proof, publish nothing, and still write their
+audit row with `cacheable: false` and proof outcome `deferred_skipped`. Slots remain occupied
+until underlying work settles, including non-abortable storage after timeout. Failed,
 oversized, and conditional downloads do not start deferred proof, and background proof or
 write failures are logged without affecting the response.
 
@@ -486,7 +490,7 @@ API quota and can fail when that quota is exhausted. No pooled-identity metadata
 added. If no source proves completion, the fetched log remains uncached.
 A cached completed run cannot prove a job terminal.
 Structured Worker logs emit `octopool.actions_log.completion_proof` with pool, path,
-outcome (`r2_cached`, `cached_job_view`, `web_page`, `anonymous_api`, `unproven`, or `error`),
+outcome (`r2_cached`, `cached_job_view`, `web_page`, `anonymous_api`, `deferred_skipped`, `unproven`, or `error`),
 and a `deferred` boolean, without changing the HTTP response.
 
 Whole-run log archives remain native GitHub CLI fallback; only job-log routes use this

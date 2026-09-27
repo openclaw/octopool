@@ -4,6 +4,7 @@ import {
   admitBackendWork,
   assertBackendWorkActive,
   backendWorkSignal,
+  withBackendWorkSignal,
 } from "../src/backend-work";
 
 beforeEach(() => vi.useFakeTimers());
@@ -142,4 +143,37 @@ it("does not acquire a permit for a fresh cache-only request", async () => {
   await Promise.all(f.background);
   expect(f.admission.acquire).not.toHaveBeenCalled();
   expect(f.admission.release).not.toHaveBeenCalled();
+});
+
+it("keeps background cancellation independent of caller admission and restores the foreground scope", async () => {
+  const f = fixture();
+  const background = new AbortController();
+  const expired = new Error("background deadline");
+  expect(
+    await f.run(async () => {
+      const foregroundSignal = backendWorkSignal();
+      await withBackendWorkSignal(background.signal, async () => {
+        await admitBackendWork();
+        expect(backendWorkSignal()).toBe(background.signal);
+        expect(f.admission.acquire).not.toHaveBeenCalled();
+        background.abort(expired);
+        expect(assertBackendWorkActive).toThrow(expired);
+        await expect(admitBackendWork()).rejects.toBe(expired);
+      });
+      expect(backendWorkSignal()).toBe(foregroundSignal);
+      expect(foregroundSignal!.aborted).toBe(false);
+      await admitBackendWork();
+      return "finished";
+    }),
+  ).toEqual({ value: "finished" });
+  await Promise.all(f.background);
+  expect(f.admission.acquire).toHaveBeenCalledTimes(1);
+  expect(f.admission.release).toHaveBeenCalledTimes(1);
+});
+
+it("does not start background work with an expired signal", async () => {
+  const handler = vi.fn();
+  const expired = new Error("background deadline");
+  await expect(withBackendWorkSignal(AbortSignal.abort(expired), handler)).rejects.toBe(expired);
+  expect(handler).not.toHaveBeenCalled();
 });

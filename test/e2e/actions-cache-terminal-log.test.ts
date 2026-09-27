@@ -4,6 +4,7 @@ import worker from "../../src/index";
 import { withGitHubEgress } from "../../src/github-egress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
+import { backendAdmissionStub } from "../../src/backend-admission";
 import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
 import { queries } from "../../src/generated/sql";
 import { deleteEdgeJSON } from "../../src/edge-cache";
@@ -77,15 +78,15 @@ describe("terminal Actions log cache", () => {
         },
       });
       const log = vi.spyOn(console, "log");
+      const { admission, acquire } = observeBackendAdmission();
+      const overrides = { DB: db, BACKEND_ADMISSION: admission, CLIENT_BACKEND_CONCURRENCY: "1" };
       const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
       let served: RelayEnvelope | undefined;
       await runWithContext(async (ctx) => {
         const response = ownedWork.track(
-          fetchLogWithContext(ctx, { DB: db, CLIENT_BACKEND_CONCURRENCY: "1" }).then(
-            async (result) => {
-              served = await result.json<RelayEnvelope>();
-            },
-          ),
+          fetchLogWithContext(ctx, overrides).then(async (result) => {
+            served = await result.json<RelayEnvelope>();
+          }),
         );
         try {
           await vi.waitFor(() => {
@@ -95,19 +96,22 @@ describe("terminal Actions log cache", () => {
           expect(envelopeBytes(served!)).toEqual([0xff, 0x41]);
           expect(await env.ACTIONS_LOGS.get(key)).toBeNull();
           expect(await env.DB.prepare("SELECT count(*) AS n FROM audit_events").first("n")).toBe(0);
-          const denied = await requestWithWarmEnv({ CLIENT_BACKEND_CONCURRENCY: "1" }, LOG_PATH, {
+          expect(acquire).toHaveBeenCalledTimes(1);
+          const foreground = await requestWithWarmEnv(overrides, LOG_PATH, {
             headers: { "if-none-match": '"conditional"' },
           });
-          expect(denied.status).toBe(424);
-          expect(await denied.json()).toMatchObject({
-            error: { details: { reason: "relay_overloaded" } },
+          expect(foreground.status).toBe(200);
+          expect(await foreground.json<RelayEnvelope>()).toMatchObject({
+            status: 200,
+            relay: { cache: "bypass" },
           });
+          expect(acquire).toHaveBeenCalledTimes(2);
           if (expires) {
             deadline.abort();
             await vi.waitFor(async () => {
               expect(
                 await env.DB.prepare(
-                  "SELECT cache_status, cacheable FROM audit_events WHERE status = 200",
+                  "SELECT cache_status, cacheable FROM audit_events WHERE cache_status = 'miss'",
                 ).first(),
               ).toEqual({ cache_status: "miss", cacheable: 0 });
             });
@@ -131,7 +135,7 @@ describe("terminal Actions log cache", () => {
       );
       expect(
         await env.DB.prepare(
-          "SELECT cache_status, cacheable FROM audit_events WHERE status = 200",
+          "SELECT cache_status, cacheable FROM audit_events WHERE cache_status = 'miss'",
         ).first(),
       ).toEqual({ cache_status: "miss", cacheable: status === "completed" && !expires ? 1 : 0 });
       const object = await env.ACTIONS_LOGS.get(key);
@@ -144,11 +148,124 @@ describe("terminal Actions log cache", () => {
         expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
           relay: { cache: "hit" },
         });
-        expect(logBackendCalls(upstream)).toBe(1);
+        expect(logBackendCalls(upstream)).toBe(2);
         expect(jobPageCalls(upstream)).toBe(cached ? 0 : 1);
       } else {
         expect(object).toBeNull();
       }
+      expect(acquire).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([false, true])(
+    "skips excess deferred proofs without consuming client admission, then recovers capacity (expired=%s)",
+    async (expires) => {
+      const gate = ownedWork.gate();
+      const deadlines: AbortController[] = [];
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      if (expires)
+        vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+          if (ms !== 20_000) return timeout(ms);
+          const deadline = new AbortController();
+          deadlines.push(deadline);
+          return deadline.signal;
+        });
+      const base = terminalLogUpstream("completed");
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const url = new URL(new Request(input, init).url);
+        if (url.hostname === "github.com" && url.pathname === "/openclaw/octopool/runs/42")
+          await gate.promise;
+        return base(input, init);
+      });
+      vi.stubGlobal("fetch", upstream);
+      const { admission, acquire } = observeBackendAdmission();
+      const overrides = { BACKEND_ADMISSION: admission, CLIENT_BACKEND_CONCURRENCY: "1" };
+      const log = vi.spyOn(console, "log");
+      const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+      const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+      const skippedProofs = () =>
+        log.mock.calls.filter(
+          ([entry]) =>
+            typeof entry === "object" && entry !== null && entry.outcome === "deferred_skipped",
+        );
+      await runWithContext(async (ctx) => {
+        try {
+          for (let started = 1; started <= 4; started++) {
+            expect(
+              await (await fetchLogWithContext(ctx, overrides)).json<RelayEnvelope>(),
+            ).toMatchObject({
+              status: 200,
+              body: "build log\n",
+              relay: { cache: "miss" },
+            });
+            await vi.waitFor(() => expect(jobPageCalls(upstream)).toBe(started));
+            expect(acquire).toHaveBeenCalledTimes(started);
+          }
+          expect(
+            await (await fetchLogWithContext(ctx, overrides)).json<RelayEnvelope>(),
+          ).toMatchObject({
+            status: 200,
+            body: "build log\n",
+            relay: { cache: "miss" },
+          });
+          await vi.waitFor(async () => {
+            expect(skippedProofs()).toEqual([
+              [expect.objectContaining({ outcome: "deferred_skipped", deferred: true })],
+            ]);
+            expect(
+              await env.DB.prepare("SELECT cache_status, cacheable FROM audit_events").all(),
+            ).toMatchObject({ results: [{ cache_status: "miss", cacheable: 0 }] });
+          });
+          expect(jobPageCalls(upstream)).toBe(4);
+          expect(acquire).toHaveBeenCalledTimes(5);
+          expect(put).not.toHaveBeenCalled();
+          expect(await env.ACTIONS_LOGS.get(key)).toBeNull();
+          if (expires) {
+            expect(deadlines).toHaveLength(4);
+            for (const deadline of deadlines) deadline.abort();
+            await vi.waitFor(async () => {
+              expect(
+                await env.DB.prepare(
+                  "SELECT count(*) AS n FROM audit_events WHERE cache_status = 'miss' AND cacheable = 0",
+                ).first("n"),
+              ).toBe(5);
+            });
+            expect(
+              await (await fetchLogWithContext(ctx, overrides)).json<RelayEnvelope>(),
+            ).toMatchObject({
+              status: 200,
+              relay: { cache: "miss" },
+            });
+            await vi.waitFor(() => expect(skippedProofs()).toHaveLength(2));
+            expect(jobPageCalls(upstream)).toBe(4);
+            expect(acquire).toHaveBeenCalledTimes(6);
+            expect(put).not.toHaveBeenCalled();
+          }
+        } finally {
+          gate.release();
+        }
+      });
+      expect(put).toHaveBeenCalledTimes(expires ? 0 : 4);
+      expect(jobMetadataCalls(upstream)).toBe(expires ? 0 : 4);
+      expect(
+        await env.DB.prepare(
+          "SELECT count(*) AS n FROM audit_events WHERE cache_status = 'miss' AND cacheable = 0",
+        ).first("n"),
+      ).toBe(expires ? 6 : 1);
+
+      await env.ACTIONS_LOGS.delete(key);
+      expect(
+        await (await requestWithWarmEnv(overrides, LOG_PATH, {})).json<RelayEnvelope>(),
+      ).toMatchObject({
+        status: 200,
+        body: "build log\n",
+        relay: { cache: "miss" },
+      });
+      expect(jobPageCalls(upstream)).toBe(5);
+      expect(put).toHaveBeenCalledTimes(expires ? 1 : 5);
+      expect(await env.ACTIONS_LOGS.get(key)).not.toBeNull();
+      expect(acquire).toHaveBeenCalledTimes(expires ? 7 : 6);
+      expect(skippedProofs()).toHaveLength(expires ? 2 : 1);
     },
   );
 
@@ -1182,6 +1299,22 @@ function observeCompletionProofQueries() {
     },
   });
   return { db, proofQueries };
+}
+
+function observeBackendAdmission() {
+  const real = backendAdmissionStub(env, "maintainers");
+  const acquire = vi.fn((id: string, client: string, limit: number) =>
+    real.acquire(id, client, limit),
+  );
+  const admission = {
+    idFromName: env.BACKEND_ADMISSION.idFromName.bind(env.BACKEND_ADMISSION),
+    get: () => ({
+      acquire,
+      renew: (id: string) => real.renew(id),
+      release: (id: string) => real.release(id),
+    }),
+  };
+  return { admission, acquire };
 }
 
 async function ageTerminalLog(key: string, modifier: string): Promise<void> {

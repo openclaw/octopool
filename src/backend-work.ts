@@ -12,7 +12,19 @@ type Admission = {
 };
 
 // Pending work belongs only to this relay invocation, never another request.
-const scope = new AsyncLocalStorage<BackendWork>();
+const scope = new AsyncLocalStorage<Pick<BackendWork, "signal" | "enter" | "check">>();
+
+// Background callers bound concurrency separately, without borrowing caller permits.
+export function withBackendWorkSignal<T>(
+  signal: AbortSignal,
+  handler: () => Promise<T>,
+): Promise<T> {
+  const check = () => signal.throwIfAborted();
+  return scope.run({ signal, check, enter: async () => check() }, async () => {
+    check();
+    return handler();
+  });
+}
 
 export async function admitBackendWork(): Promise<void> {
   await scope.getStore()?.enter();

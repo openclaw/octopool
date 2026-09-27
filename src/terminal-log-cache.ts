@@ -30,6 +30,7 @@ type TerminalLogProofOutcome =
   | "cached_job_view"
   | "web_page"
   | "anonymous_api"
+  | "deferred_skipped"
   | "unproven"
   | "error";
 
