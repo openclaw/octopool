@@ -169,7 +169,7 @@ export async function relayGitHub(
   try {
     return await relayGitHubRequest(request, env, ctx, requestId);
   } catch (error) {
-    // Backend overload can strike before handleRelayError owns the request
+    // Storage failures can strike before handleRelayError owns the request
     // (auth/policy D1 reads) or inside its stale-cache reads; the shim must
     // still see typed fallback_local instead of a dead-end internal_error.
     throw localFallbackError(error) ?? error;
@@ -244,6 +244,7 @@ async function relayGitHubRequest(
         const failure = error instanceof IdentityOperationError ? error.failure : error;
         // Admission failures are audited outside the cancelled scope. Ordinary
         // outage recovery still owns its permit if stale serving needs a probe.
+        if (backend.signal.aborted) throw backend.signal.reason;
         if (failure instanceof HttpError && failure.code === "relay_overloaded") throw failure;
         return await handleRelayError(base, active, failure);
       } finally {
@@ -251,6 +252,8 @@ async function relayGitHubRequest(
       }
     });
   } catch (error) {
+    if (backend.signal.aborted && error === backend.signal.reason)
+      return handleRelayError(base, active, error);
     if (error instanceof HttpError && error.code === "relay_overloaded")
       return handleRelayError(base, active, error);
     throw error;
@@ -821,7 +824,8 @@ async function callPublicBackend(state: ActiveRelay): Promise<Response> {
   } catch (error) {
     const stale = await recoverGitHubTransportFailure(state, error);
     if (stale !== undefined) return stale;
-    throw error instanceof GitHubTransportError ? error.failure : error;
+    // Retain upstream provenance for the relay storage-error boundary.
+    throw error;
   }
   const github = sanitizeGitHubResponse(state.route, fetched);
   const fallbackReason = githubResponseLocalFallbackReason(
@@ -904,7 +908,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     } catch (error) {
       const stale = await recoverGitHubTransportFailure(state, error);
       if (stale !== undefined) return stale;
-      throw error instanceof GitHubTransportError ? error.failure : error;
+      throw error;
     }
     const firstPage = sanitizeGitHubResponse(state.route, fetched);
     const observedAt = Date.now();
@@ -1205,14 +1209,22 @@ async function handleRelayError(
   // Do not persist a derived route key containing protected material, or turn
   // a transport denial into a stale-cache/local fallback success.
   if (error instanceof HttpError && error.code === "string_rewrite_denied") throw error;
-  const reported = localFallbackError(error) ?? error;
+  let reported = localFallbackError(error) ?? error;
   const staleReason = staleFallbackReasonFromError(reported);
   if (active !== undefined && staleReason !== undefined) {
-    const stale = await serveStaleRelayCache(active, staleReason);
-    if (stale !== undefined) {
-      return stale;
+    try {
+      const stale = await serveStaleRelayCache(active, staleReason);
+      if (stale !== undefined) {
+        return stale;
+      }
+    } catch (staleError) {
+      rethrowStringRewriteDenial(staleError);
+      reported = localFallbackError(staleError) ?? staleError;
     }
   }
+  // Admission cancellation owns the audit outside this scope, including a late
+  // stale-cache read that completed without throwing after the abort race won.
+  assertBackendWorkActive();
   const audit = auditError(reported);
   const fallbackReason = auditFallbackReason(reported);
   base.ctx.waitUntil(

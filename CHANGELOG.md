@@ -9,6 +9,7 @@
 ### Fixes
 
 - Accept completed GitHub check-run pages with annotation tables as exact-job log-cache proof, preserving ownership checks and rejecting active or ambiguous evidence.
+- Degrade recognized transient relay D1/DO storage and coordination failures to native `gh` with `relay_storage_unavailable`, preserving original logs, fallback audit reasons, and unknown-error failures.
 - Reuse valid R2 job logs as completion proof before consulting exact pool-scoped metadata, token-free job pages, or anonymous REST, so collectors share logs without repeated proof calls; validate job ownership and expose proof outcomes in Worker logs.
 - Scale cache freshness with object age for plain completed runs (60–600s), closed-unmerged PRs (120–3600s), and open PRs (120–300s), preserving live-read bounds and recording caller max-age in relay audit rows.
 - Report local GitHub CLI credential lookup timeouts and cancellations without requesting re-login, preserving the context error and discarding partial credential output.

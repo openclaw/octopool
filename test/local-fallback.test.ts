@@ -11,17 +11,17 @@ describe("local gh fallback signal", () => {
     expect(fallback?.details).toMatchObject({ reason: "route_denied" });
   });
 
-  it("converts backend overload errors into a typed retryable fallback", () => {
+  it("converts storage overload errors into a typed local fallback", () => {
     const fallback = localFallbackError(
       new Error("D1_ERROR: D1 DB is overloaded. Requests queued for too long."),
     );
 
     expect(fallback?.status).toBe(424);
     expect(fallback?.code).toBe("fallback_local");
-    expect(fallback?.details).toMatchObject({ reason: "relay_overloaded" });
+    expect(fallback?.details).toMatchObject({ reason: "relay_storage_unavailable" });
 
     expect(localFallbackError(new Error("Durable Object is overloaded"))?.details).toMatchObject({
-      reason: "relay_overloaded",
+      reason: "relay_storage_unavailable",
     });
     expect(localFallbackError(new Error("TypeError: fetch failed"))).toBeUndefined();
   });

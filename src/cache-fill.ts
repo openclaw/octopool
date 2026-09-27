@@ -103,8 +103,8 @@ export function startOwnedCacheFill(
       try {
         assertBackendWorkActive();
         return await coordinator.renewPublication(capability);
-      } catch {
-        console.error("cache fill renewal failed");
+      } catch (error) {
+        console.error("cache fill renewal failed", error);
         return false;
       }
     })();

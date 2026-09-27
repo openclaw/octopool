@@ -390,13 +390,18 @@ Cold and expired lookups reject corrupt storage, and failed parses are never cac
 successful configuration; a corrected value can be read on the next lookup. There is no
 persistent last-known-good policy fallback.
 
-When a Cloudflare backend (D1 or the pool Durable Object) rejects work because its
-request queue backed up, the relay returns `424 fallback_local` with reason
-`relay_overloaded` (other surfaces report `503 relay_overloaded`) instead of an untyped
-`internal_error`, so the shim can back off and delegate to real `gh`.
+Recognized transient D1 and Durable Object failures during relay reads return
+`424 fallback_local` with `details.reason: relay_storage_unavailable`. Signals include
+Cloudflare's network-loss, reset, storage-timeout and overload messages, and DO errors
+with `retryable === true` or `overloaded === true`. The shim delegates to native `gh`
+without a CLI upgrade. Original errors remain in Workers Logs; authenticated relay audit
+rows record `error_code: fallback_local` and `fallback_reason: relay_storage_unavailable`
+when the audit write succeeds. Unknown errors retain `500 internal_error`; GitHub
+responses, explicit authentication/policy errors, admin endpoints and write rejection
+retain their existing behavior. This mapping adds no storage retries.
 
-The same response applies when a client's backend-work allowance is full or its permit
-expires. The default is eight concurrent backend-work requests per authenticated caller/client
+When a client's backend-work allowance is full or its permit expires, the relay returns
+`424 fallback_local` with reason `relay_overloaded`. The default is eight concurrent backend-work requests per authenticated caller/client
 in each pool, configurable with `CLIENT_BACKEND_CONCURRENCY`. Fresh cache-only hits bypass
 admission, including eligible identity-cache entries; misses, revalidations, and live
 probes require a permit. See [backend-work admission](operations.md#backend-work-admission)

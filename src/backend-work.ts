@@ -57,10 +57,14 @@ export class BackendWork {
     if (this.signal.aborted) throw this.signal.reason;
   }
 
-  private stop(): void {
-    this.controller.abort(
-      new HttpError(503, "relay_overloaded", "Client backend work limit or lease exhausted"),
-    );
+  private stop(
+    error: unknown = new HttpError(
+      503,
+      "relay_overloaded",
+      "Client backend work limit or lease exhausted",
+    ),
+  ): void {
+    this.controller.abort(error);
     clearTimeout(this.renewalTimer);
     clearTimeout(this.expiryTimer);
   }
@@ -80,9 +84,9 @@ export class BackendWork {
       if (!(await this.admission.acquire(this.id, this.client, this.limit))) this.stop();
       this.check();
       this.scheduleRenewal();
-    } catch {
+    } catch (error) {
       // Unknown grant acknowledgements must never authorize backend work.
-      this.stop();
+      this.stop(error);
       this.check();
     } finally {
       // A caller can abort before the acquisition acknowledgement arrives.
@@ -109,8 +113,8 @@ export class BackendWork {
       // Use the start of the RPC, so transport delay never extends authority.
       this.setExpiry(started + BACKEND_LEASE_MS);
       this.scheduleRenewal();
-    } catch {
-      this.stop();
+    } catch (error) {
+      this.stop(error);
     }
   }
 

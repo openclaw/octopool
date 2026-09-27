@@ -174,7 +174,7 @@ it("fails closed on a lost grant acknowledgement and cleans up the committed per
     get: () => ({
       acquire: async (id: string, key: string, limit: number) => {
         expect(await real.acquire(id, key, limit)).toBe(true);
-        throw new Error("synthetic lost grant acknowledgement");
+        throw new Error("Network connection lost.");
       },
       release: (id: string) => real.release(id),
     }),
@@ -184,7 +184,7 @@ it("fails closed on a lost grant acknowledgement and cleans up the committed per
   const response = await requestWithEnv({ BACKEND_ADMISSION: namespace }, path(1), {});
   expect(response.status).toBe(424);
   expect(await response.json()).toMatchObject({
-    error: { details: { reason: "relay_overloaded" } },
+    error: { details: { reason: "relay_storage_unavailable" } },
   });
   expect(upstream).not.toHaveBeenCalled();
   expect(await permitRows()).toHaveLength(0);

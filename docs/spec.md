@@ -138,6 +138,11 @@ subresource cache entries. Legacy `route_hint.owner/repo/kind`, `cache_key`, and
 token-free results and contains only `id`/`kind` when present. `relay.backend` identifies
 `web` or `github_public` token-free results. Unsupported/policy-denied safe routes are
 normalized to `424 fallback_local` with the original denial in `details.reason`.
+Recognized transient failures in the relay's D1/DO storage and coordination also use
+`424 fallback_local`, with `details.reason: relay_storage_unavailable`. Unknown failures
+remain `500 internal_error`; upstream GitHub responses and explicit policy errors are
+not reclassified. Workers Logs retain the storage exception, and available audit writes
+record the fallback code and reason. Admin endpoints and relay write rejection are unchanged.
 
 The generated route inventory in [GitHub Read Relay](relay.md) and transport matrix in
 [Token-Free GitHub Endpoints](token-free.md) are canonical. GraphQL and mutations remain

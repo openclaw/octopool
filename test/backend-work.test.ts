@@ -61,15 +61,18 @@ it("coalesces acquisition only inside one request and releases on success", asyn
 
 it.each(["denied", "lost acknowledgement"])("does no work after %s acquisition", async (mode) => {
   const f = fixture();
+  const failure = new Error("synthetic lost grant acknowledgement");
   if (mode === "denied") f.admission.acquire.mockResolvedValue(false);
-  else f.admission.acquire.mockRejectedValue(new Error("synthetic lost grant acknowledgement"));
+  else f.admission.acquire.mockRejectedValue(failure);
   const upstream = vi.fn();
   const result = await f.run(async () => {
     await admitBackendWork();
     upstream();
   });
   await Promise.all(f.background);
-  expect(result).toMatchObject({ error: { status: 503, code: "relay_overloaded" } });
+  if (mode === "denied")
+    expect(result).toMatchObject({ error: { status: 503, code: "relay_overloaded" } });
+  else expect(result).toEqual({ error: failure });
   expect(upstream).not.toHaveBeenCalled();
   expect(f.admission.release).toHaveBeenCalledTimes(1);
 });
@@ -79,9 +82,9 @@ it.each(["rejected", "lost", "hung"])(
   async (mode) => {
     const f = fixture();
     const pending = Promise.withResolvers<boolean>();
+    const failure = new Error("synthetic renewal failure");
     if (mode === "rejected") f.admission.renew.mockResolvedValue(false);
-    if (mode === "lost")
-      f.admission.renew.mockRejectedValue(new Error("synthetic renewal failure"));
+    if (mode === "lost") f.admission.renew.mockRejectedValue(failure);
     if (mode === "hung") f.admission.renew.mockReturnValue(pending.promise);
     const result = f.run(async () => {
       await admitBackendWork();
@@ -89,7 +92,8 @@ it.each(["rejected", "lost", "hung"])(
       assertBackendWorkActive();
     });
     await vi.advanceTimersByTimeAsync(mode === "hung" ? 30_000 : 10_000);
-    expect(await result).toMatchObject({ error: { code: "relay_overloaded" } });
+    if (mode === "lost") expect(await result).toEqual({ error: failure });
+    else expect(await result).toMatchObject({ error: { code: "relay_overloaded" } });
     pending.resolve(true);
     await Promise.all(f.background);
     await vi.advanceTimersByTimeAsync(60_000);

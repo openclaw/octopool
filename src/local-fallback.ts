@@ -1,8 +1,15 @@
 import type { GitHubRate } from "./github-rate";
-import { backendOverloadedError, HttpError } from "./http";
+import { HttpError } from "./http";
+import { isTransientRelayStorageError } from "./relay-storage-error";
 
 export function localFallbackError(error: unknown): HttpError | undefined {
-  const typed = error instanceof HttpError ? error : backendOverloadedError(error);
+  if (isTransientRelayStorageError(error)) {
+    console.error("relay storage unavailable", error);
+    return new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
+      reason: "relay_storage_unavailable",
+    });
+  }
+  const typed = error instanceof HttpError ? error : undefined;
   if (typed === undefined || !localFallbackReasons.has(typed.code)) {
     return undefined;
   }
