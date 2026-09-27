@@ -8,7 +8,7 @@
 
 ### Fixes
 
-- Prove completed job logs from exact pool-scoped cached metadata or token-free job pages before anonymous REST, so collectors share R2 logs without spending metadata quota; validate job ownership and expose proof outcomes in Worker logs.
+- Reuse valid R2 job logs as completion proof before consulting exact pool-scoped metadata, token-free job pages, or anonymous REST, so collectors share logs without repeated proof calls; validate job ownership and expose proof outcomes in Worker logs.
 - Scale cache freshness with object age for plain completed runs (60–600s), closed-unmerged PRs (120–3600s), and open PRs (120–300s), preserving live-read bounds and recording caller max-age in relay audit rows.
 - Report local GitHub CLI credential lookup timeouts and cancellations without requesting re-login, preserving the context error and discarding partial credential output.
 - Cap concurrent CLI relay reads and policy fetches across processes at eight per user on each machine, configurable with `OCTOPOOL_RELAY_CONCURRENCY`, using crash-safe advisory slots and bounded fail-open waiting.

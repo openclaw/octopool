@@ -437,7 +437,14 @@ retention. Ordinary reads remain bounded cache reads; use `OCTOPOOL_FRESH=1` for
 
 ## Completed Actions log cache
 
-`job_logs` first checks D1 for a successful JSON `job_view` response in the same pool,
+Non-conditional `job_logs` requests first read the exact pool/path key in `ACTIONS_LOGS`.
+A valid, unexpired object with the current codec was written only after completion proof,
+so it proves the same job terminal without a D1 job-proof query, HTML fetch, or anonymous
+metadata call. The public-repository guard and log existence revalidation still apply.
+Absent, expired, or legacy-codec objects continue through the completion proof below;
+conditional requests retain their cache bypass.
+
+On an R2 miss, `job_logs` checks D1 for a successful JSON `job_view` response in the same pool,
 at the exact job metadata path, with that job ID and `status: "completed"`. Completion
 is permanent for a job ID: a re-run creates new IDs. This proof can therefore use rows
 past both their freshness and stale-retention expiry, until normal cleanup removes them.
@@ -466,7 +473,7 @@ API quota and can fail when that quota is exhausted. No pooled-identity metadata
 added. If no source proves completion, logs keep the large-payload bypass behavior.
 A cached completed run cannot prove a job terminal.
 Structured Worker logs emit `octopool.actions_log.completion_proof` with pool, path,
-and outcome (`cached_job_view`, `web_page`, `anonymous_api`, `unproven`, or `error`), without changing
+and outcome (`r2_cached`, `cached_job_view`, `web_page`, `anonymous_api`, `unproven`, or `error`), without changing
 the HTTP response.
 
 Whole-run log archives remain native GitHub CLI fallback; only job-log routes use this
@@ -486,7 +493,7 @@ Legacy base64 objects were already reversible but also miss once under this form
 contract. A late old writer produces another marker miss. The bucket prefix and
 seven-day lifecycle are unchanged; no purge or bucket migration is required.
 
-After terminal-status proof, an object younger than one hour can be served without
+An R2 object younger than one hour supplies its own terminal-status proof and can be served without
 contacting the log endpoint. Older objects also make an authenticated log request without
 following its redirect: a validated `302 Location` confirms existence and refreshes the
 retention timestamp, while `404` purges the object and returns GitHub's deletion response.

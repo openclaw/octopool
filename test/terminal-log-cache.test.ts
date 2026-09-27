@@ -5,7 +5,11 @@ import { withGitHubEgress } from "../src/github-egress";
 import { callGitHubWeb } from "../src/github-web";
 import { completedJobPageProof } from "../src/github-public-actions";
 import { classifyRoute, defaultPolicy } from "../src/policy";
-import { terminalLogCacheKey, terminalLogCacheProof } from "../src/terminal-log-cache";
+import {
+  terminalLogCacheKey,
+  terminalLogCacheProof,
+  terminalLogJobID,
+} from "../src/terminal-log-cache";
 import type { RelayRequest } from "../src/types";
 
 vi.mock("../src/github-web", () => ({ callGitHubWeb: vi.fn() }));
@@ -46,6 +50,24 @@ function setup(completed = false) {
 }
 
 describe("terminal job completion proof", () => {
+  it("requires the exact classified repository/job-log path before reading R2", () => {
+    const route = classifyRoute(request, policy);
+    expect(terminalLogJobID(request, route)).toBe("42");
+    for (const path of [
+      "/repos/another/octopool/actions/jobs/42/logs",
+      "/repos/openclaw/another/actions/jobs/42/logs",
+      "/repos/openclaw/octopool/actions/jobs/42/logs/extra",
+      "/other/repos/openclaw/octopool/actions/jobs/42/logs",
+      "/repos/openclaw/octopool/actions/runs/42/logs",
+    ])
+      expect(terminalLogJobID({ ...request, path }, route)).toBeUndefined();
+    expect(terminalLogJobID(request, { ...route, logs: false })).toBeUndefined();
+    const { owner: _owner, ...withoutOwner } = route;
+    const { repo: _repo, ...withoutRepo } = route;
+    expect(terminalLogJobID(request, withoutOwner)).toBeUndefined();
+    expect(terminalLogJobID(request, withoutRepo)).toBeUndefined();
+  });
+
   it("tries one pool/path-scoped D1 query before spending anonymous quota", async () => {
     const { prepare, bind, log, prove } = setup(true);
     await expect(prove()).resolves.toEqual({ key: terminalLogCacheKey(request) });

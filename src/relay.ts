@@ -75,7 +75,10 @@ import {
 import {
   deleteTerminalLogCache,
   readTerminalLogCache,
+  recordTerminalLogProof,
+  terminalLogCacheKey,
   terminalLogCacheProof,
+  terminalLogJobID,
   terminalLogNeedsRevalidation,
   type CachedTerminalLog,
   writeTerminalLogCache,
@@ -308,20 +311,27 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
       reason: "local_credentials_required",
     });
   }
-  if (state.route.logs && !hasConditionalRequestHeaders(state.request)) {
-    const terminalProof = await terminalLogCacheProof(
-      state.env,
-      state.ctx,
-      state.request,
-      state.route,
-      state.policy,
-    );
-    if (terminalProof !== undefined) {
-      const key = terminalProof.key;
+  if (
+    terminalLogJobID(state.request, state.route) !== undefined &&
+    !hasConditionalRequestHeaders(state.request)
+  ) {
+    const key = terminalLogCacheKey(state.request);
+    const cached = await readTerminalLogCache(state.env, key);
+    if (cached !== undefined) recordTerminalLogProof(state.request, "r2_cached");
+    // Only proven completed logs enter this exact pool/path cache; valid objects retain that proof.
+    if (
+      cached !== undefined ||
+      (await terminalLogCacheProof(
+        state.env,
+        state.ctx,
+        state.request,
+        state.route,
+        state.policy,
+      )) !== undefined
+    ) {
       state.terminalLogCacheKey = key;
       state.cacheStatus = "miss";
       state.cacheable = true;
-      const cached = await readTerminalLogCache(state.env, key);
       if (cached !== undefined) {
         await ensurePublicGitHubRepo(state.env, state.route, cached.created_at);
         if (terminalLogNeedsRevalidation(cached, state.maxAgeSeconds)) {

@@ -11,6 +11,8 @@ import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { terminalLogCacheKey, terminalLogCacheProof } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } from "./harness";
+import { requestWithWarmEnv } from "./identity-routing-support";
+import { observePublicationD1 } from "./publication-d1-observer";
 import { envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
 
 type RelayEnvelope = {
@@ -55,21 +57,31 @@ describe("terminal Actions log cache", () => {
     ).toBe(0);
     upstream.mockClear();
     const log = vi.spyOn(console, "log");
-    for (const cache of ["miss", "hit"]) {
-      expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
-        body: "build log\n",
-        relay: { cache },
-      });
-    }
+    const { db, proofQueries } = observeCompletionProofQueries();
+    expect(
+      await (await requestWithWarmEnv({ DB: db }, LOG_PATH, {})).json<RelayEnvelope>(),
+    ).toMatchObject({ body: "build log\n", relay: { cache: "miss" } });
+    expect(proofQueries).toEqual([
+      ["maintainers", LOG_PATH.replace(/\/logs$/, ""), CACHE_PUBLICATION_EPOCH, "42"],
+    ]);
     expect(jobMetadataCalls(upstream)).toBe(0);
     expect(logBackendCalls(upstream)).toBe(1);
     expect(downloadCalls(upstream)).toBe(1);
-    expect(
-      upstream.mock.calls.filter(
-        ([input, init]) => new URL(new Request(input, init).url).pathname === pagePath,
-      ),
-    ).toHaveLength(2);
+    expect(jobPageCalls(upstream)).toBe(1);
     expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "web_page" }));
+    upstream.mockClear();
+    proofQueries.length = 0;
+    log.mockClear();
+
+    expect(
+      await (await requestWithWarmEnv({ DB: db }, LOG_PATH, {})).json<RelayEnvelope>(),
+    ).toMatchObject({ body: "build log\n", relay: { cache: "hit" } });
+    expect(proofQueries).toEqual([]);
+    expect(jobPageCalls(upstream)).toBe(0);
+    expect(jobMetadataCalls(upstream)).toBe(0);
+    expect(logBackendCalls(upstream)).toBe(0);
+    expect(downloadCalls(upstream)).toBe(0);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "r2_cached" }));
   });
 
   it("uses the exact pool/path index for completion evidence", async () => {
@@ -82,7 +94,7 @@ describe("terminal Actions log cache", () => {
   });
 
   it.each([opaqueBytes[0], opaqueBytes[2], opaqueBytes[5], opaqueBytes[6]])(
-    "stores literal $name bytes in native R2 and reuses them after fresh completion",
+    "stores literal $name bytes in native R2 and reuses their completion proof",
     async (fixture) => {
       const upstream = terminalLogUpstream("completed", new Uint8Array(fixture.bytes));
       vi.stubGlobal("fetch", upstream);
@@ -107,7 +119,8 @@ describe("terminal Actions log cache", () => {
           "created-at": expect.any(String),
         });
       }
-      expect(jobMetadataCalls(upstream)).toBe(2);
+      expect(jobMetadataCalls(upstream)).toBe(1);
+      expect(jobPageCalls(upstream)).toBe(1);
       expect(logBackendCalls(upstream)).toBe(1);
       expect(downloadCalls(upstream)).toBe(1);
     },
@@ -137,10 +150,14 @@ describe("terminal Actions log cache", () => {
       const upstream = terminalLogUpstream("completed", new Uint8Array(original));
       vi.stubGlobal("fetch", upstream);
       const remove = vi.spyOn(env.ACTIONS_LOGS, "delete");
-      const wire = await (await relay(LOG_PATH)).json<RelayEnvelope>();
+      const { db, proofQueries } = observeCompletionProofQueries();
+      const wire = await (await requestWithWarmEnv({ DB: db }, LOG_PATH, {})).json<RelayEnvelope>();
       expect.soft(envelopeBytes(wire)).toEqual(original);
       expect.soft(wire.relay.cache).toBe("miss");
       expect.soft(downloadCalls(upstream)).toBe(1);
+      expect(proofQueries).toHaveLength(1);
+      expect(jobPageCalls(upstream)).toBe(1);
+      expect(jobMetadataCalls(upstream)).toBe(1);
       expect(remove).not.toHaveBeenCalled();
       expect(cancel).toHaveBeenCalledOnce();
       const object = await env.ACTIONS_LOGS.get(key);
@@ -315,7 +332,9 @@ describe("terminal Actions log cache", () => {
     });
     expect(jobMetadataCalls(upstream)).toBe(1);
     expect(logBackendCalls(upstream)).toBe(1);
-    expect(get).not.toHaveBeenCalled();
+    expect(get).toHaveBeenCalledExactlyOnceWith(
+      terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH }),
+    );
     expect(put).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unproven" }));
   });
@@ -329,6 +348,52 @@ describe("terminal Actions log cache", () => {
     });
     expect(jobMetadataCalls(upstream)).toBe(1);
     expect(logBackendCalls(upstream)).toBe(1);
+  });
+
+  it.each([
+    { name: "another pool", pool: "other", path: LOG_PATH },
+    {
+      name: "another job",
+      pool: "maintainers",
+      path: "/repos/openclaw/octopool/actions/jobs/43/logs",
+    },
+    {
+      name: "another repo",
+      pool: "maintainers",
+      path: "/repos/openclaw/other/actions/jobs/42/logs",
+    },
+    {
+      name: "another owner",
+      pool: "maintainers",
+      path: "/repos/other/octopool/actions/jobs/42/logs",
+    },
+  ])("does not reuse a valid R2 object belonging to $name", async ({ pool, path }) => {
+    await seedLegacyLog(terminalLogCacheKey({ pool, method: "GET", path }), {
+      age: "-10 minutes",
+      encoding: "text",
+      marker: "lossless-v1",
+      body: "another job's log\n",
+    });
+    const upstream = terminalLogUpstream("in_progress");
+    vi.stubGlobal("fetch", upstream);
+    const get = vi.spyOn(env.ACTIONS_LOGS, "get");
+    const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+    const log = vi.spyOn(console, "log");
+    const { db, proofQueries } = observeCompletionProofQueries();
+
+    expect(
+      await (await requestWithWarmEnv({ DB: db }, LOG_PATH, {})).json<RelayEnvelope>(),
+    ).toMatchObject({ body: "build log\n", relay: { cache: "bypass" } });
+    expect(get).toHaveBeenCalledExactlyOnceWith(
+      terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH }),
+    );
+    expect(proofQueries).toHaveLength(1);
+    expect(jobPageCalls(upstream)).toBe(1);
+    expect(jobMetadataCalls(upstream)).toBe(1);
+    expect(logBackendCalls(upstream)).toBe(1);
+    expect(put).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unproven" }));
+    expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "r2_cached" }));
   });
 
   it("does not use expired completion evidence as fresh public-repository proof", async () => {
@@ -366,9 +431,10 @@ describe("terminal Actions log cache", () => {
         body_encoding: "text",
         relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
       });
-      const second = await relay(
+      const { db, proofQueries } = observeCompletionProofQueries();
+      const second = await requestWithWarmEnv(
+        { DB: db },
         LOG_PATH,
-        undefined,
         cacheControl === undefined ? {} : { headers: { "cache-control": cacheControl } },
       );
       expect(await second.json<RelayEnvelope>()).toMatchObject({
@@ -377,7 +443,9 @@ describe("terminal Actions log cache", () => {
         body_encoding: "text",
         relay: { cache: "hit", cacheable: true, route_kind: "job_logs" },
       });
-      expect(jobMetadataCalls(upstream)).toBe(2);
+      expect(proofQueries).toEqual([]);
+      expect(jobMetadataCalls(upstream)).toBe(1);
+      expect(jobPageCalls(upstream)).toBe(1);
       expect(logBackendCalls(upstream)).toBe(1);
       expect(
         await env.DB.prepare(
@@ -609,9 +677,10 @@ describe("terminal Actions log cache", () => {
     const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
     await ageTerminalLog(key, age);
 
-    const response = await relay(
+    const { db, proofQueries } = observeCompletionProofQueries();
+    const response = await requestWithWarmEnv(
+      { DB: db },
       LOG_PATH,
-      undefined,
       cacheControl === undefined ? {} : { headers: { "cache-control": cacheControl } },
     );
     expect(await response.json<RelayEnvelope>()).toMatchObject({
@@ -620,6 +689,9 @@ describe("terminal Actions log cache", () => {
       relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
     expect(await env.ACTIONS_LOGS.get(key)).toBeNull();
+    expect(proofQueries).toEqual([]);
+    expect(jobMetadataCalls(upstream)).toBe(1);
+    expect(jobPageCalls(upstream)).toBe(1);
     expect(logBackendCalls(upstream)).toBe(2);
   });
 
@@ -674,7 +746,10 @@ describe("terminal Actions log cache", () => {
     const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
     await ageTerminalLog(key, "-2 hours");
 
-    expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+    const { db, proofQueries } = observeCompletionProofQueries();
+    expect(
+      await (await requestWithWarmEnv({ DB: db }, LOG_PATH, {})).json<RelayEnvelope>(),
+    ).toMatchObject({
       body: "build log\n",
       relay: { cache: "hit" },
     });
@@ -682,8 +757,11 @@ describe("terminal Actions log cache", () => {
       body: "build log\n",
       relay: { cache: "hit" },
     });
-    expect(jobMetadataCalls(upstream)).toBe(3);
+    expect(proofQueries).toEqual([]);
+    expect(jobMetadataCalls(upstream)).toBe(1);
+    expect(jobPageCalls(upstream)).toBe(1);
     expect(logBackendCalls(upstream)).toBe(2);
+    expect(downloadCalls(upstream)).toBe(1);
     expect(released).toBe(2);
   });
 
@@ -707,12 +785,18 @@ describe("terminal Actions log cache", () => {
       },
     });
 
-    const response = await relay(LOG_PATH);
+    upstream.mockClear();
+    const { db, proofQueries } = observeCompletionProofQueries();
+    const response = await requestWithWarmEnv({ DB: db }, LOG_PATH, {});
     expect(await response.json<RelayEnvelope>()).toMatchObject({
       body: "build log\n",
       relay: { cache: "miss" },
     });
-    expect(logBackendCalls(upstream)).toBe(2);
+    expect(proofQueries).toHaveLength(1);
+    expect(jobMetadataCalls(upstream)).toBe(1);
+    expect(jobPageCalls(upstream)).toBe(1);
+    expect(logBackendCalls(upstream)).toBe(1);
+    expect(downloadCalls(upstream)).toBe(1);
   });
 
   it("re-establishes fresh public proof before serving an R2 hit", async () => {
@@ -725,23 +809,33 @@ describe("terminal Actions log cache", () => {
       const request = new Request(input, init);
       const url = new URL(request.url);
       if (bearer(request) === "test-org-token") {
-        return jsonResponse({ private: true });
-      }
-      if (url.pathname === "/repos/openclaw/octopool/actions/jobs/42") {
-        return jsonResponse({ id: 42, run_id: 99, status: "completed" });
+        expect(url.pathname).toBe("/repos/openclaw/octopool");
+        return jsonResponse({ private: false });
       }
       return jsonResponse({ message: "unavailable" }, 503);
     });
     vi.stubGlobal("fetch", guarded);
 
-    const response = await relay(LOG_PATH);
+    const { db, proofQueries } = observeCompletionProofQueries();
+    const response = await requestWithWarmEnv({ DB: db }, LOG_PATH, {});
     expect(response.status).toBe(200);
     expect(await response.json<RelayEnvelope>()).toMatchObject({
       body: "build log\n",
       relay: { cache: "hit" },
     });
-    expect(jobMetadataCalls(guarded)).toBe(1);
+    expect(proofQueries).toEqual([]);
+    expect(jobMetadataCalls(guarded)).toBe(0);
+    expect(jobPageCalls(guarded)).toBe(0);
     expect(logBackendCalls(guarded)).toBe(0);
+    expect(
+      guarded.mock.calls
+        .map(([input, init]) => new Request(input, init))
+        .filter(
+          (request) =>
+            bearer(request) === "test-org-token" &&
+            new URL(request.url).pathname === "/repos/openclaw/octopool",
+        ),
+    ).toHaveLength(1);
   });
 });
 
@@ -827,6 +921,23 @@ function jobMetadataCalls(upstream: ReturnType<typeof vi.fn<typeof fetch>>): num
       new URL(request.url).pathname === "/repos/openclaw/octopool/actions/jobs/42"
     );
   }).length;
+}
+
+function jobPageCalls(upstream: ReturnType<typeof vi.fn<typeof fetch>>): number {
+  return upstream.mock.calls.filter(([input, init]) => {
+    const url = new URL(new Request(input, init).url);
+    return url.hostname === "github.com" && url.pathname === "/openclaw/octopool/runs/42";
+  }).length;
+}
+
+function observeCompletionProofQueries() {
+  const proofQueries: unknown[][] = [];
+  const db = observePublicationD1(env.DB, {
+    before: async (sql, values) => {
+      if (sql === queries.readCompletedJobCacheProof) proofQueries.push([...values]);
+    },
+  });
+  return { db, proofQueries };
 }
 
 async function ageTerminalLog(key: string, modifier: string): Promise<void> {

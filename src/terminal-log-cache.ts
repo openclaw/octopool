@@ -25,9 +25,34 @@ export type CachedTerminalLog = GitHubRelayResponse & {
 };
 
 export type TerminalLogCacheProof = { key: string };
+type TerminalLogProofOutcome =
+  | "r2_cached"
+  | "cached_job_view"
+  | "web_page"
+  | "anonymous_api"
+  | "unproven"
+  | "error";
 
 export function terminalLogCacheKey(request: RelayRequest): string {
   return `${LOG_KEY_PREFIX}${encodeURIComponent(request.pool)}${request.path}`;
+}
+
+export function terminalLogJobID(request: RelayRequest, route: RouteInfo): string | undefined {
+  if (!route.logs || route.owner === undefined || route.repo === undefined) return undefined;
+  const match = /^\/repos\/([^/]+)\/([^/]+)\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path);
+  return match?.[1] === route.owner && match[2] === route.repo ? match[3] : undefined;
+}
+
+export function recordTerminalLogProof(
+  request: RelayRequest,
+  outcome: TerminalLogProofOutcome,
+): void {
+  console.log({
+    event: "octopool.actions_log.completion_proof",
+    pool: request.pool,
+    path: request.path,
+    outcome,
+  });
 }
 
 export async function terminalLogCacheProof(
@@ -37,14 +62,11 @@ export async function terminalLogCacheProof(
   route: RouteInfo,
   policy: PoolPolicy,
 ): Promise<TerminalLogCacheProof | undefined> {
-  if (!route.logs || route.owner === undefined || route.repo === undefined) {
-    return undefined;
-  }
-  const jobID = /\/actions\/jobs\/([0-9]+)\/logs$/.exec(request.path)?.[1];
+  const jobID = terminalLogJobID(request, route);
   if (jobID === undefined) {
     return undefined;
   }
-  let outcome = "unproven";
+  let outcome: TerminalLogProofOutcome = "unproven";
   try {
     const metadata = metadataRequest(
       request,
@@ -54,7 +76,7 @@ export async function terminalLogCacheProof(
       outcome = "cached_job_view";
       return { key: terminalLogCacheKey(request) };
     }
-    if (await completedJobPageProof(env, route.owner, route.repo, jobID)) {
+    if (await completedJobPageProof(env, route.owner!, route.repo!, jobID)) {
       outcome = "web_page";
       return { key: terminalLogCacheKey(request) };
     }
@@ -68,12 +90,7 @@ export async function terminalLogCacheProof(
     console.error("actions log completion preflight failed", error);
     return undefined;
   } finally {
-    console.log({
-      event: "octopool.actions_log.completion_proof",
-      pool: request.pool,
-      path: request.path,
-      outcome,
-    });
+    recordTerminalLogProof(request, outcome);
   }
 }
 
