@@ -11,6 +11,7 @@ type RelayEnvelope = {
 };
 
 const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
+const JOB_PAGE_URL = "https://github.com/openclaw/octopool/runs/42";
 
 describe("Worker end-to-end relay security boundaries", () => {
   it("denies private repositories before a pooled credential is used", async () => {
@@ -137,6 +138,11 @@ describe("Worker end-to-end relay security boundaries", () => {
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
         const url = new URL(request.url);
+        if (request.url === JOB_PAGE_URL) {
+          expect(request.headers.get("authorization")).toBeNull();
+          expect(request.redirect).toBe("manual");
+          return new Response(null, { status: 404 });
+        }
         if (bearer(request) === "test-org-token") {
           return jsonResponse({ private: false });
         }
@@ -190,13 +196,26 @@ describe("Worker end-to-end relay security boundaries", () => {
       vi.stubGlobal("fetch", upstream);
 
       const response = await relay(LOG_PATH);
+      const pageRequests = upstream.mock.calls
+        .map(([input, init]) => new Request(input, init))
+        .filter((request) => request.url === JOB_PAGE_URL);
+      expect(
+        pageRequests.map((request) => ({
+          authorization: request.headers.get("authorization"),
+          redirect: request.redirect,
+        })),
+      ).toEqual([{ authorization: null, redirect: "manual" }]);
+      expect(
+        upstream.mock.calls.filter(
+          ([input, init]) => new Request(input, init).url !== JOB_PAGE_URL,
+        ),
+      ).toHaveLength(4);
       if (chained) {
         expect(response.status).toBe(502);
         expect(await response.json()).toMatchObject({
           error: { code: "github_log_redirect_denied" },
         });
         expect(events).toEqual(["api released", "download", "download released"]);
-        expect(upstream).toHaveBeenCalledTimes(4);
         return;
       }
       expect(response.status).toBe(200);
@@ -207,7 +226,6 @@ describe("Worker end-to-end relay security boundaries", () => {
         identity: { id: "primary", kind: "pat" },
         relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
       });
-      expect(upstream).toHaveBeenCalledTimes(4);
       expect(events).toEqual(["api released", "download"]);
       expect(
         await env.DB.prepare("SELECT cache_status, cacheable, status FROM audit_events").first(),
@@ -229,6 +247,11 @@ describe("Worker end-to-end relay security boundaries", () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
+      if (request.url === JOB_PAGE_URL) {
+        expect(request.headers.get("authorization")).toBeNull();
+        expect(request.redirect).toBe("manual");
+        return new Response(null, { status: 404 });
+      }
       if (bearer(request) === "test-org-token") {
         return jsonResponse({ private: false });
       }
@@ -259,7 +282,18 @@ describe("Worker end-to-end relay security boundaries", () => {
       error: { code },
     });
     expect(released).toBe(true);
-    expect(upstream).toHaveBeenCalledTimes(3);
+    const pageRequests = upstream.mock.calls
+      .map(([input, init]) => new Request(input, init))
+      .filter((request) => request.url === JOB_PAGE_URL);
+    expect(
+      pageRequests.map((request) => ({
+        authorization: request.headers.get("authorization"),
+        redirect: request.redirect,
+      })),
+    ).toEqual([{ authorization: null, redirect: "manual" }]);
+    expect(
+      upstream.mock.calls.filter(([input, init]) => new Request(input, init).url !== JOB_PAGE_URL),
+    ).toHaveLength(3);
     expect(
       await env.DB.prepare("SELECT identity_id, status, error_code FROM audit_events").first(),
     ).toEqual({

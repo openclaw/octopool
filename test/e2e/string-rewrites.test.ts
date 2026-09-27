@@ -89,6 +89,7 @@ describe("canonical relay egress protection", () => {
       { route_hint: { pr_state: "closed" } },
     ],
     ["/repos/example/demo/actions/jobs/19/logs", "^/repos/example/demo/actions/jobs/19$", {}],
+    ["/repos/example/demo/actions/jobs/19/logs", "^/example/demo/runs/19$", {}],
     [
       "/repos/example/demo/pulls/17",
       "^/example/demo/pull/17.diff$",
@@ -108,7 +109,14 @@ describe("canonical relay egress protection", () => {
     vi.stubGlobal("fetch", upstream);
     const response = await relay(path, CALLER_TOKEN, options);
     expect(response.status).toBe(403);
-    expect(upstream).not.toHaveBeenCalled();
+    const requests = upstream.mock.calls.map(([input, init]) => new Request(input, init));
+    // A rule for the later API fallback permits only the preceding HTML probe.
+    expect(requests.map((request) => request.url)).toEqual(
+      pattern === "^/repos/example/demo/actions/jobs/19$"
+        ? ["https://github.com/example/demo/runs/19"]
+        : [],
+    );
+    expect(requests.every((request) => !request.headers.has("authorization"))).toBe(true);
     await expectNoPublication();
   });
 
@@ -186,9 +194,13 @@ describe("canonical relay egress protection", () => {
         (request) => request.headers.get("authorization") === "Bearer test-primary-token",
       ),
     ).toBe(true);
-    expect(requests.every((request) => new URL(request.url).hostname === "api.github.com")).toBe(
-      true,
+    const pageRequests = requests.filter(
+      (request) => new URL(request.url).hostname !== "api.github.com",
     );
+    expect(pageRequests.map((request) => request.url)).toEqual([
+      "https://github.com/example/demo/runs/19",
+    ]);
+    expect(pageRequests[0]!.headers.has("authorization")).toBe(false);
     expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM audit_events").first()).toEqual({
       count: 0,
     });
