@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-09-27
+
+**Highlights:** Cap relay concurrency per machine and per client so one runaway script can't slow everyone, serve string-rewrite policy from a dedicated Durable Object, cache completed Actions job logs and settled runs/PRs far longer, and degrade transient relay storage failures to native `gh` instead of errors.
 
 ### Features
 
@@ -20,6 +22,7 @@
 
 ### Upgrade notes
 
+- Upgrade the CLI (`brew upgrade octopool`) for per-machine relay slots (`OCTOPOOL_RELAY_CONCURRENCY`), atomic login writes, and credential-timeout messages. Without it, bursts above eight concurrent requests per client fall back to native `gh` on personal quota instead of queueing locally.
 - Apply D1 migration `0022_terminal_job_proof.sql` before or with the Worker deploy to index terminal-job proof lookups; no CLI upgrade or cache purge is required.
 - Apply D1 migration `0021_audit_requested_max_age.sql` before or with the Worker deploy, before it serves traffic; the new audit inserts require this nullable column. No CLI upgrade, cache purge, or re-login is required.
 - Deploy the Worker with Durable Object migration `v2` (`PolicyCoordinator`). No CLI change, D1 schema migration, or policy write fence is required; writes from older Workers, manual D1 edits, and restores are picked up within 60 seconds, and reload failures fail closed.
