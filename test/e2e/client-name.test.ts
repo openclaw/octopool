@@ -278,7 +278,7 @@ async function historicalClients(second?: string) {
   await seedAudit("compound-history", "caller", "repo_view", "miss", 200, {
     clientName: "Host.local.local",
   });
-  const before = await preservedHistory();
+  const before = await preservedHistory(true);
   const tokens = (await env.DB.prepare("SELECT * FROM caller_tokens ORDER BY id").all()).results;
   await applyClientNameUpgrade();
   expect(await preservedHistory()).toEqual(before);
@@ -288,14 +288,17 @@ async function historicalClients(second?: string) {
   mockEnrollmentAccount(42, "renamed-user");
 }
 
-async function preservedHistory() {
+async function preservedHistory(beforeMaxAgeUpgrade = false) {
   return Promise.all([
     env.DB.prepare(
       "SELECT id, github_user_id, org_login, dashboard_role FROM callers ORDER BY id",
     ).all(),
     env.DB.prepare("SELECT * FROM caller_pools ORDER BY caller_id, pool_id").all(),
     env.DB.prepare("SELECT * FROM web_sessions ORDER BY session_hash").all(),
-    env.DB.prepare("SELECT * FROM audit_events ORDER BY request_id").all(),
+    // Migration 0021 adds only a nullable field to historical audit rows.
+    env.DB.prepare(
+      `SELECT *${beforeMaxAgeUpgrade ? ", NULL AS requested_max_age" : ""} FROM audit_events ORDER BY request_id`,
+    ).all(),
     env.DB.prepare("SELECT * FROM caller_tokens WHERE id LIKE 'other-%' ORDER BY id").all(),
     env.DB.prepare(
       "SELECT rowid, id, caller_id, created_at FROM caller_tokens WHERE id = 'caller-client-token'",
