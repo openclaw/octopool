@@ -1356,10 +1356,13 @@ remains GET-only.
 ## Cache freshness
 
 Shared cache hits are the point of the relay, but a cached answer describes the state at
-fill time, not now. A PR read stays fresh for two minutes while the PR is open, so directly
-after a `git push` the cached copy still reports the previous head SHA, and directly after a
-merge it still reports the PR as open. Nothing about the response looks different, which is
-how a stale answer gets read as current fact.
+fill time, not now. An open PR's server TTL scales with 10% of its age since `updated_at`,
+between two and five minutes. Closed-unmerged PRs range from two minutes to one hour;
+merged PRs keep one hour. Plain completed runs range from one to ten minutes, while
+active runs stay at one minute. Missing or unusable timestamps keep the minimums.
+See [cache TTLs](cache.md#ttls) for the full policy and unchanged outage stale windows.
+Cached reads can therefore lag a push, re-run, merge, or reopening unless the caller
+requests a tighter age bound.
 
 Three things keep that honest:
 

@@ -202,7 +202,8 @@ stored in either database.
 
 Audit starts after request validation, caller authentication, and pool lookup. Each later
 success/failure records caller, client, pool, normalized route, identity when used, status, error/
-fallback reason, duration, cache state, cacheability, and coalescing. Parse/auth/missing-pool
+fallback reason, duration, cache state, cacheability, coalescing, and parsed caller
+`requested_max_age` in seconds (`NULL` when absent or unparseable). Parse/auth/missing-pool
 failures occur before audit context exists. Bodies, credentials, and raw tokens are excluded.
 
 ## CLI contract

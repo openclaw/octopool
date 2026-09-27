@@ -7,7 +7,7 @@ reduce load on pooled identities.
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
 `src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
-`0002`/`0003`/`0006`/`0011`/`0013`/`0020`.
+`0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`.
 
 ## Configuration lookups
 
@@ -396,7 +396,8 @@ web hit still re-checks that public proof covers the entry before returning it.
 
 Per route kind and response state (`cacheTTLSeconds`):
 
-- base workflow runs and base job lists → 60s even when terminal, because reruns reuse the run ID;
+- base workflow runs → 60s while active; completed runs → 10% of age since `updated_at`, clamped to 60s..10m;
+  base job lists → 60s even when terminal, because reruns reuse the run ID;
   completed attempt-qualified run/job lists get 1h fresh plus up to 24h bounded stale fallback
 - checks, check suites, and commit statuses → 60s fresh plus up to 5m bounded stale fallback,
   even when terminal: reruns and new statuses can change results for the same commit SHA
@@ -406,11 +407,25 @@ Per route kind and response state (`cacheTTLSeconds`):
   comments, issue comments/events/timeline, and undiscriminated PR files → 1m..5m
 - supported repository-scoped `gh search issues|prs` shim calls use anonymous API before
   any allowed search-bucket identity
-- merged PRs and closed issues → 1h; open or closed-unmerged PRs → 2m; open issues → 5m
+- merged PRs and closed issues → 1h; closed-unmerged PRs → 10% of age since `updated_at`, clamped to 2m..1h;
+  open PRs → the same heuristic clamped to 2m..5m; open issues → 5m
 - release lists/latest → 5m; release by tag/id → 1h
 - immutable commit objects → 24h; commit lists → 5m; contents → 1h
 - repo metadata → 10m; workflow metadata → 1h
 - active/unknown-run logs, `rate_limit`, and conditional requests still bypass
+
+Age is measured at cache write time and the heuristic rounds down to whole seconds.
+Missing, unparseable, non-string, or future `updated_at` values retain the minimum TTL
+(60s for plain completed runs, 120s for unmerged PRs). Merged PRs and completed
+attempt-pinned runs keep their fixed one-hour TTL. Ref-named route caps and stale
+fallback windows are unchanged: plain runs retain 5m of bounded outage fallback
+after fresh expiry, and PRs retain 1h.
+
+The caps bound ordinary fresh-cache reuse after a re-run to at most 10m and after a
+PR reopens to its computed TTL (at most 1h). Outage stale fallback remains separately
+bounded as above. Explicit caller maximum ages still constrain both fresh and stale
+reuse; `max-age=0` requires upstream validation. CLI live-state PR fields and watch
+commands already request zero-age reads.
 
 REST issue state `closed` and page-derived `CLOSED` both receive the one-hour TTL;
 classification preserves cached bodies and raw response states.
@@ -811,6 +826,9 @@ hard `404`/private response always denies.
   and duplicate-fill telemetry (migration `0009`).
 - `audit_events.backend` — bounded upstream classification (`github_web`,
   `github_api`, or `github_identity`) for route-level stats (migration `0013`).
+- `audit_events.requested_max_age` — parsed caller cache-age bound in seconds; `0`
+  requires upstream validation, positive values bound reuse, and `NULL` means no parsed
+  bound (including older audit rows). Available after migration `0021`.
 - `ACTIONS_LOGS` R2 binding (`octopool-actions-logs`) — raw terminal Actions log objects;
   no D1 migration is required.
 

@@ -98,6 +98,7 @@ type RelayBase = {
   requestId: string;
   started: number;
   request: RelayRequest;
+  maxAgeSeconds: number | undefined;
   callerId: string;
   callerTokenId: string;
   clientName: string;
@@ -115,7 +116,6 @@ type ActiveRelay = RelayBase & {
   terminalLogCacheKey: string | undefined;
   terminalLogCached: CachedTerminalLog | undefined;
   cacheEnabled: boolean;
-  maxAgeSeconds: number | undefined;
   sharedCacheKey: string | undefined;
   cacheKey: string | undefined;
   attemptedIdentityCacheKeys: { cacheKey: string; identity: Pick<Identity, "id" | "kind"> }[];
@@ -220,6 +220,7 @@ async function relayGitHubRequest(
     requestId,
     started,
     request: relayRequest,
+    maxAgeSeconds: requestCacheMaxAgeSeconds(relayRequest),
     callerId: caller.id,
     callerTokenId: caller.caller_token_id,
     clientName: caller.client_name,
@@ -285,7 +286,6 @@ async function prepareRelay(
     terminalLogCacheKey: undefined,
     terminalLogCached: undefined,
     cacheEnabled,
-    maxAgeSeconds: requestCacheMaxAgeSeconds(base.request),
     sharedCacheKey: cacheKey,
     cacheKey,
     attemptedIdentityCacheKeys: [],
@@ -1087,6 +1087,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
       ...(backend === undefined ? {} : { backend }),
       cacheStatus,
       cacheable: state.cacheable,
+      requestedMaxAge: state.maxAgeSeconds ?? null,
     }),
   ];
   if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
@@ -1219,6 +1220,7 @@ async function handleRelayError(
       durationMs: Date.now() - base.started,
       cacheStatus: active?.cacheStatus ?? "unknown",
       cacheable: active?.cacheable ?? false,
+      requestedMaxAge: base.maxAgeSeconds ?? null,
       ...(active?.identity === undefined ? {} : { identityId: active.identity.id }),
       ...(active?.identity === undefined ? {} : { backend: "github_identity" }),
     }),
@@ -1516,6 +1518,7 @@ function cachedResponseParams(
     route: state.route,
     cached: { ...cached, ...clientResponse },
     started: state.started,
+    maxAgeSeconds: state.maxAgeSeconds,
     cacheStatus,
     ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
     ...(extras.coalesced === undefined ? {} : { coalesced: extras.coalesced }),
@@ -1566,6 +1569,7 @@ async function serveCachedGitHubResponse(
     };
     started: number;
     cacheStatus: "hit" | "stale";
+    maxAgeSeconds: number | undefined;
     staleReason?: string;
     coalesced?: boolean;
   },
@@ -1586,6 +1590,7 @@ async function serveCachedGitHubResponse(
       ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
       cacheStatus: params.cacheStatus,
       cacheable: true,
+      requestedMaxAge: params.maxAgeSeconds ?? null,
       ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
     }),
   );

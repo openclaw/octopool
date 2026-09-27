@@ -89,6 +89,7 @@ export async function insertAudit(
     cacheStatus?: "hit" | "miss" | "bypass" | "stale" | "unknown";
     cacheable?: boolean;
     coalesced?: boolean;
+    requestedMaxAge?: number | null;
   },
 ): Promise<void> {
   await env.DB.prepare(queries.insertAudit)
@@ -109,6 +110,7 @@ export async function insertAudit(
       event.cacheStatus ?? "unknown",
       event.cacheable === true ? 1 : 0,
       event.coalesced === true ? 1 : 0,
+      event.requestedMaxAge ?? null,
     )
     .run();
 }

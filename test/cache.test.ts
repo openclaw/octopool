@@ -550,7 +550,106 @@ describe("github cache policy", () => {
     expect(relayResponse.body).toEqual(original);
   });
 
-  it("keeps mutable CI TTLs short and caches terminal CI for an hour", () => {
+  describe.each([
+    {
+      name: "completed plain run",
+      path: "actions/runs/123",
+      body: { status: "completed" },
+      minimum: 60,
+      maximum: 600,
+      stale: 300,
+    },
+    {
+      name: "open PR",
+      path: "pulls/42",
+      body: { state: "open", merged_at: null },
+      minimum: 120,
+      maximum: 300,
+      stale: 3_600,
+    },
+    {
+      name: "closed-unmerged PR",
+      path: "pulls/42",
+      body: { state: "closed", merged_at: null },
+      minimum: 120,
+      maximum: 3_600,
+      stale: 3_600,
+    },
+  ])("age-scaled $name freshness", ({ path, body, minimum, maximum, stale }) => {
+    const route = classifyRoute(
+      validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: `/repos/openclaw/octopool/${path}`,
+      }),
+      policy,
+    );
+    const now = Date.parse("2026-09-27T12:00:00Z");
+
+    it.each([
+      [0, minimum],
+      [minimum * 10 - 1, minimum],
+      [minimum * 10, minimum],
+      [minimum * 10 + 10, minimum + 1],
+      [(minimum + maximum) * 5, (minimum + maximum) / 2],
+      [maximum * 10 - 1, maximum - 1],
+      [maximum * 10, maximum],
+      [maximum * 10 + 1_000, maximum],
+    ])("uses age %i seconds for a %i-second TTL", (age, expected) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(now);
+      const original = { ...body, updated_at: new Date(now - age * 1_000).toISOString() };
+      const relayResponse = response(structuredClone(original));
+      expect(cacheTTLSeconds(route, relayResponse)).toBe(expected);
+      expect(staleCacheSeconds(route, expected)).toBe(stale);
+      expect(relayResponse.body).toEqual(original);
+    });
+
+    it.each([undefined, null, "invalid", "", 123, {}, "2026-09-27T12:00:01Z"])(
+      "retains the minimum for unusable updated_at=%j",
+      (updated_at) => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(now);
+        expect(cacheTTLSeconds(route, response({ ...body, updated_at }))).toBe(minimum);
+      },
+    );
+  });
+
+  it.each([undefined, "invalid", "2026-09-28T00:00:00Z", "2026-09-01T00:00:00Z"])(
+    "preserves merged PR, attempt run, and active run TTLs for updated_at=%j",
+    (updated_at) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-27T12:00:00Z"));
+      const route = (path: string) =>
+        classifyRoute(
+          validateRelayRequest({
+            pool: "maintainers",
+            method: "GET",
+            path: `/repos/openclaw/octopool/${path}`,
+          }),
+          policy,
+        );
+      expect(
+        cacheTTLSeconds(
+          route("pulls/42"),
+          response({ state: "closed", merged_at: "2026-09-01T00:00:00Z", updated_at }),
+        ),
+      ).toBe(3_600);
+      expect(
+        cacheTTLSeconds(
+          route("actions/runs/123/attempts/2"),
+          response({ status: "completed", updated_at }),
+        ),
+      ).toBe(3_600);
+      for (const path of ["actions/runs/123", "actions/runs/123/attempts/2"]) {
+        for (const status of ["in_progress", "queued"]) {
+          expect(cacheTTLSeconds(route(path), response({ status, updated_at }))).toBe(60);
+        }
+      }
+    },
+  );
+
+  it("keeps mutable CI TTLs short, uses minimums without age, and caches pinned terminal CI for an hour", () => {
     const run = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",

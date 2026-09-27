@@ -278,8 +278,17 @@ D1 schema lives in `migrations/`:
   refuses ambiguous duplicates without changing caller history. Apply before the updated enrollment Worker.
 - `0019_client_name_guards.sql` — schema guards for normalized client-name aliases.
 - `0020_cache_publication.sql` — committed publication ownership, body receipts, and isolated repository proofs.
+- `0021_audit_requested_max_age.sql` — nullable caller max-age in seconds on every audited relay request.
 
 Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
+
+### Requested max-age audit upgrade
+
+Apply migration `0021_audit_requested_max_age.sql` before or with the updated Worker
+deployment, completing it before the new Worker serves traffic. Audit inserts require
+the new column. Existing rows remain `NULL`; older Workers can keep inserting rows
+without the column, so retain the additive migration on rollback. No CLI upgrade,
+cache purge, or re-login is required. Age-scaled TTLs apply as entries are refilled.
 
 ## Atomic enrollment upgrade
 
@@ -669,8 +678,14 @@ Both authoritative and public-proxy Worker source configurations enable observab
 full sampling (`head_sampling_rate: 1`). Every validated relay request from an authenticated
 caller to an existing pool writes an `audit_events` row (caller, client, pool, route key/kind,
 identity, status, error/fallback classification, duration, cache hit/miss/bypass status,
-and coalesced-fill marker); parse, authentication, string-protection, and pool-lookup
+coalesced-fill marker, and parsed `requested_max_age` in seconds); parse, authentication, string-protection, and pool-lookup
 failures occur before that boundary. Secrets and request bodies are never recorded.
+
+`requested_max_age = 0` identifies callers requiring upstream validation; positive
+values bound cache age, and `NULL` means no parsed maximum age. Older rows are also
+`NULL`, so compare post-upgrade windows when measuring hit rates by caller freshness.
+For example, group requests by route, `requested_max_age`, and `cache_status` to
+separate live reads from requests accepting cached bodies.
 
 ### Correlating policy-load failures
 

@@ -14,6 +14,94 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end bounded-freshness cache", () => {
+  it.each([
+    {
+      path: PR_PATH,
+      body: { state: "open", merged_at: null },
+      changed: { state: "open" },
+      ttl: 300,
+      stale: 3_600,
+    },
+    {
+      path: PR_PATH,
+      body: { state: "closed", merged_at: null },
+      changed: { state: "open" },
+      ttl: 3_600,
+      stale: 3_600,
+    },
+    {
+      path: `${REPO_PATH}/actions/runs/42`,
+      body: { status: "completed" },
+      changed: { status: "queued" },
+      ttl: 600,
+      stale: 300,
+    },
+  ])(
+    "persists age-scaled TTL $ttl for $body and keeps zero-age reads live",
+    async ({ path, body, changed, ttl, stale }) => {
+      await seedPool();
+      let fetches = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const url = new URL(new Request(input, init).url);
+          if (url.pathname === REPO_PATH) return jsonResponse({ private: false });
+          if (url.pathname === path) {
+            fetches++;
+            return jsonResponse(
+              fetches === 1
+                ? { ...body, updated_at: new Date(Date.now() - 86_400_000).toISOString() }
+                : { ...changed, updated_at: new Date().toISOString() },
+            );
+          }
+          return jsonResponse({ message: "unexpected upstream request" }, 500);
+        }),
+      );
+
+      const fill = await relay(path);
+      expect(await fill.json()).toMatchObject({ body, relay: { cache: "miss" } });
+      const row = await env.DB.prepare(`SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl,
+      unixepoch(stale_expires_at) - unixepoch(expires_at) AS stale FROM github_cache_entries`).first();
+      expect(row).toEqual({ ttl, stale });
+
+      const hit = await relay(path, undefined, { headers: { "Cache-Control": "max-age=30" } });
+      expect(await hit.json()).toMatchObject({ body, relay: { cache: "hit" } });
+      expect(fetches).toBe(1);
+      const live = await relay(path, undefined, { headers: { "Cache-Control": "max-age=0" } });
+      expect(await live.json()).toMatchObject({ body: changed, relay: { cache: "miss" } });
+      expect(fetches).toBe(2);
+      const shared = await relay(path);
+      expect(await shared.json()).toMatchObject({ body: changed, relay: { cache: "hit" } });
+      expect(fetches).toBe(2);
+
+      const audits = await env.DB.prepare(
+        "SELECT cache_status, requested_max_age FROM audit_events ORDER BY rowid",
+      ).all();
+      expect(audits.results).toEqual([
+        { cache_status: "miss", requested_max_age: null },
+        { cache_status: "hit", requested_max_age: 30 },
+        { cache_status: "miss", requested_max_age: 0 },
+        { cache_status: "hit", requested_max_age: null },
+      ]);
+    },
+  );
+
+  it.each([undefined, 0, 30])(
+    "audits requested max-age %j before route preparation succeeds",
+    async (maxAge) => {
+      await seedPool();
+      const headers = maxAge === undefined ? {} : { "Cache-Control": `max-age=${maxAge}` };
+      const denied = await relay(`${REPO_PATH}/unsupported`, undefined, { headers });
+      expect(denied.status).toBe(424);
+      expect(
+        await env.DB.prepare("SELECT route_kind, requested_max_age FROM audit_events").first(),
+      ).toEqual({
+        route_kind: "denied",
+        requested_max_age: maxAge ?? null,
+      });
+    },
+  );
+
   it("re-fills entries older than the requested max-age through the shared cache", async () => {
     await seedPool();
     let prFetches = 0;
@@ -87,14 +175,14 @@ describe("Worker end-to-end bounded-freshness cache", () => {
     expect(prFetches).toBe(2);
 
     const audits = await env.DB.prepare(
-      "SELECT cache_status FROM audit_events ORDER BY rowid",
-    ).all<{ cache_status: string }>();
-    expect(audits.results.map(({ cache_status }) => cache_status)).toEqual([
-      "miss",
-      "hit",
-      "hit",
-      "miss",
-      "hit",
+      "SELECT cache_status, requested_max_age FROM audit_events ORDER BY rowid",
+    ).all();
+    expect(audits.results).toEqual([
+      { cache_status: "miss", requested_max_age: 20 },
+      { cache_status: "hit", requested_max_age: 20 },
+      { cache_status: "hit", requested_max_age: null },
+      { cache_status: "miss", requested_max_age: 20 },
+      { cache_status: "hit", requested_max_age: 20 },
     ]);
   });
 
@@ -177,6 +265,13 @@ describe("Worker end-to-end bounded-freshness cache", () => {
           expect(cooling.status).toBe(424);
           expect(await cooling.json()).toMatchObject({
             error: { code: "fallback_local", details: { reason: "identities_cooling_down" } },
+          });
+          expect(
+            await env.DB.prepare(
+              "SELECT requested_max_age FROM audit_events WHERE status = 424 ORDER BY rowid",
+            ).all(),
+          ).toMatchObject({
+            results: [{ requested_max_age: maxAge }, { requested_max_age: maxAge }],
           });
           expect(limitedCalls).toBe(1);
 

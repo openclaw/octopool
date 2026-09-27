@@ -8,6 +8,7 @@
 
 ### Fixes
 
+- Scale cache freshness with object age for plain completed runs (60–600s), closed-unmerged PRs (120–3600s), and open PRs (120–300s), preserving live-read bounds and recording caller max-age in relay audit rows.
 - Report local GitHub CLI credential lookup timeouts and cancellations without requesting re-login, preserving the context error and discarding partial credential output.
 - Cap concurrent CLI relay reads and policy fetches across processes at eight per user on each machine, configurable with `OCTOPOOL_RELAY_CONCURRENCY`, using crash-safe advisory slots and bounded fail-open waiting.
 - Serve string-rewrite policy through a dedicated global Durable Object with a maximum snapshot age of 60 seconds, preserving revision-checked publication, immediate visibility after admin API PUTs, and fail-closed recovery; writes outside the coordinator become visible within 60 seconds.
@@ -15,6 +16,7 @@
 
 ### Upgrade notes
 
+- Apply D1 migration `0021_audit_requested_max_age.sql` before or with the Worker deploy, before it serves traffic; the new audit inserts require this nullable column. No CLI upgrade, cache purge, or re-login is required.
 - Deploy the Worker with Durable Object migration `v2` (`PolicyCoordinator`). No CLI change, D1 schema migration, or policy write fence is required; writes from older Workers, manual D1 edits, and restores are picked up within 60 seconds, and reload failures fail closed.
 - Deploy the Worker with the new `BACKEND_ADMISSION` binding and `v3` SQLite Durable Object migration; `CLIENT_BACKEND_CONCURRENCY` defaults to 8. Existing CLIs already retry and handle the overload fallback; no CLI upgrade, D1 migration, cache purge, or re-login is required.
 

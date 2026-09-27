@@ -470,13 +470,19 @@ function freshTTLSeconds(
     case "static":
       return strategy.seconds;
     case "pr":
-      return closedPR(response) ? 3_600 : 120;
+      if (isRecord(response?.body) && typeof response.body.merged_at === "string") return 3_600;
+      return ageScaledTTLSeconds(
+        response,
+        120,
+        isRecord(response?.body) && response.body.state === "closed" ? 3_600 : 300,
+      );
     case "issue":
       return closedIssue(response) ? 3_600 : 300;
     case "run":
-      return route.run_attempt !== undefined && completedRun(response)
+      if (!completedRun(response)) return 60;
+      return route.run_attempt !== undefined
         ? TERMINAL_CI_TTL_SECONDS
-        : 60;
+        : ageScaledTTLSeconds(response, 60, 600);
     case "run_list":
       return completedRunList(response) ? 120 : 60;
     case "jobs":
@@ -554,11 +560,17 @@ function defaultQueryValue(key: string, value: string | string[]): boolean {
   return (key === "page" && value === "1") || (key === "per_page" && value === "30");
 }
 
-function closedPR(response?: GitHubRelayResponse): boolean {
-  if (!isRecord(response?.body)) {
-    return false;
-  }
-  return typeof response.body.merged_at === "string";
+function ageScaledTTLSeconds(
+  response: GitHubRelayResponse | undefined,
+  minimum: number,
+  maximum: number,
+): number {
+  const updatedAt = isRecord(response?.body) ? response.body.updated_at : undefined;
+  const updatedAtMs = typeof updatedAt === "string" ? Date.parse(updatedAt) : NaN;
+  if (!Number.isFinite(updatedAtMs)) return minimum;
+  // Re-runs, reopened PRs, and new edits remain possible; cap reuse even for old objects.
+  const ageSeconds = (Date.now() - updatedAtMs) / 1_000;
+  return Math.max(minimum, Math.min(maximum, Math.floor(ageSeconds * 0.1)));
 }
 
 function closedIssue(response?: GitHubRelayResponse): boolean {

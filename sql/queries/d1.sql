@@ -74,9 +74,9 @@ WHERE identities.pool_id = ?1
 -- name: InsertAudit :exec
 INSERT INTO audit_events
   (request_id, caller_id, caller_token_id, client_name, pool_id, route_key, route_kind, identity_id, status,
-   error_code, fallback_reason, backend, duration_ms, cache_status, cacheable, coalesced)
+   error_code, fallback_reason, backend, duration_ms, cache_status, cacheable, coalesced, requested_max_age)
 VALUES (?1, ?2, (SELECT id FROM caller_tokens WHERE id = ?3), ?4, ?5, ?6, ?7, ?8,
-        ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16);
+        ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17);
 
 -- name: ReadGitHubCache :one
 SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at
