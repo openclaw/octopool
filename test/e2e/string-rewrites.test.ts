@@ -88,8 +88,6 @@ describe("canonical relay egress protection", () => {
       "^/repos/example/demo/pulls/17$",
       { route_hint: { pr_state: "closed" } },
     ],
-    ["/repos/example/demo/actions/jobs/19/logs", "^/repos/example/demo/actions/jobs/19$", {}],
-    ["/repos/example/demo/actions/jobs/19/logs", "^/example/demo/runs/19$", {}],
     [
       "/repos/example/demo/pulls/17",
       "^/example/demo/pull/17.diff$",
@@ -110,15 +108,56 @@ describe("canonical relay egress protection", () => {
     const response = await relay(path, CALLER_TOKEN, options);
     expect(response.status).toBe(403);
     const requests = upstream.mock.calls.map(([input, init]) => new Request(input, init));
-    // A rule for the later API fallback permits only the preceding HTML probe.
-    expect(requests.map((request) => request.url)).toEqual(
-      pattern === "^/repos/example/demo/actions/jobs/19$"
-        ? ["https://github.com/example/demo/runs/19"]
-        : [],
-    );
+    expect(requests.map((request) => request.url)).toEqual([]);
     expect(requests.every((request) => !request.headers.has("authorization"))).toBe(true);
     await expectNoPublication();
   });
+
+  it.each(["^/repos/openclaw/octopool/actions/jobs/42$", "^/openclaw/octopool/runs/42$"])(
+    "contains a deferred proof denial for %s without fetching the blocked URL or publishing",
+    async (pattern) => {
+      await seedPool();
+      await put([{ pattern, replacement: "public" }]);
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        if (request.headers.get("authorization") === "Bearer test-org-token")
+          return jsonResponse({ private: false });
+        if (request.headers.get("authorization") === "Bearer test-primary-token")
+          return new Response(null, {
+            status: 302,
+            headers: { location: "https://logs.actions.githubusercontent.com/fixture" },
+          });
+        if (new URL(request.url).hostname === "logs.actions.githubusercontent.com")
+          return new Response("synthetic log\n");
+        return jsonResponse({}, 404);
+      });
+      vi.stubGlobal("fetch", upstream);
+      const error = vi.spyOn(console, "error");
+      const log = vi.spyOn(console, "log");
+      const response = await relay("/repos/openclaw/octopool/actions/jobs/42/logs");
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        status: 200,
+        body: "synthetic log\n",
+        relay: { cache: "miss" },
+      });
+      const requests = upstream.mock.calls.map(([input, init]) => new Request(input, init));
+      expect(
+        requests.some((request) => new RegExp(pattern).test(new URL(request.url).pathname)),
+      ).toBe(false);
+      expect(error).toHaveBeenCalledWith(
+        "deferred actions log completion proof failed",
+        expect.objectContaining({ code: "string_rewrite_denied" }),
+      );
+      expect(log).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "error", deferred: true }),
+      );
+      expect((await env.ACTIONS_LOGS.list()).objects).toEqual([]);
+      expect(
+        await env.DB.prepare("SELECT cache_status, cacheable FROM audit_events").first(),
+      ).toEqual({ cache_status: "miss", cacheable: 0 });
+    },
+  );
 
   it("guards the membership refresh without changing credential ownership", async () => {
     await seedPool();
@@ -197,10 +236,7 @@ describe("canonical relay egress protection", () => {
     const pageRequests = requests.filter(
       (request) => new URL(request.url).hostname !== "api.github.com",
     );
-    expect(pageRequests.map((request) => request.url)).toEqual([
-      "https://github.com/example/demo/runs/19",
-    ]);
-    expect(pageRequests[0]!.headers.has("authorization")).toBe(false);
+    expect(pageRequests).toEqual([]);
     expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM audit_events").first()).toEqual({
       count: 0,
     });

@@ -46,12 +46,14 @@ export function terminalLogJobID(request: RelayRequest, route: RouteInfo): strin
 export function recordTerminalLogProof(
   request: RelayRequest,
   outcome: TerminalLogProofOutcome,
+  deferred = false,
 ): void {
   console.log({
     event: "octopool.actions_log.completion_proof",
     pool: request.pool,
     path: request.path,
     outcome,
+    deferred,
   });
 }
 
@@ -61,6 +63,7 @@ export async function terminalLogCacheProof(
   request: RelayRequest,
   route: RouteInfo,
   policy: PoolPolicy,
+  options: { deferred?: boolean } = {},
 ): Promise<TerminalLogCacheProof | undefined> {
   const jobID = terminalLogJobID(request, route);
   if (jobID === undefined) {
@@ -90,7 +93,7 @@ export async function terminalLogCacheProof(
     console.error("actions log completion preflight failed", error);
     return undefined;
   } finally {
-    recordTerminalLogProof(request, outcome);
+    recordTerminalLogProof(request, outcome, options.deferred);
   }
 }
 

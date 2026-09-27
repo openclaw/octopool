@@ -8,6 +8,7 @@
 
 ### Fixes
 
+- Defer terminal job-log completion proof and R2 publication until after the log response, preserving exact served bytes, proof diagnostics, and cached-log revalidation.
 - Accept completed GitHub check-run pages with annotation tables as exact-job log-cache proof, preserving ownership checks and rejecting active or ambiguous evidence.
 - Degrade recognized transient relay D1/DO storage and coordination failures to native `gh` with `relay_storage_unavailable`, preserving original logs, fallback audit reasons, and unknown-error failures.
 - Reuse valid R2 job logs as completion proof before consulting exact pool-scoped metadata, token-free job pages, or anonymous REST, so collectors share logs without repeated proof calls; validate job ownership and expose proof outcomes in Worker logs.

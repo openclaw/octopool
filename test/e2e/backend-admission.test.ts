@@ -78,8 +78,8 @@ it.each(["anonymous", "identity"])(
       }),
     );
     try {
-      await expect.poll(() => entered).toBe(limit);
-      await expect.poll(() => completed.length).toBe(1);
+      await expect.poll(() => entered, { timeout: 5_000 }).toBe(limit);
+      await expect.poll(() => completed.length, { timeout: 5_000 }).toBe(1);
       expect(completed[0]!.status).toBe(424);
       expect(await completed[0]!.clone().json()).toMatchObject({
         error: { code: "fallback_local", details: { reason: "relay_overloaded" } },

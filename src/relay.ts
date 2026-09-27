@@ -118,6 +118,8 @@ type ActiveRelay = RelayBase & {
   runListExactFallback: boolean;
   terminalLogCacheKey: string | undefined;
   terminalLogCached: CachedTerminalLog | undefined;
+  terminalLogProofDeferred: boolean;
+  deferredTerminalLog: (() => Promise<void>) | undefined;
   cacheEnabled: boolean;
   sharedCacheKey: string | undefined;
   cacheKey: string | undefined;
@@ -236,7 +238,7 @@ async function relayGitHubRequest(
     BackendWork.limit(env),
   );
   try {
-    return await backend.run(request.signal, ctx, async () => {
+    const response = await backend.run(request.signal, ctx, async () => {
       try {
         active = await prepareRelay(base, policy);
         return await executeRelay(active);
@@ -251,6 +253,9 @@ async function relayGitHubRequest(
         await active?.cacheFill?.fail();
       }
     });
+    // Start outside the completed request's cancelled backend scope.
+    if (active?.deferredTerminalLog !== undefined) ctx.waitUntil(active.deferredTerminalLog());
+    return response;
   } catch (error) {
     if (backend.signal.aborted && error === backend.signal.reason)
       return handleRelayError(base, active, error);
@@ -291,6 +296,8 @@ async function prepareRelay(
     runListExactFallback: runListView !== undefined && !useRunListSuperset,
     terminalLogCacheKey: undefined,
     terminalLogCached: undefined,
+    terminalLogProofDeferred: false,
+    deferredTerminalLog: undefined,
     cacheEnabled,
     sharedCacheKey: cacheKey,
     cacheKey,
@@ -320,32 +327,22 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   ) {
     const key = terminalLogCacheKey(state.request);
     const cached = await readTerminalLogCache(state.env, key);
-    if (cached !== undefined) recordTerminalLogProof(state.request, "r2_cached");
+    state.terminalLogCacheKey = key;
+    state.terminalLogProofDeferred = cached === undefined;
+    state.cacheStatus = "miss";
     // Only proven completed logs enter this exact pool/path cache; valid objects retain that proof.
-    if (
-      cached !== undefined ||
-      (await terminalLogCacheProof(
-        state.env,
-        state.ctx,
-        state.request,
-        state.route,
-        state.policy,
-      )) !== undefined
-    ) {
-      state.terminalLogCacheKey = key;
-      state.cacheStatus = "miss";
+    if (cached !== undefined) {
+      recordTerminalLogProof(state.request, "r2_cached");
       state.cacheable = true;
-      if (cached !== undefined) {
-        await ensurePublicGitHubRepo(state.env, state.route, cached.created_at);
-        if (terminalLogNeedsRevalidation(cached, state.maxAgeSeconds)) {
-          state.terminalLogCached = cached;
-        } else {
-          return serveCachedGitHubResponse(
-            state.env,
-            state.ctx,
-            cachedResponseParams(state, cached, "hit"),
-          );
-        }
+      await ensurePublicGitHubRepo(state.env, state.route, cached.created_at);
+      if (terminalLogNeedsRevalidation(cached, state.maxAgeSeconds)) {
+        state.terminalLogCached = cached;
+      } else {
+        return serveCachedGitHubResponse(
+          state.env,
+          state.ctx,
+          cachedResponseParams(state, cached, "hit"),
+        );
       }
     }
   }
@@ -1073,7 +1070,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     await switchToExactRunList(state);
     return executeRelay(state);
   }
-  if (state.terminalLogCacheKey !== undefined) {
+  if (state.terminalLogCacheKey !== undefined && !state.terminalLogProofDeferred) {
     assertBackendWorkActive();
     await publishTerminalLogCache(state.env, state.terminalLogCacheKey, result.github);
   }
@@ -1085,25 +1082,34 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     state.runJobsSuperset,
   );
   const backend = auditBackend(result);
-  const background: Promise<unknown>[] = [
-    insertAudit(state.env, {
-      requestId: state.requestId,
-      callerId: state.callerId,
-      callerTokenId: state.callerTokenId,
-      clientName: state.clientName,
-      pool: state.request.pool,
-      routeKey: state.route.routeKey,
-      routeKind: state.route.kind,
-      ...(result.identity === undefined ? {} : { identityId: result.identity.id }),
-      status: clientResponse.status,
-      durationMs: Date.now() - state.started,
-      ...(result.revalidated === true ? { fallbackReason: "cache_revalidated" } : {}),
-      ...(backend === undefined ? {} : { backend }),
-      cacheStatus,
-      cacheable: state.cacheable,
-      requestedMaxAge: state.maxAgeSeconds ?? null,
-    }),
-  ];
+  const audit: Parameters<typeof insertAudit>[1] = {
+    requestId: state.requestId,
+    callerId: state.callerId,
+    callerTokenId: state.callerTokenId,
+    clientName: state.clientName,
+    pool: state.request.pool,
+    routeKey: state.route.routeKey,
+    routeKind: state.route.kind,
+    ...(result.identity === undefined ? {} : { identityId: result.identity.id }),
+    status: clientResponse.status,
+    durationMs: Date.now() - state.started,
+    ...(result.revalidated === true ? { fallbackReason: "cache_revalidated" } : {}),
+    ...(backend === undefined ? {} : { backend }),
+    cacheStatus,
+    cacheable: state.cacheable,
+    requestedMaxAge: state.maxAgeSeconds ?? null,
+  };
+  const background: Promise<unknown>[] = [];
+  // Successful log downloads have already passed the response body cap. Keep
+  // the exact served response for publication, and capture latency before proof.
+  if (state.terminalLogProofDeferred && clientResponse.status === 200) {
+    state.deferredTerminalLog = async () => {
+      const proven = await proveAndPublishTerminalLog(state, clientResponse);
+      await insertAudit(state.env, { ...audit, cacheable: proven });
+    };
+  } else {
+    background.push(insertAudit(state.env, audit));
+  }
   if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
     background.push(
       state.coordinator.recordResult(
@@ -1698,6 +1704,41 @@ async function publishTerminalLogCache(
   } catch (error) {
     console.error("actions log cache write failed", error);
   }
+}
+
+async function proveAndPublishTerminalLog(
+  state: ActiveRelay,
+  response: GitHubRelayResponse,
+): Promise<boolean> {
+  let proven = false;
+  const backend = new BackendWork(
+    backendAdmissionStub(state.env, state.request.pool),
+    JSON.stringify([state.callerId, state.clientName]),
+    BackendWork.limit(state.env),
+  );
+  try {
+    // Leave time to record the miss within the HTTP waitUntil lifetime (30s).
+    await backend.run(AbortSignal.timeout(20_000), state.ctx, async () => {
+      await admitBackendWork();
+      const proof = await terminalLogCacheProof(
+        state.env,
+        state.ctx,
+        state.request,
+        state.route,
+        state.policy,
+        { deferred: true },
+      );
+      if (proof === undefined) return;
+      assertBackendWorkActive();
+      // R2 puts cannot be cancelled. Keep proven cacheability even if a started
+      // write outlives the scope; expired proof may never start a new write.
+      proven = true;
+      await publishTerminalLogCache(state.env, proof.key, response);
+    });
+  } catch (error) {
+    console.error("deferred actions log completion proof failed", error);
+  }
+  return proven;
 }
 
 async function revalidateCachedTerminalLog(

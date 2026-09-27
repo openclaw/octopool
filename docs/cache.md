@@ -441,10 +441,17 @@ Non-conditional `job_logs` requests first read the exact pool/path key in `ACTIO
 A valid, unexpired object with the current codec was written only after completion proof,
 so it proves the same job terminal without a D1 job-proof query, HTML fetch, or anonymous
 metadata call. The public-repository guard and log existence revalidation still apply.
-Absent, expired, or legacy-codec objects continue through the completion proof below;
+Absent, expired, or legacy-codec objects fetch the log immediately;
 conditional requests retain their cache bypass.
 
-On an R2 miss, `job_logs` checks D1 for a successful JSON `job_view` response in the same pool,
+On an R2 miss, a successful, body-cap-compliant `200` log download returns without waiting
+for completion proof or R2 publication. The proof below runs through `ctx.waitUntil` in a
+separate backend scope with a 20-second deadline, leaving time to audit within the
+30-second background lifetime; only proven logs publish the exact bytes served. Failed,
+oversized, and conditional downloads do not start deferred proof, and background proof or
+write failures are logged without affecting the response.
+
+The deferred `job_logs` proof checks D1 for a successful JSON `job_view` response in the same pool,
 at the exact job metadata path, with that job ID and `status: "completed"`. Completion
 is permanent for a job ID: a re-run creates new IDs. This proof can therefore use rows
 past both their freshness and stale-retention expiry, until normal cleanup removes them.
@@ -476,11 +483,11 @@ If the HTML proof also fails, the existing `callGitHubWeb` fallback fetches the 
 endpoint from the **anonymous REST API**. Ordinary `job_view` relay responses remain REST;
 the page provides only internal completion evidence. The final fallback consumes anonymous
 API quota and can fail when that quota is exhausted. No pooled-identity metadata call is
-added. If no source proves completion, logs keep the large-payload bypass behavior.
+added. If no source proves completion, the fetched log remains uncached.
 A cached completed run cannot prove a job terminal.
 Structured Worker logs emit `octopool.actions_log.completion_proof` with pool, path,
-and outcome (`r2_cached`, `cached_job_view`, `web_page`, `anonymous_api`, `unproven`, or `error`), without changing
-the HTTP response.
+outcome (`r2_cached`, `cached_job_view`, `web_page`, `anonymous_api`, `unproven`, or `error`),
+and a `deferred` boolean, without changing the HTTP response.
 
 Whole-run log archives remain native GitHub CLI fallback; only job-log routes use this
 cache. Cached completion does not renew public visibility: the existing public-repository
@@ -493,8 +500,8 @@ run attempts retain their distinct job IDs.
 R2 stores the raw log bytes, content type, original body encoding, and a retention timestamp.
 Corrected writers also set the exact `body-codec: lossless-v1` object metadata marker.
 Objects with a missing or different marker are misses before serving or existence-only
-renewal. The Worker downloads the original bytes after completion proof, then
-replaces the object; a failed download or write leaves the previous object intact.
+renewal. The Worker downloads and serves the original bytes, then replaces the object
+after deferred completion proof; a failed download, proof, or write leaves the previous object intact.
 Legacy base64 objects were already reversible but also miss once under this format
 contract. A late old writer produces another marker miss. The bucket prefix and
 seven-day lifecycle are unchanged; no purge or bucket migration is required.
@@ -535,7 +542,9 @@ The operator owns this rule; worker code does not scan R2 or manage bucket lifec
 
 As with edge + D1 hits, Octopool runs the public-repository guard before returning an R2
 log hit. Successful hits are audited as cacheable `hit` events and count as cache-served
-responses; active-run log fetches remain non-cacheable `bypass` events. Neither outcome
+responses. R2 misses report `miss` immediately; their audit rows wait for deferred proof
+to retain proven-log `cacheable: true` and unproven-log `cacheable: false` accounting,
+with duration captured before background work. Neither outcome
 counts upstream requests, including visibility and log-existence probes.
 Requests carrying `If-None-Match` or `If-Modified-Since` skip the completion lookup and
 all R2 reads and writes, preserving the normal conditional-request bypass path.

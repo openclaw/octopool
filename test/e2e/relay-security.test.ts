@@ -204,12 +204,12 @@ describe("Worker end-to-end relay security boundaries", () => {
           authorization: request.headers.get("authorization"),
           redirect: request.redirect,
         })),
-      ).toEqual([{ authorization: null, redirect: "manual" }]);
+      ).toEqual(chained ? [] : [{ authorization: null, redirect: "manual" }]);
       expect(
         upstream.mock.calls.filter(
           ([input, init]) => new Request(input, init).url !== JOB_PAGE_URL,
         ),
-      ).toHaveLength(4);
+      ).toHaveLength(chained ? 3 : 4);
       if (chained) {
         expect(response.status).toBe(502);
         expect(await response.json()).toMatchObject({
@@ -285,15 +285,10 @@ describe("Worker end-to-end relay security boundaries", () => {
     const pageRequests = upstream.mock.calls
       .map(([input, init]) => new Request(input, init))
       .filter((request) => request.url === JOB_PAGE_URL);
-    expect(
-      pageRequests.map((request) => ({
-        authorization: request.headers.get("authorization"),
-        redirect: request.redirect,
-      })),
-    ).toEqual([{ authorization: null, redirect: "manual" }]);
+    expect(pageRequests).toEqual([]);
     expect(
       upstream.mock.calls.filter(([input, init]) => new Request(input, init).url !== JOB_PAGE_URL),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
     expect(
       await env.DB.prepare("SELECT identity_id, status, error_code FROM audit_events").first(),
     ).toEqual({

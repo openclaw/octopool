@@ -1,5 +1,6 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
+import worker from "../../src/index";
 import { withGitHubEgress } from "../../src/github-egress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
@@ -10,7 +11,16 @@ import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { terminalLogCacheKey, terminalLogCacheProof } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
-import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } from "./harness";
+import {
+  CALLER_TOKEN,
+  bearer,
+  jsonResponse,
+  rateHeaders,
+  relay,
+  seedPool,
+  runWithContext,
+} from "./harness";
+import { ownedWork } from "./owned-work";
 import { requestWithWarmEnv } from "./identity-routing-support";
 import { observePublicationD1 } from "./publication-d1-observer";
 import { envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
@@ -27,6 +37,211 @@ type RelayEnvelope = {
 const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
 describe("terminal Actions log cache", () => {
   beforeEach(seedPool);
+
+  it.each([
+    { status: "completed", cached: false, expires: false },
+    { status: "in_progress", cached: false, expires: false },
+    { status: "completed", cached: true, expires: false },
+    { status: "completed", cached: false, expires: true },
+    { status: "completed", cached: true, expires: true },
+  ] as const)(
+    "returns the log while $status proof (cached=$cached, expires=$expires) is blocked, then publishes only proven bytes",
+    async ({ status, cached, expires }) => {
+      if (cached) await seedJobEvidence();
+      const deadline = new AbortController();
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      if (expires)
+        vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
+          ms === 20_000 ? deadline.signal : timeout(ms),
+        );
+      const gate = ownedWork.gate();
+      const base = terminalLogUpstream(status, new Uint8Array([0xff, 0x41]));
+      let proofStarted = false;
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const url = new URL(new Request(input, init).url);
+        if (url.hostname === "github.com" && url.pathname === "/openclaw/octopool/runs/42") {
+          expect(downloadCalls(upstream)).toBe(1);
+          proofStarted = true;
+          await gate.promise;
+        }
+        return base(input, init);
+      });
+      vi.stubGlobal("fetch", upstream);
+      const db = observePublicationD1(env.DB, {
+        before: async (sql) => {
+          if (cached && sql === queries.readCompletedJobCacheProof) {
+            expect(downloadCalls(upstream)).toBe(1);
+            proofStarted = true;
+            await gate.promise;
+          }
+        },
+      });
+      const log = vi.spyOn(console, "log");
+      const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+      let served: RelayEnvelope | undefined;
+      await runWithContext(async (ctx) => {
+        const response = ownedWork.track(
+          fetchLogWithContext(ctx, { DB: db, CLIENT_BACKEND_CONCURRENCY: "1" }).then(
+            async (result) => {
+              served = await result.json<RelayEnvelope>();
+            },
+          ),
+        );
+        try {
+          await vi.waitFor(() => {
+            expect(proofStarted).toBe(true);
+            expect(served).toMatchObject({ status: 200, relay: { cache: "miss" } });
+          });
+          expect(envelopeBytes(served!)).toEqual([0xff, 0x41]);
+          expect(await env.ACTIONS_LOGS.get(key)).toBeNull();
+          expect(await env.DB.prepare("SELECT count(*) AS n FROM audit_events").first("n")).toBe(0);
+          const denied = await requestWithWarmEnv({ CLIENT_BACKEND_CONCURRENCY: "1" }, LOG_PATH, {
+            headers: { "if-none-match": '"conditional"' },
+          });
+          expect(denied.status).toBe(424);
+          expect(await denied.json()).toMatchObject({
+            error: { details: { reason: "relay_overloaded" } },
+          });
+          if (expires) {
+            deadline.abort();
+            await vi.waitFor(async () => {
+              expect(
+                await env.DB.prepare(
+                  "SELECT cache_status, cacheable FROM audit_events WHERE status = 200",
+                ).first(),
+              ).toEqual({ cache_status: "miss", cacheable: 0 });
+            });
+          }
+        } finally {
+          gate.release();
+          await response;
+        }
+      });
+      expect(log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: cached
+            ? "cached_job_view"
+            : expires
+              ? "error"
+              : status === "completed"
+                ? "anonymous_api"
+                : "unproven",
+          deferred: true,
+        }),
+      );
+      expect(
+        await env.DB.prepare(
+          "SELECT cache_status, cacheable FROM audit_events WHERE status = 200",
+        ).first(),
+      ).toEqual({ cache_status: "miss", cacheable: status === "completed" && !expires ? 1 : 0 });
+      const object = await env.ACTIONS_LOGS.get(key);
+      if (status === "completed" && !expires) {
+        expect([...new Uint8Array(await object!.arrayBuffer())]).toEqual(envelopeBytes(served!));
+        expect(object!.customMetadata).toMatchObject({
+          "body-codec": "lossless-v1",
+          "body-encoding": "base64",
+        });
+        expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+          relay: { cache: "hit" },
+        });
+        expect(logBackendCalls(upstream)).toBe(1);
+        expect(jobPageCalls(upstream)).toBe(cached ? 0 : 1);
+      } else {
+        expect(object).toBeNull();
+      }
+    },
+  );
+
+  it("retains proven audit cacheability when an in-flight R2 write outlives the background deadline", async () => {
+    await seedJobEvidence();
+    const gate = ownedWork.gate();
+    const deadline = new AbortController();
+    const timeout = AbortSignal.timeout.bind(AbortSignal);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
+      ms === 20_000 ? deadline.signal : timeout(ms),
+    );
+    const put = env.ACTIONS_LOGS.put.bind(env.ACTIONS_LOGS);
+    let writing = false;
+    vi.spyOn(env.ACTIONS_LOGS, "put").mockImplementation(async (...args) => {
+      writing = true;
+      await gate.promise;
+      return put(...args);
+    });
+    vi.stubGlobal("fetch", terminalLogUpstream("completed"));
+    let served: RelayEnvelope | undefined;
+    await runWithContext(async (ctx) => {
+      const response = ownedWork.track(
+        fetchLogWithContext(ctx).then(async (result) => {
+          served = await result.json<RelayEnvelope>();
+        }),
+      );
+      try {
+        await vi.waitFor(() => {
+          expect(writing).toBe(true);
+          expect(served).toMatchObject({
+            status: 200,
+            body: "build log\n",
+            relay: { cache: "miss" },
+          });
+        });
+        deadline.abort();
+        await vi.waitFor(async () => {
+          expect(
+            await env.DB.prepare("SELECT cache_status, cacheable FROM audit_events").first(),
+          ).toEqual({ cache_status: "miss", cacheable: 1 });
+        });
+        expect((await env.ACTIONS_LOGS.list()).objects).toEqual([]);
+      } finally {
+        gate.release();
+        await response;
+      }
+    });
+    const object = await env.ACTIONS_LOGS.get(
+      terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH }),
+    );
+    expect([...new Uint8Array(await object!.arrayBuffer())]).toEqual(envelopeBytes(served!));
+  });
+
+  it.each([404, 503, "oversized"] as const)(
+    "skips completion proof for a %s log download",
+    async (status) => {
+      const base = terminalLogUpstream("completed");
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        if (
+          new URL(new Request(input, init).url).hostname ===
+          "results-receiver.actions.githubusercontent.com"
+        ) {
+          return new Response(status === "oversized" ? "x".repeat(1025) : "unavailable", {
+            status: status === "oversized" ? 200 : status,
+          });
+        }
+        return base(input, init);
+      });
+      vi.stubGlobal("fetch", upstream);
+      const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+      const { db, proofQueries } = observeCompletionProofQueries();
+      const response = await requestWithWarmEnv(
+        { DB: db, MAX_RESPONSE_BYTES: "1024" },
+        LOG_PATH,
+        {},
+      );
+      if (status === "oversized") {
+        expect(response.status).toBe(424);
+        expect(await response.json()).toMatchObject({
+          error: { details: { reason: "github_response_too_large" } },
+        });
+      } else {
+        expect(await response.json<RelayEnvelope>()).toMatchObject({
+          status,
+          relay: { cache: "miss" },
+        });
+      }
+      expect(proofQueries).toEqual([]);
+      expect(jobPageCalls(upstream)).toBe(0);
+      expect(jobMetadataCalls(upstream)).toBe(0);
+      expect(put).not.toHaveBeenCalled();
+    },
+  );
 
   it("shares logs after a run_jobs-only collector read without any job metadata API call", async () => {
     const jobsPath = "/repos/openclaw/octopool/actions/runs/99/jobs";
@@ -69,7 +284,9 @@ describe("terminal Actions log cache", () => {
     expect(logBackendCalls(upstream)).toBe(1);
     expect(downloadCalls(upstream)).toBe(1);
     expect(jobPageCalls(upstream)).toBe(1);
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "web_page" }));
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "web_page", deferred: true }),
+    );
     upstream.mockClear();
     proofQueries.length = 0;
     log.mockClear();
@@ -82,7 +299,9 @@ describe("terminal Actions log cache", () => {
     expect(jobMetadataCalls(upstream)).toBe(0);
     expect(logBackendCalls(upstream)).toBe(0);
     expect(downloadCalls(upstream)).toBe(0);
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "r2_cached" }));
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "r2_cached", deferred: false }),
+    );
   });
 
   it("uses the exact pool/path index for completion evidence", async () => {
@@ -294,51 +513,56 @@ describe("terminal Actions log cache", () => {
     { name: "non-JSON encoding", encoding: "text" },
     { name: "malformed JSON", malformed: true },
     { name: "retired publication epoch", epoch: "retired" },
-  ])("rejects cached $name evidence and bypasses when anonymous proof fails", async (fixture) => {
-    const key = await seedJobEvidence(fixture);
-    if (fixture.status !== undefined)
-      await env.DB.prepare("UPDATE github_cache_entries SET status = ? WHERE cache_key = ?")
-        .bind(fixture.status, key)
-        .run();
-    if (fixture.encoding !== undefined)
-      await env.DB.prepare("UPDATE github_cache_entries SET body_encoding = ? WHERE cache_key = ?")
-        .bind(fixture.encoding, key)
-        .run();
-    if (fixture.malformed)
-      await env.DB.prepare("UPDATE github_cache_entries SET body_json = '{' WHERE cache_key = ?")
-        .bind(key)
-        .run();
-    if (fixture.epoch !== undefined)
-      await env.DB.prepare(
-        "UPDATE github_cache_entries SET publication_epoch = ? WHERE cache_key = ?",
-      )
-        .bind(fixture.epoch, key)
-        .run();
-    const base = terminalLogUpstream("completed");
-    const upstream = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
-      if (new URL(request.url).pathname === LOG_PATH.replace(/\/logs$/, "")) {
-        expect(bearer(request)).toBeUndefined();
-        return jsonResponse({ message: "API rate limit exceeded" }, 403);
-      }
-      return base(input, init);
-    });
-    vi.stubGlobal("fetch", upstream);
-    const get = vi.spyOn(env.ACTIONS_LOGS, "get");
-    const put = vi.spyOn(env.ACTIONS_LOGS, "put");
-    const log = vi.spyOn(console, "log");
-    expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
-      body: "build log\n",
-      relay: { cache: "bypass" },
-    });
-    expect(jobMetadataCalls(upstream)).toBe(1);
-    expect(logBackendCalls(upstream)).toBe(1);
-    expect(get).toHaveBeenCalledExactlyOnceWith(
-      terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH }),
-    );
-    expect(put).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unproven" }));
-  });
+  ])(
+    "rejects cached $name evidence and leaves the miss unpublished when anonymous proof fails",
+    async (fixture) => {
+      const key = await seedJobEvidence(fixture);
+      if (fixture.status !== undefined)
+        await env.DB.prepare("UPDATE github_cache_entries SET status = ? WHERE cache_key = ?")
+          .bind(fixture.status, key)
+          .run();
+      if (fixture.encoding !== undefined)
+        await env.DB.prepare(
+          "UPDATE github_cache_entries SET body_encoding = ? WHERE cache_key = ?",
+        )
+          .bind(fixture.encoding, key)
+          .run();
+      if (fixture.malformed)
+        await env.DB.prepare("UPDATE github_cache_entries SET body_json = '{' WHERE cache_key = ?")
+          .bind(key)
+          .run();
+      if (fixture.epoch !== undefined)
+        await env.DB.prepare(
+          "UPDATE github_cache_entries SET publication_epoch = ? WHERE cache_key = ?",
+        )
+          .bind(fixture.epoch, key)
+          .run();
+      const base = terminalLogUpstream("completed");
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).pathname === LOG_PATH.replace(/\/logs$/, "")) {
+          expect(bearer(request)).toBeUndefined();
+          return jsonResponse({ message: "API rate limit exceeded" }, 403);
+        }
+        return base(input, init);
+      });
+      vi.stubGlobal("fetch", upstream);
+      const get = vi.spyOn(env.ACTIONS_LOGS, "get");
+      const put = vi.spyOn(env.ACTIONS_LOGS, "put");
+      const log = vi.spyOn(console, "log");
+      expect(await (await relay(LOG_PATH)).json<RelayEnvelope>()).toMatchObject({
+        body: "build log\n",
+        relay: { cache: "miss" },
+      });
+      expect(jobMetadataCalls(upstream)).toBe(1);
+      expect(logBackendCalls(upstream)).toBe(1);
+      expect(get).toHaveBeenCalledExactlyOnceWith(
+        terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH }),
+      );
+      expect(put).not.toHaveBeenCalled();
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unproven" }));
+    },
+  );
 
   it("uses anonymous completion when cached metadata is still in progress", async () => {
     await seedJobEvidence({ body: { id: 42, status: "in_progress" } });
@@ -384,7 +608,7 @@ describe("terminal Actions log cache", () => {
 
     expect(
       await (await requestWithWarmEnv({ DB: db }, LOG_PATH, {})).json<RelayEnvelope>(),
-    ).toMatchObject({ body: "build log\n", relay: { cache: "bypass" } });
+    ).toMatchObject({ body: "build log\n", relay: { cache: "miss" } });
     expect(get).toHaveBeenCalledExactlyOnceWith(
       terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH }),
     );
@@ -394,7 +618,9 @@ describe("terminal Actions log cache", () => {
     expect(logBackendCalls(upstream)).toBe(1);
     expect(put).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome: "unproven" }));
-    expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "r2_cached" }));
+    expect(log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "r2_cached", deferred: false }),
+    );
   });
 
   it("does not use expired completion evidence as fresh public-repository proof", async () => {
@@ -461,7 +687,7 @@ describe("terminal Actions log cache", () => {
     },
   );
 
-  it("bypasses an active rerun job despite a cached completed run", async () => {
+  it("does not publish an active rerun job despite a cached completed run", async () => {
     const runRequest: RelayRequest = {
       pool: "maintainers",
       method: "GET",
@@ -488,7 +714,7 @@ describe("terminal Actions log cache", () => {
     expect(await response.json<RelayEnvelope>()).toMatchObject({
       status: 200,
       body: "build log\n",
-      relay: { cache: "bypass", route_kind: "job_logs" },
+      relay: { cache: "miss", route_kind: "job_logs" },
     });
     expect(jobMetadataCalls(upstream)).toBe(1);
     expect(logBackendCalls(upstream)).toBe(1);
@@ -521,6 +747,8 @@ describe("terminal Actions log cache", () => {
       });
       expect(get).not.toHaveBeenCalled();
       expect(put).not.toHaveBeenCalled();
+      expect(jobPageCalls(upstream)).toBe(1);
+      expect(jobMetadataCalls(upstream)).toBe(1);
       expect(logBackendCalls(upstream)).toBe(2);
       expect(
         upstream.mock.calls.some(([input, init]) => {
@@ -579,17 +807,17 @@ describe("terminal Actions log cache", () => {
     },
   );
 
-  it("bypasses the log cache while the owning job is active", async () => {
+  it("leaves log misses unpublished while the owning job is active", async () => {
     const upstream = terminalLogUpstream("in_progress");
     vi.stubGlobal("fetch", upstream);
 
     const first = await relay(LOG_PATH);
     const second = await relay(LOG_PATH);
     expect(await first.json<RelayEnvelope>()).toMatchObject({
-      relay: { cache: "bypass", cacheable: true, route_kind: "job_logs" },
+      relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
     expect(await second.json<RelayEnvelope>()).toMatchObject({
-      relay: { cache: "bypass", cacheable: true, route_kind: "job_logs" },
+      relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
     expect(logBackendCalls(upstream)).toBe(2);
     expect(
@@ -598,8 +826,8 @@ describe("terminal Actions log cache", () => {
       ).all(),
     ).toMatchObject({
       results: [
-        { cache_status: "bypass", cacheable: 0 },
-        { cache_status: "bypass", cacheable: 0 },
+        { cache_status: "miss", cacheable: 0 },
+        { cache_status: "miss", cacheable: 0 },
       ],
     });
   });
@@ -623,7 +851,8 @@ describe("terminal Actions log cache", () => {
     get.mockRestore();
   });
 
-  it("fails open to the unchanged bypass when the completion probe throws", async () => {
+  it("returns the log without publication when the completion probe throws", async () => {
+    const put = vi.spyOn(env.ACTIONS_LOGS, "put");
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
@@ -650,9 +879,11 @@ describe("terminal Actions log cache", () => {
     expect(await response.json<RelayEnvelope>()).toMatchObject({
       status: 200,
       body: "build log\n",
-      relay: { cache: "bypass", cacheable: true, route_kind: "job_logs" },
+      relay: { cache: "miss", cacheable: true, route_kind: "job_logs" },
     });
     expect(logBackendCalls(upstream)).toBe(1);
+    expect(put).not.toHaveBeenCalled();
+    expect((await env.ACTIONS_LOGS.list()).objects).toEqual([]);
   });
 
   it.each([
@@ -839,6 +1070,18 @@ describe("terminal Actions log cache", () => {
     ).toHaveLength(1);
   });
 });
+
+function fetchLogWithContext(ctx: ExecutionContext, overrides: Record<string, unknown> = {}) {
+  return worker.fetch(
+    new Request("https://octopool.dev/v1/github/request", {
+      method: "POST",
+      headers: { authorization: `Bearer ${CALLER_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ pool: "maintainers", method: "GET", path: LOG_PATH }),
+    }),
+    { ...env, ...overrides } as Env,
+    ctx,
+  );
+}
 
 function terminalLogUpstream(status: "completed" | "in_progress", bytes?: Uint8Array) {
   return vi.fn<typeof fetch>(async (input, init) => {
