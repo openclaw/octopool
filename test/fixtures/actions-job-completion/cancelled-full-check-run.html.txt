@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html><head><title>Example job</title></head><body>
+<main>
+<section aria-label="Check run summary" class="js-zen-blankslate d-flex flex-auto CheckRunContainer"></section>
+<section aria-label="Check run summary" data-hpc="" class="js-selected-check-run d-flex flex-auto CheckRunContainer">
+<div class="flex-auto min-width-0">
+<div id="check_run_108557756681" class="js-socket-channel js-updatable-content">
+
+</div>
+<div>
+<div role="region" aria-label="Annotations" class="js-updatable-content js-socket-channel ">
+<job-annotations>
+<div class="color-bg-default color-shadow-small tmp-pt-3 pb-1 ">
+<div data-target="job-annotations.bodyContainer" hidden="">
+<table class="width-full mt-n1 actions-workflow-table table-fixed">
+<tr role="row">
+<td class="compact tmp-pr-3 col-7 col-lg-9 color-border-muted border-bottom">
+<annotation-message class="d-flex">
+<div class="ml-1 overflow-hidden">
+<div class="color-fg-muted">
+<div data-target="annotation-message.annotationContainer" class="text-small text-mono annotation--contracted">
+<div>Example annotation.</div>
+</div>
+</div>
+</div>
+</annotation-message>
+</td>
+</tr>
+</table>
+</div>
+</div>
+</job-annotations>
+</div>
+</div>
+<div id="logs" class="CheckRun js-check-steps ">
+<div class="CheckRun-header-wrapping mb-2 d-flex flex-justify-between flex-md-items-start flex-items-center mb-1 tmp-py-3 tmp-pr-3 js-checks-log-toolbar tmp-pl-4 rounded-top-0 rounded-md-top-1">
+<span class="CheckRun-log-title color-fg-default">
+<span class="d-block f6 js-socket-channel js-updatable-content color-fg-muted" data-url="/openclaw/openclaw/runs/108557756681/header">
+
+    cancelled
+    <relative-time datetime="2026-09-27T05:23:38Z" class="no-wrap">Sep 27, 2026</relative-time> in 16s
+
+</span>
+</span>
+</div>
+<div class="position-relative js-full-logs-container WorkflowRunLogsScroll">
+<check-steps class="js-socket-channel" data-job-status="completed">
+
+</check-steps>
+</div>
+</div>
+</div>
+</section>
+</main>
+</body></html>

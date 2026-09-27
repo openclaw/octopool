@@ -16,8 +16,91 @@ const proves = (html: string, id = jobID, owner = "openclaw", repo = "openclaw")
   actionsJobHTMLProvesCompleted(html, owner, repo, id);
 const headerURL = `/openclaw/openclaw/runs/${jobID}/header`;
 const header = /<span\b[^>]*data-url="[^"]*\/header"[^>]*>[\s\S]*?<\/span>/;
+const failedFull = fixture("failed-full-check-run.html.txt");
+const failedID = "108555666497";
+const annotation = /<job-annotations>[\s\S]*?<\/job-annotations>/;
 
 describe("terminal job HTML completion evidence", () => {
+  it.each([
+    ["failed", failedID],
+    ["succeeded", "108011889949"],
+    ["cancelled", "108557756681"],
+  ])("proves the captured %s page with an implicit annotation table body", (state, id) => {
+    expect(proves(fixture(`${state}-full-check-run.html.txt`), id)).toBe(true);
+  });
+
+  it("proves a realistic 600 KB page with thousands of unrelated elements", () => {
+    const chrome = `<aside>${"<div>Unrelated page content</div>".repeat(20_000)}</aside>`;
+    const html = failedFull.replace("<main>", `${chrome}<main>`);
+    expect(Buffer.byteLength(html)).toBeGreaterThan(600_000);
+    expect(proves(html, failedID)).toBe(true);
+    expect(proves(html, jobID)).toBe(false);
+  });
+
+  it("rejects the newly captured running and skipped pages", () => {
+    expect(proves(fixture("active-full-check-run.html.txt"), "108557771957")).toBe(false);
+    expect(proves(fixture("skipped-full-check-run.html.txt"), "108557811653")).toBe(false);
+  });
+
+  it.each(["in_progress", "queued"])(
+    "rejects a %s page despite completed annotation or sidebar evidence",
+    (status) => {
+      const activePage = failedFull.replace(
+        'data-job-status="completed"',
+        `data-job-status="${status}"`,
+      );
+      expect(proves(activePage, failedID)).toBe(false);
+      expect(
+        proves(activePage.replace("<job-annotations>", `<job-annotations>${completed}`), failedID),
+      ).toBe(false);
+      const sidebar = completed.replace("js-selected-check-run", "sidebar-job");
+      expect(proves(activePage.replace("<main>", `<main>${sidebar}`), failedID)).toBe(false);
+    },
+  );
+
+  it("does not borrow a header or steps from annotations", () => {
+    const jobHeader = failedFull.match(header)![0];
+    const jobSteps = '<check-steps data-job-status="completed"></check-steps>';
+    const withoutHeader = failedFull.replace(header, "");
+    expect(
+      proves(withoutHeader.replace("<job-annotations>", `<job-annotations>${jobHeader}`), failedID),
+    ).toBe(false);
+    const withoutSteps = failedFull.replace(/<check-steps\b[\s\S]*?<\/check-steps>/, "");
+    expect(
+      proves(withoutSteps.replace("<job-annotations>", `<job-annotations>${jobSteps}`), failedID),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["missing annotation close", (html: string) => html.replace("</job-annotations>", "")],
+    [
+      "duplicate annotation attributes",
+      (html: string) => html.replace("<job-annotations>", '<job-annotations class="a" class="b">'),
+    ],
+    [
+      "unowned table outside annotations",
+      (html: string) => html.replace(annotation, "<table><tr><td>Unowned</td></tr></table>"),
+    ],
+    [
+      "conflicting job marker",
+      (html: string) => html.replace(`check_run_${failedID}`, "check_run_123"),
+    ],
+    [
+      "foreign header",
+      (html: string) => html.replace(`/runs/${failedID}/header`, "/runs/123/header"),
+    ],
+    [
+      "duplicate steps",
+      (html: string) =>
+        html.replace(
+          "</check-steps>",
+          '</check-steps><check-steps data-job-status="completed"></check-steps>',
+        ),
+    ],
+  ])("keeps the full-page ownership check for %s", (_name, mutate) => {
+    expect(proves(mutate(failedFull), failedID)).toBe(false);
+  });
+
   it("proves a completed job from the live check-run page without navigation JSON", () => {
     expect(proves(completed)).toBe(true);
   });

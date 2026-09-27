@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head><title>Example job</title></head><body>
+<main>
+<section aria-label="Check run summary" class="js-zen-blankslate d-flex flex-auto CheckRunContainer"></section>
+<section aria-label="Check run summary" data-hpc="" class="js-selected-check-run d-flex flex-auto CheckRunContainer">
+<div class="flex-auto min-width-0">
+<div id="check_run_108557811653" class="js-socket-channel js-updatable-content">
+
+</div>
+<div class="js-check-run-blankslate js-socket-channel d-flex flex-auto height-full position-relative">
+<div class="d-flex flex-auto flex-justify-center tmp-py-6">
+<div class="text-center tmp-py-6">
+<h4 class="color-fg-muted text-mono f5 text-normal">
+This job was skipped
+</h4>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+</body></html>

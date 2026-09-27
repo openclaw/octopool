@@ -460,7 +460,15 @@ export function actionsJobHTMLProvesCompleted(
         hasClass(element, "js-selected-check-run"),
     ),
   );
-  const elements = region === undefined ? undefined : ownedElements(region);
+  // Annotations are not job-state evidence. Their valid tables omit <tbody>,
+  // which parse5 inserts without source locations; retain the container boundary.
+  const elements =
+    region === undefined
+      ? undefined
+      : ownedElements(region, (element) => {
+          const parent = element.parentNode;
+          return parent !== null && "tagName" in parent && parent.tagName === "job-annotations";
+        });
   if (elements === undefined) return false;
   const navigation = pageElements.filter(
     (element) =>

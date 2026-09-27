@@ -14,6 +14,7 @@ import { bearer, jsonResponse, rateHeaders, relay, seedPool, runWithContext } fr
 import { requestWithWarmEnv } from "./identity-routing-support";
 import { observePublicationD1 } from "./publication-d1-observer";
 import { envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
+import failedJobPage from "../fixtures/actions-job-completion/failed-full-check-run.html.txt?raw";
 
 type RelayEnvelope = {
   status: number;
@@ -40,11 +41,11 @@ describe("terminal Actions log cache", () => {
         throw new Error("The collector never fetches job_view; proof must not spend API quota");
       if (url.hostname === "github.com" && url.pathname === pagePath) {
         expect(bearer(request)).toBeUndefined();
-        return new Response(`<section aria-label="Check run summary" class="js-selected-check-run">
-          <span data-url="/openclaw/octopool/runs/42/header">failed
-            <relative-time datetime="2026-09-21T05:16:35Z">Sep 21, 2026</relative-time>
-          </span><check-steps data-job-status="completed"></check-steps>
-        </section>`);
+        return new Response(
+          failedJobPage
+            .replaceAll("openclaw/openclaw", "openclaw/octopool")
+            .replaceAll("108555666497", "42"),
+        );
       }
       return base(input, init);
     });

@@ -466,6 +466,12 @@ jobs, active/queued or ambiguous markup, unexpected destinations, oversized page
 timeouts do not prove completion. This covers collectors that list `run_jobs` and read
 logs without ever fetching `job_view`.
 
+Annotation contents are not completion evidence: the parser validates their container
+boundary but ignores the contents, including tables whose omitted `tbody` GitHub leaves
+for the HTML parser to insert. Header, timestamp, job identity, and steps status still
+come from the selected job outside annotations. Skipped-job blank slates without a
+completion header and steps status do not prove completion through this page path.
+
 If the HTML proof also fails, the existing `callGitHubWeb` fallback fetches the exact job
 endpoint from the **anonymous REST API**. Ordinary `job_view` relay responses remain REST;
 the page provides only internal completion evidence. The final fallback consumes anonymous
