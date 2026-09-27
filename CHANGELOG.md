@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Send common numeric PR comments, body-only edits, and closes through GitHub REST with the caller's own credentials, preserving string-rewrite protection and non-TTY output; set `OCTOPOOL_REST_WRITES=0` to retain native gh.
+
 ## 0.9.0 - 2026-09-27
 
 **Highlights:** Cap relay concurrency per machine and per client so one runaway script can't slow everyone, serve string-rewrite policy from a dedicated Durable Object, cache completed Actions job logs and settled runs/PRs far longer, and degrade transient relay storage failures to native `gh` instead of errors.

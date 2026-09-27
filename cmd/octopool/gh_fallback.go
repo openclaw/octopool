@@ -156,6 +156,9 @@ func execRealGHWithStdinAndEnv(
 	if err != nil {
 		return err
 	}
+	if handled, err := execRESTPRWrite(ctx, path, args, prepared, env, stdout, stderr); handled {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, path, prepared.args...)
 	cmd.Stdin = prepared.stdin
 	cmd.Stdout = stdout

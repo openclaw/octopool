@@ -19,7 +19,9 @@ func isolateTestConfig(t *testing.T) {
 }
 
 func testConfigEnv(root string) []string {
-	var env []string
+	// Existing native-child fixtures exercise delegation. REST-write tests opt in
+	// explicitly with an intercepted transport and synthetic caller credentials.
+	env := []string{"OCTOPOOL_REST_WRITES=0"}
 	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "AppData", "APPDATA", "USERPROFILE", "GH_CONFIG_DIR", "ZDOTDIR", "XDG_DATA_HOME", "XDG_CACHE_HOME", "LOCALAPPDATA"} {
 		// Windows environment keys are case insensitive; both spellings must agree.
 		env = append(env, name+"="+filepath.Join(root, strings.ToLower(name)))

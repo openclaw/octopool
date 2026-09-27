@@ -3,7 +3,7 @@
 The `octopool` Go CLI is the product entrypoint. It logs in against the relay, stores a
 caller token locally, and acts as a drop-in `gh` shim for the read-only GitHub commands
 Octopool supports. Local GitHub writes and read fallbacks pass through the string rewrite
-guard before the real `gh` runs.
+guard before dispatch with your own GitHub credentials.
 
 Source: `cmd/octopool/`.
 
@@ -801,8 +801,9 @@ Cancellation displays as `fail` while retaining its successful cancellation-only
 Elapsed values display `0` when absent or nonpositive, and Go durations (including
 fractional seconds) otherwise. Watch retains Octopool's terse transition/final output.
 
-After successfully fetching an explicit empty string rewrite policy (and finding no
-local rules), the command retains its existing real-`gh` delegation when any of these hold:
+Except for the common PR writes described below, after successfully fetching an explicit
+empty string rewrite policy (and finding no local rules), the command retains its existing
+real-`gh` delegation when any of these hold:
 
 - method is not `GET`, or mutating field flags are present (`-f`, `-F`, `--field`,
   `--raw-field`).
@@ -868,6 +869,48 @@ GraphQL check.
 exhausted while `gh` validates token scopes, the shim keeps the nonzero exit status but verifies
 the token through GraphQL and reports the core reset time. The token remains only in memory and
 is not stored by Octopool; retry the same login command after reset instead of reauthorizing.
+
+### Common PR writes over REST
+
+For non-TTY use on `github.com`, these exact command shapes use GitHub's REST API
+with your own native `gh` credentials, spending REST core quota instead of GraphQL points:
+
+```sh
+gh pr comment 123 --repo owner/repo --body-file comment.md
+gh pr edit 123 --repo owner/repo --body-file description.md
+gh pr close 123 --repo owner/repo --comment 'Closing comment'
+```
+
+Comment and body-only edit accept exactly one `--body`/`-b` or `--body-file`/`-F`
+(including `-` for stdin). Close accepts an optional `--comment`/`-c`, without
+`--delete-branch`. All require one positive numeric PR selector and accept
+`--repo`/`-R`; omitted repositories use the shim's local PR base-repository resolver,
+including `GH_REPO` and configured default remotes. Long flags accept separate or
+equals values; short value flags also accept attached values. Duplicate flags, other
+selectors/options, ambiguous repository context, Enterprise hosts, TTY output, and
+`GH_FORCE_TTY` retain guarded native handling. PR create and ready remain native.
+
+The final string-rewrite guard runs first. REST consumes the prepared arguments and
+private body snapshot, so file and stdin content receive the same protection as native
+writes. Policy failures still block. Requests go directly to `api.github.com`, never
+through the relay or pooled identities. Authentication honors `GH_TOKEN`, then
+`GITHUB_TOKEN`, then native `gh auth token --hostname github.com` with the caller's
+environment and configuration. Credentials are never printed.
+
+Comments POST to the issue-comments endpoint; body edits PATCH the pull-request
+endpoint. Comment and close first GET the pull request using the same caller credentials.
+That prevents posting to an ordinary issue and preserves close's already-closed and
+already-merged behavior. Close posts its optional comment before PATCHing `state` to
+`closed`. Comment and edit print the resulting URL to stdout; close prints native gh's
+non-TTY result to stderr, including `✓ Closed pull request owner/repo#123 (title)`.
+
+Repository or credential lookup failures can delegate before any REST request or stdin
+consumption. REST errors return nonzero with a diagnostic; requests never follow redirects,
+retry writes, or fall back to native execution after an attempted write. A close can
+therefore leave its comment posted when the subsequent close fails, as native gh can.
+An interrupted response may mean GitHub accepted the write; inspect its state before
+retrying. Set `OCTOPOOL_REST_WRITES=0` to restore guarded native execution for all these
+commands.
 
 ### `octopool health [--pool <id>]`
 
@@ -1423,6 +1466,7 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_TOKEN` — caller token override (required to use a non-saved URL).
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
+- `OCTOPOOL_REST_WRITES=0` — disable common PR REST writes and retain guarded native `gh`.
 - `OCTOPOOL_DIAGNOSTICS=1` — opt-in final PR-merge dispatch and bounded response-metadata
   diagnostics on stderr; only the exact value `1` enables them. See quota provenance above.
 - `OCTOPOOL_STRING_REWRITE_FILE` — optional local policy JSON; an explicit unreadable or

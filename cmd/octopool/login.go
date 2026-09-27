@@ -290,6 +290,10 @@ func localGitHubToken(ctx context.Context, ghPath string) (string, error) {
 	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
 		return token, nil
 	}
+	return storedGitHubToken(ctx, ghPath, os.Environ())
+}
+
+func storedGitHubToken(ctx context.Context, ghPath string, env []string) (string, error) {
 	path, err := resolveGHPath(ghPath)
 	if err != nil {
 		return "", err
@@ -297,6 +301,7 @@ func localGitHubToken(ctx context.Context, ghPath string) (string, error) {
 	child, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(child, path, "auth", "token", "--hostname", "github.com")
+	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
 		if child.Err() != nil {
