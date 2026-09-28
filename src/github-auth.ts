@@ -1,10 +1,127 @@
 import { base64ToBytes, bytesToBase64URL } from "./encoding";
-import type { GitHubEgressEnv } from "./github-egress";
-import { requestTimeoutMs } from "./github-limits";
+import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
+import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { HttpError } from "./http";
+import { isRecord } from "./object";
+import { readBodyCapped } from "./response-body";
 import type { Identity } from "./types";
 
 const installationTokenCache = new Map<string, { token: string; expiresAt: number }>();
+// Never share entries with installation-wide REST/landing credentials.
+const repositoryTokenCache = new Map<string, { token: string; expiresAt: number }>();
+const repositoryReadPermissions = [
+  "metadata",
+  "contents",
+  "pull_requests",
+  "issues",
+  "actions",
+  "checks",
+  "statuses",
+] as const;
+
+export async function githubRepositoryToken(
+  env: GitHubEgressEnv,
+  identity: Identity,
+  owner: string,
+  repo: string,
+): Promise<string> {
+  const unavailable = () =>
+    new HttpError(424, "fallback_local", "Repository-scoped GitHub App token is unavailable", {
+      reason: "github_app_repo_token_unavailable",
+    });
+  try {
+    if (
+      identity.kind !== "github_app" ||
+      !Number.isSafeInteger(identity.installation_id) ||
+      identity.installation_id! <= 0
+    )
+      throw unavailable();
+    const appId = githubAppID(env);
+    const key = JSON.stringify([
+      appId,
+      identity.installation_id,
+      identity.secret_ref,
+      owner.toLowerCase(),
+      repo.toLowerCase(),
+    ]);
+    const cached = repositoryTokenCache.get(key);
+    if (cached !== undefined && cached.expiresAt - Date.now() > 60_000) return cached.token;
+    repositoryTokenCache.delete(key);
+    const jwt = await githubAppJWT(appId, githubSecret(env, identity.secret_ref));
+    const base = `https://api.github.com/app/installations/${identity.installation_id}`;
+    const requestJSON = async (url: string, body?: unknown): Promise<Record<string, unknown>> => {
+      const response = await env.githubEgress.fetch(url, {
+        method: body === undefined ? "GET" : "POST",
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${jwt}`,
+          "user-agent": "octopool",
+          "x-github-api-version": "2022-11-28",
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(requestTimeoutMs(env)),
+      });
+      const bytes = await readBodyCapped(response, responseCapBytes(env), unavailable);
+      if (!response.ok) throw unavailable();
+      const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      if (!isRecord(value)) throw unavailable();
+      return value;
+    };
+    const installation = await requestJSON(base);
+    if (
+      !isRecord(installation.account) ||
+      typeof installation.account.login !== "string" ||
+      installation.account.login.toLowerCase() !== owner.toLowerCase() ||
+      !isRecord(installation.permissions)
+    )
+      throw unavailable();
+    const granted = installation.permissions;
+    const permissions = Object.fromEntries(
+      repositoryReadPermissions
+        .filter((name) => granted[name] === "read" || granted[name] === "write")
+        .map((name) => [name, "read"]),
+    );
+    if (permissions.metadata !== "read") throw unavailable();
+    const body = await requestJSON(`${base}/access_tokens`, { repositories: [repo], permissions });
+    // GitHub's response must confirm the requested boundary. Never recover by
+    // dropping repositories/permissions or by borrowing an installation token.
+    if (
+      typeof body.token !== "string" ||
+      body.token === "" ||
+      typeof body.expires_at !== "string" ||
+      !isRecord(body.permissions) ||
+      !Array.isArray(body.repositories) ||
+      body.repositories.length !== 1
+    )
+      throw unavailable();
+    const scoped = body.repositories[0];
+    if (
+      !isRecord(scoped) ||
+      scoped.private !== false ||
+      typeof scoped.full_name !== "string" ||
+      scoped.full_name.toLowerCase() !== `${owner}/${repo}`.toLowerCase()
+    )
+      throw unavailable();
+    const issued = body.permissions;
+    if (
+      Object.entries(issued).some(
+        ([name, level]) => permissions[name] !== "read" || level !== "read",
+      ) ||
+      Object.keys(permissions).some((name) => issued[name] !== "read")
+    )
+      throw unavailable();
+    const expiresAt = Date.parse(body.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt - Date.now() <= 60_000) throw unavailable();
+    if (repositoryTokenCache.size >= 256)
+      repositoryTokenCache.delete(repositoryTokenCache.keys().next().value!);
+    repositoryTokenCache.set(key, { token: body.token, expiresAt });
+    return body.token;
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    throw unavailable();
+  }
+}
 
 const credentialFailureMessages = {
   identity_secret_missing: "Identity credential is not configured",

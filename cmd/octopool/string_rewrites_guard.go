@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/url"
@@ -34,6 +35,36 @@ func (policy stringRewritePolicy) checkStructural(text string) error {
 func (policy stringRewritePolicy) guardRequest(request ghAPIRequest) error {
 	if len(policy.Rules) == 0 {
 		return nil
+	}
+	if request.graphql != nil {
+		if err := policy.check(request.graphql.Query); err != nil {
+			return err
+		}
+		tokens, ok := graphQLReadTokens(request.graphql.Query)
+		if !ok {
+			return errRewriteBlocked
+		}
+		for _, token := range tokens {
+			if strings.HasPrefix(token, `"`) {
+				var value string
+				if json.Unmarshal([]byte(token), &value) != nil {
+					return errRewriteBlocked
+				}
+				if err := policy.check(value); err != nil {
+					return err
+				}
+			}
+		}
+		for key, value := range request.graphql.Variables {
+			if err := policy.check(key); err != nil {
+				return err
+			}
+			if text, ok := value.(string); ok {
+				if err := policy.check(text); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	if query := landingGraphQLQuery(request.headers["x-octopool-public-shape"]); query != "" {
 		if err := policy.checkStructural("/graphql"); err != nil {

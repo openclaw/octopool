@@ -185,6 +185,7 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
     case "job_logs":
     case "check_run_annotations":
     case "rate_limit":
+    case "graphql_read":
       return staticCache(60);
     case "branch_protection":
     case "repo_ruleset_list":
@@ -324,6 +325,7 @@ function staleCacheSeconds(kind: RouteKind): number {
     case "repo_ruleset_list":
     case "repo_ruleset_view":
     case "branch_rules":
+    case "graphql_read":
       return 0;
     default:
       return assertNever(kind);

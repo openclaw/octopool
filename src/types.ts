@@ -1,4 +1,5 @@
 import type { RouteKind } from "./route-manifest";
+import type { GraphQLRead } from "./graphql-read";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -6,6 +7,7 @@ export type RelayRequest = {
   pool: string;
   method: string;
   path: string;
+  graphql?: GraphQLRead;
   query?: Record<string, string | string[]>;
   headers?: Record<string, string>;
   route_hint?: {

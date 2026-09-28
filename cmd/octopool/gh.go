@@ -37,6 +37,16 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 				}
 				return err
 			}
+			if request, known := parseRepositoryGraphQL(args[1:]); known {
+				if err := policy.guardRequest(request); err != nil {
+					return err
+				}
+				err := relayRepositoryGraphQL(ctx, request, stdout)
+				if shouldRunRealGH(err) {
+					return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
+				}
+				return err
+			}
 			normalized, err := normalizeGHAPIQueryArgs(args[1:])
 			if err != nil {
 				return err

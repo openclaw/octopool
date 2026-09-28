@@ -5,6 +5,23 @@ export function sanitizeGitHubResponse(
   route: RouteInfo,
   response: GitHubRelayResponse,
 ): GitHubRelayResponse {
+  if (
+    route.kind === "graphql_read" &&
+    response.body_encoding === "text" &&
+    typeof response.body === "string"
+  ) {
+    try {
+      const body: unknown = JSON.parse(response.body);
+      const sanitized = stripTokenScopedGitHubFields(body);
+      // Preserve original JSON bytes (including numeric spelling) whenever the
+      // shared sanitation policy leaves the response unchanged.
+      return JSON.stringify(body) === JSON.stringify(sanitized)
+        ? response
+        : { ...response, body: JSON.stringify(sanitized) };
+    } catch {
+      return response;
+    }
+  }
   if (route.kind === "repo_view" && isRecord(response.body)) {
     return { ...response, body: sanitizeRepoView(response.body) };
   }

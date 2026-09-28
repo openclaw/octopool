@@ -62,12 +62,15 @@ export async function loadIdentities(
   }
   const owner = route.owner ?? "";
   const repo = route.repo ?? "";
-  return lookup(`identities:${pool}:${owner}/${repo}`, async () => {
+  const identities = await lookup(`identities:${pool}:${owner}/${repo}`, async () => {
     const rows = await env.DB.prepare(queries.listActiveIdentitiesForRoute)
       .bind(pool, owner, repo)
       .all<IdentityRow>();
     return rows.results;
   });
+  return route.kind === "graphql_read"
+    ? identities.filter((identity) => identity.kind === "github_app")
+    : identities;
 }
 
 export async function insertAudit(

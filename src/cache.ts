@@ -18,6 +18,7 @@ import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-re
 import { scalarQuery } from "./github-public-utils";
 import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
+import { graphQLReadCacheable, stableGraphQLVariables } from "./graphql-read";
 import { isRecord } from "./object";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { isIssueEventRoute } from "./route-manifest";
@@ -88,6 +89,7 @@ export async function githubCacheKey(
     headers: stableRecord(varyHeaders),
     route_key: route.routeKey,
     state: cacheStateDiscriminator(route),
+    ...(request.graphql === undefined ? {} : { graphql: stableGraphQLVariables(request.graphql) }),
     // A fixed shape can gain fields without changing its wire name.
     ...(isLandingGraphQLRoute(route) &&
     request.headers?.["x-octopool-public-shape"] === PUBLIC_SHAPES.pullRequestMergeSnapshot
@@ -226,7 +228,8 @@ export async function readStaleGitHubCache(
   route: RouteInfo,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
-  if (maxAgeSeconds === 0 || isLandingGraphQLRoute(route)) return undefined;
+  if (maxAgeSeconds === 0 || isLandingGraphQLRoute(route) || route.kind === "graphql_read")
+    return undefined;
   const row = await env.DB.prepare(queries.readGitHubCacheAny)
     .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
     .first<CacheRow>();
@@ -324,7 +327,8 @@ export async function writeGitHubCache(
   }
   if (
     !cacheResponseEligible(route.kind, response.status) ||
-    (isLandingGraphQLRoute(route) && !landingGraphQLCacheable(response))
+    (isLandingGraphQLRoute(route) && !landingGraphQLCacheable(response)) ||
+    (route.kind === "graphql_read" && !graphQLReadCacheable(response))
   ) {
     return "none";
   }

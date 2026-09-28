@@ -1,4 +1,6 @@
 import { HttpError } from "./http";
+import { parseGraphQLRead } from "./graphql-read";
+import { defaultGitHubJSONAccept } from "./github-response";
 import { landingGraphQLRequest } from "./github-landing";
 import { isPublicIssueSearchQuery, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isRecord } from "./object";
@@ -84,11 +86,29 @@ export function validateRelayRequest(value: unknown): RelayRequest {
   ) {
     throw new HttpError(400, "invalid_path", "Path must be an absolute GitHub API path");
   }
-  if (method !== "GET") {
+  if (method !== "GET" && !(method === "POST" && path === "/graphql")) {
     throw new HttpError(403, "method_denied", "Only GET routes are enabled");
   }
   const query = normalizeQuery(value.query);
   const headers = normalizeHeaders(value.headers);
+  if (path === "/graphql" && method === "POST") {
+    if (
+      Object.keys(query ?? {}).length !== 0 ||
+      !defaultGitHubJSONAccept(headers?.accept) ||
+      Object.keys(headers ?? {}).some((key) => key !== "accept" && key !== "cache-control")
+    ) {
+      throw new HttpError(403, "route_denied", "Invalid GraphQL read envelope");
+    }
+    return {
+      pool,
+      method,
+      path,
+      graphql: parseGraphQLRead(value.graphql),
+      ...(headers === undefined ? {} : { headers }),
+    };
+  }
+  if (value.graphql !== undefined)
+    throw new HttpError(403, "route_denied", "GraphQL requires POST /graphql");
   return {
     pool,
     method,
@@ -100,6 +120,24 @@ export function validateRelayRequest(value: unknown): RelayRequest {
 }
 
 export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteInfo {
+  if (request.method === "POST" && request.path === "/graphql" && request.graphql !== undefined) {
+    const { owner, repo } = request.graphql;
+    if (!policy.allowed_owners.includes(owner))
+      throw new HttpError(403, "owner_denied", "GraphQL owner is not allowed for this pool");
+    return {
+      kind: "graphql_read",
+      owner,
+      repo,
+      publicOnly: false,
+      resource: "graphql",
+      routeKey: "POST /graphql repository-read",
+      cacheable: true,
+      largePayload: false,
+      logs: false,
+    };
+  }
+  if (request.method !== "GET")
+    throw new HttpError(403, "method_denied", "Only validated read routes are enabled");
   const landing = landingGraphQLRequest(request);
   for (const rule of rules) {
     const match = rule.pattern.exec(request.path);

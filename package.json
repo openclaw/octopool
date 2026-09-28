@@ -26,6 +26,7 @@
     "types": "wrangler types"
   },
   "dependencies": {
+    "graphql": "17.0.2",
     "parse5": "8.0.1",
     "re2js": "2.8.6"
   },

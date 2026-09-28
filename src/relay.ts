@@ -27,7 +27,8 @@ import { cacheResponseEligible } from "./cache-policy";
 import type { CacheFillOutcome, OwnedCacheFill } from "./cache-fill";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub, GitHubTransportError, probeGitHubLog } from "./github";
-import { githubToken, IdentityCredentialError } from "./github-auth";
+import { githubToken, githubRepositoryToken, IdentityCredentialError } from "./github-auth";
+import { graphQLReadCacheable } from "./graphql-read";
 import { storePublicAPIRate, supportsAnonymousGitHubAPI } from "./github-public-api";
 import {
   defaultGitHubJSONAccept,
@@ -476,6 +477,7 @@ async function coalesceRelayCacheMiss(
 }
 
 async function revalidateStaleRelayCache(state: ActiveRelay): Promise<Response | undefined> {
+  if (state.route.kind === "graphql_read") return undefined;
   try {
     return await attemptStaleRelayCacheRevalidation(state);
   } catch (error) {
@@ -768,6 +770,7 @@ async function callTokenFreeBackend(
   state: ActiveRelay,
   noQuotaOnly = false,
 ): Promise<Response | undefined> {
+  if (state.route.kind === "graphql_read") return undefined;
   if (state.cacheKey === undefined && !isIssueEventRoute(state.route.kind)) {
     return undefined;
   }
@@ -931,11 +934,10 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
       if (stale !== undefined) return stale;
     }
     const rate = rateFromHeaders(github.headers);
-    const identityFallback = githubResponseLocalFallbackReason(
-      github.status,
-      rate,
-      github.secondaryRateLimited,
-    );
+    const identityFallback =
+      state.route.kind === "graphql_read" && github.status === 200
+        ? undefined
+        : githubResponseLocalFallbackReason(github.status, rate, github.secondaryRateLimited);
     if (identityFallback !== undefined) {
       state.failedIdentityIds.add(identity.id);
       fallbackReason = identityFallback;
@@ -992,6 +994,13 @@ async function acquireIdentityToken(
   identity: Identity,
 ): Promise<string | undefined> {
   try {
+    if (state.route.kind === "graphql_read")
+      return await githubRepositoryToken(
+        state.env,
+        identity,
+        state.route.owner!,
+        state.route.repo!,
+      );
     return await githubToken(state.env, identity);
   } catch (error) {
     if (!(error instanceof IdentityCredentialError)) throw new IdentityOperationError(error);
@@ -2082,6 +2091,11 @@ async function cachedResponseAvailable(
 ): Promise<boolean> {
   if (!cacheResponseEligible(route.kind, cached.status)) return false;
   if (isLandingGraphQLRoute(route) && !landingGraphQLCacheable(cached)) return false;
+  if (
+    route.kind === "graphql_read" &&
+    (!graphQLReadCacheable(cached) || cached.identity?.kind !== "github_app")
+  )
+    return false;
   const identityAvailable = stale
     ? staleCachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity)
     : cachedIdentityAvailable(env, pool, route, cached.identity, selectedIdentity);

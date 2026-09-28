@@ -1,12 +1,14 @@
 import { encodeOpaqueBytes } from "./encoding";
 import type { GitHubEgressEnv } from "./github-egress";
 import { landingGraphQLRequest } from "./github-landing";
+import { graphQLReadBody } from "./graphql-read";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import {
   DEFAULT_GITHUB_API_VERSION,
   githubResponseHeaders,
   isSecondaryRateLimit,
+  hasSecondaryRateLimitMessage,
 } from "./github-response";
 import { HttpError } from "./http";
 import { cancelResponseBody, readBodyCapped } from "./response-body";
@@ -69,7 +71,10 @@ async function callGitHubAPI(
   route: RouteInfo,
   token?: string,
 ): Promise<GitHubRelayResponse> {
-  const landing = landingGraphQLRequest(request);
+  const landing =
+    request.graphql === undefined
+      ? landingGraphQLRequest(request)
+      : graphQLReadBody(request.graphql);
   if (landing !== undefined && token === undefined) {
     throw new HttpError(
       502,
@@ -95,7 +100,11 @@ async function callGitHubAPI(
     await cancelResponseBody(response);
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
   }
-  const result = await readGitHubResponse(response, responseCapBytes(env));
+  const result = await readGitHubResponse(
+    response,
+    responseCapBytes(env),
+    route.kind === "graphql_read",
+  );
   if (landing !== undefined) {
     // GraphQL POST revalidation always fetches the full snapshot once.
     delete result.headers.etag;
@@ -107,16 +116,29 @@ async function callGitHubAPI(
 async function readGitHubResponse(
   response: Response,
   capBytes: number,
+  rawGraphQL = false,
 ): Promise<GitHubRelayResponse> {
   const bodyBytes = await readGitHubBody(response, capBytes);
   const contentType = response.headers.get("content-type") ?? "";
   const { body, encoding } = decodeBody(bodyBytes, contentType);
+  const raw = rawGraphQL ? encodeOpaqueBytes(bodyBytes) : undefined;
+  const graphqlErrors =
+    rawGraphQL &&
+    body !== null &&
+    typeof body === "object" &&
+    "errors" in body &&
+    Array.isArray(body.errors)
+      ? body.errors
+      : [];
   return {
     status: response.status,
     headers: githubResponseHeaders(response.headers),
-    body,
-    body_encoding: encoding,
-    ...(isSecondaryRateLimit(response.status, body) ? { secondaryRateLimited: true as const } : {}),
+    body: raw?.body ?? body,
+    body_encoding: raw?.encoding ?? encoding,
+    ...(isSecondaryRateLimit(response.status, body) ||
+    graphqlErrors.some(hasSecondaryRateLimitMessage)
+      ? { secondaryRateLimited: true as const }
+      : {}),
   };
 }
 

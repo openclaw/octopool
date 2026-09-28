@@ -13,6 +13,7 @@ type ghAPIRequest struct {
 	query     map[string]any
 	headers   map[string]string
 	routeHint map[string]string
+	graphql   *graphQLReadRequest
 	jq        string
 	paginate  bool
 	slurp     bool

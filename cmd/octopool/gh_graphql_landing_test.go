@@ -134,6 +134,7 @@ func TestLandingGraphQLFreshObservations(t *testing.T) {
 }
 
 func TestLandingGraphQLNativeBoundaries(t *testing.T) {
+	t.Setenv("OCTOPOOL_GRAPHQL_RELAY", "0")
 	for _, test := range []struct {
 		name  string
 		query string

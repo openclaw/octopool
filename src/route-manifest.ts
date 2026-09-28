@@ -378,10 +378,16 @@ export const ROUTES = [
   route("/rate_limit", "rate_limit", "core", { publicApi: false, cacheable: false }),
 ] as const;
 
-export type RouteKind = (typeof ROUTES)[number]["kind"];
+// GraphQL is admitted by AST validation, never by the REST path allowlist.
+export type RouteKind = (typeof ROUTES)[number]["kind"] | "graphql_read";
 export type RouteManifestEntry = (typeof ROUTES)[number];
 
 const capabilitiesByKind = new Map<RouteKind, RouteCapabilities>();
+capabilitiesByKind.set("graphql_read", {
+  publicApi: false,
+  fallback: "pool",
+  anonymousRepoProof: false,
+});
 for (const route of ROUTES) {
   const existing = capabilitiesByKind.get(route.kind);
   if (existing !== undefined && !sameCapabilities(existing, route.capabilities)) {

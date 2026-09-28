@@ -39,7 +39,7 @@ type relayMeta struct {
 // silently reads as current fact.
 func volatileRouteKind(kind string) bool {
 	switch kind {
-	case "pr_view", "pr_list", "issue_view", "issue_list", "run_view", "run_list",
+	case "graphql_read", "pr_view", "pr_list", "issue_view", "issue_list", "run_view", "run_list",
 		"workflow_run_list", "commit_check_runs", "commit_check_runs_ref",
 		"commit_check_suites", "commit_check_suites_ref", "commit_status", "commit_status_ref",
 		"commit_statuses", "commit_statuses_ref", "ref_statuses", "run_jobs", "job_view",
@@ -170,8 +170,8 @@ func relayRetryAttempts() int {
 }
 
 func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
-	// All callers construct GET requests; keep writes outside the shared retry path.
-	if request.method != "GET" {
+	// Only validated repository GraphQL reads may use POST in the retry path.
+	if request.method != "GET" && !(request.method == "POST" && request.path == "/graphql" && request.graphql != nil && repositoryGraphQLRead(request.graphql)) {
 		return relayEnvelope{}, fmt.Errorf("relay client requires GET, got %q", request.method)
 	}
 	retries := relayRetryAttempts()
@@ -321,6 +321,9 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	}
 	if len(request.routeHint) > 0 {
 		body["route_hint"] = request.routeHint
+	}
+	if request.graphql != nil {
+		body["graphql"] = request.graphql
 	}
 	// Policy acquisition above retains its independent timeout. Only the safe
 	// relay read gets this per-attempt header/body budget.

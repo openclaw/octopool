@@ -39,6 +39,14 @@ repopulating it. This keeps the hot-cache D1 savings without coupling request li
 
 ## Read-through edge + D1 cache
 
+Arbitrary [repository GraphQL reads](relay.md#repository-graphql-reads) reuse this
+publication/coalescing machinery, with a separate key containing the canonically printed
+document, recursively sorted variable objects (list order is preserved), operation name,
+repository, pool, and App identity. They have a 60-second TTL and no stale fallback;
+HTTP-200 GraphQL errors do not cache. The CLI sends `max-age=0` by default, while an
+explicit positive maximum age permits reuse. The public-proof guard and current App
+eligibility still gate every hit. Lossless JSON text preserves native response bytes.
+
 On a cacheable route the relay computes a stable cache key, checks Cloudflare's
 data-center-local Cache API, falls back to `github_cache_entries` in D1, and serves a
 fresh hit without touching GitHub. D1 hits warm the edge cache. On a miss it first tries

@@ -57,12 +57,12 @@ describe("terminal Actions log cache", () => {
         );
       const gate = ownedWork.gate();
       const base = terminalLogUpstream(status, new Uint8Array([0xff, 0x41]));
-      let proofStarted = false;
+      const proofStarted = ownedWork.gate();
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const url = new URL(new Request(input, init).url);
         if (url.hostname === "github.com" && url.pathname === "/openclaw/octopool/runs/42") {
           expect(downloadCalls(upstream)).toBe(1);
-          proofStarted = true;
+          proofStarted.release();
           await gate.promise;
         }
         return base(input, init);
@@ -72,7 +72,7 @@ describe("terminal Actions log cache", () => {
         before: async (sql) => {
           if (cached && sql === queries.readCompletedJobCacheProof) {
             expect(downloadCalls(upstream)).toBe(1);
-            proofStarted = true;
+            proofStarted.release();
             await gate.promise;
           }
         },
@@ -89,10 +89,8 @@ describe("terminal Actions log cache", () => {
           }),
         );
         try {
-          await vi.waitFor(() => {
-            expect(proofStarted).toBe(true);
-            expect(served).toMatchObject({ status: 200, relay: { cache: "miss" } });
-          });
+          await Promise.all([proofStarted.promise, response]);
+          expect(served).toMatchObject({ status: 200, relay: { cache: "miss" } });
           expect(envelopeBytes(served!)).toEqual([0xff, 0x41]);
           expect(await env.ACTIONS_LOGS.get(key)).toBeNull();
           expect(await env.DB.prepare("SELECT count(*) AS n FROM audit_events").first("n")).toBe(0);

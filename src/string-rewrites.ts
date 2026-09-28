@@ -1,4 +1,5 @@
 import { RE2JS } from "re2js";
+import { parse, visit } from "graphql";
 import { HttpError } from "./http";
 import { isRecord } from "./object";
 import { containsRuleMaterial } from "./string-rewrite-material";
@@ -169,6 +170,24 @@ export function guardStringRewriteRead(
   // Percent-encoded controls remain encoded on the wire and are inspected below.
   if (/[\t\r\n]/.test(request.path)) throw denied();
   if (rules.length === 0) return;
+  if (request.graphql !== undefined) {
+    assertNoStringRewriteMatch(request.graphql.query, rules);
+    visit(parse(request.graphql.query), {
+      StringValue(node) {
+        assertNoStringRewriteMatch(node.value, rules);
+      },
+    });
+    const inspectJSON = (value: unknown): void => {
+      if (typeof value === "string") assertNoStringRewriteMatch(value, rules);
+      else if (value !== null && typeof value === "object") {
+        for (const [key, item] of Object.entries(value)) {
+          assertNoStringRewriteMatch(key, rules);
+          inspectJSON(item);
+        }
+      }
+    };
+    inspectJSON(request.graphql);
+  }
   let bytes = 0;
   const inspect = (value: string) => {
     bytes += utf8Size(value, STRING_REWRITE_LIMITS.contentBytes, denied);

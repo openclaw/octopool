@@ -220,13 +220,49 @@ the logical `/graphql` endpoint and fixed query text under both server and local
 Every request admission reloads those rules. Upstream HTTP and GraphQL failures remain
 errors; they never masquerade as an older Worker and trigger personal-token fallback.
 
-Viewer-dependent merge previews, arbitrary GraphQL, mutations, extra variables, file
-inputs, and unsupported output modes stay with native `gh`. Private repositories retain
+Viewer-dependent merge previews, mutations, file inputs, and unsupported output modes
+stay with native `gh`. Other repository queries can use the scoped route below. Private repositories retain
 guarded local fallback. A CLI connected to an older Worker rejects its raw REST response
 before any output and uses guarded fallback. The merge projection also requires the
 source branch name (`headRefName`); a Worker returning an older merge projection triggers
 the same handoff before any partial output. Upgrade both components for pooled GraphQL.
-No general GraphQL proxy or caller-controlled upstream query is exposed.
+These exact projections still run before the repository-query recognizer.
+
+### Repository GraphQL reads
+
+Plain `gh api graphql -f query=...` calls can relay a single repository-rooted read
+using a read-only GitHub App token restricted to that repository. This moves GraphQL
+quota from the personal token to the App; it does not change the native writer identity.
+
+```sh
+gh api graphql -f owner=openclaw -f name=openclaw -F pr=42 \
+  -f 'query=query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){state mergeable headRefOid}}}' \
+  --jq .data.repository.pullRequest
+```
+
+The local token check is only an optimization. The Worker owns the real AST validation,
+pool owner policy, public visibility, and verified single-repository App-token boundary;
+see [repository GraphQL security](relay.md#repository-graphql-reads). No PAT or
+installation-wide token can execute an arbitrary query. Nested reads cannot inherit
+the App's access to unrelated private repositories or organization permissions.
+
+The CLI accepts scalar `-f`/`--raw-field` and typed `-F`/`--field` variables, optional
+`operationName`, literal or variable repository arguments, and `--hostname github.com`.
+It preserves `--jq` and the native nonterminal response bytes. Template and other
+unsupported presentation flags retain native handling, as on other API relay reads.
+Input files, pagination, nested/array field flags, duplicate fields, foreign hosts,
+conditional or credential headers, block strings, and unrecognized grammar stay native.
+Only default JSON Accept and Cache-Control headers are eligible. `viewer` and `rateLimit`
+probes always stay native, as do mutations and subscriptions.
+
+Each request sends `Cache-Control: max-age=0` unless the caller explicitly supplies one.
+Use `-H 'Cache-Control: max-age=30'` for advisory reuse; cached responses have a 60-second
+server ceiling and no outage stale fallback. HTTP-200 GraphQL errors are printed and
+return failure, without a second native query. A relay fallback, older Worker, transport,
+or ordinary service failure uses guarded native `gh` before any output; policy failures,
+authentication denials, and cancellation stay terminal. `OCTOPOOL_NO_FALLBACK=1` refuses
+the handoff. `OCTOPOOL_GRAPHQL_RELAY=0` disables this new recognizer, preserving the
+existing exact landing projections and their routing.
 
 ### Read routing and freshness
 
@@ -1394,7 +1430,7 @@ Git pushes, older clients' local writes, existing published content, and arbitra
 obfuscation are outside this boundary. Policy-material detection does not interpret arbitrary Markdown, Unicode
 obfuscation, malformed rule JSON, or arbitrary encodings, and is not general data-loss
 prevention or a network-wide guarantee. GitHub writes continue to use the user's local credentials; the Worker
-remains GET-only.
+remains GET-only for REST, with the separately validated repository GraphQL POST read.
 
 ## Cache freshness
 
@@ -1467,6 +1503,8 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
 - `OCTOPOOL_REST_WRITES=0` — disable common PR REST writes and retain guarded native `gh`.
+- `OCTOPOOL_GRAPHQL_RELAY=0` — keep arbitrary repository GraphQL queries native; the
+  existing exact landing projections retain their pooled routing.
 - `OCTOPOOL_DIAGNOSTICS=1` — opt-in final PR-merge dispatch and bounded response-metadata
   diagnostics on stderr; only the exact value `1` enables them. See quota provenance above.
 - `OCTOPOOL_STRING_REWRITE_FILE` — optional local policy JSON; an explicit unreadable or

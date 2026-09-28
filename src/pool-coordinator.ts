@@ -314,7 +314,13 @@ export class PoolCoordinator extends DurableObject<Env> {
           rate.resetAt * 1000,
         );
       }
-      if (result.status === 401 || result.status === 403 || result.status === 429) {
+      if (
+        result.status === 401 ||
+        result.status === 403 ||
+        result.status === 429 ||
+        result.secondaryRateLimited === true ||
+        (result.resource === "graphql" && isRateSeconds(rate?.retryAfter))
+      ) {
         const now = Date.now();
         const cooldown = classifyCooldown(result, now);
         this.ctx.storage.sql.exec(

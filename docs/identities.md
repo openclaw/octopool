@@ -26,6 +26,14 @@ that points at the App's **PKCS#8** private key secret. The Worker:
    `POST /app/installations/{id}/access_tokens`.
 3. Caches the installation token in memory and refreshes it ~60s before expiry.
 
+The arbitrary repository GraphQL route uses a separate bounded token cache keyed by
+App, installation, secret reference, owner, and repository. Before minting, it verifies
+the installation account and granted permissions, requests `repositories: [name]` with
+only supported read permissions, and verifies the returned repository and permission
+scope. It never consults or populates the installation-wide cache above and never selects
+PAT candidates. Failure hands off to native credentials; it cannot widen the request to
+make minting succeed. See [the security boundary](relay.md#repository-graphql-reads).
+
 The private key must be `BEGIN PRIVATE KEY` (PKCS#8) PEM — `BEGIN RSA PRIVATE KEY`
 (PKCS#1) is rejected with `503 github_app_key_format`, because WebCrypto only imports
 PKCS#8. For v1 the `octopool-cache` App is installed on selected repositories only

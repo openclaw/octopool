@@ -28,7 +28,9 @@ Request body:
 ```
 
 - `pool`, `method`, `path` are required, non-empty strings.
-- Only `GET` is enabled. Any other method is rejected with `403 method_denied`.
+- REST stays `GET`-only. The sole caller-supplied POST read is the validated
+  [repository GraphQL](#repository-graphql-reads) envelope below; other methods/paths
+  are rejected with `403 method_denied`.
 - `query` values are strings or string arrays. Keys are rejected if they look
   secret-bearing (`token`, `secret`, `password`, `api_key`, …).
 - `headers` are filtered down to `accept`, `x-github-api-version`, `if-none-match`,
@@ -278,7 +280,7 @@ direct-fetch bypass.
 
 `GET /repos/{owner}/{repo}/pulls/{number}` supports five additional
 `x-octopool-public-shape` values. The Worker constructs the exact upstream query
-from its allowlist in `src/github-public-shapes.ts`; callers cannot supply GraphQL.
+from its allowlist in `src/github-public-shapes.ts`; these shapes do not accept caller GraphQL.
 The existing `pr_view` owner routes these projections through the pool's `graphql`
 budget instead of REST's `core` budget.
 
@@ -304,8 +306,81 @@ non-scalar/empty cursors, cursors longer than 512 characters or containing contr
 characters, and cursors on other shapes are refused before upstream dispatch. The
 public-repository guard, caller/pool policy, string protection, response caps and
 pooled identity eligibility still apply. There is no anonymous REST or page substitute
-for these GraphQL projections. `viewerMergeBodyText`, arbitrary queries and mutations
-are outside this shared-cache contract and remain caller-owned native operations.
+for these GraphQL projections. `viewerMergeBodyText` and mutations remain native.
+Other eligible repository queries use the separate scoped-token route below.
+
+### Repository GraphQL reads
+
+`POST /v1/github/request` also accepts this envelope:
+
+```json
+{
+  "pool": "maintainers",
+  "method": "POST",
+  "path": "/graphql",
+  "graphql": {
+    "query": "query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){state mergeable headRefOid}}}",
+    "variables": { "owner": "openclaw", "name": "openclaw", "pr": 42 }
+  },
+  "headers": { "cache-control": "max-age=0" }
+}
+```
+
+The Worker parses the document with `graphql-js` before dispatch. Exactly one query
+operation must select exactly one `repository(owner:,name:)` root, optionally aliased,
+plus optional `__typename` fields. Owner/name must be string literals or supplied
+string variables; variable defaults do not establish scope. Optional `operationName`
+must match the sole operation. Fragments are expanded for root and depth checks;
+missing, duplicate, cyclic, or excessively expanded fragments are refused. All field
+names, including unused fragments, are checked for `viewer*`, `__schema`, and `__type`.
+Only `@include` and `@skip` directives are accepted. Other roots (including `viewer`,
+`rateLimit`, `node`, `nodes`, `search`, organization/user and enterprise lookups),
+mutations, subscriptions, and schema definitions are refused.
+
+Query and variables are independently capped at 16 KiB; selection and JSON variable
+depth are capped at 12, with 4,000 document tokens and expanded selections. Variables
+may contain JSON scalars, lists, or objects. Only default JSON Accept and cache-control
+headers are supported; query-string fields and conditional validators are refused.
+The owner must occur in `allowed_owners`, even when `allow_public_repos` is enabled.
+The existing public-repository proof guard must authorize the repository before any
+App token or cached response is used. Private or unknown visibility returns
+`424 fallback_local` (`repo_not_public` / `repo_public_check_failed`).
+
+**The credential is the primary security boundary.** Only active, route-eligible GitHub
+App identities can execute these queries. The Worker verifies the installation account
+matches the repository owner, then mints with `repositories: [name]` and an explicit
+read-only subset of granted `metadata`, `contents`, `pull_requests`, `issues`, `actions`,
+`checks`, and `statuses` permissions. Organization and other permissions are excluded.
+The mint response must confirm exactly that repository and those read-only permissions.
+Nested traversal such as `owner.repositories` or `author.repositories` can therefore
+see only the selected repository and public GitHub data, not unrelated private org
+repositories. AST restrictions are defense in depth, not the confinement mechanism.
+The normal public-proof lifetime still bounds detection of a repository becoming private.
+
+Scoped tokens use a separate bounded per-repository memory cache, refreshed at least
+60 seconds before expiry. Installation-wide tokens and PATs are never substituted.
+Missing access, invalid scope/permissions, missing credentials, or mint failure returns
+`424 fallback_local` with `github_app_repo_token_unavailable`; unavailable App candidates
+use the existing pool fallback reasons. A query needing an ungranted permission retains
+GitHub's GraphQL errors. Only `https://api.github.com/graphql` receives the query POST;
+redirects are denied. Installation metadata/token exchange remains internal auth traffic.
+
+The response uses lossless `body_encoding: "text"` JSON bytes through the ordinary
+envelope, preserving whitespace, escape spelling, large numbers, and HTTP-200 `errors`.
+The existing sanitation policy still applies; a body requiring sanitation is re-encoded.
+Response caps, timeouts, authoritative string protection (including decoded GraphQL
+string literals and variable values), backend-work admission, and audit remain enforced.
+Audit uses `route_kind: graphql_read`, `route_key: POST /graphql repository-read`, the App
+identity, and `requested_max_age`. Rate headers update the App's GraphQL resource;
+HTTP-200 secondary-limit errors also enter the identity cooldown without changing the body.
+
+The pool/repository, canonically printed AST, recursively sorted variables, operation
+name, and source App identity partition cache entries. Error-free JSON data caches for
+60 seconds with no stale fallback. `max-age=0` always fetches upstream; positive maximum
+ages allow bounded reuse and identical misses use existing coalescing/publication ownership.
+The CLI defaults this route to live reads: quota placement is the main benefit.
+Upgrade both Worker and CLI; older Workers trigger guarded native fallback. No schema
+migration, permission expansion, or cache purge is required.
 
 ### Native protection reads
 

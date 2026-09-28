@@ -23,7 +23,7 @@ rate-budget routing, and audit data.
 
 - General-purpose HTTP proxy or multi-tenant SaaS.
 - Shared private-repository reads or caching.
-- GitHub mutations or GraphQL in the current protocol.
+- GitHub mutations, viewer-dependent queries, or unrestricted GraphQL proxying.
 - Bypassing GitHub authorization, permissions, rate limits, or abuse controls.
 - Replacing project-specific mirrors, indexes, or triage stores.
 
@@ -32,6 +32,14 @@ rate-budget routing, and audit data.
 Pools and identities are explicit and admin-managed. PATs and GitHub App private keys are
 Cloudflare Worker secrets referenced by stable names in D1. Installation tokens are minted
 server-side and cached in Worker memory.
+
+Caller-supplied GraphQL uses a separate single-repository, read-only installation-token
+cache. The server parses one repository-rooted query, proves the target public, requires
+an explicitly allowed owner, verifies the installation account, and requests and verifies
+exactly one repository plus an explicit subset of read permissions. It never uses a PAT,
+an installation-wide token, or organization permissions for this path. That credential
+boundary confines nested traversals; AST limits and viewer/introspection rejection are
+defense in depth. See [repository GraphQL](relay.md#repository-graphql-reads).
 
 The shared relay is public-repository-only. Repository routes require a live or narrowly
 bounded historical public proof before pooled credentials or cached data can be used. A
@@ -107,7 +115,9 @@ Bearer-authenticated primary endpoint.
 }
 ```
 
-Only `GET` and no request body are supported. Query values are strings or string arrays;
+REST supports only `GET` with no upstream body. The separate `POST /graphql` envelope
+accepts a validated `graphql: {query, variables, operationName?}` repository read and
+uses only a verified repository-scoped App token. Query values on REST are strings or string arrays;
 secret-shaped keys are rejected. Forwarded request headers are limited to content
 negotiation/API version and conditional cache headers.
 
@@ -145,8 +155,9 @@ not reclassified. Workers Logs retain the storage exception, and available audit
 record the fallback code and reason. Admin endpoints and relay write rejection are unchanged.
 
 The generated route inventory in [GitHub Read Relay](relay.md) and transport matrix in
-[Token-Free GitHub Endpoints](token-free.md) are canonical. GraphQL and mutations remain
-deferred.
+[Token-Free GitHub Endpoints](token-free.md) are canonical for REST. The separate
+`graphql_read` route is AST-admitted; it is never part of the REST path allowlist.
+Mutations remain native.
 
 ### Other APIs
 

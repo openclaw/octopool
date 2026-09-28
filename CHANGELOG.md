@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+### Features
+
 - Send common numeric PR comments, body-only edits, and closes through GitHub REST with the caller's own credentials, preserving string-rewrite protection and non-TTY output; set `OCTOPOOL_REST_WRITES=0` to retain native gh.
+- Relay bounded, read-only repository GraphQL queries on verified single-repository, read-only GitHub App tokens for public repositories in allowed owners, preserving native response bytes, live defaults, guarded fallback, and existing landing projections; disable the new CLI path with `OCTOPOOL_GRAPHQL_RELAY=0`.
 
 ## 0.9.0 - 2026-09-27
 
