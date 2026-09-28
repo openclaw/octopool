@@ -309,6 +309,7 @@ describe("github cache policy", () => {
               status: 200,
               response_headers_json: "{}",
               body_json: '{"head":{"sha":"abc"}}',
+              publication_epoch: CACHE_PUBLICATION_EPOCH,
               body_encoding: "json",
               identity_id: null,
               identity_kind: null,
@@ -405,6 +406,7 @@ describe("github cache policy", () => {
               status: 200,
               response_headers_json: "{}",
               body_json: '{"head":{"sha":"new"}}',
+              publication_epoch: CACHE_PUBLICATION_EPOCH,
               body_encoding: "json",
               identity_id: null,
               identity_kind: null,
@@ -1422,6 +1424,7 @@ function response(body: unknown): GitHubRelayResponse {
 
 function cacheRowEnv(overrides: Record<string, unknown>): Env {
   const row = {
+    publication_epoch: CACHE_PUBLICATION_EPOCH,
     status: 200,
     response_headers_json: "{}",
     body_json: '{"number":42}',

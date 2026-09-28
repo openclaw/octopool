@@ -15,6 +15,13 @@ type RelayEnvelope = {
 
 describe("Worker end-to-end bounded-freshness cache", () => {
   it.each([
+    ...["a".repeat(40), "main"].map((ref) => ({
+      path: `${REPO_PATH}/commits/${ref}/check-runs`,
+      body: { check_runs: [{ status: "completed", completed_at: "2020-01-01T00:00:00Z" }] },
+      changed: { check_runs: [{ status: "queued", completed_at: null }] },
+      ttl: ref === "main" ? 120 : 300,
+      stale: 300,
+    })),
     {
       path: PR_PATH,
       body: { state: "open", merged_at: null },
@@ -75,13 +82,13 @@ describe("Worker end-to-end bounded-freshness cache", () => {
       expect(fetches).toBe(2);
 
       const audits = await env.DB.prepare(
-        "SELECT cache_status, requested_max_age FROM audit_events ORDER BY rowid",
+        "SELECT cache_status, requested_max_age, cache_miss_reason FROM audit_events ORDER BY rowid",
       ).all();
       expect(audits.results).toEqual([
-        { cache_status: "miss", requested_max_age: null },
-        { cache_status: "hit", requested_max_age: 30 },
-        { cache_status: "miss", requested_max_age: 0 },
-        { cache_status: "hit", requested_max_age: null },
+        { cache_status: "miss", requested_max_age: null, cache_miss_reason: "absent" },
+        { cache_status: "hit", requested_max_age: 30, cache_miss_reason: null },
+        { cache_status: "miss", requested_max_age: 0, cache_miss_reason: null },
+        { cache_status: "hit", requested_max_age: null, cache_miss_reason: null },
       ]);
     },
   );

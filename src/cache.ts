@@ -59,6 +59,9 @@ export type GitHubCacheRead = {
   source: "edge" | "shared";
 };
 
+export type CacheMissReason = "absent" | "expired" | "caller_max_age" | "unusable" | "uncacheable";
+export type CacheMissObserver = (reason: CacheMissReason) => void;
+
 export function githubCacheRevalidationHeaders(
   cached: CachedGitHubResponse,
 ): Record<string, string> | undefined {
@@ -159,8 +162,10 @@ export async function readGitHubCache(
   cacheKey: string,
   ctx?: ExecutionContext,
   maxAgeSeconds?: number,
+  onMiss?: CacheMissObserver,
 ): Promise<CachedGitHubResponse | undefined> {
-  return (await readGitHubCacheWithSource(env, cacheKey, ctx, maxAgeSeconds))?.cached;
+  return (await readGitHubCacheWithSource(env, cacheKey, ctx, maxAgeSeconds, false, onMiss))
+    ?.cached;
 }
 
 export async function readGitHubCacheWithSource(
@@ -169,17 +174,35 @@ export async function readGitHubCacheWithSource(
   ctx?: ExecutionContext,
   maxAgeSeconds?: number,
   sharedOnly = false,
+  onMiss?: CacheMissObserver,
 ): Promise<GitHubCacheRead | undefined> {
   if (maxAgeSeconds === 0) return undefined;
-  const edge = sharedOnly ? undefined : await readEdgeGitHubCache(cacheKey, maxAgeSeconds);
+  const edge = sharedOnly ? undefined : await readEdgeGitHubCache(cacheKey, maxAgeSeconds, onMiss);
   if (edge !== undefined) {
     return { cached: edge, source: "edge" };
   }
   const row = await env.DB.prepare(queries.readGitHubCache)
-    .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
-    .first<CacheRow>();
+    .bind(cacheKey)
+    .first<CacheRow & { publication_epoch: string }>();
+  if (row === null) {
+    onMiss?.("absent");
+    return undefined;
+  }
+  if (row.publication_epoch !== CACHE_PUBLICATION_EPOCH) {
+    onMiss?.("unusable");
+    return undefined;
+  }
   const cached = cacheRowResponse(row);
-  if (cached === undefined || !withinRequestedMaxAge(cached, maxAgeSeconds)) {
+  if (cached === undefined || !Number.isFinite(parseSQLiteTimestamp(row.expires_at))) {
+    onMiss?.("unusable");
+    return undefined;
+  }
+  if (!freshCachedResponse(cached)) {
+    onMiss?.("expired");
+    return undefined;
+  }
+  if (!withinRequestedMaxAge(cached, maxAgeSeconds)) {
+    onMiss?.("caller_max_age");
     return undefined;
   }
   if (ctx !== undefined) {
@@ -191,13 +214,22 @@ export async function readGitHubCacheWithSource(
 export async function readEdgeGitHubCache(
   cacheKey: string,
   maxAgeSeconds?: number,
+  onMiss?: CacheMissObserver,
 ): Promise<CachedGitHubResponse | undefined> {
   if (maxAgeSeconds === 0) return undefined;
   const edge = await readEdgeJSON<CachedGitHubResponse & { protocol_epoch: string }>(
     EDGE_CACHE_NAMESPACE,
     cacheKey,
   );
-  if (edge !== undefined && edge.protocol_epoch === CACHE_PUBLICATION_EPOCH) {
+  if (edge !== undefined) {
+    if (
+      edge.protocol_epoch !== CACHE_PUBLICATION_EPOCH ||
+      typeof edge.expires_at !== "string" ||
+      !Number.isFinite(parseSQLiteTimestamp(edge.expires_at))
+    ) {
+      onMiss?.("unusable");
+      return undefined;
+    }
     if (freshCachedResponse(edge)) {
       if (withinRequestedMaxAge(edge, maxAgeSeconds)) {
         const { protocol_epoch: _epoch, ...cached } = edge;
@@ -205,6 +237,9 @@ export async function readEdgeGitHubCache(
       }
       // Keep the still-fresh edge copy; another data center may have refilled
       // D1 more recently, so fall through instead of evicting.
+      onMiss?.("caller_max_age");
+    } else {
+      onMiss?.("expired");
     }
   }
   return undefined;
@@ -494,9 +529,7 @@ function freshTTLSeconds(
         ? TERMINAL_CI_TTL_SECONDS
         : 60;
     case "mutable_ci":
-      // A completed collection can acquire new checks or statuses without a
-      // new commit; its terminal status does not earn a longer TTL.
-      return 60;
+      return settledCITTLSeconds(route, response);
     case "job":
       return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "pr_state":
@@ -570,11 +603,65 @@ function ageScaledTTLSeconds(
   maximum: number,
 ): number {
   const updatedAt = isRecord(response?.body) ? response.body.updated_at : undefined;
+  return ageScaledTimestampTTLSeconds(updatedAt, minimum, maximum);
+}
+
+function ageScaledTimestampTTLSeconds(
+  updatedAt: unknown,
+  minimum: number,
+  maximum: number,
+): number {
   const updatedAtMs = typeof updatedAt === "string" ? Date.parse(updatedAt) : NaN;
   if (!Number.isFinite(updatedAtMs)) return minimum;
   // Re-runs, reopened PRs, and new edits remain possible; cap reuse even for old objects.
   const ageSeconds = (Date.now() - updatedAtMs) / 1_000;
   return Math.max(minimum, Math.min(maximum, Math.floor(ageSeconds * 0.1)));
+}
+
+function settledCITTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
+  const body = response?.body;
+  let items: unknown;
+  let checks = false;
+  switch (route.kind) {
+    case "commit_check_runs":
+    case "commit_check_runs_ref":
+      items = isRecord(body) ? body.check_runs : undefined;
+      checks = true;
+      break;
+    case "commit_check_suites":
+    case "commit_check_suites_ref":
+      items = isRecord(body) ? body.check_suites : undefined;
+      checks = true;
+      break;
+    case "commit_status":
+    case "commit_status_ref":
+      if (!isRecord(body) || !settledStatus(body.state)) return 60;
+      items = body.statuses;
+      break;
+    default:
+      items = body;
+  }
+  if (!Array.isArray(items) || items.length === 0) return 60;
+  let newest = -Infinity;
+  for (const item of items) {
+    if (!isRecord(item) || (checks ? item.status !== "completed" : !settledStatus(item.state)))
+      return 60;
+    const timestamps = [item.completed_at, item.updated_at].filter(
+      (value) => value !== undefined && value !== null,
+    );
+    if (timestamps.length === 0) return 60;
+    for (const timestamp of timestamps) {
+      const parsed = typeof timestamp === "string" ? Date.parse(timestamp) : NaN;
+      if (!Number.isFinite(parsed)) return 60;
+      newest = Math.max(newest, parsed);
+    }
+  }
+  // New checks and reruns remain possible for the same SHA, even after completion.
+  return ageScaledTimestampTTLSeconds(new Date(newest).toISOString(), 60, 300);
+}
+
+function settledStatus(state: unknown): boolean {
+  return state === "success" || state === "failure" || state === "error";
 }
 
 function closedIssue(response?: GitHubRelayResponse): boolean {

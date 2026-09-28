@@ -1,4 +1,5 @@
 import { cachedConfigLookup } from "./config-cache";
+import type { CacheMissReason } from "./cache";
 
 function uncachedLookup<T>(_key: string, load: () => Promise<T>): Promise<T> {
   return load();
@@ -93,6 +94,7 @@ export async function insertAudit(
     cacheable?: boolean;
     coalesced?: boolean;
     requestedMaxAge?: number | null;
+    cacheMissReason?: CacheMissReason | null;
   },
 ): Promise<void> {
   await env.DB.prepare(queries.insertAudit)
@@ -114,6 +116,7 @@ export async function insertAudit(
       event.cacheable === true ? 1 : 0,
       event.coalesced === true ? 1 : 0,
       event.requestedMaxAge ?? null,
+      event.cacheMissReason ?? null,
     )
     .run();
 }

@@ -1144,6 +1144,10 @@ describe("terminal Actions log cache", () => {
     expect(jobPageCalls(upstream)).toBe(1);
     expect(logBackendCalls(upstream)).toBe(1);
     expect(downloadCalls(upstream)).toBe(1);
+    expect(
+      (await env.DB.prepare("SELECT cache_miss_reason FROM audit_events ORDER BY rowid").all())
+        .results,
+    ).toEqual([{ cache_miss_reason: "absent" }, { cache_miss_reason: "expired" }]);
   });
 
   it("re-establishes fresh public proof before serving an R2 hit", async () => {

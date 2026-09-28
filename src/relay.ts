@@ -14,6 +14,7 @@ import {
 } from "./github-egress";
 import {
   type CachedGitHubResponse,
+  type CacheMissReason,
   githubCacheRevalidationHeaders,
   githubCacheKey,
   readGitHubCache,
@@ -137,6 +138,7 @@ type ActiveRelay = RelayBase & {
   firstCredentialError: IdentityCredentialError | undefined;
   cacheFill: OwnedCacheFill | undefined;
   cacheStatus: "miss" | "bypass";
+  cacheMissReason: CacheMissReason | null;
   cacheable: boolean;
   identity: Identity | undefined;
   paginatedIdentityRateRecorded: boolean;
@@ -315,6 +317,14 @@ async function prepareRelay(
     firstCredentialError: undefined,
     cacheFill: undefined,
     cacheStatus: cacheKey === undefined ? "bypass" : "miss",
+    cacheMissReason:
+      base.maxAgeSeconds !== 0 &&
+      route.cacheable &&
+      !cacheEnabled &&
+      (terminalLogJobID(base.request, route) === undefined ||
+        hasConditionalRequestHeaders(base.request))
+        ? "uncacheable"
+        : null,
     cacheable: cacheKey !== undefined,
     identity: undefined,
     paginatedIdentityRateRecorded: false,
@@ -335,7 +345,9 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
     !hasConditionalRequestHeaders(state.request)
   ) {
     const key = terminalLogCacheKey(state.request);
-    const cached = await readTerminalLogCache(state.env, key);
+    const cached = await readTerminalLogCache(state.env, key, (reason) =>
+      recordCacheMiss(state, reason),
+    );
     state.terminalLogCacheKey = key;
     state.terminalLogProofDeferred = cached === undefined;
     state.cacheStatus = "miss";
@@ -345,6 +357,7 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
       state.cacheable = true;
       await ensurePublicGitHubRepo(state.env, state.route, cached.created_at);
       if (terminalLogNeedsRevalidation(cached, state.maxAgeSeconds)) {
+        recordCacheMiss(state, terminalLogNeedsRevalidation(cached) ? "expired" : "caller_max_age");
         state.terminalLogCached = cached;
       } else {
         return serveCachedGitHubResponse(
@@ -450,14 +463,33 @@ async function readCacheEntry(
   cacheKey: string,
   identity: Identity | undefined,
 ): Promise<CachedGitHubResponse | undefined> {
-  const cached = await readGitHubCache(state.env, cacheKey, state.ctx, state.maxAgeSeconds);
+  const cached = await readRelayCache(state, cacheKey);
   if (
     cached === undefined ||
     !(await cachedResponseAvailable(state.env, state.request.pool, state.route, cached, identity))
   ) {
+    if (cached !== undefined) recordCacheMiss(state, "unusable");
     return undefined;
   }
   return cached;
+}
+
+function recordCacheMiss(state: ActiveRelay, reason: CacheMissReason): void {
+  if (state.maxAgeSeconds === 0) return;
+  // Prefer evidence of an existing rejected entry over absent optional/identity candidates.
+  const priority = { absent: 0, expired: 1, caller_max_age: 2, unusable: 3, uncacheable: 4 };
+  if (state.cacheMissReason === null || priority[reason] > priority[state.cacheMissReason]) {
+    state.cacheMissReason = reason;
+  }
+}
+
+function readRelayCache(
+  state: ActiveRelay,
+  key: string,
+): Promise<CachedGitHubResponse | undefined> {
+  return readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds, (reason) =>
+    recordCacheMiss(state, reason),
+  );
 }
 
 async function coalesceRelayCacheMiss(
@@ -468,9 +500,19 @@ async function coalesceRelayCacheMiss(
   }
   const fill = await coalesceGitHubCacheMiss(state.env, state.coordinator, state.cacheKey, {
     ctx: state.ctx,
+    onMiss: (reason) => recordCacheMiss(state, reason),
     ...(state.maxAgeSeconds === undefined ? {} : { maxAgeSeconds: state.maxAgeSeconds }),
-    acceptCached: (cached) =>
-      cachedResponseAvailable(state.env, state.request.pool, state.route, cached, state.identity),
+    acceptCached: async (cached) => {
+      const available = await cachedResponseAvailable(
+        state.env,
+        state.request.pool,
+        state.route,
+        cached,
+        state.identity,
+      );
+      if (!available) recordCacheMiss(state, "unusable");
+      return available;
+    },
   });
   state.cacheFill = fill.owner;
   return fill.cached;
@@ -1115,6 +1157,15 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     cacheStatus,
     cacheable: state.cacheable,
     requestedMaxAge: state.maxAgeSeconds ?? null,
+    cacheMissReason:
+      cacheStatus === "hit" || state.maxAgeSeconds === 0
+        ? null
+        : (state.cacheEnabled || state.terminalLogCacheKey !== undefined) &&
+            (!cacheResponseEligible(state.route.kind, clientResponse.status) ||
+              (isLandingGraphQLRoute(state.route) && !landingGraphQLCacheable(clientResponse)) ||
+              (state.route.kind === "graphql_read" && !graphQLReadCacheable(clientResponse)))
+          ? "uncacheable"
+          : state.cacheMissReason,
   };
   const background: Promise<unknown>[] = [];
   // Successful log downloads have already passed the response body cap. Keep
@@ -1122,7 +1173,12 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   if (state.terminalLogProofDeferred && clientResponse.status === 200) {
     state.deferredTerminalLog = async () => {
       const proven = await proveAndPublishTerminalLog(state, clientResponse);
-      await insertAudit(state.env, { ...audit, cacheable: proven });
+      await insertAudit(state.env, {
+        ...audit,
+        cacheable: proven,
+        cacheMissReason:
+          !proven && state.maxAgeSeconds !== 0 ? "uncacheable" : (audit.cacheMissReason ?? null),
+      });
     };
   } else {
     background.push(insertAudit(state.env, audit));
@@ -1266,6 +1322,7 @@ async function handleRelayError(
       cacheStatus: active?.cacheStatus ?? "unknown",
       cacheable: active?.cacheable ?? false,
       requestedMaxAge: base.maxAgeSeconds ?? null,
+      cacheMissReason: active?.cacheMissReason ?? null,
       ...(active?.identity === undefined ? {} : { identityId: active.identity.id }),
       ...(active?.identity === undefined ? {} : { backend: "github_identity" }),
     }),
@@ -1319,13 +1376,12 @@ async function readRawRunJobsCache(state: ActiveRelay): Promise<CachedGitHubResp
   const request = view.cacheRequest;
   const probe = async (identity?: Identity) => {
     const key = await githubCacheKey(request.pool, request, state.route, identity);
-    const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
-    if (
-      cached === undefined ||
-      !completeRawRunJobsPage(cached, view.limit) ||
-      !(await cachedResponseAvailable(state.env, request.pool, state.route, cached, identity))
-    )
+    const cached = await readCacheEntry(state, key, identity);
+    if (cached === undefined) return undefined;
+    if (!completeRawRunJobsPage(cached, view.limit)) {
+      recordCacheMiss(state, "unusable");
       return undefined;
+    }
     return { ...cached, headers: transformedGitHubHeaders(cached.headers) };
   };
   return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
@@ -1413,6 +1469,7 @@ async function readLargerRunListCache(
     const cached = await readCacheEntry(state, key, identity);
     if (cached === undefined) return undefined;
     const projected = projectLargerRunListPage(cached);
+    if (projected === undefined) recordCacheMiss(state, "unusable");
     return projected === undefined ? undefined : { ...cached, ...projected };
   };
   return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
@@ -1458,18 +1515,19 @@ async function serveExactRunListCache(
     const key = await githubCacheKey(request.pool, request, state.route, identity);
     const cached =
       cacheStatus === "hit"
-        ? await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds)
+        ? await readCacheEntry(state, key, identity)
         : await readStaleGitHubCache(state.env, key, state.route, state.maxAgeSeconds);
     if (
       cached === undefined ||
-      !(await cachedResponseAvailable(
-        state.env,
-        request.pool,
-        state.route,
-        cached,
-        identity,
-        cacheStatus === "stale",
-      ))
+      (cacheStatus === "stale" &&
+        !(await cachedResponseAvailable(
+          state.env,
+          request.pool,
+          state.route,
+          cached,
+          identity,
+          cacheStatus === "stale",
+        )))
     )
       return undefined;
     return { key, cached, identity };
@@ -1831,6 +1889,7 @@ async function serveFreshCachedRelayResponse(
   extras: { coalesced?: boolean } = {},
 ): Promise<Response> {
   if (!state.runListExactFallback && runListSupersetUnderfilled(cached, state.runListSuperset)) {
+    recordCacheMiss(state, "unusable");
     await switchToExactRunList(state);
     return executeRelay(state);
   }
@@ -1843,6 +1902,7 @@ async function serveFreshCachedRelayResponse(
 
 function rejectIncompleteRunJobs(state: ActiveRelay, response: GitHubRelayResponse): void {
   if (runJobsSupersetIncomplete(response, state.runJobsSuperset)) {
+    recordCacheMiss(state, "unusable");
     throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
       reason: "pagination_exhausted",
     });

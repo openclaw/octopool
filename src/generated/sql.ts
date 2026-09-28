@@ -82,9 +82,9 @@ export const queries = {
   listActivePublicIdentitiesForPool:
     "SELECT DISTINCT identities.id, identities.kind, identities.login, identities.secret_ref, identities.installation_id, identities.weight\nFROM identities\nJOIN identity_scopes ON identity_scopes.identity_id = identities.id\nWHERE identities.pool_id = ?1\n  AND identities.status = 'active'\n  AND identities.kind = 'pat'\n  AND identity_scopes.owner = '*'\n  AND identity_scopes.repo IS NULL",
   insertAudit:
-    "INSERT INTO audit_events\n  (request_id, caller_id, caller_token_id, client_name, pool_id, route_key, route_kind, identity_id, status,\n   error_code, fallback_reason, backend, duration_ms, cache_status, cacheable, coalesced, requested_max_age)\nVALUES (?1, ?2, (SELECT id FROM caller_tokens WHERE id = ?3), ?4, ?5, ?6, ?7, ?8,\n        ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+    "INSERT INTO audit_events\n  (request_id, caller_id, caller_token_id, client_name, pool_id, route_key, route_kind, identity_id, status,\n   error_code, fallback_reason, backend, duration_ms, cache_status, cacheable, coalesced, requested_max_age, cache_miss_reason)\nVALUES (?1, ?2, (SELECT id FROM caller_tokens WHERE id = ?3), ?4, ?5, ?6, ?7, ?8,\n        ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
   readGitHubCache:
-    "SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at\nFROM github_cache_entries\nWHERE cache_key = ?1\n  AND publication_epoch = ?2\n  AND expires_at > CURRENT_TIMESTAMP",
+    "SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind, created_at, expires_at, publication_epoch\nFROM github_cache_entries\nWHERE cache_key = ?1",
   readGitHubCacheAny:
     "SELECT status, response_headers_json, body_json, body_encoding, identity_id, identity_kind,\n       created_at, expires_at, stale_expires_at\nFROM github_cache_entries\nWHERE cache_key = ?1\n  AND publication_epoch = ?2\n  AND stale_expires_at > CURRENT_TIMESTAMP",
   readCompletedJobCacheProof:

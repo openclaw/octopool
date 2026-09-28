@@ -279,8 +279,30 @@ D1 schema lives in `migrations/`:
 - `0019_client_name_guards.sql` — schema guards for normalized client-name aliases.
 - `0020_cache_publication.sql` — committed publication ownership, body receipts, and isolated repository proofs.
 - `0021_audit_requested_max_age.sql` — nullable caller max-age in seconds on every audited relay request.
+- `0022_terminal_job_proof.sql` — index terminal-job completion proof lookups by pool and path.
+- `0023_audit_cache_miss_reason.sql` — nullable bounded cache-miss reason for cache-accepting relay reads.
 
 Apply with `wrangler d1 migrations apply DB` (add `--remote` for production).
+
+### Cache miss reason audit upgrade
+
+Apply `0023_audit_cache_miss_reason.sql` before or with the Worker deployment,
+completing it before the new Worker serves traffic: audit inserts require
+`audit_events.cache_miss_reason`. Existing rows remain `NULL`, and older Workers
+can continue inserting without the column. Keep this additive migration on rollback.
+No CLI upgrade, cache purge, or re-login is required. Settled CI collection TTLs
+change as entries are refilled. See [cache miss reasons](cache.md#cache-miss-audit-reasons)
+for the values and their precedence.
+
+```sql
+SELECT route_kind, cache_miss_reason, count(*) AS requests
+FROM audit_events
+WHERE created_at >= datetime('now', '-24 hours')
+  AND (requested_max_age IS NULL OR requested_max_age > 0)
+  AND cache_miss_reason IS NOT NULL
+GROUP BY route_kind, cache_miss_reason
+ORDER BY requests DESC;
+```
 
 ### Requested max-age audit upgrade
 

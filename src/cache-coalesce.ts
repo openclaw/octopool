@@ -4,6 +4,7 @@ import {
   readGitHubCacheWithSource,
   type CachedGitHubResponse,
   type GitHubCacheRead,
+  type CacheMissObserver,
 } from "./cache";
 import {
   acquireOwnedCacheFill,
@@ -18,6 +19,7 @@ export async function coalesceGitHubCacheMiss(
   options: {
     ctx?: ExecutionContext;
     maxAgeSeconds?: number;
+    onMiss?: CacheMissObserver;
     acceptCached?: (cached: CachedGitHubResponse) => Promise<boolean>;
     readShared?: () => Promise<GitHubCacheRead | undefined>;
     readEdge?: () => Promise<CachedGitHubResponse | undefined>;
@@ -25,8 +27,18 @@ export async function coalesceGitHubCacheMiss(
 ): Promise<{ owner?: OwnedCacheFill; cached?: CachedGitHubResponse }> {
   const readShared =
     options.readShared ??
-    (() => readGitHubCacheWithSource(env, cacheKey, options.ctx, options.maxAgeSeconds));
-  const readEdge = options.readEdge ?? (() => readEdgeGitHubCache(cacheKey, options.maxAgeSeconds));
+    (() =>
+      readGitHubCacheWithSource(
+        env,
+        cacheKey,
+        options.ctx,
+        options.maxAgeSeconds,
+        false,
+        options.onMiss,
+      ));
+  const readEdge =
+    options.readEdge ??
+    (() => readEdgeGitHubCache(cacheKey, options.maxAgeSeconds, options.onMiss));
   const accepted = options.acceptCached ?? (async () => true);
 
   for (;;) {
@@ -52,7 +64,14 @@ export async function coalesceGitHubCacheMiss(
     if (acquisition.kind === "completed" && acquisition.outcome === "shared") {
       cached = (
         await (options.readShared?.() ??
-          readGitHubCacheWithSource(env, cacheKey, options.ctx, options.maxAgeSeconds, true))
+          readGitHubCacheWithSource(
+            env,
+            cacheKey,
+            options.ctx,
+            options.maxAgeSeconds,
+            true,
+            options.onMiss,
+          ))
       )?.cached;
     } else if (acquisition.kind === "completed" && acquisition.outcome === "edge_only") {
       cached = await readEdge();

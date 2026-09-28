@@ -7,7 +7,7 @@ reduce load on pooled identities.
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
 `src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
-`0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`/`0022`.
+`0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`/`0022`/`0023`.
 
 ## Configuration lookups
 
@@ -407,8 +407,9 @@ Per route kind and response state (`cacheTTLSeconds`):
 - base workflow runs → 60s while active; completed runs → 10% of age since `updated_at`, clamped to 60s..10m;
   base job lists → 60s even when terminal, because reruns reuse the run ID;
   completed attempt-qualified run/job lists get 1h fresh plus up to 24h bounded stale fallback
-- checks, check suites, and commit statuses → 60s fresh plus up to 5m bounded stale fallback,
-  even when terminal: reruns and new statuses can change results for the same commit SHA
+- checks, check suites, and commit statuses → 60s fresh while active; settled collections →
+  10% of age since the newest item `completed_at`/`updated_at`, clamped to 60s..5m;
+  ref-named commit routes retain their 120s cap, and all retain up to 5m bounded stale fallback
 - run/workflow lists → 60s while active, 2m when every returned run is completed; lists
   remain mutable because new runs can appear
 - PR files with a validated state discriminator → 5m; PR commits, reviews,
@@ -435,6 +436,15 @@ bounded as above. Explicit caller maximum ages still constrain both fresh and st
 reuse; `max-age=0` requires upstream validation. CLI live-state PR fields and watch
 commands already request zero-age reads.
 
+Settled check-run/check-suite collections require every returned item to have status
+`completed`; status lists require terminal `success`, `failure`, or `error` states,
+and combined status also requires a terminal aggregate state. The newest supplied
+completion/update timestamp across every item determines age. Empty collections,
+missing item timestamps, invalid/non-string timestamps, and future timestamps retain
+60s. Reruns and late workflows can still add items to a completed collection, so fresh
+reuse never exceeds 5m (120s for ref-named commit routes). Existing entries acquire
+the new TTL only when refilled; live reads and stale windows are unchanged.
+
 REST issue state `closed` and page-derived `CLOSED` both receive the one-hour TTL;
 classification preserves cached bodies and raw response states.
 
@@ -442,6 +452,31 @@ Commit CI aggregate keys carry a server-owned policy generation, so existing hou
 entries cannot survive the shorter TTL rollout through edge, D1, revalidation, or stale
 fallback. Completed attempt-qualified runs/jobs and individual job IDs retain their longer
 retention. Ordinary reads remain bounded cache reads; use `OCTOPOOL_FRESH=1` for live evidence.
+
+### Cache miss audit reasons
+
+`audit_events.cache_miss_reason` explains why a cache-accepting read did not reuse a
+response. It is `NULL` for hits (including revalidated/coalesced hits), served stale
+responses, live `max-age=0` reads, non-cache routes, and failures before cache lookup.
+Historical rows also remain `NULL`. Conditional requests on otherwise cacheable
+routes are `uncacheable`.
+
+| Value            | Meaning                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `absent`         | No entry exists for the consulted cache key.                                                                                                                   |
+| `expired`        | An entry passed its fresh TTL and the request ultimately did not serve it as stale. R2 includes expired retention or the default one-hour revalidation window. |
+| `caller_max_age` | An entry is fresh by its TTL but older than the caller's positive maximum age.                                                                                 |
+| `unusable`       | A present entry is rejected for another reason, such as publication epoch, identity ownership, body decoding, or incomplete collection projection.             |
+| `uncacheable`    | The request or response cannot be cached (including logs without proven completion).                                                                           |
+
+Reasons come from the existing edge/D1/R2 lookups, without diagnostic D1 queries.
+Across consulted identity/canonical candidates, a present rejected entry takes
+precedence over an absent key; priority is `unusable`, `caller_max_age`, `expired`,
+then `absent`. A non-cacheable response takes precedence over lookup reasons. Keys
+for different epochs or representations are not scanned: if only a different key
+exists, the consulted key is `absent`. Publication ownership is enforced on writes;
+reads report only rejection evidence they actually observe. Storage failures without
+a classified lookup may remain `NULL`.
 
 ## Completed Actions log cache
 

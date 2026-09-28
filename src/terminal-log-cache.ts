@@ -1,4 +1,5 @@
 import { base64ToBytes } from "./encoding";
+import type { CacheMissObserver } from "./cache";
 import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
 import { queries } from "./generated/sql";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
@@ -141,10 +142,12 @@ export async function deleteTerminalLogCache(env: Env, key: string): Promise<voi
 export async function readTerminalLogCache(
   env: Env,
   key: string,
+  onMiss?: CacheMissObserver,
 ): Promise<CachedTerminalLog | undefined> {
   try {
     const object = await env.ACTIONS_LOGS.get(key);
     if (object === null) {
+      onMiss?.("absent");
       return undefined;
     }
     const createdAt = object.customMetadata?.[CREATED_AT_METADATA];
@@ -154,6 +157,7 @@ export async function readTerminalLogCache(
       !Number.isFinite(createdAtMs) ||
       Date.now() - createdAtMs >= LOG_TTL_SECONDS * 1000
     ) {
+      onMiss?.(Number.isFinite(createdAtMs) ? "expired" : "unusable");
       await object.body.cancel();
       try {
         await env.ACTIONS_LOGS.delete(key);
@@ -163,6 +167,7 @@ export async function readTerminalLogCache(
       return undefined;
     }
     if (object.customMetadata?.[BODY_CODEC_METADATA] !== BODY_CODEC) {
+      onMiss?.("unusable");
       // Reject legacy bytes before serving or existence-only renewal; replace only after download.
       await object.body.cancel();
       return undefined;
