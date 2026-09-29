@@ -10,6 +10,10 @@
 - Record why cache-accepting relay reads miss (`absent`, `expired`, `caller_max_age`, `unusable`, or `uncacheable`) in audit rows, including terminal job-log cache lookups, without extra D1 reads.
 - Scale settled check-run, check-suite, and commit-status collection freshness with the newest item timestamp from 60 to 300 seconds, preserving 120-second ref caps and live-read bounds.
 
+### Fixes
+
+- Run real `gh` with a stderr notice when Octopool is not logged in, instead of failing every shimmed command with `class=setup`; local string-rewrite rules still apply, broken saved logins still fail closed, and `OCTOPOOL_NO_FALLBACK=1` keeps the old refusal.
+
 ### Upgrade notes
 
 - Apply D1 migration `0024_run_list_items.sql` before or with the Worker deploy, before it serves traffic; run-list membership warms on publication without backfilling existing bodies. No CLI upgrade, cache purge, or re-login is required.

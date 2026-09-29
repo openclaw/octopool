@@ -1029,10 +1029,18 @@ Admin provisioning. Requires an admin token. See [Admin & provisioning](admin.md
 
 ## Outbound string rewrite protection
 
-Every protected `gh` command requires an Octopool login and a fresh authoritative policy
+While logged in, every protected `gh` command requires a fresh authoritative policy
 from `GET /v1/pools/<pool>/string-rewrites`. Each relay request and every final real-`gh`
 dispatch checks policy; a fallback cannot reuse approval for different arguments. There is
 no persistent policy cache, offline allowance, or fallback on authentication/policy errors.
+
+Without a saved login or `OCTOPOOL_TOKEN`, the shim prints
+`octopool: not logged in; using real gh without the relay or server string rewrite policy (run: octopool login)`
+to stderr and runs real `gh` directly. There is no server policy in that state; local rules
+still apply at the native boundary. `OCTOPOOL_NO_FALLBACK=1` keeps the missing login an
+error. A saved login that cannot be read, parsed, or bound to the target URL still fails
+closed with `class=setup`.
+
 Policy HTTP requests reject redirects and bound the response to 65,536 bytes. Guarded
 policy GETs retain the existing 30-second timeout for the first attempt. After a transient
 failure, they may retry at most twice, only while less than six seconds have elapsed since
@@ -1100,7 +1108,7 @@ The fixed `class` identifies the failing check, not its underlying cause:
 
 | Class                  | Meaning                                                                                                                                                                     |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `setup`                | Caller client setup failed, including saved-auth loading, missing login, or saved-token URL binding. No policy request occurred.                                            |
+| `setup`                | Caller client setup failed, including saved-auth loading or saved-token URL binding. No policy request occurred.                                                            |
 | `request`              | Policy URL, blank token, or HTTP request construction failed validation.                                                                                                    |
 | `transport`            | HTTP execution failed without a response, including DNS/network errors not classified below.                                                                                |
 | `timeout` / `canceled` | HTTP execution reported a deadline/network timeout or context cancellation, respectively.                                                                                   |

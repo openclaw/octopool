@@ -541,7 +541,7 @@ func TestShouldRunRealGH(t *testing.T) {
 		t.Fatal("fallback_local should run real gh")
 	}
 	if shouldRunRealGH(errOctopoolNotLoggedIn) {
-		t.Fatal("missing octopool login must fail closed")
+		t.Fatal("runGH owns the logged-out route before any relay error")
 	}
 	if shouldRunRealGH(assertAnError{}) {
 		t.Fatal("ordinary errors should not run real gh")

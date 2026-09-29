@@ -22,6 +22,11 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		return nil
 	}
 	if !rewriteBootstrapInvocation(args) {
+		if _, err := newGHRelayClient(); errors.Is(err, errOctopoolNotLoggedIn) {
+			// Without a login there is no relay or server policy. Local rules still
+			// guard the native child when prepareProtectedGH loads the policy.
+			return execRealGHAfterLocalFallback(ctx, args, stdout, stderr, err)
+		}
 		policy, err := currentStringRewritePolicy(ctx)
 		if err != nil {
 			return err

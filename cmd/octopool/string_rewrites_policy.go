@@ -223,6 +223,9 @@ func (client ghRelayClient) stringRewritePolicy(ctx context.Context) (stringRewr
 func currentStringRewritePolicy(ctx context.Context) (stringRewritePolicy, error) {
 	attempt := rewritePolicyAttempt{started: time.Now()}
 	client, err := newGHRelayClient()
+	if errors.Is(err, errOctopoolNotLoggedIn) {
+		return loadLocalStringRewritePolicy(attempt)
+	}
 	if err != nil {
 		return stringRewritePolicy{}, attempt.failure(rewritePolicySetup)
 	}

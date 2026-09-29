@@ -155,16 +155,9 @@ func TestStringRewritePolicyRedirectsAndTimeout(t *testing.T) {
 		}
 	}
 }
-func TestStringRewriteMissingLoginAndLocalFile(t *testing.T) {
-	_, calls := rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
+func TestStringRewriteLocalFile(t *testing.T) {
+	rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
 	capture := captureRewriteGH(t)
-	t.Setenv("OCTOPOOL_TOKEN", "")
-	if err := runGH(t.Context(), []string{"alias", "list"}, io.Discard, io.Discard); !errors.Is(err, errRewritePolicy) {
-		t.Fatalf("no-login error=%v", err)
-	}
-	if calls.Load() != 0 {
-		t.Fatal("missing login made a policy request")
-	}
 	t.Setenv("OCTOPOOL_TOKEN", "test-token")
 	if err := execRealGH(t.Context(), []string{"alias", "list"}, io.Discard, io.Discard); err != nil {
 		t.Fatal("absent optional default must preserve empty-policy behavior", err)
@@ -423,8 +416,60 @@ func useRewritePolicyTestTransport(t *testing.T, transport rewritePolicyTestTran
 	t.Cleanup(func() { http.DefaultTransport = original })
 }
 
+func TestLoggedOutGHUsesRealGH(t *testing.T) {
+	for _, scenario := range []string{"no rules", "local rules", "no fallback"} {
+		t.Run(scenario, func(t *testing.T) {
+			isolateTestConfig(t)
+			t.Setenv("OCTOPOOL_TOKEN", "")
+			t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
+			useRewritePolicyTestTransport(t, func(*http.Request) (*http.Response, error) {
+				t.Error("logged-out gh reached the network")
+				return nil, errors.New("unexpected request")
+			})
+			switch scenario {
+			case "local rules":
+				local := filepath.Join(t.TempDir(), "local.json")
+				if err := os.WriteFile(local, []byte(`{"schema_version":1,"rules":[{"pattern":"internal-model","replacement":"public"}]}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", local)
+			case "no fallback":
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			}
+			capture := captureRewriteGH(t)
+			var out, stderr bytes.Buffer
+			err := runGH(t.Context(), []string{"issue", "comment", "7", "--repo", "acme/repo", "--body", "ship internal-model"}, &out, &stderr)
+			if scenario == "no fallback" {
+				if !errors.Is(err, errOctopoolNotLoggedIn) {
+					t.Fatalf("err = %v", err)
+				}
+				if _, statErr := os.Stat(capture); !os.IsNotExist(statErr) {
+					t.Fatal("OCTOPOOL_NO_FALLBACK still dispatched real gh")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			notice := "octopool: not logged in; using real gh without the relay or server string rewrite policy (run: octopool login)\n"
+			if out.String() != "child stdout\n" || withoutGraphQLNotice(stderr.String()) != notice+"child stderr\n" {
+				t.Fatalf("stdout=%q stderr=%q", out.String(), stderr.String())
+			}
+			got := readRewriteCapture(t, capture)
+			if scenario == "local rules" {
+				// Active local rules still sanitize the body into a snapshot file.
+				if !rewriteCaptureHasContent(got, "ship public") {
+					t.Fatalf("local rules did not rewrite the body: %q %q", got.Args, got.Files)
+				}
+			} else if !slices.Contains(got.Args, "ship internal-model") {
+				t.Fatalf("real gh args = %q", got.Args)
+			}
+		})
+	}
+}
+
 func TestRewritePolicySetupDiagnostics(t *testing.T) {
-	for _, scenario := range []string{"missing login", "saved binding", "auth parse", "auth read"} {
+	for _, scenario := range []string{"saved binding", "auth parse", "auth read"} {
 		t.Run(scenario, func(t *testing.T) {
 			isolateTestConfig(t)
 			t.Setenv("OCTOPOOL_TOKEN", "")

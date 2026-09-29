@@ -68,7 +68,9 @@ func execRealGHAfterLocalFallback(
 	if envDefault("OCTOPOOL_NO_FALLBACK", "") != "" {
 		return reason
 	}
-	if !errors.Is(reason, errOctopoolNotLoggedIn) {
+	if errors.Is(reason, errOctopoolNotLoggedIn) {
+		fmt.Fprintln(stderr, "octopool: not logged in; using real gh without the relay or server string rewrite policy (run: octopool login)")
+	} else {
 		fmt.Fprintf(stderr, "octopool: %v; falling back to real gh\n", reason)
 	}
 	return execRealGH(ctx, args, stdout, stderr)

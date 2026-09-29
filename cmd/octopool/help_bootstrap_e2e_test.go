@@ -182,6 +182,18 @@ func assertBootstrapChild(t *testing.T, result cliResult, captures []rewriteCapt
 	}
 }
 
+// A logged-out CLI has no policy to guard with, so non-bootstrap shapes run real gh.
+func assertLoggedOutChild(t *testing.T, result cliResult, captures []rewriteCapture, args []string) {
+	t.Helper()
+	const notice = "octopool: not logged in; using real gh without the relay or server string rewrite policy (run: octopool login)\n"
+	if result.err != nil || result.stdout != "synthetic child stdout\n" || withoutGraphQLNotice(result.stderr) != notice+"synthetic child stderr\n" {
+		t.Errorf("logged-out gh did not run real gh: err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+	}
+	if len(captures) != 1 || !slices.Equal(captures[0].Args, args) {
+		t.Errorf("logged-out real gh dispatch mismatch: %+v; want %q", captures, args)
+	}
+}
+
 func assertBootstrapBlocked(t *testing.T, result cliResult, captures []rewriteCapture) {
 	t.Helper()
 	if result.err == nil || result.stdout != "" || len(captures) != 0 || !strings.Contains(result.stderr, "string rewrite") {
@@ -237,7 +249,11 @@ func TestCLIHelpBootstrap(t *testing.T) {
 								}
 								before := current.calls.Load()
 								result, captures := current.run(t, args, nil, false, 0)
-								assertBootstrapBlocked(t, result, captures)
+								if state == "missing-login" {
+									assertLoggedOutChild(t, result, captures, args)
+								} else {
+									assertBootstrapBlocked(t, result, captures)
+								}
 								want := int64(1)
 								if state == "missing-login" {
 									want = 0
@@ -294,6 +310,9 @@ func excludedBootstrapHelp() [][]string {
 
 func testBootstrapRootAndAuth(t *testing.T, bin, native string, shim bool) {
 	fixture := newBootstrapCLI(t, bin, native, "missing-login", shim)
+	// Near-miss shapes must not inherit the bootstrap exemption; prove that against
+	// an unavailable policy, since a logged-out CLI now runs real gh for them.
+	blocked := newBootstrapCLI(t, bin, native, "failed-401", shim)
 	for _, args := range [][]string{nil, {"--help"}, {"-h"}, {"help"}, {"--version"}, {"version"}, {"--help", "view"}, {"-h", "pr", "view"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			result, captures := fixture.run(t, args, nil, false, 0)
@@ -304,6 +323,7 @@ func testBootstrapRootAndAuth(t *testing.T, bin, native string, shim bool) {
 				}
 			} else if len(args) > 1 {
 				// Shim root-leading help goes directly to the final guard.
+				result, captures = blocked.run(t, args, nil, false, 0)
 				assertBootstrapBlocked(t, result, captures)
 			} else {
 				assertBootstrapChild(t, result, captures, args, 0)
@@ -343,7 +363,7 @@ func testBootstrapRootAndAuth(t *testing.T, bin, native string, shim bool) {
 	bad = append(bad, append(slices.Clone(viewer), "--silent"))
 	for _, args := range bad {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
-			result, captures := fixture.run(t, args, nil, false, 0)
+			result, captures := blocked.run(t, args, nil, false, 0)
 			assertBootstrapBlocked(t, result, captures)
 		})
 	}
