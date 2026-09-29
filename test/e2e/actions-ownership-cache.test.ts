@@ -346,7 +346,7 @@ async function seedLegacy(routePath: string) {
 
 async function expire(key: string) {
   await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
+    "UPDATE github_cache_entries SET expires_at = datetime('now', '-61 seconds'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
   )
     .bind(key)
     .run();

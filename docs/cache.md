@@ -4,7 +4,7 @@ Octopool owns a shared edge + D1 read-through cache for `gh` reads, and guards e
 route with a public-visibility check. Both keep private data out of the shared cache and
 reduce load on pooled identities.
 
-Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`,
+Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`, `src/cache-swr.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
 `src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
 `0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`/`0022`/`0023`.
@@ -430,7 +430,7 @@ attempt-pinned runs keep their fixed one-hour TTL. Ref-named route caps and stal
 fallback windows are unchanged: plain runs retain 5m of bounded outage fallback
 after fresh expiry, and PRs retain 1h.
 
-The caps bound ordinary fresh-cache reuse after a re-run to at most 10m and after a
+The caps bound fresh-cache reuse after a re-run to at most 10m and after a
 PR reopens to its computed TTL (at most 1h). Outage stale fallback remains separately
 bounded as above. Explicit caller maximum ages still constrain both fresh and stale
 reuse; `max-age=0` requires upstream validation. CLI live-state PR fields and watch
@@ -452,6 +452,46 @@ Commit CI aggregate keys carry a server-owned policy generation, so existing hou
 entries cannot survive the shorter TTL rollout through edge, D1, revalidation, or stale
 fallback. Completed attempt-qualified runs/jobs and individual job IDs retain their longer
 retention. Ordinary reads remain bounded cache reads; use `OCTOPOOL_FRESH=1` for live evidence.
+
+### Stale-while-revalidate for CI status
+
+A cache-accepting CI read **without an explicit `cache-control: max-age`** may reuse
+an entry expired by less than 60 seconds and schedule a refresh with `ctx.waitUntil`.
+This applies only to `run_view`, `run_jobs`, `run_list`, `workflow_run_list`,
+`commit_check_runs`, `commit_check_suites`, `commit_status`, `commit_statuses` (including
+each `_ref` variant), and `job_view`. It includes matching canonical and exact filtered
+run-list entries. Fresh entries are preferred. The retained D1 entry must pass the same
+publication-epoch, representation, active-identity, public-repository proof, and response
+integrity checks as a fresh hit; SWR does not revive expired retention or extend timestamps.
+Edge-only bodies that are no longer retained fall through to a normal miss.
+
+Such a read may observe CI state **up to its fresh TTL + 60 seconds old** during normal
+operation: an active run with a 60-second TTL can be almost 120 seconds old. Every explicit
+maximum age, including positive values and zero, disables SWR. Watch commands and live PR
+fields retain their live-read behavior. Beyond the SWR window, normal miss/revalidation
+applies; the separately bounded outage fallback described below still applies on failures.
+
+Refreshes reuse the normal token-free/identity selection, quota and cooldown feedback,
+string-rewrite protection, sanitization, size caps, and owned publication path. One renewable
+publication lease per canonical cache key coalesces refreshes across isolates, including
+transitions between shared and identity-specific body keys. Body fills also use nonblocking
+ownership acquisition: an existing foreground fill wins. Each isolate runs at most eight
+refreshes, with a 20-second deadline; excess work is skipped, and non-abortable storage
+continues to count until it settles. Refreshes never recursively schedule SWR.
+
+Because refreshes spend pooled quota, they try admission under the same authenticated
+caller/client key, with the configured concurrency limit reduced by one to reserve a slot
+for foreground work. They never queue for admission or turn the served stale response into
+an overload error. A configured limit of one disables refreshes. Busy ownership or admission,
+timeouts, and upstream failures leave the served response unaffected; unsuccessful fetches
+leave the old entry intact. Later reads can retry while still within the SWR window.
+
+SWR uses the existing `cache_status = stale`, with `fallback_reason = stale_while_revalidate`
+in the single client audit row and `relay.stale_reason` in the response. It retains
+`requested_max_age = NULL` and `cache_miss_reason = NULL`. Background work emits no second
+client audit row; failures are logged and identity quota feedback is still recorded. The
+CLI's existing “served from shared cache (stale)” notice remains accurate, including when
+refresh is skipped, so no CLI change is required.
 
 ### Cache miss audit reasons
 

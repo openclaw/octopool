@@ -1,4 +1,4 @@
-import type { PublicationOwner } from "./cache-publication";
+import { bodyPublicationResource, type PublicationOwner } from "./cache-publication";
 import { authenticateCaller } from "./auth";
 import { backendAdmissionStub } from "./backend-admission";
 import {
@@ -25,7 +25,8 @@ import {
 } from "./cache";
 import { coalesceGitHubCacheMiss } from "./cache-coalesce";
 import { cacheResponseEligible } from "./cache-policy";
-import type { CacheFillOutcome, OwnedCacheFill } from "./cache-fill";
+import { startOwnedCacheFill, type CacheFillOutcome, type OwnedCacheFill } from "./cache-fill";
+import { scheduleCacheRefresh, supportsStaleWhileRevalidate, withinSWRWindow } from "./cache-swr";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { callGitHub, callPublicGitHub, GitHubTransportError, probeGitHubLog } from "./github";
 import { githubToken, githubRepositoryToken, IdentityCredentialError } from "./github-auth";
@@ -130,6 +131,8 @@ type ActiveRelay = RelayBase & {
   terminalLogCached: CachedTerminalLog | undefined;
   terminalLogProofDeferred: boolean;
   deferredTerminalLog: (() => Promise<void>) | undefined;
+  deferredCacheRefresh: (() => void) | undefined;
+  background: boolean;
   cacheEnabled: boolean;
   sharedCacheKey: string | undefined;
   cacheKey: string | undefined;
@@ -266,6 +269,7 @@ async function relayGitHubRequest(
     });
     // Start outside the completed request's cancelled backend scope.
     if (active?.deferredTerminalLog !== undefined) ctx.waitUntil(active.deferredTerminalLog());
+    active?.deferredCacheRefresh?.();
     return response;
   } catch (error) {
     if (backend.signal.aborted && error === backend.signal.reason)
@@ -309,6 +313,8 @@ async function prepareRelay(
     terminalLogCached: undefined,
     terminalLogProofDeferred: false,
     deferredTerminalLog: undefined,
+    deferredCacheRefresh: undefined,
+    background: false,
     cacheEnabled,
     sharedCacheKey: cacheKey,
     cacheKey,
@@ -395,6 +401,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
       rethrowStringRewriteDenial(error);
     }
   }
+  const swr = await serveSWRRelayCache(state);
+  if (swr !== undefined) return swr;
   await admitBackendWork();
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
@@ -497,6 +505,16 @@ async function coalesceRelayCacheMiss(
 ): Promise<CachedGitHubResponse | undefined> {
   if (state.cacheKey === undefined) {
     return undefined;
+  }
+  if (state.background) {
+    const capability = await state.coordinator.tryAcquirePublication(
+      bodyPublicationResource(state.cacheKey),
+    );
+    if (capability === undefined) throw new Error("background cache fill already owned");
+    state.cacheFill = startOwnedCacheFill(state.coordinator, capability);
+    assertBackendWorkActive();
+    // An earlier fill may have completed between the initial read and ownership.
+    return readAvailableCache(state);
   }
   const fill = await coalesceGitHubCacheMiss(state.env, state.coordinator, state.cacheKey, {
     ctx: state.ctx,
@@ -1180,7 +1198,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
           !proven && state.maxAgeSeconds !== 0 ? "uncacheable" : (audit.cacheMissReason ?? null),
       });
     };
-  } else {
+  } else if (!state.background) {
     background.push(insertAudit(state.env, audit));
   }
   if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
@@ -1330,11 +1348,107 @@ async function handleRelayError(
   throw reported;
 }
 
+async function serveSWRRelayCache(state: ActiveRelay): Promise<Response | undefined> {
+  if (
+    state.background ||
+    !state.cacheEnabled ||
+    state.maxAgeSeconds !== undefined ||
+    !supportsStaleWhileRevalidate(state.route.kind)
+  )
+    return undefined;
+  const candidates = staleCacheCandidates(state).map((candidate) => ({
+    ...candidate,
+    exact: false,
+  }));
+  const view = state.runListSuperset;
+  if (
+    !state.runListExactFallback &&
+    view !== undefined &&
+    (view.branch !== undefined || view.status !== undefined)
+  ) {
+    const request = exactRunListRequest(state.request, state.route);
+    for (const identity of [
+      undefined,
+      ...state.attemptedIdentityCacheKeys.map((c) => c.identity),
+    ]) {
+      candidates.push({
+        cacheKey: await githubCacheKey(request.pool, request, state.route, identity),
+        ...(identity === undefined ? {} : { identity }),
+        exact: true,
+      });
+    }
+  }
+  for (const candidate of candidates) {
+    let cached: CachedGitHubResponse | undefined;
+    try {
+      cached = await readStaleGitHubCache(state.env, candidate.cacheKey, state.route);
+      if (
+        cached === undefined ||
+        !withinSWRWindow(cached.expires_at) ||
+        (!candidate.exact &&
+          !state.runListExactFallback &&
+          runListSupersetUnderfilled(cached, state.runListSuperset)) ||
+        !(await cachedResponseAvailable(
+          state.env,
+          state.request.pool,
+          state.route,
+          cached,
+          candidate.identity,
+        ))
+      )
+        continue;
+    } catch (error) {
+      rethrowStringRewriteDenial(error);
+      if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
+      // Optional stale lookups cannot prevent the ordinary foreground fill.
+      continue;
+    }
+    // Public proof can take time; never let that lookup extend the SWR bound.
+    if (!withinSWRWindow(cached.expires_at)) continue;
+    if (candidate.exact) await switchToExactRunList(state);
+    const response = await serveCachedGitHubResponse(
+      state.env,
+      state.ctx,
+      cachedResponseParams(state, cached, "stale", { staleReason: "stale_while_revalidate" }),
+    );
+    const refresh: ActiveRelay = {
+      ...state,
+      background: true,
+      cacheKey: state.sharedCacheKey,
+      identity: undefined,
+      cacheFill: undefined,
+      attemptedIdentityCacheKeys: [],
+      failedIdentityIds: new Set(),
+    };
+    state.deferredCacheRefresh = () =>
+      scheduleCacheRefresh(
+        state.env,
+        state.ctx,
+        state.coordinator,
+        state.request.pool,
+        state.sharedCacheKey!,
+        JSON.stringify([state.callerId, state.clientName]),
+        async () => {
+          try {
+            const result = await executeRelay(refresh);
+            const envelope = await result.json<{ status: number }>();
+            if (envelope.status < 200 || envelope.status >= 300)
+              throw new Error("background cache refresh upstream failed");
+          } finally {
+            await refresh.cacheFill?.fail();
+          }
+        },
+      );
+    return response;
+  }
+  return undefined;
+}
+
 async function serveStaleRelayCache(
   state: ActiveRelay,
   staleReason: string,
 ): Promise<Response | undefined> {
-  if (!staleFallbackReason(staleReason)) {
+  if (state.background || !staleFallbackReason(staleReason)) {
     return undefined;
   }
   for (const candidate of staleCacheCandidates(state)) {
@@ -1623,6 +1737,7 @@ function cachedResponseParams(
     started: state.started,
     maxAgeSeconds: state.maxAgeSeconds,
     cacheStatus,
+    background: state.background,
     ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
     ...(extras.coalesced === undefined ? {} : { coalesced: extras.coalesced }),
   };
@@ -1675,28 +1790,33 @@ async function serveCachedGitHubResponse(
     maxAgeSeconds: number | undefined;
     staleReason?: string;
     coalesced?: boolean;
+    background?: boolean;
   },
 ): Promise<Response> {
   assertBackendWorkActive();
   const sanitizedCached = sanitizeGitHubResponse(params.route, params.cached);
-  ctx.waitUntil(
-    insertAudit(env, {
-      requestId: params.requestId,
-      callerId: params.callerId,
-      callerTokenId: params.callerTokenId,
-      clientName: params.clientName,
-      pool: params.pool,
-      routeKey: params.route.routeKey,
-      routeKind: params.route.kind,
-      status: params.cached.status,
-      durationMs: Date.now() - params.started,
-      ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
-      cacheStatus: params.cacheStatus,
-      cacheable: true,
-      requestedMaxAge: params.maxAgeSeconds ?? null,
-      ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
-    }),
-  );
+  if (params.background !== true)
+    ctx.waitUntil(
+      insertAudit(env, {
+        requestId: params.requestId,
+        callerId: params.callerId,
+        callerTokenId: params.callerTokenId,
+        clientName: params.clientName,
+        pool: params.pool,
+        routeKey: params.route.routeKey,
+        routeKind: params.route.kind,
+        status: params.cached.status,
+        durationMs: Date.now() - params.started,
+        ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
+        cacheStatus: params.cacheStatus,
+        cacheable: true,
+        requestedMaxAge: params.maxAgeSeconds ?? null,
+        ...(params.staleReason === "stale_while_revalidate"
+          ? { fallbackReason: params.staleReason }
+          : {}),
+        ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
+      }),
+    );
   return jsonResponse({
     status: sanitizedCached.status,
     headers: sanitizedCached.headers,
@@ -2056,6 +2176,7 @@ async function serveFreshIdentityCache(
       state.route,
       identity,
     );
+    rememberIdentityCacheKey(state, cacheKey, identity);
     const cached = await readCacheEntry(state, cacheKey, identity);
     if (cached === undefined) {
       continue;

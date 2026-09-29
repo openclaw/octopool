@@ -78,8 +78,12 @@ describe("mutable commit CI cache", () => {
     );
 
     expect(await (await relay(path)).json()).toMatchObject({
+      body: result("completed"),
+      relay: { cache: "stale", stale_reason: "stale_while_revalidate" },
+    });
+    expect(await (await relay(path)).json()).toMatchObject({
       body: result("in_progress"),
-      relay: { cache: "miss" },
+      relay: { cache: "hit" },
     });
     expect(upstream).toHaveBeenCalledTimes(2);
     expect(

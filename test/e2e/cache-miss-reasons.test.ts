@@ -47,7 +47,7 @@ describe("relay cache miss reason audit", () => {
       "expires_at = datetime('now', '-10 minutes'), stale_expires_at = datetime('now', '-5 minutes')",
       undefined,
     ],
-    ["expired", "expires_at = datetime('now', '-1 second')", undefined],
+    ["expired", "expires_at = datetime('now', '-61 seconds')", undefined],
     ["caller_max_age", "created_at = datetime('now', '-30 seconds')", "max-age=10"],
     ["unusable", "publication_epoch = 'retired'", undefined],
     ["unusable", "body_json = '{'", undefined],

@@ -1327,7 +1327,7 @@ async function expireCacheEntry(routeKind: string): Promise<void> {
   await env.DB.prepare(
     `UPDATE github_cache_entries
      SET created_at = datetime('now', '-180 seconds'),
-         expires_at = datetime('now', '-1 second'),
+         expires_at = datetime('now', '-61 seconds'),
          stale_expires_at = datetime('now', '+1 hour')
      WHERE cache_key = ?`,
   )

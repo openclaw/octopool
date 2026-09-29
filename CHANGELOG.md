@@ -4,6 +4,7 @@
 
 ### Features
 
+- Serve CI status entries for up to 60 seconds past fresh expiry when no caller maximum age is set, with bounded, coalesced background refreshes that preserve foreground admission capacity and live-read behavior.
 - Record why cache-accepting relay reads miss (`absent`, `expired`, `caller_max_age`, `unusable`, or `uncacheable`) in audit rows, including terminal job-log cache lookups, without extra D1 reads.
 - Scale settled check-run, check-suite, and commit-status collection freshness with the newest item timestamp from 60 to 300 seconds, preserving 120-second ref caps and live-read bounds.
 
