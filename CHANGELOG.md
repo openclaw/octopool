@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9.2 - 2026-09-29
+
+**Highlights:** Raise relay cache reuse without weakening live reads: bounded stale-while-revalidate for CI status and PR reads, run views served from cached run lists, job pages shared across attempt-pinned and latest forms, age-scaled check freshness, and per-miss audit reasons to guide further tuning.
 
 ### Features
 
@@ -13,6 +15,7 @@
 
 ### Upgrade notes
 
+- The Worker changes and D1 migrations `0023`/`0024` are already deployed; this release changes no CLI behavior. `brew upgrade octopool` keeps the fleet on the current version.
 - Apply D1 migration `0024_run_list_items.sql` before or with the Worker deploy, before it serves traffic; run-list membership warms on publication without backfilling existing bodies. No CLI upgrade, cache purge, or re-login is required.
 - Apply D1 migration `0023_audit_cache_miss_reason.sql` before or with the Worker deploy, before it serves traffic; new audit inserts require the nullable column. No CLI upgrade, cache purge, or re-login is required.
 
