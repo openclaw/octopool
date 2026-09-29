@@ -75,6 +75,10 @@ import {
 import {
   completeRawRunJobsPage,
   completeRunJobsSuperset,
+  cachedLatestRunAttempt,
+  equivalentRunJobsRequests,
+  projectEquivalentRunJobs,
+  rawRunJobsAttemptLookup,
   RunJobsUnavailableError,
   filterRunJobsSuperset,
   rawRunJobsSupersetView,
@@ -406,6 +410,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   }
   const swr = await serveSWRRelayCache(state);
   if (swr !== undefined) return swr;
+  const equivalentJobs = await serveEquivalentRunJobsCache(state);
+  if (equivalentJobs !== undefined) return equivalentJobs;
   const listedRun = await readRunViewFromListCache(state);
   if (listedRun !== undefined)
     return serveFreshCachedRelayResponse(state, listedRun, { fallbackReason: "run_list_superset" });
@@ -1417,37 +1423,41 @@ async function serveSWRRelayCache(state: ActiveRelay): Promise<Response | undefi
       state.ctx,
       cachedResponseParams(state, cached, "stale", { staleReason: "stale_while_revalidate" }),
     );
-    const refresh: ActiveRelay = {
-      ...state,
-      background: true,
-      cacheKey: state.sharedCacheKey,
-      identity: undefined,
-      cacheFill: undefined,
-      attemptedIdentityCacheKeys: [],
-      failedIdentityIds: new Set(),
-    };
-    state.deferredCacheRefresh = () =>
-      scheduleCacheRefresh(
-        state.env,
-        state.ctx,
-        state.coordinator,
-        state.request.pool,
-        state.sharedCacheKey!,
-        JSON.stringify([state.callerId, state.clientName]),
-        async () => {
-          try {
-            const result = await executeRelay(refresh);
-            const envelope = await result.json<{ status: number }>();
-            if (envelope.status < 200 || envelope.status >= 300)
-              throw new Error("background cache refresh upstream failed");
-          } finally {
-            await refresh.cacheFill?.fail();
-          }
-        },
-      );
+    deferSWRRefresh(state);
     return response;
   }
   return undefined;
+}
+
+function deferSWRRefresh(state: ActiveRelay, source: ActiveRelay = state): void {
+  const refresh: ActiveRelay = {
+    ...source,
+    background: true,
+    cacheKey: source.sharedCacheKey,
+    identity: undefined,
+    cacheFill: undefined,
+    attemptedIdentityCacheKeys: [],
+    failedIdentityIds: new Set(),
+  };
+  state.deferredCacheRefresh = () =>
+    scheduleCacheRefresh(
+      state.env,
+      state.ctx,
+      state.coordinator,
+      state.request.pool,
+      source.sharedCacheKey!,
+      JSON.stringify([state.callerId, state.clientName]),
+      async () => {
+        try {
+          const result = await executeRelay(refresh);
+          const envelope = await result.json<{ status: number }>();
+          if (envelope.status < 200 || envelope.status >= 300)
+            throw new Error("background cache refresh upstream failed");
+        } finally {
+          await refresh.cacheFill?.fail();
+        }
+      },
+    );
 }
 
 async function serveStaleRelayCache(
@@ -1505,6 +1515,106 @@ async function readRawRunJobsCache(state: ActiveRelay): Promise<CachedGitHubResp
     return { ...cached, headers: transformedGitHubHeaders(cached.headers) };
   };
   return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
+}
+
+async function serveEquivalentRunJobsCache(state: ActiveRelay): Promise<Response | undefined> {
+  if (state.background || !state.cacheEnabled || state.maxAgeSeconds === 0) return undefined;
+  const lookup = rawRunJobsAttemptLookup(state.request, state.route);
+  if (lookup === undefined) return undefined;
+  const proofRequest = { ...state.request, path: lookup.runPath, query: {} };
+  const proofRoute = classifyRoute(proofRequest, state.policy);
+  const proof =
+    (await readOptionalCacheCandidates(
+      state.env,
+      state.request.pool,
+      proofRoute,
+      async (identity) => {
+        const key = await githubCacheKey(proofRequest.pool, proofRequest, proofRoute, identity);
+        const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
+        if (
+          cached === undefined ||
+          cachedLatestRunAttempt(cached, lookup) === undefined ||
+          !(await cachedResponseAvailable(
+            state.env,
+            proofRequest.pool,
+            proofRoute,
+            cached,
+            identity,
+          )) ||
+          !cachedResponseStillFresh(cached, state.maxAgeSeconds)
+        )
+          return undefined;
+        return cached;
+      },
+    )) ?? (await readRunViewFromListCache({ ...state, request: proofRequest, route: proofRoute }));
+  if (proof === undefined) return undefined;
+  const latest = cachedLatestRunAttempt(proof, lookup);
+  if (latest === undefined) return undefined;
+  const requests = equivalentRunJobsRequests(state.request, lookup, latest);
+  for (const cacheStatus of ["hit", "stale"] as const) {
+    if (cacheStatus === "stale" && state.maxAgeSeconds !== undefined) break;
+    for (const request of requests) {
+      const route = classifyRoute(request, state.policy);
+      const cached = await readOptionalCacheCandidates(
+        state.env,
+        request.pool,
+        route,
+        async (identity) => {
+          const key = await githubCacheKey(request.pool, request, route, identity);
+          const candidate =
+            cacheStatus === "hit"
+              ? await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds)
+              : await readStaleGitHubCache(state.env, key, route);
+          if (
+            candidate === undefined ||
+            (cacheStatus === "stale" && !withinSWRWindow(candidate.expires_at))
+          )
+            return undefined;
+          const projected = projectEquivalentRunJobs(
+            candidate,
+            request,
+            state.request,
+            lookup,
+            latest,
+            proof,
+          );
+          if (
+            projected === undefined ||
+            !(await cachedResponseAvailable(state.env, request.pool, route, candidate, identity)) ||
+            !cachedResponseStillFresh(proof, state.maxAgeSeconds) ||
+            !(cacheStatus === "hit"
+              ? cachedResponseStillFresh(candidate, state.maxAgeSeconds)
+              : withinSWRWindow(candidate.expires_at))
+          )
+            return undefined;
+          return projected;
+        },
+      );
+      if (cached === undefined) continue;
+      if (cacheStatus === "stale") {
+        const sharedCacheKey = await githubCacheKey(request.pool, request, route);
+        deferSWRRefresh(state, { ...state, request, cacheRequest: request, route, sharedCacheKey });
+      }
+      if (
+        !cachedResponseStillFresh(proof, state.maxAgeSeconds) ||
+        !(cacheStatus === "hit"
+          ? cachedResponseStillFresh(cached, state.maxAgeSeconds)
+          : withinSWRWindow(cached.expires_at))
+      ) {
+        state.deferredCacheRefresh = undefined;
+        continue;
+      }
+      return serveCachedGitHubResponse(
+        state.env,
+        state.ctx,
+        cachedResponseParams(state, cached, cacheStatus, {
+          fallbackReason: "run_jobs_superset",
+          ...(cacheStatus === "stale" ? { staleReason: "stale_while_revalidate" } : {}),
+        }),
+      );
+    }
+  }
+  return undefined;
 }
 
 async function readRunViewFromListCache(
@@ -1759,7 +1869,11 @@ function cachedResponseParams(
   state: ActiveRelay,
   cached: CachedGitHubResponse,
   cacheStatus: "hit" | "stale",
-  extras: { staleReason?: string; coalesced?: boolean; fallbackReason?: "run_list_superset" } = {},
+  extras: {
+    staleReason?: string;
+    coalesced?: boolean;
+    fallbackReason?: "run_list_superset" | "run_jobs_superset";
+  } = {},
 ): Parameters<typeof serveCachedGitHubResponse>[2] {
   rejectIncompleteRunJobs(state, cached);
   const clientResponse = filterRunJobsSuperset(
@@ -1834,7 +1948,7 @@ async function serveCachedGitHubResponse(
     staleReason?: string;
     coalesced?: boolean;
     background?: boolean;
-    fallbackReason?: "run_list_superset";
+    fallbackReason?: "run_list_superset" | "run_jobs_superset";
   },
 ): Promise<Response> {
   assertBackendWorkActive();

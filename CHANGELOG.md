@@ -4,6 +4,7 @@
 
 ### Features
 
+- Reuse raw latest-run and attempt-pinned job pages in both directions when fresh cached run metadata proves the latest attempt, preserving source freshness, bounded SWR, pagination, identity, and visibility checks; keep `filter=all` exact-key only.
 - Serve exact run views from fresh indexed REST run-list pages when the complete run object is present, preserving list freshness, caller age bounds, visibility, identity, and representation checks.
 - Extend the bounded 60-second stale-while-revalidate window to PR views/files, issue comment lists, and contents reads without an explicit maximum age; live reads remain unchanged.
 - Serve CI status entries for up to 60 seconds past fresh expiry when no caller maximum age is set, with bounded, coalesced background refreshes that preserve foreground admission capacity and live-read behavior.

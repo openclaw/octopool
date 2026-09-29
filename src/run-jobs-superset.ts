@@ -9,6 +9,7 @@ import {
   transformedGitHubHeaders,
 } from "./github-response";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
+import type { CachedGitHubResponse } from "./cache";
 
 const MAX_PAGE_SIZE = 100;
 const MAX_API_JOBS = 300;
@@ -40,7 +41,7 @@ export function rawRunJobsSupersetView(
   if (
     !validScalarQuery(query, new Set(["filter", "page", "per_page"])) ||
     !firstPageQuery(query) ||
-    (query.filter !== undefined && query.filter !== "latest" && query.filter !== "all")
+    (query.filter !== undefined && query.filter !== "latest")
   ) {
     return undefined;
   }
@@ -53,6 +54,149 @@ export function rawRunJobsSupersetView(
     },
     limit,
   };
+}
+
+export function rawRunJobsAttemptLookup(request: RelayRequest, route: RouteInfo) {
+  if (
+    route.kind !== "run_jobs" ||
+    request.headers?.["x-octopool-public-shape"] !== undefined ||
+    !defaultGitHubJSONAccept(request.headers?.accept)
+  )
+    return undefined;
+  const query = request.query ?? {};
+  const page = query.page ?? "1";
+  const size = boundedPageSize(query.per_page, { strict: true, defaultValue: DEFAULT_PAGE_SIZE });
+  const match =
+    /^(\/repos\/[^/]+\/[^/]+)\/actions\/runs\/([1-9][0-9]*)(?:\/attempts\/([1-9][0-9]*))?\/jobs$/.exec(
+      request.path,
+    );
+  if (
+    !validScalarQuery(query, new Set(["filter", "page", "per_page"])) ||
+    (query.filter !== undefined && query.filter !== "latest") ||
+    typeof page !== "string" ||
+    !/^[1-9][0-9]*$/.test(page) ||
+    size === undefined ||
+    match === null ||
+    !Number.isSafeInteger(Number(page) * size) ||
+    !Number.isSafeInteger(Number(match[2])) ||
+    (match[3] !== undefined && !Number.isSafeInteger(Number(match[3])))
+  )
+    return undefined;
+  return {
+    runPath: `${match[1]}/actions/runs/${match[2]}`,
+    runId: Number(match[2]),
+    attempt: match[3] === undefined ? undefined : Number(match[3]),
+    page: Number(page),
+    size,
+  };
+}
+
+export function cachedLatestRunAttempt(
+  cached: CachedGitHubResponse,
+  lookup: NonNullable<ReturnType<typeof rawRunJobsAttemptLookup>>,
+): number | undefined {
+  const run = cached.body;
+  return cached.status === 200 &&
+    cached.body_encoding === "json" &&
+    isRecord(run) &&
+    run.id === lookup.runId &&
+    typeof run.url === "string" &&
+    run.url.toLowerCase() === `https://api.github.com${lookup.runPath}`.toLowerCase() &&
+    Number.isSafeInteger(run.run_attempt) &&
+    Number(run.run_attempt) > 0
+    ? Number(run.run_attempt)
+    : undefined;
+}
+
+export function equivalentRunJobsRequests(
+  request: RelayRequest,
+  lookup: NonNullable<ReturnType<typeof rawRunJobsAttemptLookup>>,
+  latest: number,
+): RelayRequest[] {
+  if (lookup.attempt !== undefined && lookup.attempt !== latest) return [];
+  const path =
+    lookup.attempt === undefined
+      ? `${lookup.runPath}/attempts/${latest}/jobs`
+      : `${lookup.runPath}/jobs`;
+  // Attempt endpoints retain distinct omitted/explicit filter keys. Probe both
+  // exact representations without changing their normal fill keys.
+  return (lookup.attempt === undefined ? [undefined, "latest"] : [undefined]).map((filter) => ({
+    ...request,
+    path,
+    query: {
+      page: String(lookup.page),
+      per_page: String(lookup.size),
+      ...(filter === undefined ? {} : { filter }),
+    },
+  }));
+}
+
+export function projectEquivalentRunJobs(
+  cached: CachedGitHubResponse,
+  source: RelayRequest,
+  target: RelayRequest,
+  lookup: NonNullable<ReturnType<typeof rawRunJobsAttemptLookup>>,
+  latest: number,
+  proof: CachedGitHubResponse,
+): CachedGitHubResponse | undefined {
+  const body = cached.body;
+  if (
+    cached.status !== 200 ||
+    cached.body_encoding !== "json" ||
+    !isRecord(body) ||
+    !Array.isArray(body.jobs) ||
+    !Number.isSafeInteger(body.total_count) ||
+    Number(body.total_count) < 0 ||
+    body.jobs.length !==
+      Math.min(
+        lookup.size,
+        Math.max(0, Number(body.total_count) - (lookup.page - 1) * lookup.size),
+      ) ||
+    !body.jobs.every(
+      (job) => isRecord(job) && job.run_id === lookup.runId && job.run_attempt === latest,
+    ) ||
+    // Empty latest pages have no attempt fields. Second-resolution timestamps
+    // must establish strict ordering; equal timestamps are ambiguous.
+    (body.jobs.length === 0 &&
+      source.path === `${lookup.runPath}/jobs` &&
+      cached.created_at <= proof.created_at)
+  )
+    return undefined;
+  const headers = transformedGitHubHeaders(cached.headers);
+  const link = Object.entries(cached.headers).find(([key]) => key.toLowerCase() === "link")?.[1];
+  if (link !== undefined) {
+    const repository = isRecord(proof.body) ? proof.body.repository : undefined;
+    const numericPath =
+      isRecord(repository) && Number.isSafeInteger(repository.id) && Number(repository.id) > 0
+        ? source.path.replace(/^\/repos\/[^/]+\/[^/]+/, `/repositories/${repository.id}`)
+        : undefined;
+    let valid = true;
+    let links = 0;
+    headers.link = link.replace(/<([^>]+)>/g, (_match, address: string) => {
+      links++;
+      try {
+        const url = new URL(address);
+        if (
+          url.origin !== "https://api.github.com" ||
+          (url.pathname.toLowerCase() !== source.path.toLowerCase() && url.pathname !== numericPath)
+        ) {
+          valid = false;
+          return "";
+        }
+        url.pathname = target.path;
+        url.searchParams.delete("filter");
+        if (target.query?.filter === "latest") url.searchParams.set("filter", "latest");
+        return `<${url}>`;
+      } catch {
+        valid = false;
+        return "";
+      }
+    });
+    if (!valid || links === 0) return undefined;
+  }
+  if (Number(body.total_count) > lookup.page * lookup.size !== hasNextJobsPage(cached))
+    return undefined;
+  return { ...cached, headers };
 }
 
 export function completeRawRunJobsPage(response: GitHubRelayResponse, limit: number): boolean {

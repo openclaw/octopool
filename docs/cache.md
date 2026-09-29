@@ -6,7 +6,7 @@ reduce load on pooled identities.
 
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`, `src/cache-swr.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
-`src/run-list-superset.ts`, `src/run-view-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
+`src/run-list-superset.ts`, `src/run-view-superset.ts`, `src/run-jobs-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
 `0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`/`0022`/`0023`/`0024`.
 
 ## Configuration lookups
@@ -492,7 +492,8 @@ in the single client audit row and `relay.stale_reason` in the response. It reta
 `requested_max_age = NULL` and `cache_miss_reason = NULL`. Background work emits no second
 client audit row; failures are logged and identity quota feedback is still recorded. The
 CLI's existing “served from shared cache (stale)” notice remains accurate, including when
-refresh is skipped, so no CLI change is required.
+refresh is skipped, so no CLI change is required. Cross-form raw jobs reuse instead records
+`fallback_reason = run_jobs_superset`, retaining the same stale status and response reason.
 
 ### Cache miss audit reasons
 
@@ -816,7 +817,7 @@ the native defaults, explicit safe-integer boundary, lazy names and whole-comman
 
 Raw default-JSON first-page jobs requests with a smaller page size can reuse a fresh
 raw `per_page=100` entry for the same path and equivalent filter (omitted and `latest`
-are equivalent on the base jobs endpoint). Its `total_count` must equal
+are equivalent on the base jobs endpoint; `filter=all` stays exact-key only). Its `total_count` must equal
 the jobs array length, the entire array must fit the requested page, and it must have no
 `Link` header. This includes empty lists. Octopool returns the complete REST body unchanged,
 including extra fields, while omitting source representation validators and lengths.
@@ -829,6 +830,46 @@ public visibility, and positive maximum-age bounds still apply. Shaped responses
 custom media, later pages, unsupported queries, conditionals, and forced-live requests
 retain their existing paths. Lookup failures fall through to the exact request;
 policy and visibility denials still propagate.
+
+### Raw latest-attempt jobs equivalence
+
+Raw default-JSON `/actions/runs/{id}/jobs` with omitted or `filter=latest` can reuse
+`/actions/runs/{id}/attempts/{n}/jobs`, and vice versa, for the same page and page size,
+including later pages. The latest attempt must first be proven by a fresh cached plain
+REST run view, or a complete run object from an indexed fresh REST run-list page.
+The proof must identify the exact repository/run and a positive safe-integer `run_attempt`.
+Attempt-qualified run views, stale proofs, public-page shapes, or job fields alone never
+prove which attempt is latest. A requested non-latest attempt keeps its exact path.
+
+Every job in the reused page must carry the proven `run_attempt` and matching `run_id`;
+the array length must agree with `total_count`, page, and page size. Mixed-attempt pages
+and incomplete pagination are refused. An empty plain page must have a creation timestamp
+strictly later than the proof, since it has no job fields to establish its attempt; equal
+second-resolution timestamps are ambiguous and cannot supply that ordering. Source pagination
+links must name its exact GitHub API endpoint (named repository, or the numeric repository
+ID from the same cached run proof); they are rewritten to the target endpoint
+and filter while retaining page navigation. Source validators and lengths are removed;
+the entire JSON body, extra fields, identity, creation time, and expiry are preserved.
+
+Lookups use exact keys for the run view and opposite jobs endpoint (at most two filter
+variants per eligible identity), or the existing indexed run-list lookup capped at eight
+pages. No bodies are scanned, no cold proof/job request is fetched, and no alias is
+published. All candidates retain normal pool, API version, representation, publication
+epoch, active-identity, and public-visibility checks. Proof and jobs freshness are checked
+again after these checks. Lookup failures retain the normal exact fill; policy and
+visibility denials propagate.
+
+The jobs entry's own fresh TTL remains authoritative, including the existing one-hour
+completed-attempt rule. Source jobs expired by less than 60 seconds may serve through SWR
+only without an explicit maximum age, while the latest-attempt proof must still be fresh.
+The background refresh targets the source's normal cache key and publication owner.
+Positive maximum ages bound both proof and jobs; `max-age=0`, conditionals, unsupported
+queries, shaped/custom-media requests, and `filter=all` do not cross-serve.
+Hits and SWR reuse audit `fallback_reason = run_jobs_superset` with a null miss reason.
+
+Cross-form reuse does not slice arbitrary smaller pages: the pre-existing raw larger-page
+helper only supports a complete collection that already fits the requested first page,
+on the same endpoint. No new migration, CLI upgrade, or cache purge is required.
 
 ## Cache-hit integrity
 

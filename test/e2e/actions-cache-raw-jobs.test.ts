@@ -47,7 +47,7 @@ describe("complete raw jobs page reuse", () => {
     { scenario: "attempt-qualified source", expected: "hit", attempt: true },
     { scenario: "completed attempt source", expected: "hit", attempt: true },
     { scenario: "same latest filter", expected: "hit", filter: "latest" },
-    { scenario: "same all filter", expected: "hit", filter: "all" },
+    { scenario: "same all filter", expected: "miss", filter: "all" },
     { scenario: "complete empty source", expected: "hit" },
     { scenario: "changed filter", expected: "miss", filter: "latest" },
     { scenario: "different attempt", expected: "miss", attempt: true },
