@@ -661,7 +661,7 @@ describe("Worker end-to-end relay", () => {
     expect(cacheRow).toMatchObject({ identity_id: null });
     await env.DB.prepare(
       `UPDATE github_cache_entries
-       SET expires_at = datetime('now', '-1 second'),
+       SET expires_at = datetime('now', '-61 seconds'),
            stale_expires_at = datetime('now', '+1 hour')
        WHERE cache_key = ?`,
     )

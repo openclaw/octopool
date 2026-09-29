@@ -82,6 +82,52 @@ async function audits() {
 }
 
 describe("CI stale-while-revalidate", () => {
+  const addedRoutes = [
+    `${repo}/pulls/42/files`,
+    `${repo}/issues/42/comments`,
+    `${repo}/issues/comments`,
+    `${repo}/pulls/42`,
+    `${repo}/contents/README.md`,
+  ];
+
+  it.each(addedRoutes)("serves and refreshes SWR for %s", async (route) => {
+    const upstream = await setup();
+    await relay(route);
+    await expire();
+    upstream.mockClear();
+    expect(await (await relay(route)).json()).toMatchObject({
+      relay: { cache: "stale", stale_reason: "stale_while_revalidate" },
+    });
+    expect(upstream).toHaveBeenCalledOnce();
+    expect((await audits()).at(-1)).toMatchObject({
+      cache_status: "stale",
+      fallback_reason: "stale_while_revalidate",
+      requested_max_age: null,
+    });
+    expect(await (await relay(route)).json()).toMatchObject({ relay: { cache: "hit" } });
+  });
+
+  it.each(addedRoutes.flatMap((route) => [0, 300].map((age) => ({ route, age }))))(
+    "never serves SWR for $route with explicit max-age=$age",
+    async ({ route, age }) => {
+      const upstream = await setup();
+      await relay(route);
+      await expire();
+      upstream.mockClear();
+      expect(
+        await (
+          await relay(route, undefined, { headers: { "cache-control": `max-age=${age}` } })
+        ).json(),
+      ).toMatchObject({ relay: { cache: "miss" } });
+      expect(upstream).toHaveBeenCalledOnce();
+      expect((await audits()).at(-1)).toMatchObject({
+        cache_status: "miss",
+        fallback_reason: null,
+        requested_max_age: age,
+      });
+    },
+  );
+
   it.each([false, true])(
     "serves stale before the %s identity refresh finishes, coalesces concurrent reads, and publishes a fresh hit",
     async (identity) => {

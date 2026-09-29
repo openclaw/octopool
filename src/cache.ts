@@ -20,6 +20,7 @@ import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
 import { graphQLReadCacheable, stableGraphQLVariables } from "./graphql-read";
 import { isRecord } from "./object";
+import { exactRunListQuery } from "./run-view-superset";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import { isIssueEventRoute } from "./route-manifest";
 import type { CacheFillOutcome } from "./cache-fill";
@@ -209,6 +210,41 @@ export async function readGitHubCacheWithSource(
     ctx.waitUntil(writeEdgeCachedResponse(cacheKey, cached));
   }
   return { cached, source: "shared" };
+}
+
+export async function readRunListCacheCandidates(
+  env: Env,
+  request: RelayRequest,
+  repoPath: string,
+  runId: number,
+  maxAgeSeconds?: number,
+): Promise<CachedGitHubResponse[]> {
+  if (maxAgeSeconds === 0) return [];
+  const rows = await env.DB.prepare(queries.readRunListCacheCandidates)
+    .bind(
+      request.pool,
+      repoPath,
+      runId,
+      CACHE_PUBLICATION_EPOCH,
+      JSON.stringify(stableRecord(cacheVaryHeaders(request.headers))),
+    )
+    .all<CacheRow & { query_json: string }>();
+  return rows.results.flatMap((row) => {
+    if (!exactRunListQuery(row.query_json)) return [];
+    const cached = cacheRowResponse(row);
+    return cached !== undefined &&
+      freshCachedResponse(cached) &&
+      withinRequestedMaxAge(cached, maxAgeSeconds)
+      ? [cached]
+      : [];
+  });
+}
+
+export function cachedResponseStillFresh(
+  cached: CachedGitHubResponse,
+  maxAgeSeconds?: number,
+): boolean {
+  return freshCachedResponse(cached) && withinRequestedMaxAge(cached, maxAgeSeconds);
 }
 
 export async function readEdgeGitHubCache(

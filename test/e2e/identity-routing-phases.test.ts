@@ -37,7 +37,7 @@ async function warmExpiredDiff() {
   }>();
   for (const row of rows.results) await deleteEdgeJSON("github-publication-v1", row.cache_key);
   await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second')",
+    "UPDATE github_cache_entries SET expires_at = datetime('now', '-61 seconds')",
   ).run();
 }
 async function expectNoFills() {

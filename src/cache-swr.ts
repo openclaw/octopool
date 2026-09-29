@@ -23,6 +23,11 @@ export function supportsStaleWhileRevalidate(kind: RouteKind): boolean {
     case "commit_statuses":
     case "commit_statuses_ref":
     case "job_view":
+    case "pr_files":
+    case "issue_comments":
+    case "issue_comment_list":
+    case "pr_view":
+    case "contents":
       return true;
     default:
       return false;

@@ -30,13 +30,13 @@ it.each<RouteKind>([
   "commit_statuses",
   "commit_statuses_ref",
   "job_view",
+  "pr_files",
+  "issue_comments",
+  "issue_comment_list",
+  "pr_view",
+  "contents",
 ])("permits SWR for %s", (kind) => expect(supportsStaleWhileRevalidate(kind)).toBe(true));
 
-it.each<RouteKind>([
-  "pr_view",
-  "issue_comments",
-  "pr_files",
-  "graphql_read",
-  "job_logs",
-  "ref_statuses",
-])("excludes %s from SWR", (kind) => expect(supportsStaleWhileRevalidate(kind)).toBe(false));
+it.each<RouteKind>(["graphql_read", "job_logs", "ref_statuses"])("excludes %s from SWR", (kind) =>
+  expect(supportsStaleWhileRevalidate(kind)).toBe(false),
+);

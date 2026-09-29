@@ -101,6 +101,19 @@ WHERE pool_id = ?1 AND path = ?2 AND publication_epoch = ?3
   AND CASE WHEN json_valid(body_json) THEN CAST(json_extract(body_json, '$.id') AS TEXT) END = ?4
 LIMIT 1;
 
+-- name: ReadRunListCacheCandidates :many
+SELECT c.status, c.response_headers_json, c.body_json, c.body_encoding,
+       c.identity_id, c.identity_kind, c.created_at, c.expires_at, c.query_json
+FROM github_run_list_items AS i INDEXED BY idx_github_run_list_item_lookup
+JOIN github_cache_entries AS c ON c.cache_key = i.cache_key
+WHERE i.pool_id = ?1 AND i.repo_path = ?2 AND i.run_id = ?3
+  AND c.pool_id = ?1 AND c.publication_epoch = ?4 AND c.headers_json = ?5
+  AND c.method = 'GET' AND c.route_kind IN ('run_list', 'workflow_run_list')
+  AND c.status = 200 AND c.body_encoding = 'json'
+  AND c.expires_at > strftime('%Y-%m-%d %H:%M:%f', 'now')
+ORDER BY c.created_at DESC, c.cache_key
+LIMIT 8;
+
 -- name: WriteGitHubCache :one
 INSERT INTO github_cache_entries
   (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,

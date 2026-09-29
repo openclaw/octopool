@@ -4,12 +4,15 @@
 
 ### Features
 
+- Serve exact run views from fresh indexed REST run-list pages when the complete run object is present, preserving list freshness, caller age bounds, visibility, identity, and representation checks.
+- Extend the bounded 60-second stale-while-revalidate window to PR views/files, issue comment lists, and contents reads without an explicit maximum age; live reads remain unchanged.
 - Serve CI status entries for up to 60 seconds past fresh expiry when no caller maximum age is set, with bounded, coalesced background refreshes that preserve foreground admission capacity and live-read behavior.
 - Record why cache-accepting relay reads miss (`absent`, `expired`, `caller_max_age`, `unusable`, or `uncacheable`) in audit rows, including terminal job-log cache lookups, without extra D1 reads.
 - Scale settled check-run, check-suite, and commit-status collection freshness with the newest item timestamp from 60 to 300 seconds, preserving 120-second ref caps and live-read bounds.
 
 ### Upgrade notes
 
+- Apply D1 migration `0024_run_list_items.sql` before or with the Worker deploy, before it serves traffic; run-list membership warms on publication without backfilling existing bodies. No CLI upgrade, cache purge, or re-login is required.
 - Apply D1 migration `0023_audit_cache_miss_reason.sql` before or with the Worker deploy, before it serves traffic; new audit inserts require the nullable column. No CLI upgrade, cache purge, or re-login is required.
 
 ## 0.9.1 - 2026-09-28

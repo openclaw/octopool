@@ -6,8 +6,8 @@ reduce load on pooled identities.
 
 Source: `src/cache.ts`, `src/cache-policy.ts`, `src/cache-coalesce.ts`, `src/cache-swr.ts`,
 `src/edge-cache.ts`, `src/public-repos.ts`, `src/pr-state.ts`,
-`src/run-list-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
-`0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`/`0022`/`0023`.
+`src/run-list-superset.ts`, `src/run-view-superset.ts`, `src/terminal-log-cache.ts`, `src/maintenance.ts`, migrations
+`0002`/`0003`/`0006`/`0011`/`0013`/`0020`/`0021`/`0022`/`0023`/`0024`.
 
 ## Configuration lookups
 
@@ -453,19 +453,20 @@ entries cannot survive the shorter TTL rollout through edge, D1, revalidation, o
 fallback. Completed attempt-qualified runs/jobs and individual job IDs retain their longer
 retention. Ordinary reads remain bounded cache reads; use `OCTOPOOL_FRESH=1` for live evidence.
 
-### Stale-while-revalidate for CI status
+### Stale-while-revalidate
 
-A cache-accepting CI read **without an explicit `cache-control: max-age`** may reuse
+A supported cache-accepting read **without an explicit `cache-control: max-age`** may reuse
 an entry expired by less than 60 seconds and schedule a refresh with `ctx.waitUntil`.
 This applies only to `run_view`, `run_jobs`, `run_list`, `workflow_run_list`,
 `commit_check_runs`, `commit_check_suites`, `commit_status`, `commit_statuses` (including
-each `_ref` variant), and `job_view`. It includes matching canonical and exact filtered
+each `_ref` variant), `job_view`, `pr_files`, `issue_comments`, `issue_comment_list`,
+`pr_view`, and `contents`. It includes matching canonical and exact filtered
 run-list entries. Fresh entries are preferred. The retained D1 entry must pass the same
 publication-epoch, representation, active-identity, public-repository proof, and response
 integrity checks as a fresh hit; SWR does not revive expired retention or extend timestamps.
 Edge-only bodies that are no longer retained fall through to a normal miss.
 
-Such a read may observe CI state **up to its fresh TTL + 60 seconds old** during normal
+Such a read may observe state **up to its fresh TTL + 60 seconds old** during normal
 operation: an active run with a 60-second TTL can be almost 120 seconds old. Every explicit
 maximum age, including positive values and zero, disables SWR. Watch commands and live PR
 fields retain their live-read behavior. Beyond the SWR window, normal miss/revalidation
@@ -714,6 +715,56 @@ empty or partial success: the relay uses an eligible exact stale entry or retain
 normal typed failure. Both cache paths keep the existing identity, public-visibility,
 retention and explicit maximum-age checks; `max-age=0` still requires upstream validation.
 
+## Exact run views from cached REST lists
+
+After exact shared/identity hits and eligible SWR entries are exhausted, a plain
+`GET /repos/:owner/:repo/actions/runs/:id` can reuse one complete run object from a
+fresh cached repository or workflow run-list page. The source page must contain
+exactly one matching numeric ID and its run URL must identify the requested repo/run.
+The response preserves the entire sanitized object, including extra fields; it does
+not reconstruct missing values. List validators, lengths, and pagination headers are
+removed. The source timestamps and fresh TTL remain authoritative, including a second
+age/expiry check after public-proof verification. No run-view alias is published.
+
+GitHub's [workflow-run REST documentation](https://docs.github.com/en/rest/actions/workflow-runs)
+and [OpenAPI description](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.json)
+give both list item types and the single view the same `workflow-run` schema. The
+documentation examples omit `referenced_workflows` and `previous_attempt_url` from
+lists, so those examples alone do **not** prove equality. A field-for-field comparison
+on 2026-09-29 UTC of completed `openclaw/octopool` run `36512885551` found all 35 fields
+and values equal between its single view, repository list, and workflow `321064621`
+list filtered by branch, status, event, and head SHA. This includes `triggering_actor`,
+`display_title`, `path`, `run_started_at`, `previous_attempt_url`, `referenced_workflows`,
+and all `check_suite_*` fields. Existing public-page summary fixtures are projections
+and cannot supply this exact REST shape. Tests cover the complete shape, sanitizer
+equivalence, preserved extra fields, and rejection of every missing field.
+
+Reuse requires all 35 observed/schema fields, even optional ones. Incomplete lists
+fall through to the ordinary view fetch. Only unshaped default-JSON responses qualify;
+API-version and normalized media variants must match. Scalar actor, branch, event,
+status, created, check-suite, head-SHA, and pagination filters preserve run objects.
+`exclude_pull_requests=true`, repeated/unknown parameters, and summary projections
+cannot supply a view. An explicit `exclude_pull_requests=false` is allowed. View queries,
+attempt-pinned views, conditional requests, live `max-age=0`, and background refreshes
+retain their existing paths. Positive maximum ages constrain the source list's age.
+Pool, publication epoch, current source-identity eligibility, and public-repository
+proof checks are the same as for exact hits.
+
+Migration `0024_run_list_items.sql` adds `github_run_list_items`, indexed by pool,
+repository path, and run ID. Insert/update triggers maintain membership in the same
+guarded transaction as body publication: at most one insert per unique run in a page,
+with no membership writes for pages over 100 runs or shaped lists. Replacements remove
+the old page's memberships, and normal cache deletion cascades to its index rows.
+Rejected publications cannot change membership. Existing bodies are not scanned or
+backfilled; the index warms as pages are republished. Edge-only bodies are not indexed.
+One indexed query selects at most eight fresh matching pages, newest first; candidates
+that fail shape, query, identity, or proof checks never become hits. There is no
+full-table body scan, cold list fetch, or source lifetime extension. A successful reuse
+audits `cache_status = hit`, `fallback_reason = run_list_superset`, and a null miss reason.
+
+Apply migration `0024` before or with the Worker deployment, before it serves traffic.
+No CLI upgrade, cache purge, or re-login is required.
+
 ## Actions attempt job-list superset
 
 Shaped human `gh run view` and `gh run watch` reads resolve the run's current positive
@@ -955,6 +1006,7 @@ hard `404`/private response always denies.
   key/kind, status, response headers JSON, body JSON, body encoding, source identity,
   created/fresh/stale expiration timestamps and internal publication receipt (migrations `0002`, `0011`, `0020`).
 - `cache_publication_owners` — live/abandoned capabilities, global AUTOINCREMENT fence, unique epoch/resource, indexed D1-clock expiry (`0020`); retain its `sqlite_sequence`.
+- `github_run_list_items` — bounded REST run-list membership, atomically maintained with body publication and indexed by pool/repo/run (`0024`).
 - `github_public_repo_proofs` — epoch-isolated positive/negative evidence, immutable timestamps and internal publication receipt (`0020`). Legacy `github_public_repos` is ignored by new readers.
 - `github_pr_state_proofs` — short-lived validated PR head/state discriminators for
   state-scoped PR subresource cache keys (migration `0006`).

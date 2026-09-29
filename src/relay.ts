@@ -18,6 +18,8 @@ import {
   githubCacheRevalidationHeaders,
   githubCacheKey,
   readGitHubCache,
+  readRunListCacheCandidates,
+  cachedResponseStillFresh,
   readStaleGitHubCache,
   requestCacheMaxAgeSeconds,
   shouldUseGitHubCache,
@@ -25,6 +27,7 @@ import {
 } from "./cache";
 import { coalesceGitHubCacheMiss } from "./cache-coalesce";
 import { cacheResponseEligible } from "./cache-policy";
+import { projectRunListItem, runViewListLookup } from "./run-view-superset";
 import { startOwnedCacheFill, type CacheFillOutcome, type OwnedCacheFill } from "./cache-fill";
 import { scheduleCacheRefresh, supportsStaleWhileRevalidate, withinSWRWindow } from "./cache-swr";
 import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
@@ -403,6 +406,9 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   }
   const swr = await serveSWRRelayCache(state);
   if (swr !== undefined) return swr;
+  const listedRun = await readRunViewFromListCache(state);
+  if (listedRun !== undefined)
+    return serveFreshCachedRelayResponse(state, listedRun, { fallbackReason: "run_list_superset" });
   await admitBackendWork();
   const coalesced = await coalesceRelayCacheMiss(state);
   if (coalesced !== undefined) {
@@ -1501,6 +1507,42 @@ async function readRawRunJobsCache(state: ActiveRelay): Promise<CachedGitHubResp
   return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
 }
 
+async function readRunViewFromListCache(
+  state: ActiveRelay,
+): Promise<CachedGitHubResponse | undefined> {
+  if (state.background || !state.cacheEnabled || state.maxAgeSeconds === 0) return undefined;
+  const lookup = runViewListLookup(state.request, state.route);
+  if (lookup === undefined) return undefined;
+  try {
+    const candidates = await readRunListCacheCandidates(
+      state.env,
+      state.request,
+      lookup.repoPath,
+      lookup.runId,
+      state.maxAgeSeconds,
+    );
+    for (const candidate of candidates) {
+      const cached = projectRunListItem(candidate, state.request.path, lookup.runId);
+      if (
+        cached !== undefined &&
+        (await cachedResponseAvailable(
+          state.env,
+          state.request.pool,
+          state.route,
+          cached,
+          cached.identity,
+        )) &&
+        cachedResponseStillFresh(cached, state.maxAgeSeconds)
+      )
+        return cached;
+    }
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
+  }
+  return undefined;
+}
+
 async function readWorkflowCatalogueCache(
   state: ActiveRelay,
 ): Promise<CachedGitHubResponse | undefined> {
@@ -1717,7 +1759,7 @@ function cachedResponseParams(
   state: ActiveRelay,
   cached: CachedGitHubResponse,
   cacheStatus: "hit" | "stale",
-  extras: { staleReason?: string; coalesced?: boolean } = {},
+  extras: { staleReason?: string; coalesced?: boolean; fallbackReason?: "run_list_superset" } = {},
 ): Parameters<typeof serveCachedGitHubResponse>[2] {
   rejectIncompleteRunJobs(state, cached);
   const clientResponse = filterRunJobsSuperset(
@@ -1740,6 +1782,7 @@ function cachedResponseParams(
     background: state.background,
     ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
     ...(extras.coalesced === undefined ? {} : { coalesced: extras.coalesced }),
+    ...(extras.fallbackReason === undefined ? {} : { fallbackReason: extras.fallbackReason }),
   };
 }
 
@@ -1791,6 +1834,7 @@ async function serveCachedGitHubResponse(
     staleReason?: string;
     coalesced?: boolean;
     background?: boolean;
+    fallbackReason?: "run_list_superset";
   },
 ): Promise<Response> {
   assertBackendWorkActive();
@@ -1814,6 +1858,7 @@ async function serveCachedGitHubResponse(
         ...(params.staleReason === "stale_while_revalidate"
           ? { fallbackReason: params.staleReason }
           : {}),
+        ...(params.fallbackReason === undefined ? {} : { fallbackReason: params.fallbackReason }),
         ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
       }),
     );
@@ -2006,7 +2051,7 @@ async function revalidateCachedTerminalLog(
 async function serveFreshCachedRelayResponse(
   state: ActiveRelay,
   cached: CachedGitHubResponse,
-  extras: { coalesced?: boolean } = {},
+  extras: { coalesced?: boolean; fallbackReason?: "run_list_superset" } = {},
 ): Promise<Response> {
   if (!state.runListExactFallback && runListSupersetUnderfilled(cached, state.runListSuperset)) {
     recordCacheMiss(state, "unusable");
