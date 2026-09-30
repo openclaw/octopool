@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -165,13 +166,17 @@ func TestGraphQLViewerConfigPaths(t *testing.T) {
 			if location == "xdg" {
 				config = filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "gh")
 			} else if location == "home" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					t.Fatal(err)
-				}
-				config = filepath.Join(home, ".config", "gh")
 				t.Setenv("XDG_CONFIG_HOME", "")
-				t.Setenv("AppData", "")
+				if runtime.GOOS == "windows" {
+					config = filepath.Join(os.Getenv("AppData"), "GitHub CLI")
+				} else {
+					home, err := os.UserHomeDir()
+					if err != nil {
+						t.Fatal(err)
+					}
+					config = filepath.Join(home, ".config", "gh")
+					t.Setenv("AppData", "")
+				}
 			}
 			t.Setenv("GH_CONFIG_DIR", config)
 			writeGraphQLHosts(t, "github.com: {user: alice}")
