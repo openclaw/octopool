@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 import { parseGraphQLRead } from "../src/graphql-read";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
-import { githubCacheKey } from "../src/cache";
+import { cachedResponseStillFresh, cacheTTLSeconds, githubCacheKey } from "../src/cache";
 import { compileStringRewriteRules, guardStringRewriteRead } from "../src/string-rewrites";
 
 const root = (fields: string) => `{ repository(owner:"openclaw", name:"octopool") { ${fields} } }`;
+const codexBatch = readFileSync(
+  new URL("../cmd/octopool/testdata/graphql-read/codex-batch.txt", import.meta.url),
+  "utf8",
+);
 const envelope = (query: string, variables: unknown = {}) =>
   validateRelayRequest({
     pool: "maintainers",
@@ -25,6 +31,8 @@ describe("repository GraphQL AST boundary", () => {
     '{ r: repository(owner:"openclaw", name:"octopool") @include(if:true) { name @skip(if:false) } __typename }',
     'query Q { ...Root } fragment Root on Query { repository(owner:"openclaw",name:"octopool") { ...Names } } fragment Names on Repository { name }',
     root("owner { repositories(first:10) { nodes { name } } }"),
+    '{ a:repository(owner:"OpenClaw",name:"Octopool"){name} b:repository(owner:"openclaw",name:"octopool"){id} __typename }',
+    'query { ...Roots } fragment Roots on Query { a:repository(owner:"openclaw",name:"octopool"){name} ... on Query { b:repository(owner:"OPENCLAW",name:"OCTOPOOL"){id} } }',
   ])("accepts a bounded public repository read: %s", (query) => {
     expect(parseGraphQLRead({ query })).toMatchObject({ owner: "openclaw", repo: "octopool" });
   });
@@ -60,6 +68,11 @@ describe("repository GraphQL AST boundary", () => {
     `${root("name")} ${root("id")}`,
     'query A { repository(owner:"openclaw",name:"octopool") { name } } query B { viewer { login } }',
     '{ a: repository(owner:"openclaw",name:"octopool") { name } b: repository(owner:"openclaw",name:"other") { name } }',
+    '{ a: repository(owner:"openclaw",name:"octopool") { name } b: repository(owner:"other",name:"octopool") { name } }',
+    '{ a: repository(owner:"openclaw",name:"octopool") { name } b: repository(owner:"openclaw",name:"../private") { name } }',
+    '{ a: repository(owner:"openclaw",name:"octopool") { name } b: repository(owner:"openclaw",name:"octopool",extra:"x") { name } }',
+    '{ a: repository(owner:"openclaw",name:"octopool") { name } ...More } fragment More on Query { b:repository(owner:"openclaw",name:"other"){name} }',
+    codexBatch,
     '{ repository(owner:"openclaw",name:"octopool") { name } other: rateLimit { remaining } }',
     root("name @defer"),
     root("...Missing"),
@@ -102,6 +115,84 @@ describe("repository GraphQL AST boundary", () => {
         operationName: "Other",
       }),
     ).toThrow();
+  });
+
+  it("accepts the exact captured Codex batch only after the CLI removes viewer", () => {
+    const query = codexBatch.replace("viewer { login }", "");
+    expect(parseGraphQLRead({ query })).toMatchObject({ owner: "openclaw", repo: "openclaw" });
+    expect(() =>
+      parseGraphQLRead({
+        query: query.replace(
+          'p2: repository(owner:"openclaw",name:"openclaw")',
+          'p2: repository(owner:"openclaw",name:"private")',
+        ),
+      }),
+    ).toThrow();
+  });
+
+  it("resolves and validates every alias against one repository", () => {
+    const query =
+      'query($owner:String!,$name:String!){a:repository(owner:"OpenClaw",name:"Octopool"){name} b:repository(owner:$owner,name:$name){id}}';
+    expect(
+      parseGraphQLRead({ query, variables: { owner: "openclaw", name: "octopool" } }),
+    ).toMatchObject({ owner: "openclaw", repo: "octopool" });
+    for (const variables of [
+      { owner: "other", name: "octopool" },
+      { owner: "openclaw", name: "private" },
+      { owner: "openclaw", name: false },
+      { owner: "openclaw", name: "x".repeat(101) },
+      {},
+    ]) {
+      expect(() => parseGraphQLRead({ query, variables })).toThrow();
+    }
+  });
+
+  it("bounds reuse by both the requested age and the 60-second static TTL", () => {
+    const request = envelope(root("name"));
+    const route = classifyRoute(request, defaultPolicy("openclaw"));
+    expect(cacheTTLSeconds(route)).toBe(60);
+    const now = Date.now();
+    const cached = (age: number) => ({
+      status: 200,
+      headers: {},
+      body: "{}",
+      body_encoding: "text" as const,
+      created_at: new Date(now - age * 1000).toISOString(),
+      expires_at: new Date(now + (60 - age) * 1000).toISOString(),
+    });
+    expect(cachedResponseStillFresh(cached(10), 20)).toBe(true);
+    expect(cachedResponseStillFresh(cached(21), 20)).toBe(false);
+    expect(cachedResponseStillFresh(cached(21), 30)).toBe(true);
+    expect(cachedResponseStillFresh(cached(61), 120)).toBe(false);
+  });
+
+  it("partitions batched pages and PRs by the full query and variable values", async () => {
+    const query = codexBatch.replace("viewer { login }", "");
+    const request = envelope(query);
+    const route = classifyRoute(request, defaultPolicy("openclaw"));
+    const key = await githubCacheKey(request.pool, request, route);
+    for (const changed of [
+      envelope(query.replaceAll('after:"MjAw"', 'after:"MzAw"')),
+      envelope(query.replace("157854", "157855")),
+      envelope(query.replace("146339", "146340")),
+      envelope(query, { cursor: "MjAw", pr: 1 }),
+      envelope(query, { cursor: "MzAw", pr: 2 }),
+    ]) {
+      expect(await githubCacheKey(request.pool, changed, route)).not.toBe(key);
+    }
+    const variableQuery = query
+      .replace("query {", "query($cursor:String,$pr:Int!){")
+      .replaceAll('"MjAw"', "$cursor")
+      .replace("157854", "$pr");
+    const a = envelope(variableQuery, { cursor: "MjAw", pr: 1 });
+    for (const variables of [
+      { cursor: "MzAw", pr: 1 },
+      { cursor: "MjAw", pr: 2 },
+    ]) {
+      expect(await githubCacheKey(a.pool, a, route)).not.toBe(
+        await githubCacheKey(a.pool, envelope(variableQuery, variables), route),
+      );
+    }
   });
 
   it("normalizes printed documents and nested variable keys, retaining pool/repo/values", async () => {

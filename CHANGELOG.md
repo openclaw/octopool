@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Let `gh run watch` finish without extra live GitHub reads when run completion and terminal job freshness are already proven.
+- Codex-app style batched PR GraphQL reads (same-repo aliases plus `viewer { login }`) now use the pooled read relay and cache instead of the caller's personal GraphQL budget.
 
 ## 0.9.2 - 2026-09-29
 

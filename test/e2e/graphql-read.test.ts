@@ -25,6 +25,8 @@ const permissions = {
 let installation = 71000;
 const query =
   "query($owner:String!,$name:String!,$pr:Int!) { repository(owner:$owner,name:$name) { pullRequest(number:$pr) { state mergeable headRefOid comments(first:10) { nodes { body } } } } }";
+const batchQuery =
+  'query($owner:String!,$name:String!){p1:repository(owner:$owner,name:$name){pullRequest(number:42){title}} p2:repository(owner:"OPENCLAW",name:"OCTOPOOL"){pullRequest(number:43){title}}}';
 const raw =
   '{"data":{"repository":{"pullRequest":{"state":"OPEN","mergeable":"MERGEABLE","headRefOid":"0123456789abcdef0123456789abcdef01234567","comments":{"nodes":[{"body":"a & b \\u003cfixture\\u003e"}]},"large":9007199254740993}}}}';
 type Envelope = {
@@ -150,6 +152,36 @@ function upstream(
 }
 
 describe("repository GraphQL relay", () => {
+  it("uses one verified public repo token for every alias and reuses the batch for 20 seconds", async () => {
+    const id = await seedApp();
+    const body = {
+      data: { p1: { pullRequest: { title: "first" } }, p2: { pullRequest: { title: "second" } } },
+    };
+    const calls = upstream(id, { graphql: () => jsonResponse(body) });
+    expect(await (await read({ query: batchQuery, maxAge: 20 })).json<Envelope>()).toMatchObject({
+      body: JSON.stringify(body),
+      relay: { cache: "miss" },
+    });
+    expect(await (await read({ query: batchQuery, maxAge: 20 })).json<Envelope>()).toMatchObject({
+      body: JSON.stringify(body),
+      relay: { cache: "hit" },
+    });
+    expect(calls.minted).toEqual(["octopool"]);
+    expect(calls.queries()).toBe(1);
+    expect(await (await read({ query: batchQuery, maxAge: 0 })).json<Envelope>()).toMatchObject({
+      relay: { cache: "miss" },
+    });
+    expect(calls.queries()).toBe(2);
+  });
+
+  it("rejects a second repository before any visibility or credential work", async () => {
+    const id = await seedApp();
+    const calls = upstream(id);
+    expect(
+      (await read({ query: batchQuery.replace('name:"OCTOPOOL"', 'name:"private"') })).status,
+    ).toBe(424);
+    expect(calls.mock).not.toHaveBeenCalled();
+  });
   it("never reuses or overwrites an installation-wide token", async () => {
     const id = await seedApp();
     const calls = upstream(id, { broad: true });
@@ -209,17 +241,20 @@ describe("repository GraphQL relay", () => {
     ).toMatchObject({ results: [{ ttl: 60, stale: 0 }] });
   });
 
-  it("refuses private repositories before token exchange or query execution", async () => {
-    const id = await seedApp();
-    const calls = upstream(id, { visibility: true });
-    const response = await read();
-    expect(response.status).toBe(424);
-    expect(await response.json()).toMatchObject({
-      error: { code: "fallback_local", details: { reason: "repo_not_public" } },
-    });
-    expect(calls.mock).toHaveBeenCalledTimes(1);
-    expect(calls.minted).toEqual([]);
-  });
+  it.each([query, batchQuery])(
+    "refuses private repositories before token exchange or query execution: %s",
+    async (query) => {
+      const id = await seedApp();
+      const calls = upstream(id, { visibility: true });
+      const response = await read({ query });
+      expect(response.status).toBe(424);
+      expect(await response.json()).toMatchObject({
+        error: { code: "fallback_local", details: { reason: "repo_not_public" } },
+      });
+      expect(calls.mock).toHaveBeenCalledTimes(1);
+      expect(calls.minted).toEqual([]);
+    },
+  );
 
   it("refuses PAT-only pools", async () => {
     await seedPool();
@@ -279,7 +314,7 @@ describe("repository GraphQL relay", () => {
   ])("falls back without ever broadening failed token issuance: %j", async (options) => {
     const id = await seedApp();
     const calls = upstream(id, options);
-    const response = await read();
+    const response = await read({ query: batchQuery });
     expect(response.status).toBe(424);
     expect(await response.json()).toMatchObject({
       error: { code: "fallback_local", details: { reason: "github_app_repo_token_unavailable" } },

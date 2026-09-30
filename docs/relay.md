@@ -336,15 +336,22 @@ Other eligible repository queries use the separate scoped-token route below.
 ```
 
 The Worker parses the document with `graphql-js` before dispatch. Exactly one query
-operation must select exactly one `repository(owner:,name:)` root, optionally aliased,
-plus optional `__typename` fields. Owner/name must be string literals or supplied
-string variables; variable defaults do not establish scope. Optional `operationName`
+operation must select one or more `repository(owner:,name:)` roots, optionally aliased,
+plus optional `__typename` fields. Every root must resolve to the identical owner/name,
+compared case-insensitively; each argument retains the character and length checks.
+Owner/name must be string literals or supplied string variables; variable defaults do not
+establish scope. Optional `operationName`
 must match the sole operation. Fragments are expanded for root and depth checks;
 missing, duplicate, cyclic, or excessively expanded fragments are refused. All field
 names, including unused fragments, are checked for `viewer*`, `__schema`, and `__type`.
 Only `@include` and `@skip` directives are accepted. Other roots (including `viewer`,
 `rateLimit`, `node`, `nodes`, `search`, organization/user and enterprise lookups),
-mutations, subscriptions, and schema definitions are refused.
+mutations, subscriptions, and schema definitions are refused. The CLI can remove one
+top-level `viewer { login }` (optionally aliased) after proving the active native gh
+`github.com` config user equals Octopool's saved login, without token overrides or
+ambiguous config. It restores that object locally in document order, preserves errors,
+and leaves null data unchanged. Viewer selections with arguments, directives, fragments,
+or additional fields stay native. The Worker never receives or answers viewer fields.
 
 Query and variables are independently capped at 16 KiB; selection and JSON variable
 depth are capped at 12, with 4,000 document tokens and expanded selections. Variables
@@ -360,7 +367,10 @@ App identities can execute these queries. The Worker verifies the installation a
 matches the repository owner, then mints with `repositories: [name]` and an explicit
 read-only subset of granted `metadata`, `contents`, `pull_requests`, `issues`, `actions`,
 `checks`, and `statuses` permissions. Organization and other permissions are excluded.
-The mint response must confirm exactly that repository and those read-only permissions.
+The mint response must confirm exactly that repository with `private: false` and those
+read-only permissions. Since every root resolves to that same repository, this check
+covers all aliases; the GraphQL body itself need not select a privacy field. A mismatched
+root, unverified visibility, or invalid mint response fails closed for the entire batch.
 Nested traversal such as `owner.repositories` or `author.repositories` can therefore
 see only the selected repository and public GitHub data, not unrelated private org
 repositories. AST restrictions are defense in depth, not the confinement mechanism.
@@ -387,7 +397,11 @@ The pool/repository, canonically printed AST, recursively sorted variables, oper
 name, and source App identity partition cache entries. Error-free JSON data caches for
 60 seconds with no stale fallback. `max-age=0` always fetches upstream; positive maximum
 ages allow bounded reuse and identical misses use existing coalescing/publication ownership.
-The CLI defaults this route to live reads: quota placement is the main benefit.
+The CLI defaults this route to `max-age=20`, including explicit GitHub.com host reads.
+Explicit Cache-Control headers retain their bound; `max-age=0` or `OCTOPOOL_FRESH=1`
+forces live reads. Viewer insertion happens locally after cache retrieval, so the shared
+body contains only repository results and optional `__typename` fields. The existing
+exact landing projections retain their live defaults.
 Upgrade both Worker and CLI; older Workers trigger guarded native fallback. No schema
 migration, permission expansion, or cache purge is required.
 

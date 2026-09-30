@@ -14,6 +14,7 @@ type graphQLReadRequest struct {
 	Query         string         `json:"query"`
 	Variables     map[string]any `json:"variables"`
 	OperationName string         `json:"operationName,omitempty"`
+	viewer        *graphQLLocalViewer
 }
 
 var graphQLReadToken = regexp.MustCompile(`[_A-Za-z][_0-9A-Za-z]*|-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|"(?:\\.|[^"\\\r\n])*"|[!$():{}\[\]@=]|\.\.\.`)
@@ -43,7 +44,7 @@ func graphQLReadTokens(query string) ([]string, bool) {
 			return nil, false
 		}
 		token := query[:match[1]]
-		if token == "mutation" || token == "subscription" || token == "rateLimit" || strings.HasPrefix(token, "viewer") || token == "__schema" || token == "__type" {
+		if token == "mutation" || token == "subscription" || token == "rateLimit" || token == "__schema" || token == "__type" {
 			return nil, false
 		}
 		tokens = append(tokens, token)
@@ -103,8 +104,16 @@ func repositoryGraphQLRead(read *graphQLReadRequest) bool {
 	}
 	i++
 	repositories := 0
+	repo := ""
+	viewer := &graphQLLocalViewer{}
+	viewerStart, viewerEnd := 0, 0
 	for i < len(tokens) && tokens[i] != "}" {
+		start := i
 		field := tokens[i]
+		key := field
+		if !graphQLVariableName.MatchString(field) {
+			return false
+		}
 		i++
 		if i < len(tokens) && tokens[i] == ":" {
 			i++
@@ -113,6 +122,15 @@ func repositoryGraphQLRead(read *graphQLReadRequest) bool {
 			}
 			field = tokens[i]
 			i++
+		}
+		viewer.keys = append(viewer.keys, key)
+		if field == "viewer" {
+			if viewer.key != "" || i+2 >= len(tokens) || tokens[i] != "{" || tokens[i+1] != "login" || tokens[i+2] != "}" {
+				return false
+			}
+			i += 3
+			viewer.key, viewerStart, viewerEnd = key, start, i
+			continue
 		}
 		if field == "repository" {
 			repositories++
@@ -156,6 +174,11 @@ func repositoryGraphQLRead(read *graphQLReadRequest) bool {
 			if i >= len(tokens) || !rewriteRepoPattern.MatchString(args["owner"]+"/"+args["name"]) {
 				return false
 			}
+			current := strings.ToLower(args["owner"] + "/" + args["name"])
+			if repo != "" && repo != current {
+				return false
+			}
+			repo = current
 			i++
 		} else if field != "__typename" {
 			return false
@@ -174,7 +197,7 @@ func repositoryGraphQLRead(read *graphQLReadRequest) bool {
 			return false
 		}
 	}
-	if repositories != 1 || i >= len(tokens) || tokens[i] != "}" {
+	if repositories == 0 || i >= len(tokens) || tokens[i] != "}" {
 		return false
 	}
 	i++
@@ -188,6 +211,22 @@ func repositoryGraphQLRead(read *graphQLReadRequest) bool {
 		if !skip("{", "}") {
 			return false
 		}
+	}
+	for index, token := range tokens {
+		if (index < viewerStart || index >= viewerEnd) && strings.HasPrefix(token, "viewer") {
+			return false
+		}
+	}
+	if viewer.key != "" {
+		seen := map[string]bool{}
+		for _, key := range viewer.keys {
+			if seen[key] {
+				return false
+			}
+			seen[key] = true
+		}
+		read.Query = strings.Join(append(tokens[:viewerStart:viewerStart], tokens[viewerEnd:]...), " ")
+		read.viewer = viewer
 	}
 	return true
 }
@@ -252,6 +291,13 @@ func parseRepositoryGraphQL(args []string) (ghAPIRequest, bool) {
 	if err != nil || len(variables) > 16384 || !repositoryGraphQLRead(read) {
 		return ghAPIRequest{}, false
 	}
+	if read.viewer != nil {
+		login, ok := nativeGraphQLViewerLogin()
+		if !ok {
+			return ghAPIRequest{}, false
+		}
+		read.viewer.login = login
+	}
 	request, fallback, err := parseGHAPIArgs(append([]string{"/graphql"}, opts.output...))
 	if err != nil || fallback || request.paginate || request.slurp {
 		return ghAPIRequest{}, false
@@ -260,8 +306,10 @@ func parseRepositoryGraphQL(args []string) (ghAPIRequest, bool) {
 		return ghAPIRequest{}, false
 	}
 	request.method, request.graphql = "POST", read
-	if _, present := request.headers["cache-control"]; !present {
+	if freshReadRequested() {
 		request.headers["cache-control"] = "max-age=0"
+	} else if _, present := opts.headers["cache-control"]; !present {
+		request.headers["cache-control"] = "max-age=20"
 	}
 	return request, true
 }
@@ -288,6 +336,14 @@ func relayRepositoryGraphQL(ctx context.Context, request ghAPIRequest, stdout io
 	}
 	if envelope.Relay.RouteKind != "graphql_read" || json.Unmarshal(raw, &response) != nil || (response.Data == nil && len(response.Errors) == 0) {
 		return localFallbackError{Reason: "unsupported_graphql_read_response"}
+	}
+	if request.graphql.viewer != nil {
+		raw, err = spliceGraphQLViewer(raw, request.graphql.viewer)
+		if err != nil {
+			return localFallbackError{Reason: "unsupported_graphql_read_response"}
+		}
+		envelope.Body, _ = json.Marshal(string(raw))
+		envelope.BodyEncoding = "text"
 	}
 	if err := writeGHBody(ctx, stdout, envelope, request.jq); err != nil {
 		return err

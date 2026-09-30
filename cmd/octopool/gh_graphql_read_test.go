@@ -21,16 +21,18 @@ func repositoryReadArgs(query string) []string {
 func TestRepositoryGraphQLGrammar(t *testing.T) {
 	t.Setenv("GH_HOST", "github.com")
 	t.Setenv("OCTOPOOL_GRAPHQL_RELAY", "")
+	t.Setenv("OCTOPOOL_FRESH", "")
 	for _, query := range []string{
 		repositoryReadQuery,
 		`query { r:repository(owner:"openclaw",name:"octopool") { name } __typename }`,
+		`query { p1:repository(owner:"OpenClaw",name:"Octopool") { name } p2:repository(owner:$owner,name:$name) { name } }`,
 		`{repository(owner:"openclaw",name:"octopool") @include(if:true) {name}}`,
 		`query Q($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){...Fields}} fragment Fields on Repository { name }`,
 		"# header\n" + repositoryReadQuery,
 	} {
 		t.Run(query, func(t *testing.T) {
 			request, ok := parseRepositoryGraphQL(repositoryReadArgs(query)[1:])
-			if !ok || request.method != "POST" || request.path != "/graphql" || request.headers["cache-control"] != "max-age=0" || request.graphql.Query != query || request.graphql.Variables["pr"] != 42 {
+			if !ok || request.method != "POST" || request.path != "/graphql" || request.headers["cache-control"] != "max-age=20" || request.graphql.Query != query || request.graphql.Variables["pr"] != 42 {
 				t.Fatalf("query not relayed: %#v, %v", request, ok)
 			}
 		})
@@ -55,6 +57,8 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 		{"input", repositoryReadQuery, []string{"--input", "body.json"}},
 		{"pagination", repositoryReadQuery, []string{"--paginate"}},
 		{"pagination-false", repositoryReadQuery, []string{"--paginate=false"}},
+		{"slurp", repositoryReadQuery, []string{"--slurp"}},
+		{"tokens", `{viewer{login} repository(owner:"openclaw",name:"octopool"){` + strings.Repeat("id ", 4000) + `}}`, nil},
 		{"template", repositoryReadQuery, []string{"--template", "{{.data}}"}},
 		{"include", repositoryReadQuery, []string{"--include"}},
 		{"conditional", repositoryReadQuery, []string{"-H", "If-None-Match: old"}},
@@ -86,6 +90,7 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 }
 
 func TestRepositoryGraphQLRelayNativeFixture(t *testing.T) {
+	t.Setenv("OCTOPOOL_FRESH", "")
 	fixture, err := os.ReadFile("testdata/graphql-read/native.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -103,8 +108,8 @@ func TestRepositoryGraphQLRelayNativeFixture(t *testing.T) {
 				if request["method"] != "POST" || request["path"] != "/graphql" || graphql["query"] != repositoryReadQuery || !reflect.DeepEqual(graphql["variables"], map[string]any{"owner": "openclaw", "name": "octopool", "pr": float64(42)}) {
 					t.Errorf("request=%#v", request)
 				}
-				if request["headers"].(map[string]any)["cache-control"] != "max-age=0" {
-					t.Error("read not live")
+				if request["headers"].(map[string]any)["cache-control"] != "max-age=20" {
+					t.Error("read missing bounded reuse")
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"status": 200, "body": string(fixture), "body_encoding": "text", "relay": map[string]string{"route_kind": "graphql_read", "cache": "miss"}})
 			})

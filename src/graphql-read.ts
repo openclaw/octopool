@@ -102,11 +102,11 @@ export function parseGraphQLRead(value: unknown): GraphQLRead {
   walk(operation.selectionSet, 1, new Set(), true);
   // Check unused fragments too, including cycles and expansion/depth limits.
   for (const [name, fragment] of fragments) walk(fragment.selectionSet, 1, new Set([name]), false);
-  const repository = roots.filter((node) => node.name.value !== "__typename");
-  if (repository.length !== 1 || repository[0]!.name.value !== "repository") throw denied();
-  const args = repository[0]!.arguments ?? [];
-  if (args.length !== 2 || new Set(args.map((arg) => arg.name.value)).size !== 2) throw denied();
-  const textArgument = (name: string): string => {
+  const repositories = roots.filter((node) => node.name.value !== "__typename");
+  if (repositories.length === 0) throw denied();
+  const textArgument = (node: FieldNode, name: string): string => {
+    const args = node.arguments ?? [];
+    if (args.length !== 2 || new Set(args.map((arg) => arg.name.value)).size !== 2) throw denied();
     const arg = args.find((item) => item.name.value === name)?.value;
     const text =
       arg?.kind === Kind.STRING
@@ -122,14 +122,25 @@ export function parseGraphQLRead(value: unknown): GraphQLRead {
       text.length > 100
     )
       throw denied();
-    return text;
+    return text.toLowerCase();
   };
+  const owner = textArgument(repositories[0]!, "owner");
+  const repo = textArgument(repositories[0]!, "name");
+  // Every alias shares the one public repository verified by the scoped token mint.
+  for (const node of repositories) {
+    if (
+      node.name.value !== "repository" ||
+      textArgument(node, "owner") !== owner ||
+      textArgument(node, "name") !== repo
+    )
+      throw denied();
+  }
   return {
     query: print(document),
     variables,
     ...(typeof value.operationName === "string" ? { operationName: value.operationName } : {}),
-    owner: textArgument("owner").toLowerCase(),
-    repo: textArgument("name").toLowerCase(),
+    owner,
+    repo,
   };
 }
 

@@ -147,7 +147,7 @@ to the real `gh` for a complete response.
 relay, including under active protection rules and with scalar query fields or
 pagination. Other explicit hosts are not relayed. Existing protected native commands
 retain their GitHub.com host pinning.
-These explicit-host reads request `max-age=0` by default to preserve their previous
+These explicit-host REST reads request `max-age=0` by default to preserve their previous
 live-read behavior. An explicit `Cache-Control` header controls reuse; unqualified
 REST reads keep their existing cache policy.
 
@@ -230,9 +230,11 @@ These exact projections still run before the repository-query recognizer.
 
 ### Repository GraphQL reads
 
-Plain `gh api graphql -f query=...` calls can relay a single repository-rooted read
+Plain `gh api graphql -f query=...` calls can relay one or more repository-rooted reads
 using a read-only GitHub App token restricted to that repository. This moves GraphQL
 quota from the personal token to the App; it does not change the native writer identity.
+All roots must name the same owner/repository (case-insensitively), with optional aliases
+and `__typename` fields. Batches spanning different repositories stay native.
 
 ```sh
 gh api graphql -f owner=openclaw -f name=openclaw -F pr=42 \
@@ -248,17 +250,31 @@ the App's access to unrelated private repositories or organization permissions.
 
 The CLI accepts scalar `-f`/`--raw-field` and typed `-F`/`--field` variables, optional
 `operationName`, literal or variable repository arguments, and `--hostname github.com`.
-It preserves `--jq` and the native nonterminal response bytes. Template and other
-unsupported presentation flags retain native handling, as on other API relay reads.
+It preserves `--jq` and the native nonterminal response bytes, except for the local viewer
+splice described below. Template and other unsupported presentation flags retain native
+handling, as on other API relay reads.
 Input files, pagination, nested/array field flags, duplicate fields, foreign hosts,
 conditional or credential headers, block strings, and unrecognized grammar stay native.
-Only default JSON Accept and Cache-Control headers are eligible. `viewer` and `rateLimit`
-probes always stay native, as do mutations and subscriptions.
+Only default JSON Accept and Cache-Control headers are eligible. `rateLimit` probes,
+mutations, and subscriptions stay native.
 
-Each request sends `Cache-Control: max-age=0` unless the caller explicitly supplies one.
-Use `-H 'Cache-Control: max-age=30'` for advisory reuse; cached responses have a 60-second
-server ceiling and no outage stale fallback. HTTP-200 GraphQL errors are printed and
-return failure, without a second native query. A relay fallback, older Worker, transport,
+A single top-level `viewer { login }` (optionally aliased) can accompany the repository
+roots. Its selection must be exactly `login`, without arguments, directives, aliases,
+or fragments inside it. The CLI reads the active `github.com` host's `user` from native
+gh's `hosts.yml` (`GH_CONFIG_DIR`, then `XDG_CONFIG_HOME/gh`, the Windows AppData location,
+or `~/.config/gh`) and requires an exact match with Octopool's saved login. Token overrides,
+missing/unreadable config, account mismatches, and ambiguous config stay native. This
+proof makes no network identity call. The CLI removes the viewer root before relaying,
+then inserts its login into `data` in document key order, preserving error arrays and
+leaving `data: null` unchanged. The login never enters the shared cache. Other viewer
+fields or nested viewer uses stay native.
+
+Repository queries default to `Cache-Control: max-age=20`, including explicit
+`--hostname github.com` calls. Explicit Cache-Control headers retain their requested bound;
+`-H 'Cache-Control: max-age=0'` and `OCTOPOOL_FRESH=1` force live reads (the environment
+override takes precedence). Cached responses have a 60-second server ceiling and no outage
+stale fallback. Full queries and variables partition PR and cursor pages. HTTP-200 GraphQL
+errors are printed and return failure, without a second native query. A relay fallback, older Worker, transport,
 or ordinary service failure uses guarded native `gh` before any output; policy failures,
 authentication denials, and cancellation stay terminal. `OCTOPOOL_NO_FALLBACK=1` refuses
 the handoff. `OCTOPOOL_GRAPHQL_RELAY=0` disables this new recognizer, preserving the

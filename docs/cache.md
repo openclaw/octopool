@@ -43,9 +43,16 @@ Arbitrary [repository GraphQL reads](relay.md#repository-graphql-reads) reuse th
 publication/coalescing machinery, with a separate key containing the canonically printed
 document, recursively sorted variable objects (list order is preserved), operation name,
 repository, pool, and App identity. They have a 60-second TTL and no stale fallback;
-HTTP-200 GraphQL errors do not cache. The CLI sends `max-age=0` by default, while an
-explicit positive maximum age permits reuse. The public-proof guard and current App
-eligibility still gate every hit. Lossless JSON text preserves native response bytes.
+HTTP-200 GraphQL errors do not cache. The CLI sends `max-age=20` by default, including
+explicit `--hostname github.com` reads. Explicit Cache-Control headers set the caller's
+bound; `max-age=0` or `OCTOPOOL_FRESH=1` forces live reads. A positive requested age is
+bounded by the 60-second server TTL. The full query and variables keep different PRs,
+batches, and cursor pages separate. Same-repository aliases share one verified public
+repository/App-token boundary; cross-repository batches are refused. The CLI can remove
+an identity-proven top-level `viewer { login }` and restore it after the response, so
+viewer identity never enters the shared cache. The public-proof guard and current App
+eligibility still gate every hit. Lossless JSON text preserves native response bytes;
+the local viewer splice changes only the `data` object, retaining document key order.
 
 On a cacheable route the relay computes a stable cache key, checks Cloudflare's
 data-center-local Cache API, falls back to `github_cache_entries` in D1, and serves a
