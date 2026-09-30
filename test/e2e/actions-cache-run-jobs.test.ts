@@ -339,7 +339,7 @@ describe("Actions attempt job-list cache", () => {
           `SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl
        FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
         ).first(),
-      ).toEqual({ ttl: reject === undefined ? 3600 : 60 });
+      ).toEqual({ ttl: reject === undefined ? 21_600 : 60 });
       const metadataFetches = upstream.mock.calls.filter(([input, init]) => {
         const path = new URL(new Request(input, init).url).pathname;
         return path.endsWith("/actions/runs/42") || path.endsWith("/actions/runs/42/attempts/2");
@@ -448,7 +448,7 @@ describe("Actions attempt job-list cache", () => {
                 unixepoch(MAX(expires_at)) - unixepoch(MAX(created_at)) AS ttl
          FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
       ).first(),
-    ).toEqual({ count: 1, ttl: 3600 });
+    ).toEqual({ count: 1, ttl: 21_600 });
   });
 
   it("keeps completed-looking jobs short-lived until the owning attempt is terminal", async () => {
@@ -555,7 +555,7 @@ describe("Actions attempt job-list cache", () => {
         `SELECT unixepoch(expires_at) - unixepoch(created_at) AS ttl
          FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
       ).first(),
-    ).toEqual({ ttl: 3600 });
+    ).toEqual({ ttl: 21_600 });
   });
 
   it("fails closed above the three-page API bound", async () => {

@@ -412,8 +412,9 @@ web hit still re-checks that public proof covers the entry before returning it.
 Per route kind and response state (`cacheTTLSeconds`):
 
 - base workflow runs → 60s while active; completed runs → 10% of age since `updated_at`, clamped to 60s..10m;
-  base job lists → 60s even when terminal, because reruns reuse the run ID;
-  completed attempt-qualified run/job lists get 1h fresh plus up to 24h bounded stale fallback
+  base job lists (including `filter=latest`) → 60s even when terminal, because reruns reuse the run ID;
+  completed attempt-qualified run views, job lists with a proven completed attempt and every
+  returned job completed, and completed single jobs get 6h (21,600s) fresh plus up to 24h bounded stale fallback
 - checks, check suites, and commit statuses → 60s fresh while active; settled collections →
   10% of age since the newest item `completed_at`/`updated_at`, clamped to 60s..5m;
   ref-named commit routes retain their 120s cap, and all retain up to 5m bounded stale fallback
@@ -432,10 +433,13 @@ Per route kind and response state (`cacheTTLSeconds`):
 
 Age is measured at cache write time and the heuristic rounds down to whole seconds.
 Missing, unparseable, non-string, or future `updated_at` values retain the minimum TTL
-(60s for plain completed runs, 120s for unmerged PRs). Merged PRs and completed
-attempt-pinned runs keep their fixed one-hour TTL. Ref-named route caps and stale
-fallback windows are unchanged: plain runs retain 5m of bounded outage fallback
+(60s for plain completed runs, 120s for unmerged PRs). Merged PRs keep their fixed
+one-hour TTL; completed attempt-pinned runs keep their fixed six-hour TTL. Ref-named route caps
+and stale fallback windows are unchanged: plain runs retain 5m of bounded outage fallback
 after fresh expiry, and PRs retain 1h.
+
+Terminal attempts and single jobs are immutable because reruns create new attempts and job IDs.
+Existing entries acquire the six-hour fresh TTL when refilled; cache keys and stale windows are unchanged.
 
 The caps bound fresh-cache reuse after a re-run to at most 10m and after a
 PR reopens to its computed TTL (at most 1h). Outage stale fallback remains separately
@@ -781,7 +785,7 @@ Shaped human `gh run view` and `gh run watch` reads resolve the run's current po
 `run_attempt`, then request `/actions/runs/{id}/attempts/{attempt}/jobs`. That attempt-qualified
 path is immutable after all returned jobs complete, while the base run and base jobs endpoints
 remain short-lived because a rerun can change both after they previously appeared terminal.
-Before granting the one-hour job-list TTL, Octopool verifies that exact attempt is completed;
+Before granting the six-hour job-list TTL, Octopool verifies that exact attempt is completed;
 a list of currently completed jobs alone is not treated as proof. A fresh cached run-view
 response can supply that proof when its run ID and attempt match and its source identity
 and public-repository guard remain eligible. Both the base run view and the exact attempt
@@ -868,7 +872,7 @@ epoch, active-identity, and public-visibility checks. Proof and jobs freshness a
 again after these checks. Lookup failures retain the normal exact fill; policy and
 visibility denials propagate.
 
-The jobs entry's own fresh TTL remains authoritative, including the existing one-hour
+The jobs entry's own fresh TTL remains authoritative, including the six-hour
 completed-attempt rule. Source jobs expired by less than 60 seconds may serve through SWR
 only without an explicit maximum age, while the latest-attempt proof must still be fresh.
 The background refresh targets the source's normal cache key and publication owner.

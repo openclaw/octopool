@@ -383,7 +383,7 @@ it.each(["token-free", "revalidation"])(
       ).first<{ created_at: string; expires_at: string; body_json: string }>();
       expect(JSON.parse(row!.body_json).jobs).toHaveLength(101);
       expect(row!.created_at).toBe(sqliteTimestamp(observedAt));
-      expect(row!.expires_at).toBe(sqliteTimestamp(observedAt + 3_600_000));
+      expect(row!.expires_at).toBe(sqliteTimestamp(observedAt + 21_600_000));
     } finally {
       secondPage.release();
       try {

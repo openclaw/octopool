@@ -26,7 +26,7 @@ import { isIssueEventRoute } from "./route-manifest";
 import type { CacheFillOutcome } from "./cache-fill";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
-const TERMINAL_CI_TTL_SECONDS = 3_600;
+const TERMINAL_CI_TTL_SECONDS = 21_600;
 const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
 export const GITHUB_EDGE_CACHE_NAMESPACE = `github-${CACHE_PUBLICATION_EPOCH}`;
 const EDGE_CACHE_NAMESPACE = GITHUB_EDGE_CACHE_NAMESPACE;

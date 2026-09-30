@@ -155,7 +155,7 @@ describe("complete raw jobs page reuse", () => {
         )
           .bind(key)
           .first("ttl"),
-      ).toBe(3600);
+      ).toBe(21_600);
     }
     if (test.scenario === "different pool") {
       await env.DB.batch([

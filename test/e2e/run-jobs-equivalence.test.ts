@@ -365,7 +365,7 @@ describe("raw run jobs latest-attempt equivalence", () => {
       )
         .bind(source)
         .first("ttl");
-      expect(ttl).toBe(source === pinned ? 3600 : 60);
+      expect(ttl).toBe(source === pinned ? 21_600 : 60);
     }
   });
 

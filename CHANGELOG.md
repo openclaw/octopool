@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep completed attempt-pinned run views, proven completed-attempt job lists, and completed single jobs fresh in the relay cache for six hours, preserving mutable CI TTLs and caller age bounds.
 - Let `gh run watch` finish without extra live GitHub reads when run completion and terminal job freshness are already proven.
 - Codex-app style batched PR GraphQL reads (same-repo aliases plus `viewer { login }`) now use the pooled read relay and cache instead of the caller's personal GraphQL budget.
 

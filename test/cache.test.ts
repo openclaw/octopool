@@ -663,7 +663,7 @@ describe("github cache policy", () => {
           route("actions/runs/123/attempts/2"),
           response({ status: "completed", updated_at }),
         ),
-      ).toBe(3_600);
+      ).toBe(21_600);
       for (const path of ["actions/runs/123", "actions/runs/123/attempts/2"]) {
         for (const status of ["in_progress", "queued"]) {
           expect(cacheTTLSeconds(route(path), response({ status, updated_at }))).toBe(60);
@@ -672,7 +672,7 @@ describe("github cache policy", () => {
     },
   );
 
-  it("keeps mutable CI TTLs short, uses minimums without age, and caches pinned terminal CI for an hour", () => {
+  it("keeps mutable CI TTLs short, uses minimums without age, and caches pinned terminal CI for six hours", () => {
     const run = classifyRoute(
       validateRelayRequest({
         pool: "maintainers",
@@ -693,7 +693,7 @@ describe("github cache policy", () => {
       policy,
     );
     expect(cacheTTLSeconds(runAttempt, response({ status: "in_progress" }))).toBe(60);
-    expect(cacheTTLSeconds(runAttempt, response({ status: "completed" }))).toBe(3_600);
+    expect(cacheTTLSeconds(runAttempt, response({ status: "completed" }))).toBe(21_600);
 
     const jobs = classifyRoute(
       validateRelayRequest({
@@ -715,7 +715,7 @@ describe("github cache policy", () => {
     expect(cacheTTLSeconds(jobs, completedJobs)).toBe(60);
     expect(cacheTTLSeconds(attemptJobs, completedJobs)).toBe(60);
     expect(cacheTTLSeconds({ ...attemptJobs, run_attempt_completed: true }, completedJobs)).toBe(
-      3_600,
+      21_600,
     );
 
     const runList = classifyRoute(
@@ -771,7 +771,7 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    expect(cacheTTLSeconds(job, response({ status: "completed" }))).toBe(3_600);
+    expect(cacheTTLSeconds(job, response({ status: "completed" }))).toBe(21_600);
     expect(cacheTTLSeconds(job, response({ status: "in_progress" }))).toBe(60);
 
     const files = classifyRoute(
@@ -965,8 +965,8 @@ describe("github cache policy", () => {
         }),
       );
       expect(await githubCacheKey(request.pool, request, route)).toBe(previousKey);
-      expect(cacheTTLSeconds(route, response({ status: "completed" }))).toBe(3_600);
-      expect(staleCacheSeconds(route, 3_600)).toBe(86_400);
+      expect(cacheTTLSeconds(route, response({ status: "completed" }))).toBe(21_600);
+      expect(staleCacheSeconds(route, 21_600)).toBe(86_400);
     },
   );
 
