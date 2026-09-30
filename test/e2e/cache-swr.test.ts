@@ -82,6 +82,26 @@ async function audits() {
 }
 
 describe("CI stale-while-revalidate", () => {
+  it("returns the stored REST creation time for hits and the stale entry during SWR", async () => {
+    await setup(true);
+    const miss = await (await relay(path)).json<Envelope>();
+    expect(miss.relay.cache).toBe("miss");
+    expect(miss.relay).not.toHaveProperty("cache_created_at");
+    const [fresh] = await cacheRows();
+    expect(await (await relay(path)).json()).toMatchObject({
+      relay: { cache: "hit", cache_created_at: new Date(`${fresh!.created_at}Z`).toISOString() },
+    });
+    await expire();
+    const [stale] = await cacheRows();
+    expect(await (await relay(path)).json()).toMatchObject({
+      relay: {
+        cache: "stale",
+        stale_reason: "stale_while_revalidate",
+        cache_created_at: new Date(`${stale!.created_at}Z`).toISOString(),
+      },
+    });
+  });
+
   const addedRoutes = [
     `${repo}/pulls/42/files`,
     `${repo}/issues/42/comments`,

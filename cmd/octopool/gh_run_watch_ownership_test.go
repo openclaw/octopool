@@ -211,8 +211,8 @@ func TestGHRunWatchJobsRetryClearsCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 	backoff := newWatchBackoff(watchMinInterval)
-	jobs, err := relayWatchRunJobs(t.Context(), client, "acme/repo", runJobOwner{id: "42"}, 2, &backoff)
-	if err != nil || len(jobs) != relayPageSize+1 || strings.Join(pages, ",") != "1,2,1,2" || len(*sleeps) != 1 {
+	jobs, err := relayWatchRunJobs(t.Context(), client, "acme/repo", runJobOwner{id: "42"}, 2, "", time.Now(), &backoff)
+	if err != nil || len(jobs) != relayPageSize+1 || strings.Join(pages, ",") != "1,2,1,2,1,2" || len(*sleeps) != 1 {
 		t.Fatalf("err=%v jobs=%d pages=%v sleeps=%v", err, len(jobs), pages, *sleeps)
 	}
 }
@@ -259,7 +259,7 @@ func TestGHRunWatchRerunAttemptAndExitStatus(t *testing.T) {
 				} else if result.action != ghComplete || result.err != nil {
 					t.Fatalf("action=%v err=%v", result.action, result.err)
 				}
-				if runCalls != 2 || jobCalls != 1 || strings.Count(stdout.String(), "job ") != 3 ||
+				if runCalls != 2 || jobCalls != 2 || strings.Count(stdout.String(), "job ") != 3 ||
 					!strings.Contains(stdout.String(), "Run 42 completed with '"+conclusion+"'") {
 					t.Fatalf("runs=%d jobs=%d stdout=%q", runCalls, jobCalls, stdout.String())
 				}
@@ -317,8 +317,8 @@ func TestCLIRunWatchInvalidJobsDoesNotLaunchNative(t *testing.T) {
 						writeCLIEnvelope(t, w, map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "owned"})
 						return
 					}
-					if request["path"] != "/repos/acme/repo/actions/runs/42/attempts/2/jobs" || request["headers"].(map[string]any)["cache-control"] != "max-age=0" {
-						t.Error("jobs must belong to the confirmed attempt and be fresh")
+					if request["path"] != "/repos/acme/repo/actions/runs/42/attempts/2/jobs" {
+						t.Error("jobs must belong to the confirmed attempt")
 					}
 					job := map[string]any{"id": 7, "name": "Check", "conclusion": "success"}
 					jobs := []map[string]any{job}

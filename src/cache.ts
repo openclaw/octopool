@@ -60,6 +60,22 @@ export type GitHubCacheRead = {
   source: "edge" | "shared";
 };
 
+export function cachedGitHubCreatedAt(
+  cached: GitHubRelayResponse & Pick<CachedGitHubResponse, "identity" | "created_at">,
+  ...sources: CachedGitHubResponse[]
+): string | undefined {
+  let oldest = Infinity;
+  for (const source of [cached, ...sources]) {
+    // Web projections can incorporate older proof data whose fetch time is not retained.
+    if (source.identity === undefined && source.headers["x-ratelimit-resource"] === undefined)
+      return undefined;
+    const createdAt = parseSQLiteTimestamp(source.created_at);
+    if (!Number.isFinite(createdAt) || createdAt > Date.now()) return undefined;
+    oldest = Math.min(oldest, createdAt);
+  }
+  return new Date(oldest).toISOString();
+}
+
 export type CacheMissReason = "absent" | "expired" | "caller_max_age" | "unusable" | "uncacheable";
 export type CacheMissObserver = (reason: CacheMissReason) => void;
 

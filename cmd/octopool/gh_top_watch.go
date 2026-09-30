@@ -15,6 +15,8 @@ const (
 	watchMinInterval = 30 * time.Second
 	watchMaxInterval = 120 * time.Second
 	watchMaxErrors   = 3
+	// Allow two seconds of client/server clock skew in timestamp proofs.
+	watchClockSkewMargin = 2 * time.Second
 )
 
 var sleepContext = func(ctx context.Context, duration time.Duration) error {
@@ -169,6 +171,7 @@ func parseGHRunWatchOptions(args []string) (ghRunWatchOptions, bool) {
 }
 
 func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions) error {
+	watchStart := time.Now()
 	client, err := newGHRelayClient()
 	if err != nil {
 		return runWatchError(err, false)
@@ -178,9 +181,10 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 	progressPrinted := false
 	for {
 		var run map[string]any
+		var meta relayMeta
 		err := retryWatchTick(ctx, &backoff, func() error {
 			var pollErr error
-			run, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, nil)
+			run, meta, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, nil)
 			return pollErr
 		})
 		if err != nil {
@@ -202,17 +206,17 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 		}
 		previousStatus = status
 		if status == "completed" {
-			// Reruns reuse the run ID, so a cached terminal payload from a
-			// previous attempt could finalize the watch instantly with stale
-			// results. Confirm completion with one uncached read per exit.
-			var confirmed map[string]any
-			err := retryWatchTick(ctx, &backoff, func() error {
-				var pollErr error
-				confirmed, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, watchFreshHeaders())
-				return pollErr
-			})
-			if err != nil {
-				return runWatchError(err, progressPrinted)
+			// Reruns reuse IDs; an unproven cached terminal attempt still needs a live read.
+			confirmed := run
+			if !watchRunComplete(meta, watchStart) {
+				err := retryWatchTick(ctx, &backoff, func() error {
+					var pollErr error
+					confirmed, _, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, watchFreshHeaders())
+					return pollErr
+				})
+				if err != nil {
+					return runWatchError(err, progressPrinted)
+				}
 			}
 			confirmedStatus := watchSafeText(firstString(confirmed, "status"))
 			if confirmedStatus == "" {
@@ -239,7 +243,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 				return errors.New("workflow run confirmation did not include conclusion")
 			}
 			owner := runJobOwner{id: opts.id, headSHA: firstString(confirmed, "head_sha")}
-			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, owner, attempt, &backoff)
+			jobs, err := relayWatchRunJobs(ctx, client, opts.repo, owner, attempt, firstString(confirmed, "updated_at"), watchStart, &backoff)
 			if err != nil {
 				return runWatchError(err, true)
 			}
@@ -264,7 +268,15 @@ func watchFreshHeaders() map[string]string {
 	return map[string]string{"cache-control": "max-age=0"}
 }
 
-func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id string, extraHeaders map[string]string) (map[string]any, error) {
+func watchRunComplete(meta relayMeta, watchStart time.Time) bool {
+	if meta.Cache == "miss" && !meta.Coalesced {
+		return true
+	}
+	created, err := time.Parse(time.RFC3339, meta.CacheCreatedAt)
+	return err == nil && !created.Before(watchStart.Add(watchClockSkewMargin))
+}
+
+func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id string, extraHeaders map[string]string) (map[string]any, relayMeta, error) {
 	headers := map[string]string{"x-octopool-public-shape": publicShapeActionsSummary}
 	for key, value := range extraHeaders {
 		headers[key] = value
@@ -275,27 +287,62 @@ func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id st
 		headers: headers,
 	})
 	if err != nil {
-		return nil, err
+		return nil, relayMeta{}, err
 	}
 	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
-		return nil, err
+		return nil, relayMeta{}, err
 	}
 	var run map[string]any
 	if err := json.Unmarshal(body, &run); err != nil {
-		return nil, err
+		return nil, relayMeta{}, err
 	}
-	return run, nil
+	return run, envelope.Relay, nil
 }
 
-func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, backoff *watchBackoff) ([]any, error) {
+func relayWatchRunJobs(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, updatedAt string, watchStart time.Time, backoff *watchBackoff) ([]any, error) {
 	var jobs []any
+	var pages []relayMeta
 	err := retryWatchTick(ctx, backoff, func() error {
+		var err error
+		jobs, pages, err = relayHumanRunJobsWithMeta(ctx, client, repo, owner, attempt, nil)
+		return err
+	})
+	if err != nil || watchJobsComplete(jobs, pages, updatedAt, watchStart) {
+		return jobs, err
+	}
+	err = retryWatchTick(ctx, backoff, func() error {
 		var err error
 		jobs, err = relayHumanRunJobs(ctx, client, repo, owner, attempt, watchFreshHeaders())
 		return err
 	})
 	return jobs, err
+}
+
+func watchJobsComplete(jobs []any, pages []relayMeta, updatedAt string, watchStart time.Time) bool {
+	updated, updatedErr := time.Parse(time.RFC3339, updatedAt)
+	threshold := watchStart
+	if updated.After(threshold) {
+		threshold = updated
+	}
+	threshold = threshold.Add(watchClockSkewMargin)
+	for _, page := range pages {
+		if page.Cache == "miss" && !page.Coalesced {
+			continue
+		}
+		// Jobs appear lazily: a terminal snapshot predating run completion is insufficient.
+		created, err := time.Parse(time.RFC3339, page.CacheCreatedAt)
+		if updatedErr != nil || err != nil || created.Before(threshold) {
+			return false
+		}
+	}
+	for _, raw := range jobs {
+		job, ok := raw.(map[string]any)
+		if !ok || firstString(job, "status") != "completed" {
+			return false
+		}
+	}
+	return len(pages) > 0
 }
 
 func printWatchRunJobs(stdout io.Writer, jobs []any) error {

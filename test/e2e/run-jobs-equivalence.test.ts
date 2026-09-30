@@ -102,6 +102,36 @@ const directions = [
 ];
 
 describe("raw run jobs latest-attempt equivalence", () => {
+  it.each([runPath, pinned])("reports the oldest source when %s is older", async (older) => {
+    const upstream = await setup();
+    const original = upstream.getMockImplementation()!;
+    upstream.mockImplementation(async (input, init) => {
+      const response = await original(input, init);
+      response.headers.set("x-ratelimit-resource", "core");
+      return response;
+    });
+    await relay(runPath);
+    await relay(pinned, undefined, { query: { per_page: "100" } });
+    await env.DB.prepare(
+      "UPDATE github_cache_entries SET created_at = datetime('now', '-30 seconds') WHERE path = ?",
+    )
+      .bind(older)
+      .run();
+    await evictEdges();
+    const before = await rows();
+    upstream.mockClear();
+    const response = await (await relay(plain, undefined, { query: { per_page: "100" } })).json();
+    expect(response).toMatchObject({
+      relay: {
+        cache: "hit",
+        cache_created_at: new Date(
+          `${before.find((row) => row.path === older)!.created_at}Z`,
+        ).toISOString(),
+      },
+    });
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it.each(directions)(
     "accepts canonical repository casing in the $source proof and links",
     async ({ source, target }) => {
@@ -267,6 +297,7 @@ describe("raw run jobs latest-attempt equivalence", () => {
       cache: "hit",
       cache_expires_at: before.find((row) => row.path === source)!.expires_at,
     });
+    expect(response.relay).not.toHaveProperty("cache_created_at");
     expect(response.identity).toEqual(pooled ? { id: "primary", kind: "pat" } : undefined);
     expect(response.headers.etag).toBeUndefined();
     expect(response.headers["last-modified"]).toBeUndefined();

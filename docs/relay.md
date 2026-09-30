@@ -123,6 +123,15 @@ and patch hosts.
   authenticated responses can include private repositories visible to the caller.
 - `cache` is `hit`, `stale`, `miss`, or `bypass` (conditional, log, large-payload, or
   otherwise non-cacheable request).
+- `cache_created_at`, when present, is the stored representation's GitHub observation time
+  as an ISO 8601 UTC string. REST hits, including SWR stale entries and coalesced followers,
+  retain their source entry's `created_at`; a run projected from a REST list retains the
+  list's time. Merged REST job pages retain the first (oldest) page's observation time.
+  Job projections requiring a separate run proof use the older of the job and proof times.
+  Public/web projections without REST provenance omit it because the oldest source time
+  is not retained. Fresh misses and direct revalidation responses also omit it.
+  Clients must treat absence as unknown, and a
+  coalesced response does not imply that this request started the fetch.
 - `stale_ok: true` means an expired public cache entry was served because all eligible
   identities were depleted, cooling down, missing, or rate-limited, or because a token-free-only
   route lost its public backend (`web_only_unavailable`). `stale_reason` and

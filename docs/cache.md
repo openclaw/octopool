@@ -433,8 +433,10 @@ after fresh expiry, and PRs retain 1h.
 The caps bound fresh-cache reuse after a re-run to at most 10m and after a
 PR reopens to its computed TTL (at most 1h). Outage stale fallback remains separately
 bounded as above. Explicit caller maximum ages still constrain both fresh and stale
-reuse; `max-age=0` requires upstream validation. CLI live-state PR fields and watch
-commands already request zero-age reads.
+reuse; `max-age=0` requires upstream validation. CLI live-state PR fields and unproven watch
+completion confirmations request zero-age reads. Run watches can reuse terminal snapshots
+fetched after watch start and jobs proven newer than both watch start and run completion;
+see the [watch contract](cli.md).
 
 Settled check-run/check-suite collections require every returned item to have status
 `completed`; status lists require terminal `success`, `failure`, or `error` states,

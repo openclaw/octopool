@@ -29,7 +29,9 @@ type relayEnvelope struct {
 
 type relayMeta struct {
 	Cache          string `json:"cache"`
+	CacheCreatedAt string `json:"cache_created_at"`
 	CacheExpiresAt string `json:"cache_expires_at"`
+	Coalesced      bool   `json:"coalesced"`
 	RouteKind      string `json:"route_kind"`
 }
 

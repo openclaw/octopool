@@ -15,6 +15,7 @@ import {
 import {
   type CachedGitHubResponse,
   type CacheMissReason,
+  cachedGitHubCreatedAt,
   githubCacheRevalidationHeaders,
   githubCacheKey,
   readGitHubCache,
@@ -1609,6 +1610,7 @@ async function serveEquivalentRunJobsCache(state: ActiveRelay): Promise<Response
         state.ctx,
         cachedResponseParams(state, cached, cacheStatus, {
           fallbackReason: "run_jobs_superset",
+          source: proof,
           ...(cacheStatus === "stale" ? { staleReason: "stale_while_revalidate" } : {}),
         }),
       );
@@ -1873,6 +1875,7 @@ function cachedResponseParams(
     staleReason?: string;
     coalesced?: boolean;
     fallbackReason?: "run_list_superset" | "run_jobs_superset";
+    source?: CachedGitHubResponse;
   } = {},
 ): Parameters<typeof serveCachedGitHubResponse>[2] {
   rejectIncompleteRunJobs(state, cached);
@@ -1890,6 +1893,7 @@ function cachedResponseParams(
     pool: state.request.pool,
     route: state.route,
     cached: { ...cached, ...clientResponse },
+    cacheCreatedAt: cachedGitHubCreatedAt(cached, ...(extras.source ? [extras.source] : [])),
     started: state.started,
     maxAgeSeconds: state.maxAgeSeconds,
     cacheStatus,
@@ -1944,6 +1948,7 @@ async function serveCachedGitHubResponse(
     };
     started: number;
     cacheStatus: "hit" | "stale";
+    cacheCreatedAt: string | undefined;
     maxAgeSeconds: number | undefined;
     staleReason?: string;
     coalesced?: boolean;
@@ -1990,6 +1995,7 @@ async function serveCachedGitHubResponse(
       stale_ok: params.cacheStatus === "stale",
       ...(params.staleReason === undefined ? {} : { stale_reason: params.staleReason }),
       ...(params.coalesced === true ? { coalesced: true } : {}),
+      ...(params.cacheCreatedAt === undefined ? {} : { cache_created_at: params.cacheCreatedAt }),
       ...(params.cached.expires_at === undefined
         ? {}
         : { cache_expires_at: params.cached.expires_at }),

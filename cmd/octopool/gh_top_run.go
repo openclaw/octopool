@@ -140,17 +140,25 @@ func positiveJSONInt(value any) (int, bool) {
 }
 
 func relayHumanRunJobs(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, extraHeaders map[string]string) ([]any, error) {
+	jobs, _, err := relayHumanRunJobsWithMeta(ctx, client, repo, owner, attempt, extraHeaders)
+	return jobs, err
+}
+
+func relayHumanRunJobsWithMeta(ctx context.Context, client ghRelayClient, repo string, owner runJobOwner, attempt int, extraHeaders map[string]string) ([]any, []relayMeta, error) {
 	headers := map[string]string{"x-octopool-public-shape": publicShapeActionsJobs}
 	for key, value := range extraHeaders {
 		headers[key] = value
 	}
-	return relayRunJobs(ctx, client, ghAPIRequest{
+	var pages []relayMeta
+	jobs, err := relayRunJobs(ctx, client, ghAPIRequest{
 		method:  "GET",
 		path:    repoPath(repo, "actions", "runs", owner.id, "attempts", strconv.Itoa(attempt), "jobs"),
 		headers: headers,
 	}, func(envelope relayEnvelope, seen map[int64]bool) ([]any, int, error) {
+		pages = append(pages, envelope.Relay)
 		return runJobsPage(envelope, owner, seen)
 	})
+	return jobs, pages, err
 }
 
 func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool) ([]any, int, error) {

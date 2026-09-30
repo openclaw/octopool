@@ -43,6 +43,7 @@ describe("Actions run-list superset", () => {
     expect(cached.body).toMatchObject({ total_count: 2500 });
     expect(runIDs(cached.body)).toEqual([1]);
     expect(cached.relay.cache).toBe("hit");
+    expect(cached.relay).not.toHaveProperty("cache_created_at");
     expect(upstream).toHaveBeenCalledOnce();
   });
 

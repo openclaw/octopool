@@ -14,6 +14,7 @@ type relayTestResponse struct {
 	Body    any
 	Headers map[string]string
 	Status  int
+	Relay   relayMeta
 	// GitHubStatus is the upstream status inside a successful relay envelope.
 	GitHubStatus int
 }
@@ -58,6 +59,7 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 				return
 			}
 			fixture = response.Body
+			envelope.Relay = response.Relay
 			envelope.Headers = response.Headers
 			if response.GitHubStatus != 0 {
 				envelope.Status = response.GitHubStatus

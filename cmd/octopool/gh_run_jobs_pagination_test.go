@@ -111,7 +111,7 @@ func TestRunJobsPagination(t *testing.T) {
 						}
 						responseHeaders["Link"] = fmt.Sprintf(`<https://api.github.com%s?page=%d>; rel="next"`, path, next)
 					}
-					return relayTestResponse{Headers: responseHeaders, Body: map[string]any{"total_count": total, "jobs": jobs}}
+					return relayTestResponse{Headers: responseHeaders, Relay: relayMeta{Cache: "miss"}, Body: map[string]any{"total_count": total, "jobs": jobs}}
 				})
 				args := []string{"run", "view", "42", "-R", "acme/repo"}
 				if mode == "json" {

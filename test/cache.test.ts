@@ -4,6 +4,7 @@ import { hashToken } from "../src/auth";
 import { CACHE_PUBLICATION_EPOCH } from "../src/cache-publication";
 import {
   cacheTTLSeconds,
+  cachedGitHubCreatedAt,
   githubCacheRevalidationHeaders,
   githubCacheKey,
   pruneExpiredGitHubCache,
@@ -26,6 +27,26 @@ describe("github cache policy", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("exposes only known REST cache creation times in UTC", () => {
+    const cached = {
+      status: 200,
+      headers: {},
+      body: {},
+      created_at: "2026-01-01 12:34:56",
+    };
+    expect(cachedGitHubCreatedAt(cached)).toBeUndefined();
+    const rest = { ...cached, headers: { "x-ratelimit-resource": "core" } };
+    expect(cachedGitHubCreatedAt(rest)).toBe("2026-01-01T12:34:56.000Z");
+    expect(cachedGitHubCreatedAt({ ...cached, identity: { id: "primary", kind: "pat" } })).toBe(
+      "2026-01-01T12:34:56.000Z",
+    );
+    expect(cachedGitHubCreatedAt({ ...rest, created_at: "invalid" })).toBeUndefined();
+    expect(cachedGitHubCreatedAt({ ...rest, created_at: "9999-01-01 00:00:00" })).toBeUndefined();
+    const older = { ...rest, created_at: "2026-01-01 12:00:00", expires_at: "2026-01-01 13:00:00" };
+    expect(cachedGitHubCreatedAt(rest, older)).toBe("2026-01-01T12:00:00.000Z");
+    expect(cachedGitHubCreatedAt(rest, { ...older, headers: {} })).toBeUndefined();
   });
 
   it("keys equivalent query and header order identically", async () => {

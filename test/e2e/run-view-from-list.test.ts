@@ -65,6 +65,14 @@ describe("exact run views from indexed fresh REST lists", () => {
         relay: { cache: "miss" },
       });
       expect(await memberships()).toHaveLength(1);
+      const entries = await env.DB.prepare("SELECT cache_key FROM github_cache_entries").all<{
+        cache_key: string;
+      }>();
+      for (const entry of entries.results)
+        await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, entry.cache_key);
+      await env.DB.prepare(
+        "UPDATE github_cache_entries SET created_at = datetime('now', '-30 seconds')",
+      ).run();
       const before = (await env.DB.prepare(
         "SELECT created_at, expires_at FROM github_cache_entries",
       ).first())!;
@@ -74,10 +82,11 @@ describe("exact run views from indexed fresh REST lists", () => {
       ).json<{
         body: unknown;
         headers: Record<string, string>;
-        relay: { cache: string; cache_expires_at: string };
+        relay: { cache: string; cache_expires_at: string; cache_created_at?: string };
       }>();
       expect(response.body).toEqual(run);
       expect(response.relay.cache).toBe("hit");
+      expect(response.relay.cache_created_at).toBe(new Date(`${before.created_at}Z`).toISOString());
       expect(response.headers.etag).toBeUndefined();
       expect(response.headers.link).toBeUndefined();
       expect(upstream).not.toHaveBeenCalled();

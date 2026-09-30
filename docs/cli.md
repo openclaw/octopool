@@ -698,9 +698,22 @@ Supported `gh run watch` commands keep polling on the relay, including under act
 rules. Relay failures, including
 `fallback_local` for pagination or exhausted pool retries, stop the watch with an error;
 they never start a personal-token watcher. This applies to the initial read, later polls,
-fresh completion confirmation, and final job hydration. Jobs are fetched only after a fresh
-completed run response, using its exact `run_attempt`. Missing or inconsistent job metadata
-fails explicitly without printing a partial job summary or a successful completion message.
+completion confirmation, and final job hydration. A terminal poll needs a fresh confirmation
+unless it is a non-coalesced cache miss or its RFC3339 `cache_created_at` is at or after
+`watchStart + 2s`. `watchStart` is captured once when the watch begins, before its first poll;
+the two-second margin allows for client/server clock skew. Earlier in-progress observations
+and attempt numbers do not prove freshness, since those snapshots can themselves be stale.
+A confirmation that finds an unfinished run resumes polling.
+
+Jobs use the proven completed run's exact `run_attempt`. Each page first uses normal caching
+and is accepted only when every job is completed and every page is either a non-coalesced
+cache miss or has `cache_created_at >= max(run.updated_at, watchStart) + 2s`. `cache_created_at`
+and `run.updated_at` must both parse as RFC3339 for the cached proof. Jobs can appear lazily
+after an older all-completed snapshot, and that snapshot must also postdate the watch's start.
+Unproven collections are reread with `max-age=0`. `OCTOPOOL_FRESH` still forces live reads;
+older relays without creation timestamps can prove completion only through non-coalesced
+misses. Missing or inconsistent job metadata fails explicitly without printing a partial job
+summary or a successful completion message.
 Job IDs must be positive, unique across all pages, and within the relay's safe-integer
 range. Supplied `run_id` and nonempty `head_sha` must match the owning run;
 optional ownership fields may be absent from public-page-derived jobs. Human run views

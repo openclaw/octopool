@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Let `gh run watch` finish without extra live GitHub reads when run completion and terminal job freshness are already proven.
+
 ## 0.9.2 - 2026-09-29
 
 **Highlights:** Raise relay cache reuse without weakening live reads: bounded stale-while-revalidate for CI status and PR reads, run views served from cached run lists, job pages shared across attempt-pinned and latest forms, age-scaled check freshness, and per-miss audit reasons to guide further tuning.

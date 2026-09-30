@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func TestGHRunWatchPrintsTransitionsAndFetchesJobsOnce(t *testing.T) {
+func TestGHRunWatchPrintsTransitionsAndValidatesTerminalJobs(t *testing.T) {
 	var runCalls int
 	var jobsCalls int
 	relayTestServer(t, func(body map[string]any) any {
@@ -27,7 +27,6 @@ func TestGHRunWatchPrintsTransitionsAndFetchesJobsOnce(t *testing.T) {
 			if headers["x-octopool-public-shape"] != "actions-summary-v1" {
 				t.Fatalf("run headers = %#v", headers)
 			}
-			// The fifth read is the terminal confirmation with max-age=0.
 			statuses := []string{"queued", "in_progress", "in_progress", "completed", "completed"}
 			return map[string]any{"status": statuses[runCalls-1], "conclusion": "failure", "run_attempt": 2}
 		case "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs":
@@ -71,7 +70,7 @@ func TestGHRunWatchPrintsTransitionsAndFetchesJobsOnce(t *testing.T) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
 		}
 	}
-	if runCalls != 5 || jobsCalls != 1 {
+	if runCalls != 5 || jobsCalls != 2 {
 		t.Fatalf("run calls=%d jobs calls=%d", runCalls, jobsCalls)
 	}
 	if want := []time.Duration{30 * time.Second, 60 * time.Second, 120 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
@@ -101,6 +100,197 @@ func TestGHRunWatchRequestedIntervalStartsAt45Seconds(t *testing.T) {
 	}
 	if want := []time.Duration{45 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
 		t.Fatalf("sleeps=%v want=%v", *sleeps, want)
+	}
+}
+
+func TestGHRunWatchCompletionProof(t *testing.T) {
+	beforeWatch := time.Now().UTC()
+	for _, test := range []struct {
+		name             string
+		prior            bool
+		priorAttempt     int
+		completedAttempt int
+		meta             relayMeta
+		newTimestamp     bool
+		wantFresh        int
+	}{
+		{name: "initial hit", completedAttempt: 1, meta: relayMeta{Cache: "hit"}, wantFresh: 1},
+		{name: "initial hit after watch start", completedAttempt: 1, meta: relayMeta{Cache: "hit"}, newTimestamp: true},
+		{name: "same attempt without timestamp", prior: true, priorAttempt: 1, completedAttempt: 1, meta: relayMeta{Cache: "hit"}, wantFresh: 1},
+		{name: "newer attempt without timestamp", prior: true, priorAttempt: 1, completedAttempt: 2, meta: relayMeta{Cache: "hit"}, wantFresh: 1},
+		{name: "older attempt without timestamp", prior: true, priorAttempt: 2, completedAttempt: 1, meta: relayMeta{Cache: "hit"}, wantFresh: 1},
+		{name: "older attempt after watch start", prior: true, priorAttempt: 2, completedAttempt: 1, meta: relayMeta{Cache: "hit"}, newTimestamp: true},
+		{name: "missing terminal attempt without timestamp", prior: true, priorAttempt: 2, meta: relayMeta{Cache: "hit"}, wantFresh: 1},
+		{name: "live miss", completedAttempt: 1, meta: relayMeta{Cache: "miss"}},
+		{name: "coalesced miss", completedAttempt: 1, meta: relayMeta{Cache: "miss", Coalesced: true}, wantFresh: 1},
+		{name: "coalesced same attempt", prior: true, priorAttempt: 1, completedAttempt: 1, meta: relayMeta{Cache: "hit", Coalesced: true}, wantFresh: 1},
+		{name: "coalesced after watch start", completedAttempt: 1, meta: relayMeta{Cache: "miss", Coalesced: true}, newTimestamp: true},
+		{name: "stale initial", completedAttempt: 1, meta: relayMeta{Cache: "stale"}, wantFresh: 1},
+		{name: "stale same attempt", prior: true, priorAttempt: 1, completedAttempt: 1, meta: relayMeta{Cache: "stale"}, wantFresh: 1},
+		{name: "stale after watch start", completedAttempt: 1, meta: relayMeta{Cache: "stale"}, newTimestamp: true},
+		{name: "old relay same attempt", prior: true, priorAttempt: 1, completedAttempt: 1, wantFresh: 1},
+		{name: "old relay no attempt", prior: true, completedAttempt: 1, wantFresh: 1},
+		{name: "timestamp after watch start", prior: true, completedAttempt: 1, meta: relayMeta{Cache: "hit"}, newTimestamp: true},
+		{name: "stale in progress then completed before watch start", prior: true, priorAttempt: 1, completedAttempt: 1, meta: relayMeta{Cache: "hit", CacheCreatedAt: beforeWatch.Add(-time.Minute).Format(time.RFC3339Nano)}, wantFresh: 1},
+		{name: "timestamp within skew margin", completedAttempt: 1, meta: relayMeta{Cache: "hit", CacheCreatedAt: beforeWatch.Add(time.Second).Format(time.RFC3339Nano)}, wantFresh: 1},
+		{name: "invalid timestamp", prior: true, completedAttempt: 1, meta: relayMeta{Cache: "hit", CacheCreatedAt: "invalid"}, wantFresh: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			polls, fresh := 0, 0
+			relayTestServer(t, func(request map[string]any) any {
+				if strings.HasSuffix(request["path"].(string), "/jobs") {
+					return relayTestResponse{Body: map[string]any{"total_count": 0, "jobs": []any{}}, Relay: relayMeta{Cache: "miss"}}
+				}
+				if request["headers"].(map[string]any)["cache-control"] == "max-age=0" {
+					fresh++
+					return map[string]any{"status": "completed", "run_attempt": 2, "conclusion": "success"}
+				}
+				polls++
+				if test.prior && polls == 1 {
+					return relayTestResponse{
+						Body:  map[string]any{"status": "in_progress", "run_attempt": test.priorAttempt},
+						Relay: relayMeta{Cache: "hit", CacheCreatedAt: beforeWatch.Add(-time.Hour).Format(time.RFC3339Nano)},
+					}
+				}
+				meta := test.meta
+				if test.newTimestamp {
+					meta.CacheCreatedAt = time.Now().UTC().Add(3 * time.Second).Format(time.RFC3339Nano)
+				}
+				return relayTestResponse{
+					Body: map[string]any{"status": "completed", "run_attempt": test.completedAttempt, "conclusion": "success"}, Relay: meta,
+				}
+			})
+			sleeps := recordWatchSleeps(t)
+			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo"}, &bytes.Buffer{})
+			wantPolls := 1
+			if test.prior {
+				wantPolls++
+			}
+			if result.action != ghComplete || result.err != nil || fresh != test.wantFresh || polls != wantPolls || len(*sleeps) != wantPolls-1 {
+				t.Fatalf("action=%v err=%v fresh=%d polls=%d sleeps=%v", result.action, result.err, fresh, polls, *sleeps)
+			}
+		})
+	}
+}
+
+func TestWatchRunCompletionTimestampIncludesClockSkewMargin(t *testing.T) {
+	watchStart := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	for _, delta := range []time.Duration{-time.Nanosecond, 0, time.Second, 2*time.Second - time.Nanosecond, 2 * time.Second, 2*time.Second + time.Nanosecond} {
+		t.Run(delta.String(), func(t *testing.T) {
+			meta := relayMeta{Cache: "hit", CacheCreatedAt: watchStart.Add(delta).Format(time.RFC3339Nano)}
+			if got := watchRunComplete(meta, watchStart); got != (delta >= 2*time.Second) {
+				t.Fatalf("delta=%v proven=%v", delta, got)
+			}
+		})
+	}
+}
+
+func TestGHRunWatchJobsCompletionProof(t *testing.T) {
+	beforeWatch := time.Now().UTC()
+	updated := beforeWatch.Add(-time.Hour).Format(time.RFC3339Nano)
+	for _, test := range []struct {
+		name         string
+		cache        string
+		created      string
+		updated      string
+		jobStatus    string
+		coalesced    bool
+		secondPage   bool
+		newTimestamp bool
+		freshEnv     bool
+		wantFresh    bool
+	}{
+		{name: "equal run timestamp", cache: "hit", created: updated, updated: updated, jobStatus: "completed", wantFresh: true},
+		{name: "after watch start and skew margin", cache: "hit", newTimestamp: true, updated: updated, jobStatus: "completed"},
+		{name: "older than run timestamp", cache: "hit", created: beforeWatch.Add(-2 * time.Hour).Format(time.RFC3339Nano), updated: updated, jobStatus: "completed", wantFresh: true},
+		{name: "after run timestamp before watch start", cache: "hit", created: beforeWatch.Add(-time.Minute).Format(time.RFC3339Nano), updated: updated, jobStatus: "completed", wantFresh: true},
+		{name: "within watch start skew margin", cache: "hit", created: beforeWatch.Add(time.Second).Format(time.RFC3339Nano), updated: updated, jobStatus: "completed", wantFresh: true},
+		{name: "nonterminal job", cache: "hit", newTimestamp: true, updated: updated, jobStatus: "in_progress", wantFresh: true},
+		{name: "missing job status", cache: "hit", newTimestamp: true, updated: updated, wantFresh: true},
+		{name: "old relay", cache: "hit", updated: updated, jobStatus: "completed", wantFresh: true},
+		{name: "missing run timestamp", cache: "hit", newTimestamp: true, jobStatus: "completed", wantFresh: true},
+		{name: "invalid run timestamp", cache: "hit", newTimestamp: true, updated: "invalid", jobStatus: "completed", wantFresh: true},
+		{name: "invalid cache timestamp", cache: "hit", created: "invalid", updated: updated, jobStatus: "completed", wantFresh: true},
+		{name: "live miss", cache: "miss", jobStatus: "completed"},
+		{name: "live nonterminal", cache: "miss", jobStatus: "queued", wantFresh: true},
+		{name: "coalesced miss", cache: "miss", coalesced: true, jobStatus: "completed", wantFresh: true},
+		{name: "coalesced timestamp proof", cache: "hit", coalesced: true, newTimestamp: true, updated: updated, jobStatus: "completed"},
+		{name: "second page too old", secondPage: true, cache: "hit", created: beforeWatch.Add(-time.Minute).Format(time.RFC3339Nano), updated: updated, jobStatus: "completed", wantFresh: true},
+		{name: "second page nonterminal", secondPage: true, cache: "hit", newTimestamp: true, updated: updated, jobStatus: "queued", wantFresh: true},
+		{name: "second page proven", secondPage: true, cache: "hit", newTimestamp: true, updated: updated, jobStatus: "completed"},
+		{name: "fresh environment", cache: "miss", jobStatus: "completed", freshEnv: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var jobHeaders []any
+			relayTestServer(t, func(request map[string]any) any {
+				if !strings.HasSuffix(request["path"].(string), "/jobs") {
+					return relayTestResponse{Body: map[string]any{"status": "completed", "run_attempt": 1, "conclusion": "success", "updated_at": test.updated}, Relay: relayMeta{Cache: "miss"}}
+				}
+				header := request["headers"].(map[string]any)["cache-control"]
+				jobHeaders = append(jobHeaders, header)
+				meta := relayMeta{Cache: test.cache, CacheCreatedAt: test.created, Coalesced: test.coalesced}
+				if test.newTimestamp {
+					meta.CacheCreatedAt = time.Now().UTC().Add(3 * time.Second).Format(time.RFC3339Nano)
+				}
+				jobStatus := test.jobStatus
+				count, total, offset := 1, 1, 0
+				if test.secondPage {
+					total = relayPageSize + 1
+					if request["query"].(map[string]any)["page"] == "1" {
+						count, jobStatus, meta = relayPageSize, "completed", relayMeta{Cache: "miss"}
+					} else {
+						offset = relayPageSize
+					}
+				}
+				if header == "max-age=0" {
+					meta, jobStatus = relayMeta{Cache: "miss"}, "completed"
+				}
+				jobs := make([]map[string]any, count)
+				for i := range jobs {
+					jobs[i] = map[string]any{"id": offset + i + 1, "status": jobStatus, "conclusion": "success"}
+				}
+				return relayTestResponse{Body: map[string]any{"total_count": total, "jobs": jobs}, Relay: meta}
+			})
+			if test.freshEnv {
+				t.Setenv("OCTOPOOL_FRESH", "1")
+			}
+			recordWatchSleeps(t)
+			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo"}, &bytes.Buffer{})
+			wantHeaders := []any{nil}
+			if test.secondPage {
+				wantHeaders = append(wantHeaders, nil)
+			}
+			if test.wantFresh {
+				for range len(wantHeaders) {
+					wantHeaders = append(wantHeaders, "max-age=0")
+				}
+			}
+			if test.freshEnv {
+				wantHeaders = []any{"max-age=0"}
+			}
+			if result.action != ghComplete || result.err != nil || !reflect.DeepEqual(jobHeaders, wantHeaders) {
+				t.Fatalf("action=%v err=%v headers=%v want=%v", result.action, result.err, jobHeaders, wantHeaders)
+			}
+		})
+	}
+}
+
+func TestWatchJobsCompletionTimestampIncludesClockSkewMargin(t *testing.T) {
+	watchStart := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	jobs := []any{map[string]any{"status": "completed"}}
+	for _, updatedDelta := range []time.Duration{-time.Minute, 0, time.Minute} {
+		t.Run(updatedDelta.String(), func(t *testing.T) {
+			updated := watchStart.Add(updatedDelta)
+			for _, createdDelta := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
+				t.Run(createdDelta.String(), func(t *testing.T) {
+					created := watchStart.Add(max(updatedDelta, 0) + 2*time.Second + createdDelta)
+					pages := []relayMeta{{Cache: "hit", CacheCreatedAt: created.Format(time.RFC3339Nano)}}
+					if got := watchJobsComplete(jobs, pages, updated.Format(time.RFC3339Nano), watchStart); got != (createdDelta >= 0) {
+						t.Fatalf("updated=%v created=%v proven=%v", updated, created, got)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -645,6 +835,7 @@ func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
 
 func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
 	freshRunReads := 0
+	var jobHeaders []any
 	relayTestServer(t, func(body map[string]any) any {
 		switch path := body["path"].(string); {
 		case path == "/repos/openclaw/octopool/actions/runs/42":
@@ -662,9 +853,7 @@ func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
 			}
 			return map[string]any{"id": 42, "status": "completed", "conclusion": conclusion, "run_attempt": 2}
 		case strings.HasSuffix(path, "/jobs"):
-			if h, _ := body["headers"].(map[string]any); h["cache-control"] != "max-age=0" {
-				t.Fatal("terminal jobs read must bypass cached staleness")
-			}
+			jobHeaders = append(jobHeaders, body["headers"].(map[string]any)["cache-control"])
 			return map[string]any{"total_count": 0, "jobs": []any{}}
 		default:
 			t.Fatalf("unexpected path = %v", path)
@@ -677,10 +866,69 @@ func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
+	if !reflect.DeepEqual(jobHeaders, []any{nil, "max-age=0"}) {
+		t.Fatalf("job headers = %v", jobHeaders)
+	}
 	if freshRunReads != 2 {
 		t.Fatalf("fresh run reads = %d, want stale terminal rejected then confirmed", freshRunReads)
 	}
 	if !strings.Contains(out.String(), "completed -> in_progress") || !strings.Contains(out.String(), "Run 42 completed with 'success'") {
+		t.Fatalf("out=%q", out.String())
+	}
+}
+
+func TestGHRunWatchRejectsCachedPriorAttemptAfterRerun(t *testing.T) {
+	beforeWatch := time.Now().UTC()
+	var runHeaders []any
+	jobCalls := 0
+	relayTestServer(t, func(request map[string]any) any {
+		switch path := request["path"].(string); {
+		case path == "/repos/acme/repo/actions/runs/42":
+			runHeaders = append(runHeaders, request["headers"].(map[string]any)["cache-control"])
+			switch len(runHeaders) {
+			case 1:
+				return relayTestResponse{
+					Body:  map[string]any{"status": "in_progress", "run_attempt": 1},
+					Relay: relayMeta{Cache: "hit", CacheCreatedAt: beforeWatch.Add(-4 * time.Minute).Format(time.RFC3339Nano)},
+				}
+			case 2:
+				// Attempt 1 completed and was cached before the user started attempt 2.
+				return relayTestResponse{
+					Body:  map[string]any{"status": "completed", "run_attempt": 1, "conclusion": "failure", "updated_at": beforeWatch.Add(-3 * time.Minute).Format(time.RFC3339Nano)},
+					Relay: relayMeta{Cache: "hit", CacheCreatedAt: beforeWatch.Add(-2 * time.Minute).Format(time.RFC3339Nano)},
+				}
+			case 3:
+				if runHeaders[2] != "max-age=0" {
+					t.Error("stale attempt 1 completion must be confirmed fresh")
+				}
+				return relayTestResponse{Body: map[string]any{"status": "in_progress", "run_attempt": 2}, Relay: relayMeta{Cache: "miss"}}
+			case 4:
+				return relayTestResponse{Body: map[string]any{"status": "completed", "run_attempt": 2, "conclusion": "success"}, Relay: relayMeta{Cache: "miss"}}
+			default:
+				t.Errorf("unexpected run read %d", len(runHeaders))
+				return nil
+			}
+		case path == "/repos/acme/repo/actions/runs/42/attempts/2/jobs":
+			jobCalls++
+			return relayTestResponse{Body: map[string]any{"total_count": 0, "jobs": []any{}}, Relay: relayMeta{Cache: "miss"}}
+		default:
+			t.Errorf("unexpected path %s", path)
+			return nil
+		}
+	})
+	sleeps := recordWatchSleeps(t)
+	var out bytes.Buffer
+	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo", "--exit-status"}, &out)
+	if result.action != ghComplete || result.err != nil || jobCalls != 1 {
+		t.Fatalf("action=%v err=%v jobs=%d out=%q", result.action, result.err, jobCalls, out.String())
+	}
+	if want := []any{nil, nil, "max-age=0", nil}; !reflect.DeepEqual(runHeaders, want) {
+		t.Fatalf("run headers=%v want=%v", runHeaders, want)
+	}
+	if want := []time.Duration{30 * time.Second, 60 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
+		t.Fatalf("sleeps=%v want=%v", *sleeps, want)
+	}
+	if !strings.Contains(out.String(), "completed -> in_progress") || !strings.Contains(out.String(), "Run 42 completed with 'success'") || strings.Contains(out.String(), "completed with 'failure'") {
 		t.Fatalf("out=%q", out.String())
 	}
 }
@@ -761,7 +1009,7 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
-	if len(jobsRequests) != 2 || jobsRequests[0] != "1" || jobsRequests[1] != "2" {
+	if !reflect.DeepEqual(jobsRequests, []string{"1", "2", "1", "2"}) {
 		t.Fatalf("jobs pages requested = %v", jobsRequests)
 	}
 	if got := strings.Count(out.String(), "job job: success"); got != 150 {
