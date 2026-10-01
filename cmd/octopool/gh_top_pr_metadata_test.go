@@ -19,6 +19,55 @@ const metadataHead = "0123456789abcdef0123456789abcdef01234567"
 // OpenClaw scripts/pr-lib/worktree.sh:pr_meta_json reads this complete shape.
 const metadataFields = "number,title,state,isDraft,author,baseRefName,headRefName,headRefOid,headRepository,headRepositoryOwner,url,body,labels,assignees,changedFiles,additions,deletions,statusCheckRollup,files"
 
+func TestRunGHPRViewAuthorCacheFreshness(t *testing.T) {
+	for _, fresh := range []string{"", "1"} {
+		t.Run("fresh="+fresh, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_FRESH", fresh)
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			var paths []string
+			relayTestServer(t, func(request map[string]any) any {
+				path := request["path"].(string)
+				paths = append(paths, path)
+				headers, _ := request["headers"].(map[string]any)
+				switch path {
+				case "/repos/acme/repo/pulls/1":
+					var wantCacheControl any
+					if fresh == "1" {
+						wantCacheControl = "max-age=0"
+					}
+					if headers["cache-control"] != wantCacheControl {
+						t.Errorf("PR cache-control = %v, want %v", headers["cache-control"], wantCacheControl)
+					}
+					return map[string]any{"number": 1, "user": map[string]any{"login": "alice", "node_id": "U_alice", "type": "User"}}
+				case "/users/alice":
+					if headers["cache-control"] != "max-age=3600" {
+						t.Errorf("user cache-control = %v, want max-age=3600", headers["cache-control"])
+					}
+					return map[string]any{"id": 12, "node_id": "U_alice", "login": "alice", "name": "Alice", "type": "User"}
+				default:
+					t.Errorf("unexpected path %q", path)
+					return nil
+				}
+			})
+			var out bytes.Buffer
+			if err := runGH(t.Context(), []string{"pr", "view", "1", "-R", "acme/repo", "--json", "author"}, &out, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(paths, []string{"/repos/acme/repo/pulls/1", "/users/alice"}) {
+				t.Fatalf("paths = %v", paths)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]any{"author": map[string]any{"id": "U_alice", "login": "alice", "name": "Alice", "is_bot": false}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("output = %s, want %#v", out.String(), want)
+			}
+		})
+	}
+}
+
 func TestRunGHPRViewMetadataUnderActivePolicy(t *testing.T) {
 	for _, test := range []struct{ fresh, fields string }{
 		{"", metadataFields}, {"1", metadataFields},
@@ -37,8 +86,12 @@ func TestRunGHPRViewMetadataUnderActivePolicy(t *testing.T) {
 				paths = append(paths, path)
 				pathsMu.Unlock()
 				headers, _ := request["headers"].(map[string]any)
-				immutableOrDescriptive := path == "/users/contributor" || strings.HasSuffix(path, "/files") || strings.HasSuffix(path, "/actions/workflows")
-				if (!immutableOrDescriptive || test.fresh == "1") && headers["cache-control"] != "max-age=0" {
+				identityLookup := path == "/users/contributor"
+				immutableOrDescriptive := strings.HasSuffix(path, "/files") || strings.HasSuffix(path, "/actions/workflows")
+				if identityLookup && headers["cache-control"] != "max-age=3600" {
+					t.Errorf("identity lookup must stay cache-eligible: %#v", request)
+				}
+				if !identityLookup && (!immutableOrDescriptive || test.fresh == "1") && headers["cache-control"] != "max-age=0" {
 					t.Errorf("metadata request must be fresh: %#v", request)
 				}
 				if strings.HasSuffix(path, "/actions/workflows") && test.fresh != "1" && headers["cache-control"] != nil {

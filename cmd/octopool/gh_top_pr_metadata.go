@@ -19,7 +19,12 @@ func relayPRUser(ctx context.Context, client ghRelayClient, raw any, users map[s
 	key := strings.ToLower(login)
 	profile := users[key]
 	if profile == nil {
-		request := ghAPIRequest{method: "GET", path: "/users/" + url.PathEscape(login)}
+		// Identity metadata stays cache-eligible under OCTOPOOL_FRESH. This bound
+		// matches the user_view TTL in src/cache-policy.ts; validation below still applies.
+		request := ghAPIRequest{
+			method: "GET", path: "/users/" + url.PathEscape(login),
+			headers: map[string]string{"cache-control": "max-age=3600"},
+		}
 		if !safeRelayRequest(request) {
 			return nil, errors.New("unsupported pull request user lookup")
 		}

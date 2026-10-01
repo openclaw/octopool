@@ -1548,10 +1548,10 @@ These are dev/CI escape hatches, not the everyday UX:
   missing file fails closed. Defaults to `string-rewrites.json` beside `auth.json`.
 - `OCTOPOOL_FRESH=1` — default every relayed read to `cache-control: max-age=0`, including
   direct `octopool request` GET reads, run metadata, and jobs; explicit cache-control headers
-  take precedence. Use it right after
-  a `git push` or a merge, when a cached answer could describe the previous state. It can
-  cost API quota; leave it off for ordinary reads. Outage fallback cannot exceed the
-  requested age bound.
+  take precedence. Identity lookups for PR author metadata stay cache-eligible with a
+  one-hour age bound. Use it right after a `git push` or a merge, when a cached answer could
+  describe the previous state. It can cost API quota; leave it off for ordinary reads.
+  Outage fallback cannot exceed the requested age bound.
 - `OCTOPOOL_QUIET_CACHE=1` — suppress the one-line stderr note printed when a
   decision-shaped route (PR/issue/run/checks) is served from the shared cache.
 - `OCTOPOOL_NO_FALLBACK=1` — fail instead of running real `gh` after Octopool returns
