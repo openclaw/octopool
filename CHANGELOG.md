@@ -1,11 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.9.3 - 2026-10-01
 
-- Keep PR author identity lookups cache-eligible for up to one hour under `OCTOPOOL_FRESH=1`, preserving live PR reads and identity validation.
+**Highlights:** Move more read traffic onto the pooled relay and its cache: Codex-app batched PR GraphQL no longer spends the caller's personal GraphQL budget, `gh run watch` finishes without redundant live reads, terminal CI data stays fresh for six hours, and PR author lookups stay cacheable under `OCTOPOOL_FRESH=1`.
+
+### Features
+
+- Codex-app style batched PR GraphQL reads (same-repo aliases plus `viewer { login }`) now use the pooled read relay and cache instead of the caller's personal GraphQL budget; `viewer { login }` is answered locally only when native gh's active account matches the Octopool login, and GraphQL reads without Cache-Control accept 20-second-old cached results.
+- Let `gh run watch` finish without extra live GitHub reads when run completion and terminal job freshness are already proven by a live fetch or a relay `cache_created_at` at least two seconds after the watch started.
 - Keep completed attempt-pinned run views, proven completed-attempt job lists, and completed single jobs fresh in the relay cache for six hours, preserving mutable CI TTLs and caller age bounds.
-- Let `gh run watch` finish without extra live GitHub reads when run completion and terminal job freshness are already proven.
-- Codex-app style batched PR GraphQL reads (same-repo aliases plus `viewer { login }`) now use the pooled read relay and cache instead of the caller's personal GraphQL budget.
+- Keep PR author identity lookups cache-eligible for up to one hour under `OCTOPOOL_FRESH=1`, preserving live PR reads and identity validation.
+
+### Fixes
+
+- Run real `gh` with a stderr notice when Octopool is not logged in, instead of failing every shimmed command with `class=setup`; local string-rewrite rules still apply, broken saved logins still fail closed, and `OCTOPOOL_NO_FALLBACK=1` keeps the old refusal.
+
+### Upgrade notes
+
+- The Worker changes (`cache_created_at` relay metadata, same-repository GraphQL aliases, six-hour terminal CI freshness) are already deployed from main 64f1bba; no D1 migrations. Run `brew upgrade octopool` for the CLI changes; no re-login or cache purge is required.
 
 ## 0.9.2 - 2026-09-29
 
@@ -19,10 +31,6 @@
 - Serve CI status entries for up to 60 seconds past fresh expiry when no caller maximum age is set, with bounded, coalesced background refreshes that preserve foreground admission capacity and live-read behavior.
 - Record why cache-accepting relay reads miss (`absent`, `expired`, `caller_max_age`, `unusable`, or `uncacheable`) in audit rows, including terminal job-log cache lookups, without extra D1 reads.
 - Scale settled check-run, check-suite, and commit-status collection freshness with the newest item timestamp from 60 to 300 seconds, preserving 120-second ref caps and live-read bounds.
-
-### Fixes
-
-- Run real `gh` with a stderr notice when Octopool is not logged in, instead of failing every shimmed command with `class=setup`; local string-rewrite rules still apply, broken saved logins still fail closed, and `OCTOPOOL_NO_FALLBACK=1` keeps the old refusal.
 
 ### Upgrade notes
 
