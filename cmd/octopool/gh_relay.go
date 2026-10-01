@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"math/rand/v2"
 	"net"
 	"os"
 	"runtime"
@@ -141,6 +142,18 @@ func newGHRelayClient() (ghRelayClient, error) {
 // generally outlast this budget.
 var relayRetryDelays = []time.Duration{time.Second}
 
+const relayOverloadWait = 8 * time.Second
+
+type relayRetryBudget struct {
+	deadline   time.Time
+	overloaded bool
+}
+
+func relayOverloadDelay(attempt int) time.Duration {
+	base := (500 * time.Millisecond) << min(attempt, 2)
+	return base + time.Duration(rand.Int64N(int64(base)))
+}
+
 func relayReadTimeout() time.Duration {
 	seconds, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("OCTOPOOL_RELAY_TIMEOUT_SECONDS")), 10, 64)
 	if err != nil || seconds < 0 || seconds > math.MaxInt64/int64(time.Second) {
@@ -159,14 +172,14 @@ func transientFallbackReason(reason string) bool {
 	}
 }
 
-func relayRetryAttempts() int {
+func relayRetryAttempts(defaultRetries int) int {
 	raw := strings.TrimSpace(os.Getenv("OCTOPOOL_RELAY_RETRIES"))
 	if raw == "" {
-		return len(relayRetryDelays)
+		return defaultRetries
 	}
 	parsed, err := strconv.Atoi(raw)
 	if err != nil || parsed < 0 {
-		return len(relayRetryDelays)
+		return defaultRetries
 	}
 	return parsed
 }
@@ -176,20 +189,35 @@ func (client ghRelayClient) do(ctx context.Context, request ghAPIRequest) (relay
 	if request.method != "GET" && !(request.method == "POST" && request.path == "/graphql" && request.graphql != nil && repositoryGraphQLRead(request.graphql)) {
 		return relayEnvelope{}, fmt.Errorf("relay client requires GET, got %q", request.method)
 	}
-	retries := relayRetryAttempts()
+	budget := &relayRetryBudget{}
+	var waited time.Duration
 	for attempt := 0; ; attempt++ {
-		envelope, err := client.doOnce(ctx, request)
+		envelope, err := client.doOnce(ctx, request, budget)
 		if err == nil {
 			return envelope, err
 		}
-		if attempt < retries && transientRelayFailure(err) {
-			delay := relayRetryDelays[min(attempt, len(relayRetryDelays)-1)]
-			if err := sleepContext(ctx, delay); err != nil {
-				return envelope, err
-			}
-			continue
-		}
 		var relay *relayResponseError
+		overloaded := errors.As(err, &relay) && relay.Code == "fallback_local" && relayFallbackReason(relay) == "relay_overloaded"
+		defaults := len(relayRetryDelays)
+		if overloaded {
+			defaults = 3
+			budget.overloaded = true
+		}
+		if attempt < relayRetryAttempts(defaults) && transientRelayFailure(err) {
+			delay := relayRetryDelays[min(attempt, len(relayRetryDelays)-1)]
+			if overloaded {
+				delay = relayOverloadDelay(attempt)
+			}
+			// Once admission is overloaded, all remaining retries share the first
+			// read's deadline. Do not start a backoff that consumes that budget.
+			if !budget.overloaded || (delay <= relayOverloadWait-waited && delay < time.Until(budget.deadline)) {
+				if err := sleepContext(ctx, delay); err != nil {
+					return envelope, err
+				}
+				waited += delay
+				continue
+			}
+		}
 		if errors.As(err, &relay) {
 			if fallback, ok := localFallbackFromRelayError(relay); ok {
 				return envelope, fallback
@@ -299,10 +327,16 @@ func relayReadHeaders(method string, headers map[string]string) map[string]strin
 	return headers
 }
 
-func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
-	ctx, releaseSlot := withRelaySlot(ctx)
+func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest, budget *relayRetryBudget) (relayEnvelope, error) {
+	attemptCtx := ctx
+	if budget.overloaded {
+		var cancel context.CancelFunc
+		attemptCtx, cancel = context.WithDeadline(ctx, budget.deadline)
+		defer cancel()
+	}
+	attemptCtx, releaseSlot := withRelaySlot(attemptCtx)
 	defer releaseSlot()
-	policy, err := client.stringRewritePolicy(ctx)
+	policy, err := client.stringRewritePolicy(attemptCtx)
 	if err != nil {
 		return relayEnvelope{}, err
 	}
@@ -327,10 +361,23 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest) (r
 	if request.graphql != nil {
 		body["graphql"] = request.graphql
 	}
-	// Policy acquisition above retains its independent timeout. Only the safe
-	// relay read gets this per-attempt header/body budget.
+	// Initial slot/policy acquisition is outside the read budget. Overload retries
+	// share its deadline, including subsequent slot/policy acquisition.
 	timeout := relayReadTimeout()
-	out, status, err := doRawWithTimeout(ctx, apiURL(client.baseURL, "/v1/github/request"), client.token, body, timeout)
+	if budget.deadline.IsZero() {
+		budget.deadline = time.Now().Add(timeout)
+	}
+	if budget.overloaded {
+		timeout = min(timeout, time.Until(budget.deadline))
+		if timeout <= 0 {
+			if err := ctx.Err(); err != nil {
+				return relayEnvelope{}, err
+			}
+			return relayEnvelope{}, localFallbackError{Reason: "relay_timeout (overload retry budget exhausted)"}
+		}
+	}
+	// The HTTP helper owns read timeouts so an observed rejection stays terminal.
+	out, status, err := doRawWithTimeout(attemptCtx, apiURL(client.baseURL, "/v1/github/request"), client.token, body, timeout)
 	releaseSlot()
 	if err != nil {
 		if ctx.Err() != nil {

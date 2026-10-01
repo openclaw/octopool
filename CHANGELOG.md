@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Keep sandboxed read bursts on the relay with private temp-directory concurrency slots when cache locks are unavailable and bounded jittered backoff for client-admission overloads before native fallback.
+
 ## 0.9.3 - 2026-10-01
 
 **Highlights:** Move more read traffic onto the pooled relay and its cache: Codex-app batched PR GraphQL no longer spends the caller's personal GraphQL budget, `gh run watch` finishes without redundant live reads, terminal CI data stays fresh for six hours, and PR author lookups stay cacheable under `OCTOPOOL_FRESH=1`.

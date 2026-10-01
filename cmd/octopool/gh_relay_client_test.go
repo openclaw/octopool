@@ -280,7 +280,7 @@ func TestRelayRetryAttempts(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("OCTOPOOL_RELAY_RETRIES", test.raw)
-			if got := relayRetryAttempts(); got != test.want {
+			if got := relayRetryAttempts(len(relayRetryDelays)); got != test.want {
 				t.Fatalf("relayRetryAttempts() = %d, want %d", got, test.want)
 			}
 		})

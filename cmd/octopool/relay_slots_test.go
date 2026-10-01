@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -109,9 +110,24 @@ func (child *relaySlotProcess) ready(t *testing.T) {
 }
 
 func TestRelaySlotCrossProcessConcurrency(t *testing.T) {
-	for _, concurrency := range []string{"4", "0"} {
-		t.Run(concurrency, func(t *testing.T) {
+	for _, mode := range []string{"4", "0", "fallback"} {
+		t.Run(mode, func(t *testing.T) {
 			isolateTestConfig(t)
+			concurrency := mode
+			if mode == "fallback" {
+				concurrency = "4"
+				isolateRelaySlotTemp(t)
+				cache, err := os.UserCacheDir()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(cache, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(cache, "octopool"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", concurrency)
 			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 			t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
@@ -209,6 +225,7 @@ func TestRelaySlotFailOpen(t *testing.T) {
 			})
 			t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "1")
 			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			isolateRelaySlotTemp(t)
 			cache, err := os.UserCacheDir()
 			if err != nil {
 				t.Fatal(err)
@@ -252,6 +269,102 @@ func TestRelaySlotFailOpen(t *testing.T) {
 			}
 		})
 	}
+}
+
+func isolateRelaySlotTemp(t *testing.T) string {
+	t.Helper()
+	directory := t.TempDir()
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, directory)
+	}
+	return directory
+}
+
+func TestRelaySlotDirectoryFallback(t *testing.T) {
+	for _, failure := range []string{"mkdir", "open", "lock", "both unavailable", "both lock errors"} {
+		t.Run(failure, func(t *testing.T) {
+			isolateTestConfig(t)
+			temp := isolateRelaySlotTemp(t)
+			cache, err := os.UserCacheDir()
+			if err != nil {
+				t.Fatal(err)
+			}
+			primary := filepath.Join(cache, "octopool", "relay-slots")
+			if err := os.MkdirAll(primary, 0700); err != nil {
+				t.Fatal(err)
+			}
+			switch failure {
+			case "mkdir", "both unavailable":
+				if err := os.Remove(primary); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(primary, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "open":
+				if err := os.Mkdir(filepath.Join(primary, "slot-0"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "lock", "both lock errors":
+				original := lockRelaySlot
+				lockRelaySlot = func(file *os.File) (bool, error) {
+					if filepath.Dir(file.Name()) == primary || failure == "both lock errors" {
+						return false, errors.New("synthetic lock syscall failure")
+					}
+					return original(file)
+				}
+				t.Cleanup(func() { lockRelaySlot = original })
+			}
+			if failure == "both unavailable" {
+				blocked := filepath.Join(temp, "blocked")
+				if err := os.WriteFile(blocked, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+					t.Setenv(name, blocked)
+				}
+			}
+			file := acquireRelaySlot(t.Context(), 1, time.Second)
+			if strings.HasPrefix(failure, "both") {
+				if file != nil {
+					file.Close()
+					t.Fatal("unusable directories should fail open")
+				}
+				return
+			}
+			if file == nil {
+				t.Fatal("did not acquire fallback slot")
+			}
+			name := file.Name()
+			file.Close()
+			if filepath.Dir(filepath.Dir(name)) != temp {
+				t.Fatalf("slot %q is not under temp %q", name, temp)
+			}
+			if _, err := os.Stat(name); err != nil {
+				t.Fatalf("slot file removed: %v", err)
+			}
+		})
+	}
+}
+
+func TestRelaySlotContentionDoesNotFallBack(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		isolateTestConfig(t)
+		temp := isolateRelaySlotTemp(t)
+		held := acquireRelaySlot(t.Context(), 1, time.Second)
+		if held == nil {
+			t.Fatal("could not hold primary slot")
+		}
+		defer held.Close()
+		if file := acquireRelaySlot(t.Context(), 1, time.Second); file != nil {
+			file.Close()
+			t.Fatal("contention bypassed primary slots")
+		}
+		entries, err := os.ReadDir(temp)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("contention created fallback: entries=%v err=%v", entries, err)
+		}
+	})
 }
 
 func TestRelaySlotWaitBoundAndCancellation(t *testing.T) {
@@ -331,7 +444,7 @@ func TestRelaySlotWaitPreservesPolicyRetryAndReadBudgets(t *testing.T) {
 		useHTTPTestTransport(t, transport)
 		client := ghRelayClient{baseURL: "https://synthetic.invalid", token: "synthetic-token"}
 		started := time.Now()
-		if _, err := client.doOnce(t.Context(), ghAPIRequest{method: "GET", path: "/repos/acme/repo"}); err != nil {
+		if _, err := client.doOnce(t.Context(), ghAPIRequest{method: "GET", path: "/repos/acme/repo"}, &relayRetryBudget{}); err != nil {
 			t.Fatal(err)
 		}
 		if policies != 2 || reads != 1 || time.Since(started) < 8*time.Second || time.Since(started) > 9*time.Second {

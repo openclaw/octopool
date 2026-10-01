@@ -12,6 +12,8 @@ import (
 
 const relaySlotWait = 30 * time.Second
 
+var lockRelaySlot = tryLockRelaySlot
+
 type relaySlotContextKey struct{}
 
 func relayConcurrency() int {
@@ -44,32 +46,44 @@ func acquireRelaySlot(ctx context.Context, count int, wait time.Duration) *os.Fi
 	}
 	deadline := time.Now().Add(wait)
 	cache, err := os.UserCacheDir()
+	if err == nil {
+		directory := filepath.Join(cache, "octopool", "relay-slots")
+		if err = os.MkdirAll(directory, 0700); err == nil {
+			file, err := acquireRelaySlotInDirectory(ctx, count, deadline, directory)
+			if err == nil {
+				return file
+			}
+		}
+	}
+	// Sandboxed callers may be allowed to lock files in temp but not the cache.
+	directory, err := fallbackRelaySlotDirectory()
 	if err != nil {
 		return nil
 	}
-	directory := filepath.Join(cache, "octopool", "relay-slots")
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return nil
-	}
+	file, _ := acquireRelaySlotInDirectory(ctx, count, deadline, directory)
+	return file
+}
+
+func acquireRelaySlotInDirectory(ctx context.Context, count int, deadline time.Time, directory string) (*os.File, error) {
 	backoff := 20 * time.Millisecond
 	for {
 		start := rand.IntN(count)
 		for offset := 0; offset < count; offset++ {
 			if ctx.Err() != nil || !time.Now().Before(deadline) {
-				return nil
+				return nil, nil
 			}
 			// Keep files in place: unlinking a locked inode would split the pool.
 			file, err := os.OpenFile(filepath.Join(directory, "slot-"+strconv.Itoa(start)), os.O_CREATE|os.O_RDWR, 0600)
 			if err != nil {
-				return nil
+				return nil, err
 			}
-			locked, err := tryLockRelaySlot(file)
+			locked, err := lockRelaySlot(file)
 			if locked {
-				return file
+				return file, nil
 			}
 			_ = file.Close()
 			if err != nil {
-				return nil
+				return nil, err
 			}
 			start++
 			if start == count {
@@ -78,7 +92,7 @@ func acquireRelaySlot(ctx context.Context, count int, wait time.Duration) *os.Fi
 		}
 		delay := backoff + time.Duration(rand.Int64N(int64(backoff)))
 		if sleepContext(ctx, min(delay, max(time.Until(deadline), 0))) != nil {
-			return nil
+			return nil, nil
 		}
 		backoff = min(2*backoff, 100*time.Millisecond)
 	}

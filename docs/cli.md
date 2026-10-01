@@ -885,8 +885,15 @@ server says the read should run locally — unsupported route, public pooling di
 policy, private/unverified repository, no usable identity, or identity pool depleted — the CLI
 runs the original command with the real `gh` and your local GitHub token.
 
-Transient pool fallbacks and eligible relay service/connection failures get one retry after
-one second by default. Each shim relay GET attempt has a 20-second timeout covering response
+Client-admission refusals (`relay_overloaded`) get three retries by default, with jittered
+exponential backoff of 0.5–1, 1–2, and 2–4 seconds. Other transient pool fallbacks and
+eligible relay service/connection failures keep one retry after one second by default.
+`OCTOPOOL_RELAY_RETRIES` overrides the maximum retry count for either case; `0` disables
+retries. Additional overload retries keep the 2–4-second range, but total retry sleep
+cannot exceed eight seconds. Once overloaded, retries also share the first relay read's
+timeout deadline, including subsequent slot waits and policy checks; a backoff that would
+exhaust either budget is skipped and the refusal follows the normal fallback path.
+Each shim relay GET or validated GraphQL read attempt has a 20-second timeout covering response
 headers and the body; policy fetches retain their separate timeout. A timed-out read does
 not retry and requests guarded local fallback with a `relay_timeout` diagnostic. An observed
 HTTP rejection remains a failure if its body times out. `OCTOPOOL_NO_FALLBACK=1` keeps timeout
@@ -903,14 +910,21 @@ policy approval and dispatch. Standalone policy fetches use the same slots. A cr
 process releases its lock automatically; slot files stay in place and must not be deleted
 while commands are running.
 
+Sandboxed callers that cannot create, open, or lock cache slots try a private directory
+under the OS temp directory instead (`octopool-relay-slots-<uid>` on Unix, with the user
+SID on Windows). Unix fallback directories must belong to the current user and have no
+group/other permissions; Windows requires a protected current-user-only ACL. Insecure
+pre-existing directories and symlinks are rejected, not repaired.
+
 Slot acquisition polls with short jittered backoff for at most 30 seconds, then proceeds
-without a slot; unavailable cache directories or lock errors also proceed immediately.
+without a slot. Filesystem or lock errors fail open only if both directories are unusable;
+ordinary contention never switches directories.
 This is a best-effort cap, shared across pools and servers, and all processes should use
-the same `OCTOPOOL_RELAY_CONCURRENCY` setting and cache directory. Waiting adds command
-latency but happens before policy timeout/retry clocks and the relay read timeout start.
-Caller cancellation and earlier caller deadlines still apply. Relay retries acquire a new
-slot after their existing backoff; watch intervals, retry counts, timeout handling, and
-`OCTOPOOL_NO_FALLBACK` behavior are unchanged. Slots are released before relay retry
+the same `OCTOPOOL_RELAY_CONCURRENCY` setting and directory. Cache and temp slots are
+separate pools; processes using different directories do not share a local cap.
+Initial waiting adds command latency before policy timeout/retry clocks and the relay read
+timeout start. Caller cancellation and earlier caller deadlines still apply. Relay retries
+acquire a new slot after backoff. Slots are released before relay retry
 backoff, native `gh`, `jq`, cache notices, or command output.
 
 Pagination is fail-closed: if bounded relay pagination cannot prove a complete PR detail,
@@ -1563,24 +1577,32 @@ These are dev/CI escape hatches, not the everyday UX:
   (`identities_cooling_down`, `identity_pool_depleted`, `github_identity_depleted`,
   `github_rate_limited`, `relay_overloaded`), relay `5xx internal_error` responses, and
   malformed 502/503/504 or Cloudflare 520–524 gateway responses are retried against the
-  relay (1s before every retry). Interrupted response bodies and transient
+  relay. Defaults to `3` for `relay_overloaded`, with jittered 0.5–1s, 1–2s, then 2–4s
+  delays, and `1` for other failures, with 1s before every retry. A nonnegative integer
+  overrides both counts; invalid/negative values use the reason-specific default, and `0`
+  disables retries. Overload retries remain bounded by eight seconds of total retry sleep
+  and the first relay read's timeout deadline even with a larger override.
+  Interrupted response bodies and transient
   connection failures on safe relay reads use the same budget; timeouts never retry. Every retry
   obtains current protection policy; policy failures, authentication denials, response-size
   violations and caller cancellation never become retries or native handoffs. Exhausted
   transient fallbacks may delegate to real `gh` except for
   supported `gh run watch`, which fails explicitly. Exhausted service errors remain failures
-  instead of spending local GitHub quota. Default `1`; `0`
-  disables retries.
+  instead of spending local GitHub quota.
 - `OCTOPOOL_RELAY_CONCURRENCY` — concurrent relay attempts and standalone policy fetches
   across CLI processes for the same user on this machine (default `8`; `0` disables).
   Nonnegative integers are accepted; invalid or negative values use the default. Each
   acquisition waits up to 30 seconds before failing open without changing command errors.
-- `OCTOPOOL_RELAY_TIMEOUT_SECONDS` — per-attempt timeout for shim relay GET reads,
+  Unusable cache slots try private per-user temp slots before failing open.
+- `OCTOPOOL_RELAY_TIMEOUT_SECONDS` — per-attempt timeout for shim relay GET and validated GraphQL reads,
   including response-body reads. Default `20`; nonnegative integer values below `5`
   are clamped to `5` seconds. Invalid, negative, or unrepresentable durations use the
-  default. A timeout requests guarded native fallback with reason `relay_timeout`, without
+  default. After `relay_overloaded`, the first read's deadline bounds remaining retries,
+  including their slot waits and policy checks. A relay HTTP timeout requests guarded native
+  fallback with reason `relay_timeout`, without
   retrying or claiming an explicit server `fallback_local` response. Login, writes, policy
-  fetches, and direct `octopool request` retain their existing timeouts.
+  fetches, and direct `octopool request` retain their existing timeouts. Policy failures
+  remain terminal, including when an overload retry's deadline interrupts policy acquisition.
 - `OCTOPOOL_ADMIN_TOKEN` — admin token for `octopool admin`.
 - `OCTOPOOL_ALLOW_INSECURE_LOGIN=1` — permit non-HTTPS login for local dev.
 
