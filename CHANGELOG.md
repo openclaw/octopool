@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.9.4 - 2026-10-02
+
+**Highlights:** Keep the Codex desktop app's PR-panel GraphQL bursts on the pooled relay instead of the caller's personal token, and stop transient relay admission failures from surfacing as 500 errors.
 
 ### Fixes
 
 - Retry transient backend-admission RPC failures once and fall back to local GitHub credentials when admission remains unavailable, preserving concurrency limits and safe background cleanup.
 - Keep sandboxed read bursts on the relay with private temp-directory concurrency slots when cache locks are unavailable and bounded jittered backoff for client-admission overloads before native fallback.
+
+### Upgrade notes
+
+- The Worker admission fix is already deployed from main d40157d; no D1 migrations. Run `brew upgrade octopool` for the CLI fix; no re-login or cache purge is required.
 
 ## 0.9.3 - 2026-10-01
 
