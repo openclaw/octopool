@@ -496,9 +496,9 @@ without a CLI upgrade. Original errors remain in Workers Logs; authenticated rel
 rows record `error_code: fallback_local` and `fallback_reason: relay_storage_unavailable`
 when the audit write succeeds. Other runtime messages matching the existing `is overloaded`
 or `queued for too long` matcher retain `424 fallback_local` with reason `relay_overloaded`.
-Unknown errors retain `500 internal_error`; GitHub
+Unknown errors outside admission RPCs retain `500 internal_error`; GitHub
 responses, explicit authentication/policy errors, admin endpoints and write rejection
-retain their existing behavior. This mapping adds no storage retries.
+retain their existing behavior. This mapping alone adds no storage retries.
 
 When a client's backend-work allowance is full or its permit expires, the relay returns
 `424 fallback_local` with reason `relay_overloaded`. The default is eight concurrent backend-work requests per authenticated caller/client
@@ -506,6 +506,15 @@ in each pool, configurable with `CLIENT_BACKEND_CONCURRENCY`. Fresh cache-only h
 admission, including eligible identity-cache entries; misses, revalidations, and live
 probes require a permit. See [backend-work admission](operations.md#backend-work-admission)
 for lease deadlines, cancellation, upgrade requirements, and client-attributed stats.
+
+Admission acquisition retries an untyped RPC failure once after 50–150 ms of jitter,
+bounded by the request signal and backend lease/deadline, using the same permit ID.
+Work never starts without an acknowledged grant. Repeated acquisition failures and
+renewal RPC failures use `relay_storage_unavailable`; renewal failures stop active work,
+and release remains best-effort. One structured `octopool.worker.admission_unavailable`
+warning per failed RPC operation records attempts and retry success without error messages.
+Background SWR refreshes use the same handling without affecting the served response;
+deferred log proof uses its separate bounded scope without caller admission.
 
 Every repo route additionally passes a public-visibility check before a pooled identity
 or cache entry is used — see [Cache & public-repo guard](cache.md).

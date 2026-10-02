@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { HttpError, parsePositiveInt } from "./http";
+import { relayStorageUnavailableError } from "./local-fallback";
 
 export const BACKEND_LEASE_MS = 30_000;
 export const BACKEND_DEADLINE_MS = 60_000;
@@ -93,7 +94,12 @@ export class BackendWork {
     this.deadline = started + BACKEND_DEADLINE_MS;
     this.setExpiry(started + BACKEND_LEASE_MS);
     try {
-      if (!(await this.admission.acquire(this.id, this.client, this.limit))) this.stop();
+      if (
+        !(await this.admissionRPC("acquire", () =>
+          this.admission.acquire(this.id, this.client, this.limit),
+        ))
+      )
+        this.stop();
       this.check();
       this.scheduleRenewal();
     } catch (error) {
@@ -104,6 +110,53 @@ export class BackendWork {
       // A caller can abort before the acquisition acknowledgement arrives.
       if (this.closed) await this.release();
     }
+  }
+
+  private async admissionRPC<T>(operation: keyof Admission, rpc: () => Promise<T>): Promise<T> {
+    let attempts = 0;
+    let unavailable = false;
+    let retrySucceeded = false;
+    try {
+      for (;;) {
+        if (attempts > 0) this.check();
+        attempts++;
+        try {
+          const result = await rpc();
+          retrySucceeded = unavailable;
+          return result;
+        } catch (error) {
+          if (error instanceof HttpError) throw error;
+          unavailable = true;
+          if (operation !== "acquire" || attempts === 2) throw relayStorageUnavailableError();
+        }
+        // Reuse the permit ID: a lost acknowledgement may have committed the grant.
+        await this.waitForAdmissionRetry();
+      }
+    } finally {
+      if (unavailable)
+        console.warn({
+          event: "octopool.worker.admission_unavailable",
+          operation,
+          attempts,
+          retry_succeeded: retrySucceeded,
+        });
+    }
+  }
+
+  private async waitForAdmissionRetry(): Promise<void> {
+    this.check();
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.signal.removeEventListener("abort", finish);
+        resolve();
+      };
+      const remaining = Math.max(0, Math.min(this.until, this.deadline) - Date.now());
+      const timer = setTimeout(finish, Math.min(50 + Math.floor(Math.random() * 101), remaining));
+      this.signal.addEventListener("abort", finish, { once: true });
+      if (this.signal.aborted) finish();
+    });
+    this.check();
   }
 
   private setExpiry(until: number): void {
@@ -120,7 +173,7 @@ export class BackendWork {
     const started = Date.now();
     try {
       this.check();
-      if (!(await this.admission.renew(this.id))) this.stop();
+      if (!(await this.admissionRPC("renew", () => this.admission.renew(this.id)))) this.stop();
       this.check();
       // Use the start of the RPC, so transport delay never extends authority.
       this.setExpiry(started + BACKEND_LEASE_MS);
@@ -132,7 +185,7 @@ export class BackendWork {
 
   private async release(): Promise<void> {
     try {
-      await this.admission.release(this.id);
+      await this.admissionRPC("release", () => this.admission.release(this.id));
     } catch {
       // Durable expiry is the cleanup guarantee, including lost acknowledgements.
     }

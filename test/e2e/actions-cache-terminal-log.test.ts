@@ -39,6 +39,38 @@ const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
 describe("terminal Actions log cache", () => {
   beforeEach(seedPool);
 
+  it("finishes deferred log proof after admission retry and a lost release acknowledgement", async () => {
+    const real = backendAdmissionStub(env, "maintainers");
+    const acquire = vi.fn(async (id: string, key: string, limit: number) =>
+      real.acquire(id, key, limit),
+    );
+    acquire.mockRejectedValueOnce(new Error("synthetic admission failure"));
+    const release = vi.fn(async (id: string) => {
+      await real.release(id);
+      throw new Error("synthetic lost release acknowledgement");
+    });
+    const admission = {
+      idFromName: env.BACKEND_ADMISSION.idFromName.bind(env.BACKEND_ADMISSION),
+      get: () => ({ acquire, renew: (id: string) => real.renew(id), release }),
+    };
+    vi.stubGlobal("fetch", terminalLogUpstream("completed"));
+    const response = await runWithContext((ctx) =>
+      fetchLogWithContext(ctx, { BACKEND_ADMISSION: admission }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 200, body: "build log\n" });
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(acquire.mock.calls[1]).toEqual(acquire.mock.calls[0]);
+    expect(release).toHaveBeenCalledTimes(1);
+    const key = terminalLogCacheKey({ pool: "maintainers", method: "GET", path: LOG_PATH });
+    expect(await (await env.ACTIONS_LOGS.get(key))!.text()).toBe("build log\n");
+    expect(
+      await env.DB.prepare("SELECT cache_status, cacheable FROM audit_events").all(),
+    ).toMatchObject({
+      results: [{ cache_status: "miss", cacheable: 1 }],
+    });
+  });
+
   it.each([
     { status: "completed", cached: false, expires: false },
     { status: "in_progress", cached: false, expires: false },

@@ -52,7 +52,10 @@ async function expire(seconds = 30) {
 function request(
   ctx: ExecutionContext,
   route = path,
-  overrides: { CLIENT_BACKEND_CONCURRENCY?: string } = {},
+  overrides: {
+    CLIENT_BACKEND_CONCURRENCY?: string;
+    BACKEND_ADMISSION?: Env["BACKEND_ADMISSION"];
+  } = {},
 ) {
   return worker.fetch(
     new Request("https://octopool.dev/v1/github/request", {
@@ -82,6 +85,48 @@ async function audits() {
 }
 
 describe("CI stale-while-revalidate", () => {
+  it.each([false, true])(
+    "contains background admission RPC failures (retry succeeds=%s)",
+    async (recovers) => {
+      const upstream = await setup();
+      await relay(path);
+      await expire();
+      const before = await cacheRows();
+      upstream.mockClear();
+      const real = backendAdmissionStub(env, POOL);
+      const acquire = vi.fn(async (id: string, key: string, limit: number) =>
+        real.acquire(id, key, limit),
+      );
+      if (recovers) acquire.mockRejectedValueOnce(new Error("synthetic admission failure"));
+      else acquire.mockRejectedValue(new Error("synthetic admission failure"));
+      const release = vi.fn(async (id: string) => {
+        await real.release(id);
+        throw new Error("synthetic lost release acknowledgement");
+      });
+      const namespace = {
+        idFromName: env.BACKEND_ADMISSION.idFromName.bind(env.BACKEND_ADMISSION),
+        get: () => ({ acquire, renew: (id: string) => real.renew(id), release }),
+      } as unknown as Env["BACKEND_ADMISSION"];
+      const response = await runWithContext((ctx) =>
+        request(ctx, path, { BACKEND_ADMISSION: namespace }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        relay: { cache: "stale", stale_reason: "stale_while_revalidate" },
+      });
+      expect(acquire).toHaveBeenCalledTimes(2);
+      expect(acquire.mock.calls[1]).toEqual(acquire.mock.calls[0]);
+      expect(acquire.mock.calls[0]![2]).toBe(7);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(upstream).toHaveBeenCalledTimes(recovers ? 1 : 0);
+      if (!recovers) expect(await cacheRows()).toEqual(before);
+      expect(await audits()).toHaveLength(2);
+      // The failed refresh releases its isolate slot so a later read can refresh.
+      expect((await relay(path)).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("returns the stored REST creation time for hits and the stale entry during SWR", async () => {
     await setup(true);
     const miss = await (await relay(path)).json<Envelope>();

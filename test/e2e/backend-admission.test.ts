@@ -166,28 +166,138 @@ it("honors the configured client cap and releases slots after backend failure", 
   expect(await permitRows()).toHaveLength(1);
 });
 
-it("fails closed on a lost grant acknowledgement and cleans up the committed permit", async () => {
+it.each(["Network connection lost.", "synthetic secret in plain RPC error"])(
+  "fails closed on repeated lost grant acknowledgements (%s) and cleans up the permit",
+  async (message) => {
+    await seedPool();
+    const real = admission();
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const acquire = vi.fn(async (id: string, key: string, limit: number) => {
+      expect(await real.acquire(id, key, limit)).toBe(true);
+      throw new Error(message);
+    });
+    const namespace = {
+      idFromName: env.BACKEND_ADMISSION.idFromName.bind(env.BACKEND_ADMISSION),
+      get: () => ({
+        acquire,
+        release: (id: string) => real.release(id),
+      }),
+    };
+    const upstream = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", upstream);
+    const response = await requestWithEnv({ BACKEND_ADMISSION: namespace }, path(1), {});
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "relay_storage_unavailable" } },
+    });
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(acquire.mock.calls[1]).toEqual(acquire.mock.calls[0]);
+    expect(upstream).not.toHaveBeenCalled();
+    expect(await permitRows()).toHaveLength(0);
+    expect(warning).toHaveBeenCalledExactlyOnceWith({
+      event: "octopool.worker.admission_unavailable",
+      operation: "acquire",
+      attempts: 2,
+      retry_succeeded: false,
+    });
+    expect(errors).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "octopool.worker.unexpected_exception",
+      }),
+    );
+    expect(JSON.stringify([...warning.mock.calls, ...errors.mock.calls])).not.toContain(message);
+    expect(
+      await env.DB.prepare("SELECT status, error_code, fallback_reason FROM audit_events").all(),
+    ).toMatchObject({
+      results: [
+        { status: 424, error_code: "fallback_local", fallback_reason: "relay_storage_unavailable" },
+      ],
+    });
+  },
+);
+
+it("serves normally after retrying a lost grant acknowledgement with the same permit", async () => {
   await seedPool();
   const real = admission();
+  const acquire = vi.fn(async (id: string, key: string, limit: number) =>
+    real.acquire(id, key, limit),
+  );
+  acquire.mockImplementationOnce(async (id, key, limit) => {
+    expect(await real.acquire(id, key, limit)).toBe(true);
+    throw new Error("synthetic lost acknowledgement");
+  });
+  const namespace = {
+    idFromName: env.BACKEND_ADMISSION.idFromName.bind(env.BACKEND_ADMISSION),
+    get: () => ({ acquire, release: (id: string) => real.release(id) }),
+  };
+  const upstream = vi.fn<typeof fetch>(async () => jsonResponse([]));
+  vi.stubGlobal("fetch", upstream);
+  const response = await requestWithEnv({ BACKEND_ADMISSION: namespace }, path(1), {});
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ status: 200, body: [] });
+  expect(acquire).toHaveBeenCalledTimes(2);
+  expect(acquire.mock.calls[1]).toEqual(acquire.mock.calls[0]);
+  expect(upstream).toHaveBeenCalledTimes(1);
+  expect(await permitRows()).toHaveLength(0);
+});
+
+it("cancels active egress on a renewal RPC rejection with a storage fallback", async () => {
+  await seedPool();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const real = admission();
+  const renew = vi.fn(async () => {
+    throw new Error("synthetic secret");
+  });
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
   const namespace = {
     idFromName: env.BACKEND_ADMISSION.idFromName.bind(env.BACKEND_ADMISSION),
     get: () => ({
-      acquire: async (id: string, key: string, limit: number) => {
-        expect(await real.acquire(id, key, limit)).toBe(true);
-        throw new Error("Network connection lost.");
-      },
+      acquire: (id: string, key: string, limit: number) => real.acquire(id, key, limit),
+      renew,
       release: (id: string) => real.release(id),
     }),
   };
-  const upstream = vi.fn<typeof fetch>();
-  vi.stubGlobal("fetch", upstream);
-  const response = await requestWithEnv({ BACKEND_ADMISSION: namespace }, path(1), {});
-  expect(response.status).toBe(424);
-  expect(await response.json()).toMatchObject({
-    error: { details: { reason: "relay_storage_unavailable" } },
+  const entered = ownedWork.gate();
+  let aborted = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (_input, init) => {
+      entered.release();
+      return new Promise<Response>((_resolve, reject) => {
+        init!.signal!.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            reject(init!.signal!.reason);
+          },
+          { once: true },
+        );
+      });
+    }),
+  );
+  const response = requestWithEnv({ BACKEND_ADMISSION: namespace }, path(1), {});
+  await entered.promise;
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect((await response).status).toBe(424);
+  expect(await (await response).json()).toMatchObject({
+    error: { code: "fallback_local", details: { reason: "relay_storage_unavailable" } },
   });
-  expect(upstream).not.toHaveBeenCalled();
+  expect(aborted).toBe(true);
+  expect(renew).toHaveBeenCalledTimes(1);
   expect(await permitRows()).toHaveLength(0);
+  expect(warning).toHaveBeenCalledExactlyOnceWith({
+    event: "octopool.worker.admission_unavailable",
+    operation: "renew",
+    attempts: 1,
+    retry_succeeded: false,
+  });
+  expect(errors).not.toHaveBeenCalledWith(
+    expect.objectContaining({
+      event: "octopool.worker.unexpected_exception",
+    }),
+  );
 });
 
 it("finishes audit, rate snapshots and edge warming after normal completion aborts backend egress", async () => {

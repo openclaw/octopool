@@ -1,14 +1,20 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   BackendWork,
+  BACKEND_DEADLINE_MS,
+  BACKEND_LEASE_MS,
   admitBackendWork,
   assertBackendWorkActive,
   backendWorkSignal,
   withBackendWorkSignal,
 } from "../src/backend-work";
+import { HttpError } from "../src/http";
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 function fixture() {
   const admission = {
@@ -60,22 +66,142 @@ it("coalesces acquisition only inside one request and releases on success", asyn
   expect(other.admission.release).toHaveBeenCalledTimes(1);
 });
 
-it.each(["denied", "lost acknowledgement"])("does no work after %s acquisition", async (mode) => {
+it("does no work or retry after a denied acquisition", async () => {
   const f = fixture();
-  const failure = new Error("synthetic lost grant acknowledgement");
-  if (mode === "denied") f.admission.acquire.mockResolvedValue(false);
-  else f.admission.acquire.mockRejectedValue(failure);
+  f.admission.acquire.mockResolvedValue(false);
   const upstream = vi.fn();
   const result = await f.run(async () => {
     await admitBackendWork();
     upstream();
   });
   await Promise.all(f.background);
-  if (mode === "denied")
-    expect(result).toMatchObject({ error: { status: 503, code: "relay_overloaded" } });
-  else expect(result).toEqual({ error: failure });
+  expect(result).toMatchObject({ error: { status: 503, code: "relay_overloaded" } });
   expect(upstream).not.toHaveBeenCalled();
+  expect(f.admission.acquire).toHaveBeenCalledTimes(1);
   expect(f.admission.release).toHaveBeenCalledTimes(1);
+});
+
+it.each([0, 0.999])("retries a lost acknowledgement with bounded jitter (%s)", async (random) => {
+  const f = fixture();
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  vi.spyOn(Math, "random").mockReturnValue(random);
+  f.admission.acquire.mockRejectedValueOnce(new Error("synthetic secret"));
+  const upstream = vi.fn(() => "served");
+  const result = f.run(async () => {
+    await Promise.all([admitBackendWork(), admitBackendWork()]);
+    return upstream();
+  });
+  const delay = random === 0 ? 50 : 150;
+  await vi.advanceTimersByTimeAsync(delay - 1);
+  expect(f.admission.acquire).toHaveBeenCalledTimes(1);
+  expect(upstream).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await result).toEqual({ value: "served" });
+  await Promise.all(f.background);
+  expect(f.admission.acquire).toHaveBeenCalledTimes(2);
+  expect(f.admission.acquire.mock.calls[1]).toEqual(f.admission.acquire.mock.calls[0]);
+  expect(warning.mock.calls).toEqual([
+    [
+      {
+        event: "octopool.worker.admission_unavailable",
+        operation: "acquire",
+        attempts: 2,
+        retry_succeeded: true,
+      },
+    ],
+  ]);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each([
+  new Error("synthetic secret"),
+  new Error("Durable Object reset."),
+  Object.assign(new Error("synthetic retryable error"), { retryable: true }),
+  "synthetic non-Error rejection",
+  undefined,
+])("fails closed with a storage fallback after two RPC rejections (%s)", async (failure) => {
+  const f = fixture();
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  f.admission.acquire.mockRejectedValue(failure);
+  const upstream = vi.fn();
+  const result = f.run(async () => {
+    await admitBackendWork();
+    upstream();
+  });
+  await vi.advanceTimersByTimeAsync(150);
+  const outcome = await result;
+  expect(outcome).toMatchObject({
+    error: {
+      status: 424,
+      code: "fallback_local",
+      details: { reason: "relay_storage_unavailable" },
+    },
+  });
+  await Promise.all(f.background);
+  expect(upstream).not.toHaveBeenCalled();
+  expect(f.admission.acquire).toHaveBeenCalledTimes(2);
+  expect(f.admission.release).toHaveBeenCalledTimes(1);
+  expect(warning.mock.calls).toEqual([
+    [
+      {
+        event: "octopool.worker.admission_unavailable",
+        operation: "acquire",
+        attempts: 2,
+        retry_succeeded: false,
+      },
+    ],
+  ]);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("preserves a limit refusal after a transport retry", async () => {
+  const f = fixture();
+  f.admission.acquire.mockRejectedValueOnce(new Error("reset")).mockResolvedValue(false);
+  const upstream = vi.fn();
+  const result = f.run(async () => {
+    await admitBackendWork();
+    upstream();
+  });
+  await vi.advanceTimersByTimeAsync(150);
+  expect(await result).toMatchObject({ error: { code: "relay_overloaded" } });
+  await Promise.all(f.background);
+  expect(upstream).not.toHaveBeenCalled();
+  expect(f.admission.acquire).toHaveBeenCalledTimes(2);
+});
+
+it("preserves typed admission errors without retry or reclassification", async () => {
+  const f = fixture();
+  const failure = new HttpError(403, "owner_denied", "Synthetic typed refusal");
+  f.admission.acquire.mockRejectedValue(failure);
+  expect(await f.run(admitBackendWork)).toEqual({ error: failure });
+  await Promise.all(f.background);
+  expect(f.admission.acquire).toHaveBeenCalledTimes(1);
+});
+
+it.each(["cancellation", "lease", "deadline"])("does not retry after %s", async (mode) => {
+  const f = fixture();
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  f.admission.acquire.mockRejectedValue(new Error("synthetic failure"));
+  const upstream = vi.fn();
+  const result = f.run(async () => {
+    await admitBackendWork();
+    upstream();
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  if (mode === "cancellation") f.input.abort();
+  else vi.setSystemTime(Date.now() + (mode === "lease" ? BACKEND_LEASE_MS : BACKEND_DEADLINE_MS));
+  await vi.advanceTimersByTimeAsync(150);
+  expect(await result).toMatchObject({ error: { code: "relay_overloaded" } });
+  await Promise.all(f.background);
+  expect(upstream).not.toHaveBeenCalled();
+  expect(f.admission.acquire).toHaveBeenCalledTimes(1);
+  expect(warning).toHaveBeenCalledExactlyOnceWith({
+    event: "octopool.worker.admission_unavailable",
+    operation: "acquire",
+    attempts: 1,
+    retry_succeeded: false,
+  });
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it.each(["rejected", "lost", "hung"])(
@@ -93,7 +219,14 @@ it.each(["rejected", "lost", "hung"])(
       assertBackendWorkActive();
     });
     await vi.advanceTimersByTimeAsync(mode === "hung" ? 30_000 : 10_000);
-    if (mode === "lost") expect(await result).toEqual({ error: failure });
+    if (mode === "lost")
+      expect(await result).toMatchObject({
+        error: {
+          status: 424,
+          code: "fallback_local",
+          details: { reason: "relay_storage_unavailable" },
+        },
+      });
     else expect(await result).toMatchObject({ error: { code: "relay_overloaded" } });
     pending.resolve(true);
     await Promise.all(f.background);
@@ -102,6 +235,27 @@ it.each(["rejected", "lost", "hung"])(
     expect(vi.getTimerCount()).toBe(0);
   },
 );
+
+it("swallows release failures after successful work", async () => {
+  const f = fixture();
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  f.admission.release.mockRejectedValue(new Error("synthetic secret"));
+  expect(
+    await f.run(async () => {
+      await admitBackendWork();
+      return "served";
+    }),
+  ).toEqual({ value: "served" });
+  await expect(Promise.all(f.background)).resolves.toBeDefined();
+  expect(f.admission.release).toHaveBeenCalledTimes(1);
+  expect(warning).toHaveBeenCalledExactlyOnceWith({
+    event: "octopool.worker.admission_unavailable",
+    operation: "release",
+    attempts: 1,
+    retry_succeeded: false,
+  });
+  expect(vi.getTimerCount()).toBe(0);
+});
 
 it("bounds continuously renewed work at 60 seconds and prevents a resumed continuation", async () => {
   const f = fixture();
@@ -119,23 +273,28 @@ it("bounds continuously renewed work at 60 seconds and prevents a resumed contin
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("releases a late grant after caller cancellation without authorizing its continuation", async () => {
-  const f = fixture();
-  const grant = Promise.withResolvers<boolean>();
-  f.admission.acquire.mockReturnValue(grant.promise);
-  const upstream = vi.fn();
-  const result = f.run(async () => {
-    await admitBackendWork();
-    upstream();
-  });
-  f.input.abort();
-  expect(await result).toMatchObject({ error: { code: "relay_overloaded" } });
-  grant.resolve(true);
-  await Promise.all(f.background);
-  expect(upstream).not.toHaveBeenCalled();
-  expect(f.admission.release).toHaveBeenCalledTimes(2);
-  expect(vi.getTimerCount()).toBe(0);
-});
+it.each(["grant", "RPC rejection"])(
+  "cleans up a late %s after caller cancellation without resuming work",
+  async (outcome) => {
+    const f = fixture();
+    const grant = Promise.withResolvers<boolean>();
+    f.admission.acquire.mockReturnValue(grant.promise);
+    const upstream = vi.fn();
+    const result = f.run(async () => {
+      await admitBackendWork();
+      upstream();
+    });
+    f.input.abort();
+    expect(await result).toMatchObject({ error: { code: "relay_overloaded" } });
+    if (outcome === "grant") grant.resolve(true);
+    else grant.reject(new Error("synthetic late RPC rejection"));
+    await Promise.all(f.background);
+    expect(upstream).not.toHaveBeenCalled();
+    expect(f.admission.acquire).toHaveBeenCalledTimes(1);
+    expect(f.admission.release).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
 
 it("does not acquire a permit for a fresh cache-only request", async () => {
   const f = fixture();

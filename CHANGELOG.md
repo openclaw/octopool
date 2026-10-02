@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Retry transient backend-admission RPC failures once and fall back to local GitHub credentials when admission remains unavailable, preserving concurrency limits and safe background cleanup.
 - Keep sandboxed read bursts on the relay with private temp-directory concurrency slots when cache locks are unavailable and bounded jittered backoff for client-admission overloads before native fallback.
 
 ## 0.9.3 - 2026-10-01
