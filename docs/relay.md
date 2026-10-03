@@ -559,7 +559,7 @@ unchanged and included in the cache key, along with sort/order/pagination parame
 | `author`, `assignee`, `mentions`, `commenter`, `involves`, `reviewed-by`, `review-requested` | `[A-Za-z0-9][A-Za-z0-9-]{0,38}`, optionally prefixed with `app/`; `@me` is rejected because it would resolve to the pooled identity         |
 | `label`, `milestone`                                                                         | `[A-Za-z0-9_./-]+` or a nonblank double-quoted name with spaces and simple punctuation                                                      |
 | `no`                                                                                         | `label`, `milestone`, `assignee`                                                                                                            |
-| `in`                                                                                         | `title`, `body`, `comments`                                                                                                                 |
+| `in`                                                                                         | `title`, `body`, `comments`, or comma-separated lists of these values                                                                       |
 | `created`, `updated`, `closed`, `merged`                                                     | `YYYY-MM-DD`, optionally prefixed with `>`, `>=`, `<`, `<=`, or `YYYY-MM-DD..YYYY-MM-DD`; month/day components are bounded to 01–12 / 01–31 |
 | `draft`                                                                                      | `true`, `false`                                                                                                                             |
 | `review`                                                                                     | `none`, `required`, `approved`, `changes_requested`                                                                                         |
@@ -580,9 +580,30 @@ one repo, one `type:issue|pr`, at most one `state:open|closed`, and plain terms 
 first page, without sort/order parameters or these additional filters.
 
 The raw `gh api search/issues` path forwards this syntax through query parameters or
-explicit `--method=GET -f q=...` fields. The current top-level `gh search issues|prs`
-builders still accept only their documented plain-term shape; richer positional
-queries and filter flags use native `gh` before reaching this Worker allowlist.
+explicit `--method=GET -f q=...` fields. Top-level `gh search issues|prs` accepts these
+qualifiers and quoted phrases as positional arguments, with one `--repo`/`-R` scope.
+Its `--author`, `--assignee`, `--label`, and custom sort/match flags still use native `gh`.
+
+JSON `gh pr list --search` and `gh issue list --search` use `GET /search/issues` with
+the same client-side term validation, adding the repository, entity type, state, and
+supported author/assignee/label flags. Unsupported queries are rejected locally before
+relay dispatch. List exports preserve native uppercase states, nullable close/merge
+timestamps, label objects, and GraphQL author objects; author names use cacheable user
+profile reads. `mergedAt` comes only from `pull_request.merged_at`, and PR draft status
+comes from `draft`. PR `createdAt` stays native because search returns the issue's
+creation time, which can differ from the PR's. Head/base refs, files,
+assignees/milestone exports, and other fields
+not faithfully represented by this list-search projection remain native, as do human
+output, empty searches, and limits above 100.
+
+Search reads use one page with `per_page` equal to the requested limit (default 30),
+preserve GitHub's default best-match ordering unless the query contains a sort qualifier,
+and remain cacheable unless `OCTOPOOL_FRESH=1` is set. Richer queries require pooled
+search to be enabled and a Worker with the matching grammar (including comma-list `in:`
+support). A `search_denied` response or a confirmed upstream search rate limit uses
+guarded local fallback, respecting `OCTOPOOL_NO_FALLBACK`; authentication and outbound
+protection failures remain terminal. Each pooled token has GitHub's separate search
+quota of 30 requests per minute.
 
 ## Safety limits
 

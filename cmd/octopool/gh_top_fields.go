@@ -91,7 +91,22 @@ var supportedPublicPRViewFields = supportedFields(
 
 var supportedPRSearchFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
-	"labels",
+	"labels", "isDraft",
+)
+
+var supportedIssueSearchFields = supportedFields(
+	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
+	"labels", "assignees",
+)
+
+var supportedListSearchFields = supportedFields(
+	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt", "labels",
+)
+
+var supportedPRListSearchFields = supportedFields(
+	// Search returns the issue's creation time, which can differ from the PR's.
+	"number", "title", "body", "state", "url", "author", "updatedAt", "closedAt", "labels",
+	"isDraft", "mergedAt",
 )
 
 var supportedIssueFields = supportedFields(

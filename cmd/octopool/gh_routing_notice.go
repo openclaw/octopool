@@ -44,8 +44,10 @@ func nativeReadRoutingNotice(args []string) string {
 		fields = supportedPRFields
 	case "pr list":
 		fields = supportedPRListFields
-	case "issue view", "issue list", "search issues":
+	case "issue view", "issue list":
 		fields = supportedIssueFields
+	case "search issues":
+		fields = supportedIssueSearchFields
 	case "pr checks":
 		fields = supportedCheckRunFields
 	case "repo view", "search repos":
@@ -70,6 +72,13 @@ func nativeReadRoutingNotice(args []string) string {
 		return ""
 	}
 	opts, fallback, err := parseGHTopOptions(args[2:], topReadSpecs(args[0]+" "+args[1]))
+	if opts.read.has("--search") {
+		if args[0] == "pr" {
+			fields = supportedPRListSearchFields
+		} else if args[0] == "issue" {
+			fields = supportedListSearchFields
+		}
+	}
 	if err == nil && !fallback && machineReadable(opts) && !supportedJSONFields(opts, fields) {
 		return ghNativeJSONNotice
 	}

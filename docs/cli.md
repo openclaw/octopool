@@ -671,15 +671,33 @@ unselected modeled fields. Contradictory job ownership uses guarded fallback. Ex
 job-total, pagination and catalogue refusal reasons remain distinct. Exports buffer all
 validation/hydration before output; successful JSON commands return success independently
 of run conclusion. Downstream writer/jq errors still fail and cannot be rolled back.
-`gh search issues|prs` is translated to a repo-scoped, cacheable GitHub Search request
-for the common plain-term `-R owner/repo --state ... --json ...` shape. Cached bodies avoid
-a full result download; conditional revalidation can still use GitHub Search quota.
-All supported search fields use the anonymous GitHub Search API;
-this path remains available when pooled search is disabled and never uses a pooled identity
-or local token. Qualified search syntax
-such as `author:` or custom sort/match flags falls through to the real `gh`. PR search
-supports the issue-like fields returned by GitHub Search; PR-list-only fields such as
-`headRefName` fall through. Hydrated `gh pr view --json files,...` requests send the
+`gh search issues|prs` and JSON `gh pr list --search` / `gh issue list --search` use
+repo-scoped, cacheable `GET /search/issues` reads. Positional search terms and list
+`--search` values accept the [scoped search grammar](relay.md#scoped-search-queries),
+including dates, quoted phrases, non-scope negation, and `in:title,body`. The client
+rejects unsupported syntax before relay dispatch. Plain queries can use anonymous
+search even when pooled search is disabled; richer qualifiers require enabled pooled
+search and a compatible Worker. Search denial and confirmed rate limits fall back to
+native `gh`, unless `OCTOPOOL_NO_FALLBACK=1` is set.
+
+List searches support `--state open|closed|all` (also `merged` for PRs), author,
+assignee, and label filters. They preserve native's default open filter and its removal
+when the search includes a closed/merged clause. List JSON supports `number`, `title`,
+`body`, `state`, `url`, `author`, `updatedAt`, `closedAt`, and `labels`, plus issue
+`createdAt` and PR `isDraft`/`mergedAt`. PR `createdAt` stays native because search
+returns the issue's creation time, which can differ from the PR's. Authors retain
+native's `is_bot`/`name` semantics via cached user profiles. Top-level search keeps its distinct REST author shape and
+lowercase states. Its author/assignee/label flags and custom sort/match flags still
+delegate; the corresponding allowlisted qualifiers can be written in the query.
+
+Both paths request one page, defaulting to 30 results, with GitHub's best-match order
+unless a sort qualifier is supplied. Limits above 100, human list-search output, empty
+`--search`, and unsupported fields such as `headRefName`, `headRefOid`, or `files`
+delegate. Search results remain cacheable even when exporting state or merge time;
+`OCTOPOOL_FRESH=1` requests fresh search results. Cached bodies avoid a full result
+download; conditional revalidation can still use GitHub Search quota.
+
+Hydrated `gh pr view --json files,...` requests send the
 verified PR head SHA, allowing file pages to share a five-minute state-scoped cache.
 `gh pr checks` uses the shared cache throughout ordinary acquisition: its PR
 head-SHA lookup sends `cache-control: max-age=60` so concurrent CI-polling sessions share

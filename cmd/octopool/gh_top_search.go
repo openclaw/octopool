@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"regexp"
 	"strconv"
@@ -49,20 +49,14 @@ func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResu
 	if opts.state != "" && opts.state != "open" && opts.state != "closed" {
 		return ghDelegated()
 	}
-	queryParts := opts.positionals
-	for _, part := range queryParts {
-		if strings.ContainsAny(part, " \t\r\n") {
-			return ghDelegated()
-		}
-	}
-	query := strings.TrimSpace(strings.Join(queryParts, " "))
+	query := topSearchQuery(opts.positionals)
 	if query == "" {
 		return ghDelegated()
 	}
 	opts.positionals = nil
 	switch kind {
 	case "issues":
-		if !supportedJSONFields(opts, supportedIssueFields) {
+		if !supportedJSONFields(opts, supportedIssueSearchFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relaySearchIssues(ctx, stdout, repo, query, opts))
@@ -138,20 +132,13 @@ func relayGitHubSearch(
 	opts ghTopOptions,
 	fieldMap map[string][]string,
 ) error {
-	terms, ok := searchTerms(rawQuery)
+	q, ok := scopedSearchQuery(repo, searchType, rawQuery, opts)
 	if !ok {
 		return localFallbackError{Reason: "unsupported_search_query"}
 	}
 	client, err := newGHRelayClient()
 	if err != nil {
 		return err
-	}
-	q := fmt.Sprintf("repo:%s type:%s", repo, searchType)
-	if opts.state != "" {
-		q += " state:" + opts.state
-	}
-	if len(terms) > 0 {
-		q += " " + strings.Join(terms, " ")
 	}
 	envelope, err := client.do(ctx, ghAPIRequest{
 		method:  "GET",
@@ -160,7 +147,10 @@ func relayGitHubSearch(
 		headers: map[string]string{"x-octopool-public-shape": publicShapeIssueSearch},
 	})
 	if err != nil {
-		return err
+		return searchFallbackError(err)
+	}
+	if searchRateLimited(envelope) {
+		return localFallbackError{Reason: "github_rate_limited"}
 	}
 	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
@@ -170,29 +160,36 @@ func relayGitHubSearch(
 	if err := json.Unmarshal(body, &response); err != nil {
 		return err
 	}
-	items, _ := response["items"].([]any)
+	items, ok := response["items"].([]any)
+	if !ok || response["incomplete_results"] == true {
+		return localFallbackError{Reason: "incomplete_search_results"}
+	}
+	users := map[string]map[string]any{}
 	for _, item := range items {
 		issue, ok := item.(map[string]any)
 		if !ok {
-			continue
+			return localFallbackError{Reason: "unsupported_search_item"}
 		}
 		// Native search derives lowercase merged only from nested PR metadata.
 		mergedAt, err := time.Parse(time.RFC3339, nestedStringValue(issue, "pull_request", "merged_at"))
 		if err == nil && !mergedAt.IsZero() {
 			issue["state"] = "merged"
 		}
-	}
-	raw, err := json.Marshal(items)
-	if err != nil {
-		return err
-	}
-	if len(opts.json) > 0 {
-		raw, err = filterJSONFields(raw, opts.json, fieldMap)
-		if err != nil {
+		if opts.read.has("--search") {
+			if err := mapListSearchItem(ctx, client, issue, searchType, opts.json, users); err != nil {
+				return err
+			}
+		} else if err := mapTopSearchItem(issue, opts.json); err != nil {
 			return err
 		}
 	}
-	return writeBytes(ctx, stdout, raw, opts.jq)
+	var output bytes.Buffer
+	encoder := json.NewEncoder(&output)
+	encoder.SetEscapeHTML(false) // Match native gh's JSON exporter, including titles/bodies.
+	if err := encoder.Encode(filterJSONValue(items, opts.json, fieldMap)); err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, output.Bytes(), opts.jq)
 }
 
 func searchTerms(raw string) ([]string, bool) {
@@ -225,4 +222,24 @@ func plainSearchQuery(parts []string) (string, bool) {
 		return "", false
 	}
 	return strings.Join(terms, " "), true
+}
+
+// Native search quotes each positional keyword (or its qualifier value).
+// List --search is deliberately different: native treats it as a raw query.
+func topSearchQuery(parts []string) string {
+	quote := func(value string) string {
+		if strings.ContainsAny(value, " \"\t\r\n") {
+			return strconv.Quote(value)
+		}
+		return value
+	}
+	terms := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if key, value, ok := strings.Cut(part, ":"); ok {
+			terms = append(terms, key+":"+quote(value))
+		} else {
+			terms = append(terms, quote(part))
+		}
+	}
+	return strings.TrimSpace(strings.Join(terms, " "))
 }

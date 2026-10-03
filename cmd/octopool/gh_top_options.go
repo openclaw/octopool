@@ -18,6 +18,7 @@ type ghTopOptions struct {
 	limit       int
 	limitSet    bool
 	state       string
+	search      string
 	branch      string
 	workflow    string
 	status      string
@@ -38,7 +39,7 @@ func topReadSpecs(command string) map[string]readOptionSpec {
 	case "pr diff":
 		values, booleans = "--repo,-R", "--patch"
 	case "pr list", "issue list":
-		values += " --limit,-L --state --author --assignee --label"
+		values += " --limit,-L --state --author --assignee --label --search,-S"
 	case "run list":
 		values += " --limit,-L --branch --workflow --status --commit,-c --event,-e --created"
 	case "run view":
@@ -78,7 +79,7 @@ func prepareGHTopOptions(command string, args []string) (ghTopOptions, ghResult,
 		// Native preserves status spelling; the relay's modeled status set does not.
 		return opts, ghDelegated(), false
 	}
-	if command == "pr list" {
+	if command == "pr list" && !opts.read.has("--search") {
 		if opts.read.has("--author") || opts.read.has("--assignee") || opts.read.has("--label") {
 			return opts, ghDelegated(), false
 		}
@@ -122,6 +123,7 @@ func parseGHTopOptions(args []string, specs map[string]readOptionSpec) (ghTopOpt
 		opts.limit = int(limit)
 	}
 	opts.state = parsed.values["--state"].raw
+	opts.search = parsed.values["--search"].raw
 	opts.branch = parsed.values["--branch"].raw
 	opts.workflow = parsed.values["--workflow"].raw
 	opts.status = parsed.values["--status"].raw

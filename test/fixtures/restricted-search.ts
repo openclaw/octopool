@@ -66,7 +66,11 @@ export const additionalDeniedRepoSearchQueries = [
   ...[
     "is:unknown",
     "no:author",
-    "in:title,body",
+    "in:title,unknown",
+    "in:title,",
+    "in:,body",
+    "in:title,,body",
+    "in:Title,body",
     "draft:yes",
     "review:commented",
     "status:error",
@@ -137,6 +141,9 @@ export const allowedSearchFilters = [
   "in:title",
   "in:body",
   "in:comments",
+  "in:title,body",
+  "in:title,body,comments",
+  "in:comments,title",
   ...["created", "updated", "closed", "merged"].flatMap((qualifier) =>
     [
       "2026-09-26",

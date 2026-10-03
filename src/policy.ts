@@ -316,7 +316,7 @@ function allowedSearchTerm(token: string): boolean {
     case "no":
       return /^(label|milestone|assignee)$/.test(value);
     case "in":
-      return /^(title|body|comments)$/.test(value);
+      return /^(title|body|comments)(,(title|body|comments))*$/.test(value);
     case "created":
     case "updated":
     case "closed":

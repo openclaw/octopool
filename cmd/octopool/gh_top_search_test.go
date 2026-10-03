@@ -162,8 +162,13 @@ func TestRunGHSearchFallsBackForUnimplementedSort(t *testing.T) {
 	}
 }
 
-func TestRunGHSearchFallsBackForQualifiedQuery(t *testing.T) {
-	isolateTestConfig(t)
+func TestRunGHSearchRelaysQualifiedQuery(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["query"].(map[string]any)["q"] != "repo:openclaw/octopool type:issue author:alice cache" {
+			t.Fatalf("request = %#v", body)
+		}
+		return map[string]any{"items": []any{}}
+	})
 	var out bytes.Buffer
 	result := handleGHSearch(t.Context(), []string{
 		"issues",
@@ -172,7 +177,7 @@ func TestRunGHSearchFallsBackForQualifiedQuery(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "number,title,url",
 	}, &out)
-	if result.action != ghFail || !isLocalFallback(result.err) {
+	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }
@@ -191,7 +196,13 @@ func TestRunGHSearchFallsBackForUnsupportedTerm(t *testing.T) {
 	}
 }
 
-func TestRunGHSearchFallsBackForQuotedPhrase(t *testing.T) {
+func TestRunGHSearchRelaysPhraseArgument(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		if body["query"].(map[string]any)["q"] != `repo:openclaw/octopool type:issue "cache regression"` {
+			t.Fatalf("request = %#v", body)
+		}
+		return map[string]any{"items": []any{}}
+	})
 	var out bytes.Buffer
 	result := handleGHSearch(t.Context(), []string{
 		"issues",
@@ -199,7 +210,7 @@ func TestRunGHSearchFallsBackForQuotedPhrase(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "number,title,url",
 	}, &out)
-	if result.err != nil || result.action != ghDelegate {
+	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }

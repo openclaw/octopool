@@ -80,6 +80,7 @@ Use it like `gh` for common read shapes:
 
 ```sh
 octopool gh pr view 85341 -R openclaw/openclaw --json number,title,url
+octopool gh pr list -R openclaw/openclaw --search 'updated:>=2026-10-01 gateway' --json number,title,updatedAt,author
 octopool gh search issues cache regression -R openclaw/openclaw --state open --json number,title,url
 octopool gh pr checks 85341 -R openclaw/openclaw --json name,state,bucket
 octopool gh issue list -R openclaw/openclaw --state open --json number,title,url
@@ -98,6 +99,10 @@ octopool install-shim
 The installer pins the real GitHub CLI path, creates an isolated shim symlink, updates a managed block in `.zshenv`, and verifies that non-interactive `zsh -c` commands cannot bypass Octopool. Re-running it is safe; use `--dry-run` to preview changes.
 
 Full command surface, fallback rules, and discovery details: [docs.octopool.dev/cli](https://docs.octopool.dev/cli.html).
+
+JSON PR/issue lists with `--search` and top-level issue/PR searches route supported
+single-repository queries through REST search. Rich qualifiers require enabled pooled
+search; unsupported syntax, fields, and human list-search output stay with native `gh`.
 
 Exact repository branch-protection, ruleset list/detail, and applicable branch-rules GETs
 are supported through guarded native-`gh` fallback. They retain the user's GitHub permissions

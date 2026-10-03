@@ -155,11 +155,6 @@ func TestGHRelayTransportTimeoutHonorsCallerContext(t *testing.T) {
 			defer cancel()
 			t.Setenv("OCTOPOOL_RELAY_TIMEOUT_SECONDS", "5")
 			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
-			if mode == "caller deadline" {
-				var cancelDeadline context.CancelFunc
-				ctx, cancelDeadline = context.WithTimeout(ctx, 200*time.Millisecond)
-				defer cancelDeadline()
-			}
 			var calls atomic.Int64
 			_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
 				if calls.Add(1) == 1 {
@@ -178,6 +173,13 @@ func TestGHRelayTransportTimeoutHonorsCallerContext(t *testing.T) {
 			t.Setenv("OCTOPOOL_RELAY_RETRIES", "2")
 			useTestRelayRetryDelays(t, time.Millisecond)
 			var out, stderr bytes.Buffer
+			if mode == "caller deadline" {
+				// Leave setup outside the deadline and allow policy/admission work
+				// to finish before timing out the blocked relay on busy machines.
+				var cancelDeadline context.CancelFunc
+				ctx, cancelDeadline = context.WithTimeout(ctx, 2*time.Second)
+				defer cancelDeadline()
+			}
 			err := run(ctx, []string{"gh", "api", "repos/acme/repo"}, &out, &stderr)
 			if mode == "HTTP timeout" {
 				if !isLocalFallback(err) || !strings.Contains(err.Error(), "relay_timeout") || out.Len() != 0 {

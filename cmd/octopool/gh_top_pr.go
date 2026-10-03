@@ -61,6 +61,9 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		}
 		return ghCompleted(relayPRView(ctx, stdout, repo, number, opts))
 	case "list":
+		if opts.read.has("--search") {
+			return handleGHListSearch(ctx, stdout, "pr", opts)
+		}
 		repo, ok, err := repoOnly(opts)
 		if err != nil {
 			return ghFailed(err)
