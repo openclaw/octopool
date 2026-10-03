@@ -6,6 +6,7 @@ import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
 import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import {
+  agentSearchQueries,
   deniedRepoSearchQueries,
   repoSearchPaths,
   validRepoSearchQueries,
@@ -14,18 +15,21 @@ import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
 const searchBody = { total_count: 1, incomplete_results: false, items: [{ id: 7 }] };
 
-function mockSearchUpstream() {
+function mockSearchUpstream(isPublic = true) {
   const upstream = vi.fn<typeof fetch>(async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
     if (url.hostname === "api.github.com" && url.pathname.startsWith("/search/")) {
+      if (!isPublic) return jsonResponse({ message: "anonymous backend unavailable" }, 503);
       return jsonResponse(searchBody, 200, rateHeaders({ remaining: 4_999 }));
     }
     if (url.hostname === "api.github.com" && url.pathname.startsWith("/repos/")) {
-      return jsonResponse({ private: false });
+      return jsonResponse({ private: !isPublic });
     }
     if (url.hostname === "github.com") {
-      return new Response('<meta name="octolytics-dimension-repository_public" content="true" />');
+      return new Response(
+        `<meta name="octolytics-dimension-repository_public" content="${isPublic}" />`,
+      );
     }
     throw new Error(`Unexpected synthetic upstream: ${request.url}`);
   });
@@ -146,6 +150,66 @@ describe.each(repoSearchPaths)("Worker restricted search boundary for %s", (path
 
 describe("Worker restricted search shape and protection boundaries", () => {
   beforeEach(seedPool);
+
+  it.each(agentSearchQueries)("dispatches and caches agent search $q exactly", async (query) => {
+    const upstream = mockSearchUpstream();
+    for (const cache of ["miss", "hit"]) {
+      const response = await relay("/search/issues", undefined, { query });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ body: searchBody, relay: { cache } });
+    }
+    const requests = upstream.mock.calls.map(([input, init]) => new Request(input, init));
+    const searches = requests.filter(
+      (request) => new URL(request.url).pathname === "/search/issues",
+    );
+    expect(searches).toHaveLength(1);
+    const params = new URL(searches[0]!.url).searchParams;
+    for (const [key, value] of Object.entries(query)) expect(params.get(key)).toBe(value);
+    expect(requests.some((request) => new URL(request.url).pathname.startsWith("/repos/"))).toBe(
+      true,
+    );
+  });
+
+  it.each([false, true])(
+    "keeps expanded shaped searches gated with allow_search=%s",
+    async (allowSearch) => {
+      await env.DB.prepare(
+        "UPDATE pools SET policy_json = json_set(policy_json, '$.allow_search', json(?))",
+      )
+        .bind(JSON.stringify(allowSearch))
+        .run();
+      const upstream = mockSearchUpstream();
+      const response = await relay("/search/issues", undefined, {
+        query: { q: 'repo:openclaw/octopool type:issue author:alice label:"good first issue"' },
+        headers: { "x-octopool-public-shape": "issue-search-v1" },
+      });
+      if (allowSearch) {
+        expect(response.status).toBe(200);
+      } else {
+        await expectSearchDenied(response);
+        expect(upstream).not.toHaveBeenCalled();
+        expect(await cacheRows()).toEqual([]);
+      }
+    },
+  );
+
+  it("does not let is:public bypass the repository visibility guard", async () => {
+    const upstream = mockSearchUpstream(false);
+    const response = await relay("/search/issues", undefined, {
+      query: { q: 'repo:openclaw/octopool is:public author:alice "cache miss"' },
+    });
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { details: { reason: "repo_not_public" } },
+    });
+    const requests = upstream.mock.calls.map(([input, init]) => new Request(input, init));
+    expect(
+      requests
+        .filter((request) => new URL(request.url).pathname === "/search/issues")
+        .every((request) => bearer(request) === undefined),
+    ).toBe(true);
+    expect(await cacheRows()).toEqual([]);
+  });
 
   it.each([true, false])(
     "does not let the issue shape bypass grammar with allow_search=%s",

@@ -245,6 +245,99 @@ function tokenFreeSearchRequest(
   );
 }
 
+const MAX_SEARCH_QUERY_LENGTH = 4_096;
+const MAX_SEARCH_TOKENS = 128;
+const searchLogin = /^(?:app\/)?[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
+const searchDate = String.raw`\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])`;
+const searchDateFilter = new RegExp(
+  `^(?:(?:>=?|<=?)?${searchDate}|${searchDate}\\.\\.${searchDate})$`,
+);
+// Printable ASCII except quotes, colons (qualifier syntax), and backslashes (escapes).
+const quotedSearchText = /^"[\x20-\x21\x23-\x39\x3b-\x5b\x5d-\x7e]+"$/;
+
+function searchTermsDenied(): HttpError {
+  return new HttpError(403, "search_denied", "Search routes require allowlisted repo-scoped terms");
+}
+
+function tokenizeSearchQuery(q: string): string[] {
+  if (q.length > MAX_SEARCH_QUERY_LENGTH) throw searchTermsDenied();
+  const tokens: string[] = [];
+  let start = 0;
+  let quoted = false;
+  for (let index = 0; index <= q.length; index++) {
+    const char = q[index];
+    if (char === '"') quoted = !quoted;
+    if (char === undefined || (!quoted && /[ \t\r\n]/.test(char))) {
+      if (index > start) {
+        tokens.push(q.slice(start, index));
+        if (tokens.length > MAX_SEARCH_TOKENS) throw searchTermsDenied();
+      }
+      start = index + 1;
+    }
+  }
+  if (quoted) throw searchTermsDenied();
+  return tokens;
+}
+
+function allowedSearchTerm(token: string): boolean {
+  const negated = token.startsWith("-");
+  const term = negated ? token.slice(1) : token;
+  if (/^(OR|AND|NOT)$/i.test(term) || term.startsWith("-")) return false;
+  if (/^[A-Za-z0-9_.-]+$/.test(term)) return true;
+  if (quotedSearchText.test(term)) return !negated && term.slice(1, -1).trim() !== "";
+  const separator = term.indexOf(":");
+  if (separator === -1) return false;
+  const qualifier = term.slice(0, separator);
+  const value = term.slice(separator + 1);
+  switch (qualifier) {
+    case "type":
+      return /^(issue|pr)$/.test(value);
+    case "state":
+      return /^(open|closed)$/.test(value);
+    case "is":
+      return (
+        /^(open|closed|merged|unmerged|issue|pr|draft|locked|unlocked)$/.test(value) ||
+        (!negated && value === "public")
+      );
+    case "author":
+    case "assignee":
+    case "mentions":
+    case "commenter":
+    case "involves":
+    case "reviewed-by":
+    case "review-requested":
+      return searchLogin.test(value);
+    case "label":
+    case "milestone":
+      return (
+        /^[A-Za-z0-9_./-]+$/.test(value) ||
+        (quotedSearchText.test(value) && value.slice(1, -1).trim() !== "")
+      );
+    case "no":
+      return /^(label|milestone|assignee)$/.test(value);
+    case "in":
+      return /^(title|body|comments)$/.test(value);
+    case "created":
+    case "updated":
+    case "closed":
+    case "merged":
+      return searchDateFilter.test(value);
+    case "draft":
+      return /^(true|false)$/.test(value);
+    case "review":
+      return /^(none|required|approved|changes_requested)$/.test(value);
+    case "status":
+      return /^(pending|success|failure)$/.test(value);
+    case "base":
+    case "head":
+      return /^[A-Za-z0-9._/-]+$/.test(value);
+    case "sort":
+      return /^(created|updated|comments|reactions)(-asc|-desc)?$/.test(value);
+    default:
+      return false;
+  }
+}
+
 function repoFromSearchQuery(query: Record<string, string | string[]> | undefined): {
   owner: string;
   repo: string;
@@ -253,7 +346,7 @@ function repoFromSearchQuery(query: Record<string, string | string[]> | undefine
   if (typeof q !== "string") {
     throw new HttpError(403, "search_denied", "Search routes require a repo-scoped q query");
   }
-  const tokens = q.trim().split(/\s+/).filter(Boolean);
+  const tokens = tokenizeSearchQuery(q);
   let scope: { owner: string; repo: string } | undefined;
   for (const token of tokens) {
     const match = /^repo:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(token);
@@ -268,18 +361,7 @@ function repoFromSearchQuery(query: Record<string, string | string[]> | undefine
       scope = { owner: match[1], repo: match[2] };
       continue;
     }
-    if (/^type:(issue|pr)$/.test(token) || /^state:(open|closed)$/.test(token)) {
-      continue;
-    }
-    const upper = token.toUpperCase();
-    if (
-      token.startsWith("-") ||
-      !/^[A-Za-z0-9_.-]+$/.test(token) ||
-      upper === "OR" ||
-      upper === "NOT"
-    ) {
-      throw new HttpError(403, "search_denied", "Search routes only allow plain repo-scoped terms");
-    }
+    if (!allowedSearchTerm(token)) throw searchTermsDenied();
   }
   if (scope === undefined) {
     throw new HttpError(403, "search_denied", "Search routes require exactly one repo qualifier");

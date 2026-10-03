@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Relay single-repository searches with common issue/PR filters, dates, quoted phrases, and non-scope negation while preserving public-repository and pooled-identity safeguards.
 - Relay live PR-view boolean `maintainerCanModify`, native `mergedBy` exports, and explicitly null `autoMergeRequest` from REST, retaining native fallback for incomplete or unsupported metadata.
 
 ## 0.9.4 - 2026-10-02

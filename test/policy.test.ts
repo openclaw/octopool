@@ -3,6 +3,9 @@ import { HttpError } from "../src/http";
 import { classifyRoute, defaultPolicy, parsePolicy, validateRelayRequest } from "../src/policy";
 import { malformedStoredPolicies, restrictivePolicy } from "./fixtures/stored-policy";
 import {
+  additionalDeniedRepoSearchQueries,
+  agentSearchQueries,
+  allowedSearchFilters,
   deniedRepoSearchQueries,
   repoSearchPaths,
   validRepoSearchQueries,
@@ -62,11 +65,14 @@ describe.each(repoSearchPaths)("restricted search grammar for %s", (path) => {
   const requestFor = (q: string | string[] | undefined) =>
     validateRelayRequest({ pool: "maintainers", method: "GET", path, query: { q } });
 
-  it.each(deniedRepoSearchQueries)("denies unsupported q=%j", (q) => {
-    expect(() => classifyRoute(requestFor(q), policy)).toThrow(
-      expect.objectContaining({ status: 403, code: "search_denied" }),
-    );
-  });
+  it.each([...deniedRepoSearchQueries, ...additionalDeniedRepoSearchQueries])(
+    "denies unsupported q=%j",
+    (q) => {
+      expect(() => classifyRoute(requestFor(q), policy)).toThrow(
+        expect.objectContaining({ status: 403, code: "search_denied" }),
+      );
+    },
+  );
 
   it("requires a single string q", () => {
     for (const query of [undefined, {}, { q: ["repo:openclaw/octopool", "needle"] }]) {
@@ -77,7 +83,10 @@ describe.each(repoSearchPaths)("restricted search grammar for %s", (path) => {
     }
   });
 
-  it.each(validRepoSearchQueries)("preserves valid q=%j", (q) => {
+  it.each([
+    ...validRepoSearchQueries,
+    ...allowedSearchFilters.map((filter) => `repo:openclaw/octopool ${filter} -${filter}`),
+  ])("preserves valid q=%j", (q) => {
     const request = requestFor(q);
     expect(classifyRoute(request, policy)).toMatchObject({
       owner: "openclaw",
@@ -92,7 +101,7 @@ describe.each(repoSearchPaths)("restricted search grammar for %s", (path) => {
   });
 
   it("retains owner and public-only policy routing", () => {
-    const request = requestFor("repo:Other/Project needle");
+    const request = requestFor('repo:Other/Project is:public updated:>=2026-09-26 "cache miss"');
     expect(classifyRoute(request, policy)).toMatchObject({
       owner: "other",
       repo: "Project",
@@ -102,10 +111,47 @@ describe.each(repoSearchPaths)("restricted search grammar for %s", (path) => {
       expect.objectContaining({ status: 403, code: "owner_denied" }),
     );
   });
+
+  it("bounds query length and token count", () => {
+    const prefix = "repo:openclaw/octopool ";
+    for (const q of [
+      prefix + "x".repeat(4_096 - prefix.length),
+      prefix + Array(127).fill("x").join(" "),
+    ]) {
+      expect(classifyRoute(requestFor(q), policy)).toMatchObject({
+        owner: "openclaw",
+        repo: "octopool",
+      });
+    }
+    for (const q of [
+      prefix + "x".repeat(4_097 - prefix.length),
+      prefix + Array(128).fill("x").join(" "),
+    ]) {
+      expect(() => classifyRoute(requestFor(q), policy)).toThrow(
+        expect.objectContaining({ code: "search_denied" }),
+      );
+    }
+  });
 });
 
 describe("route policy", () => {
   const policy = defaultPolicy("openclaw");
+
+  it.each(agentSearchQueries)("allows agent search $q without changing its query", (query) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/search/issues",
+      query,
+    });
+    const otherOwner = query.q.includes("steipete/CodexBar");
+    expect(classifyRoute(request, { ...policy, allow_search: true })).toMatchObject({
+      owner: otherOwner ? "steipete" : "openclaw",
+      repo: otherOwner ? "CodexBar" : "openclaw",
+      publicOnly: otherOwner,
+    });
+    expect(request.query).toEqual(query);
+  });
 
   it("recognizes exact native protection reads without opening neighboring routes", () => {
     for (const path of [
@@ -687,7 +733,7 @@ describe("route policy", () => {
       query: { q: "repo:openclaw/openclaw cache OR org:other" },
     });
     expect(() => classifyRoute(request, { ...policy, allow_search: true })).toThrow(
-      /plain repo-scoped terms/,
+      /allowlisted repo-scoped terms/,
     );
   });
 

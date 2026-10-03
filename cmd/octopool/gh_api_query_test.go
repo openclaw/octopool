@@ -4,11 +4,62 @@ import (
 	"bytes"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 )
+
+func TestGHSearchAPIForwardsFullQuery(t *testing.T) {
+	for _, query := range []map[string]string{
+		{"q": "repo:steipete/CodexBar is:open is:issue"},
+		{"q": "repo:steipete/CodexBar is:issue is:open updated:>=2026-09-26"},
+		{"q": `repo:openclaw/openclaw is:pr author:steipete "(batch" in:title`, "sort": "updated", "order": "desc", "per_page": "50"},
+	} {
+		for _, fields := range []bool{false, true} {
+			t.Run(query["q"]+"/fields="+strconv.FormatBool(fields), func(t *testing.T) {
+				calls := 0
+				rewriteTestServer(t, rewriteEmptyTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					request := decodeCLIRequest(t, w, r)
+					got, _ := request["query"].(map[string]any)
+					if request["method"] != "GET" || request["path"] != "/search/issues" || len(got) != len(query) {
+						t.Fatalf("search request changed: %#v", request)
+					}
+					for key, value := range query {
+						if got[key] != value {
+							t.Errorf("query[%s] = %v, want %q", key, got[key], value)
+						}
+					}
+					writeCLIEnvelope(t, w, map[string]any{"items": []any{}})
+				})
+				capture := captureRewriteGH(t)
+				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+				args := []string{"api", "search/issues", "--method=GET"}
+				params := url.Values{}
+				for key, value := range query {
+					if fields {
+						args = append(args, "-f", key+"="+value)
+					} else {
+						params.Set(key, value)
+					}
+				}
+				if !fields {
+					args[1] += "?" + params.Encode()
+				}
+				var out, stderr bytes.Buffer
+				if err := runGH(t.Context(), args, &out, &stderr); err != nil || calls != 1 {
+					t.Fatalf("err=%v calls=%d stderr=%q", err, calls, stderr.String())
+				}
+				if _, err := os.Stat(capture); !os.IsNotExist(err) {
+					t.Fatal("search API must relay without native fallback")
+				}
+			})
+		}
+	}
+}
 
 func TestGHExplicitGETFieldsRelay(t *testing.T) {
 	for _, policy := range []string{rewriteEmptyTestPolicy, rewriteActiveTestPolicy} {

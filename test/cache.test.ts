@@ -89,6 +89,35 @@ describe("github cache policy", () => {
     );
   });
 
+  it("keys searches by the full query, including phrases, filters, and ordering", async () => {
+    const q = 'repo:openclaw/octopool is:pr author:alice "(batch" in:title';
+    const queries = [
+      { q },
+      { q: q.replace("alice", "bob") },
+      { q: q.replace("(batch", "batch") },
+      { q: q + " -label:bug" },
+      { q, sort: "updated", order: "asc" },
+      { q, sort: "updated", order: "desc" },
+      { q, per_page: "50" },
+    ];
+    const keys = await Promise.all(
+      queries.map(async (query) => {
+        const request = validateRelayRequest({
+          pool: "maintainers",
+          method: "GET",
+          path: "/search/issues",
+          query,
+        });
+        return githubCacheKey(
+          request.pool,
+          request,
+          classifyRoute(request, { ...policy, allow_search: true }),
+        );
+      }),
+    );
+    expect(new Set(keys).size).toBe(queries.length);
+  });
+
   it("normalizes default query and JSON accept variants in cache keys", async () => {
     const left = validateRelayRequest({
       pool: "maintainers",

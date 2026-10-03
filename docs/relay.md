@@ -465,15 +465,11 @@ the Worker remains GET-only and does not relay those neighboring routes.
 - `allow_logs` — log routes require it (default `true`), else `424 fallback_local` with
   reason `logs_denied`.
 - `allow_search` — search routes require it (default `false`). Issue, code, and commit searches
-  require exactly one `repo:owner/name` qualifier plus plain terms and optional
-  `type:issue|pr` / `state:open|closed`. Every token must match this grammar: additional,
-  quoted, bare, or malformed repo qualifiers, `OR`/`NOT`, and negated terms are rejected
-  before upstream dispatch or cache reuse. Qualifier names and filter values are lowercase;
-  owner/repository casing and whitespace between tokens are accepted without rewriting the
-  query sent upstream. Repository search keeps its separate plain-term grammar. Invalid
+  require exactly one `repo:owner/name` qualifier and the [scoped search allowlist](#scoped-search-queries).
+  Validation runs before upstream dispatch or cache reuse. Repository search keeps its separate plain-term grammar. Invalid
   queries return `424 fallback_local` with reason `search_denied`. The supported token-free
-  issue-search shape can run with `allow_search: false`, subject to the same grammar and
-  owner/public-repository gates, and never falls through to pooled credentials.
+  issue-search shape can run with `allow_search: false`, subject to its existing narrower
+  grammar and the same owner/public-repository gates, and never falls through to pooled credentials.
 
 Stored policy must be a JSON object. Missing fields, including an explicit `{}`, retain
 the defaults above; present boolean fields must be booleans and `allowed_owners` must
@@ -541,6 +537,52 @@ transport is in [Token-Free GitHub Endpoints](token-free.md).
 discriminators for PR file lists. They do not bypass policy or visibility checks; they
 only let clients that already know current PR state keep `/files` cache entries separate
 across head SHAs or closed/merged state.
+
+### Scoped search queries
+
+Issue, PR, code, and commit searches accept one unquoted, positive `repo:owner/name`;
+each component must match `[A-Za-z0-9_.-]+`. The repository still passes the existing
+owner policy, public-visibility proof, and identity eligibility checks before pooled
+credentials or cached results can be used. `is:public` only narrows the query; it never
+replaces that proof.
+
+Queries are limited to 4,096 characters and 128 tokens. The tokenizer respects double
+quotes and separates tokens on spaces, tabs, CR, or LF outside quotes. Qualifier names
+and enumerated values are lowercase; login, name, ref, phrase, and repository casing
+is preserved. The full original `q`, including all filters and phrases, is forwarded
+unchanged and included in the cache key, along with sort/order/pagination parameters.
+
+| Qualifier                                                                                    | Allowed values                                                                                                                              |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`, `state`                                                                              | `issue` / `pr`; `open` / `closed`, respectively                                                                                             |
+| `is`                                                                                         | `open`, `closed`, `merged`, `unmerged`, `issue`, `pr`, `draft`, `locked`, `unlocked`, `public`                                              |
+| `author`, `assignee`, `mentions`, `commenter`, `involves`, `reviewed-by`, `review-requested` | `[A-Za-z0-9][A-Za-z0-9-]{0,38}`, optionally prefixed with `app/`; `@me` is rejected because it would resolve to the pooled identity         |
+| `label`, `milestone`                                                                         | `[A-Za-z0-9_./-]+` or a nonblank double-quoted name with spaces and simple punctuation                                                      |
+| `no`                                                                                         | `label`, `milestone`, `assignee`                                                                                                            |
+| `in`                                                                                         | `title`, `body`, `comments`                                                                                                                 |
+| `created`, `updated`, `closed`, `merged`                                                     | `YYYY-MM-DD`, optionally prefixed with `>`, `>=`, `<`, `<=`, or `YYYY-MM-DD..YYYY-MM-DD`; month/day components are bounded to 01–12 / 01–31 |
+| `draft`                                                                                      | `true`, `false`                                                                                                                             |
+| `review`                                                                                     | `none`, `required`, `approved`, `changes_requested`                                                                                         |
+| `status`                                                                                     | `pending`, `success`, `failure`                                                                                                             |
+| `base`, `head`                                                                               | `[A-Za-z0-9._/-]+` (no colon)                                                                                                               |
+| `sort`                                                                                       | `created`, `updated`, `comments`, `reactions`, optionally suffixed with `-asc` or `-desc`                                                   |
+
+Plain terms retain `[A-Za-z0-9_.-]+`. Double-quoted phrases and names allow printable
+ASCII, including parentheses inside quotes (for example `"(batch"`), but no internal
+quotes, colons, backslashes, or blank-only values. One leading `-` may negate plain
+terms or the non-scope qualifiers above; negated phrases and `-is:public` are rejected.
+
+Everything outside this allowlist is denied, including missing/duplicate/negated `repo:`,
+`org:`, `user:`, `owner:`, `is:private`, `@me` logins, unquoted `OR`/`AND`/`NOT` in any
+case, grouping parentheses, malformed or escaped quotes, and unknown qualifiers.
+The `allow_search: false` exception retains the existing `issue-search-v1` grammar:
+one repo, one `type:issue|pr`, at most one `state:open|closed`, and plain terms on the
+first page, without sort/order parameters or these additional filters.
+
+The raw `gh api search/issues` path forwards this syntax through query parameters or
+explicit `--method=GET -f q=...` fields. The current top-level `gh search issues|prs`
+builders still accept only their documented plain-term shape; richer positional
+queries and filter flags use native `gh` before reaching this Worker allowlist.
 
 ## Safety limits
 
