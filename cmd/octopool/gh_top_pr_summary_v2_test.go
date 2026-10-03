@@ -20,7 +20,7 @@ func TestPRViewSummaryV2Headers(t *testing.T) {
 		}
 		t.Logf("--json %s -> %v", fields, got)
 	}
-	for _, field := range []string{"mergeable", "mergeStateStatus", "reviewDecision", "body", "labels", "comments", "reviews", "commits", "headRepository", "mergedBy"} {
+	for _, field := range []string{"mergeable", "mergeStateStatus", "autoMergeRequest", "maintainerCanModify", "reviewDecision", "body", "labels", "comments", "reviews", "commits", "headRepository", "mergedBy"} {
 		if got := prViewHeaders(ghTopOptions{json: strings.Split(summaryV2Fields+","+field, ",")}); got != nil {
 			t.Fatalf("%s unexpectedly enabled the page shape: %v", field, got)
 		}

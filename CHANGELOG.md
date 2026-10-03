@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Relay live PR-view boolean `maintainerCanModify`, native `mergedBy` exports, and explicitly null `autoMergeRequest` from REST, retaining native fallback for incomplete or unsupported metadata.
+
 ## 0.9.4 - 2026-10-02
 
 **Highlights:** Keep the Codex desktop app's PR-panel GraphQL bursts on the pooled relay instead of the caller's personal token, and stop transient relay admission failures from surfacing as 500 errors.

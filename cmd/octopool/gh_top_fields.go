@@ -64,11 +64,14 @@ var fieldMapGist = map[string][]string{
 	"updatedAt": {"updated_at"},
 }
 
+// GraphQL mergeStateStatus is viewer-dependent; pooled REST mergeable_state diverges
+// (observed caller BLOCKED vs pooled unstable), so it stays native.
 var supportedPRFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
 	"additions", "deletions", "changedFiles", "mergeable", "mergeCommit", "merged", "files", "commits", "comments",
-	"reviews", "headRepository", "headRepositoryOwner", "assignees", "statusCheckRollup",
+	"reviews", "headRepository", "headRepositoryOwner", "assignees", "statusCheckRollup", "autoMergeRequest",
+	"maintainerCanModify", "mergedBy",
 )
 
 var supportedPRListFields = supportedFields(

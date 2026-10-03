@@ -26,7 +26,7 @@ func needsLivePRRead(fields []string) bool {
 	for _, field := range fields {
 		switch field {
 		case "headRefOid", "baseRefOid", "state", "merged", "mergedAt", "mergeable",
-			"mergeCommit", "mergeStateStatus", "closedAt", "statusCheckRollup":
+			"mergeCommit", "mergeStateStatus", "autoMergeRequest", "maintainerCanModify", "mergedBy", "closedAt", "statusCheckRollup":
 			return true
 		}
 	}
@@ -207,6 +207,18 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	users := map[string]map[string]any{}
 	for _, field := range opts.json {
 		switch field {
+		case "maintainerCanModify":
+			canModify, ok := pr["maintainer_can_modify"].(bool)
+			if !ok {
+				return localFallbackError{Reason: "pull request response did not include maintainer modification status"}
+			}
+			pr[field] = canModify
+		case "autoMergeRequest":
+			// Only explicit null is faithful: REST lacks GraphQL enabledAt/authorEmail.
+			if autoMerge, present := pr["auto_merge"]; !present || autoMerge != nil {
+				return localFallbackError{Reason: "unsupported pull request auto-merge shape"}
+			}
+			pr[field] = nil
 		case "comments", "commits":
 			detail, err := relayPRDetail(ctx, client, repo, number, field, viewer, nestedStringValue(pr, "head", "sha"))
 			if err != nil {
@@ -229,6 +241,20 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 					return localFallbackError{Reason: "pull request response did not include merge commit identity"}
 				}
 				pr[field] = map[string]any{"oid": sha}
+			}
+		case "mergedBy":
+			actor, present := pr["merged_by"]
+			if !present {
+				return localFallbackError{Reason: "pull request response did not include merged_by"}
+			}
+			// gh's nullable mergedBy pointer exports null, unlike its zero author value.
+			pr[field] = nil
+			if actor != nil {
+				mapped, err := relayPRViewAuthor(ctx, client, actor, users)
+				if err != nil {
+					return err
+				}
+				pr[field] = mapped
 			}
 		case "author":
 			author, present := pr["user"]

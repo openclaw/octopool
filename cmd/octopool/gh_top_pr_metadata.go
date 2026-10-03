@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -14,7 +13,7 @@ func relayPRUser(ctx context.Context, client ghRelayClient, raw any, users map[s
 	login, nodeID := firstString(user, "login"), firstString(user, "node_id")
 	_, hasSourceNodeID := user["node_id"]
 	if login == "" || (hasSourceNodeID && nodeID == "") {
-		return nil, errors.New("pull request response did not include user identity")
+		return nil, localFallbackError{Reason: "pull request response did not include user identity"}
 	}
 	key := strings.ToLower(login)
 	profile := users[key]
@@ -26,7 +25,7 @@ func relayPRUser(ctx context.Context, client ghRelayClient, raw any, users map[s
 			headers: map[string]string{"cache-control": "max-age=3600"},
 		}
 		if !safeRelayRequest(request) {
-			return nil, errors.New("unsupported pull request user lookup")
+			return nil, localFallbackError{Reason: "unsupported pull request user lookup"}
 		}
 		envelope, err := client.do(ctx, request)
 		if err != nil {
@@ -46,7 +45,7 @@ func relayPRUser(ctx context.Context, client ghRelayClient, raw any, users map[s
 	_, hasID := profile["id"].(float64)
 	profileNodeID := firstString(profile, "node_id")
 	if !strings.EqualFold(firstString(profile, "login"), login) || profileNodeID == "" || (hasSourceNodeID && profileNodeID != nodeID) || !hasName || (!stringName && profile["name"] != nil) || !hasID || firstString(profile, "type") == "" {
-		return nil, errors.New("user response did not include matching complete identity")
+		return nil, localFallbackError{Reason: "user response did not include matching complete identity"}
 	}
 	return profile, nil
 }

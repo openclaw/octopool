@@ -151,9 +151,9 @@ for node IDs, actor types, and names. Missing identities are omitted, not guesse
 If a requested projection needs an omitted value, the CLI repeats the PR read through
 the relay without the public-shape header, preserving its freshness headers. This stays
 within the relay even with `OCTOPOOL_NO_FALLBACK=1`. Fields not needed by the request do
-not trigger this retry. `headRepository` and `mergeable` remain API-only; `mergedBy`
-remains unsupported by the CLI. Older CLIs can still request the original `pr-summary-v1`
-field set. Deploy the Worker and upgrade the CLI to use v2.
+not trigger this retry. `headRepository`, `mergeable`, `autoMergeRequest`,
+`maintainerCanModify`, and `mergedBy` remain API-only. Older CLIs can still request the
+original `pr-summary-v1` field set. Deploy the Worker and upgrade the CLI to use v2.
 
 Actions run lists validate the first page's cards and matching responsive copies of counts
 and timestamps. When GitHub marks the count as capped (`N+ workflow runs` or

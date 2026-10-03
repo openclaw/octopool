@@ -531,9 +531,22 @@ boolean, null, or absent `mergeable` values.
 for a merged PR or `null` for an unmerged PR. An open or closed-unmerged PR's synthetic
 test merge SHA is never exported as its merged commit. Missing merge status or an
 invalid merged-commit SHA requests guarded native fallback before printing output.
-Raw `gh api` reads retain `merge_commit_sha`. `mergeStateStatus` remains unsupported
-and delegates to real `gh`, including alongside `mergeable` or `mergeCommit`;
-`gh pr list --json mergeable` and `gh pr list --json mergeCommit` also delegate.
+Raw `gh api` reads retain `merge_commit_sha`.
+`mergeStateStatus` remains native, including when combined with supported fields.
+GraphQL evaluates it per viewer, so pooled-token REST `mergeable_state` cannot reproduce
+the caller's result (observed native `BLOCKED` versus pooled REST `unstable`).
+`autoMergeRequest` is supported only when REST explicitly supplies `auto_merge: null`,
+which exports JSON `null`. Missing or non-null values delegate the entire request because
+REST cannot reproduce native gh's `enabledAt` and `authorEmail` fields.
+`maintainerCanModify` exports REST `maintainer_can_modify` only when it is a JSON boolean;
+missing, null, or other types use guarded native fallback.
+`mergedBy` exports JSON `null` only when REST explicitly supplies `merged_by: null`.
+Non-null actors use the same validated user/bot export and shared profile lookup as
+`author`; missing or unrepresentable identities use guarded native fallback.
+These three fields read live (`max-age=0`) from the full REST pull response, bypassing public
+page shapes; incomplete cached projections fall back before any JSON or `--jq` output.
+PR lists and searches do not support these fields. `gh pr list --json mergeable` and
+`gh pr list --json mergeCommit` also delegate.
 Supported summary-only combinations use the `pr-summary-v2` public page shape, including
 `mergeCommit`, `merged`, `isDraft`, `author`, and `headRepositoryOwner`. Login-only page
 identities use the shared profile lookup for actor types and node IDs; supplied node IDs
@@ -541,12 +554,13 @@ must still match the profile. Closed-unmerged pages omit draft status, and missi
 authors or head owners are omitted. When a requested field needs an omitted value, the
 CLI retries once through the relay without the shape header, retaining `max-age=0` when
 required. This exact REST retry works with `OCTOPOOL_NO_FALLBACK=1` and completes before
-hydration or output. Adding API-only fields such as `mergeable` or `headRepository` skips
-the page shape. See [the complete supported field set](token-free.md#bounded-cli-shapes).
+hydration or output. Adding API-only fields such as `mergeable`,
+`autoMergeRequest`, `maintainerCanModify`, `mergedBy`, or `headRepository` skips the page shape.
+See [the complete supported field set](token-free.md#bounded-cli-shapes).
 PR views also relay `headRepository`, `headRepositoryOwner`, `assignees`, and
 `statusCheckRollup` to reduce local GitHub quota usage through shared transports and
 eligible caching, including under active string rewrite protection. Fork metadata
-uses GitHub node IDs; a deleted head repository is `null`. Requested author, owner, and assignee
+uses GitHub node IDs; a deleted head repository is `null`. Requested author, merger, owner, and assignee
 names use a shared per-command profile lookup. The rollup preserves native `gh`
 `CheckRun` and `StatusContext` fields and resolves workflow names by check-suite ID
 through head-filtered Actions runs and the complete raw workflow catalogue, including
@@ -1497,8 +1511,9 @@ requests a tighter age bound.
 Three things keep that honest:
 
 - **Gate fields read live.** `gh pr view --json` reads that include `headRefOid`,
-  `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`,
-  `closedAt`, or `statusCheckRollup` send `cache-control: max-age=0` automatically. These are the values callers
+  `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `autoMergeRequest`,
+  `maintainerCanModify`, `mergedBy`, `closedAt`, or `statusCheckRollup` send
+  `cache-control: max-age=0` automatically. These are the values callers
   branch on, so they require an upstream fetch or successful conditional revalidation.
   Descriptive fields (`title`, `body`, `labels`, `author`) stay cached. Rollup check/status
   pages and head-filtered runs read live; workflow names use the shared one-hour catalogue
