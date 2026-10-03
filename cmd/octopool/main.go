@@ -76,6 +76,8 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return runHealth(ctx, args[1:], stdout)
 	case "stats":
 		return runStats(ctx, args[1:], stdout)
+	case "native-delegations":
+		return runNativeDelegations(args[1:], stdout)
 	case "request":
 		return runRequest(ctx, args[1:], stdout)
 	case "admin":
@@ -138,7 +140,7 @@ func isGHArgv(argv0 string) bool {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: octopool <login|install-shim|whoami|gh|health|stats|request|admin> [flags]")
+	fmt.Fprintln(w, "usage: octopool <login|install-shim|whoami|gh|health|stats|native-delegations|request|admin> [flags]")
 }
 
 func parseCommandFlags(fs *flag.FlagSet, args []string, stdout io.Writer, usageLine string) (bool, error) {

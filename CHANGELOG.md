@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Journal native `gh` delegations locally with redacted command shapes, parent-process attribution, private sandbox fallback, and `octopool native-delegations` summaries; records are never uploaded and `OCTOPOOL_NATIVE_JOURNAL=0` opts out.
 - Relay JSON PR/issue lists with `--search` and richer top-level search qualifiers through cacheable REST search, preserving native exports and falling back for unsupported queries, fields, search denial, or rate limits; accept comma-separated `in:` fields.
 - Share private per-user temp relay slots between sandboxed and normal CLI callers to keep one concurrency budget, resolving macOS's canonical temp directory across `TMPDIR` overrides and falling back to cache slots only when temp is unusable.
 - Accept repository GraphQL cache entries up to 60 seconds old by default, matching the Worker's TTL while preserving explicit Cache-Control headers and `OCTOPOOL_FRESH` live reads.

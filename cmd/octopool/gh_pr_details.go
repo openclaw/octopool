@@ -41,6 +41,7 @@ func localPRCommentViewer(ctx context.Context, client ghRelayClient) (string, er
 	cmd := exec.CommandContext(child, path, args...)
 	cmd.Stdout = &output
 	cmd.WaitDelay = 100 * time.Millisecond
+	journalNativeDelegation(ctx, args, os.Environ(), "viewer-probe")
 	if cmd.Run() != nil {
 		return "", nil
 	}

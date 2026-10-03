@@ -302,6 +302,7 @@ func storedGitHubToken(ctx context.Context, ghPath string, env []string) (string
 	defer cancel()
 	cmd := exec.CommandContext(child, path, "auth", "token", "--hostname", "github.com")
 	cmd.Env = env
+	journalNativeDelegation(ctx, cmd.Args[1:], env, "credential-lookup")
 	out, err := cmd.Output()
 	if err != nil {
 		if child.Err() != nil {

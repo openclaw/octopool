@@ -245,7 +245,11 @@ failures occur before audit context exists. Bodies, credentials, and raw tokens 
 - Invalid numeric limits fail explicitly.
 
 Configuration: `OCTOPOOL_URL`, `OCTOPOOL_TOKEN`, `OCTOPOOL_POOL`, `OCTOPOOL_GH_PATH`,
-`OCTOPOOL_NO_FALLBACK`.
+`OCTOPOOL_NO_FALLBACK`, `OCTOPOOL_NATIVE_JOURNAL`.
+
+Native `gh` dispatches have a best-effort, default-on local delegation journal with
+redacted shapes and parent-process attribution. `octopool native-delegations` summarizes
+it without network access; `OCTOPOOL_NATIVE_JOURNAL=0` opts out. Records are never uploaded.
 
 ## Operations and observability
 

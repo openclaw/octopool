@@ -303,6 +303,9 @@ can follow successful revalidation and do not measure avoided GitHub requests.
 
 ### Quota provenance and merge diagnostics
 
+Native dispatches also enter a [local delegation journal](#octopool-native-delegations-since-24h-top-20-json),
+so desktop callers that discard stderr can still be attributed to their parent process.
+
 Native GraphQL delegation prints `octopool: graphql delegated to personal token` on
 stderr. This includes unsupported PR exports, native PR checks, and unrecognized
 `gh api graphql` queries; relay-backed reads do not print it. When the last observation has fewer than 500 remaining,
@@ -1100,6 +1103,59 @@ Filter the client-specific aggregates without changing the calling client identi
 octopool stats -client ci-runner
 ```
 
+### `octopool native-delegations [--since 24h] [--top 20] [--json]`
+
+Summarizes native `gh` dispatch attempts from this user's local journal, grouped by
+parent executable basename, category, and redacted command shape. The default window is
+24 hours; `--since` accepts positive Go durations or whole days such as `7d`. `--top`
+limits the sorted groups (default 20); the total always includes every matching record.
+No login or network access is required. `--json` prints `since`, `total`, and `groups`,
+with each group containing `parent`, `category`, `shape`, and `count`.
+
+```sh
+octopool native-delegations
+octopool native-delegations --since 7d --top 30 --json
+```
+
+The journal is **local-only and never uploaded**. It defaults on, including for writes
+and internal native quota, viewer, preflight, and credential-lookup probes. Direct REST
+writes performed by Octopool itself are not native delegations. Each JSON line records
+the UTC RFC3339 timestamp, CLI version, parent PID and executable basename, grandparent
+basename when available, command shape, category, GraphQL involvement (`true`, `false`,
+or `null` when unknown), and whether `OCTOPOOL_FRESH` was present (not its value).
+macOS uses kernel process metadata without spawning `ps`; names may be truncated by
+the kernel. Linux uses `/proc`; unavailable process names and other platforms use empty
+strings. Categories include `native-json-fields`, `graphql-delegated`, `include`,
+`write`, `unsupported-command`, and `local-fallback:<reason>`. Known incomplete metadata
+reasons are grouped as `metadata_incomplete`; unrecognized error text becomes `other`.
+
+Shapes retain recognized subcommands, flag names, and known `--json` field names only.
+REST API shapes include the method and a template such as
+`/repos/:owner/:repo/pulls/:number`; unrecognized segments become `:segment`. GraphQL
+shapes retain only a bounded named operation from an inline `-f`/`-F query=...`, or
+`graphql` otherwise. Bodies, query text and variables, tokens, URLs, repository names,
+selectors, numeric arguments, and file paths are never recorded. Query files and stdin
+are never read for journaling. Unknown commands, flags, and JSON fields are redacted,
+and argument/shape lengths are bounded. Flag ordering and repeated fields are normalized.
+
+Records are stored in `<user-cache-dir>/octopool/native-delegations.jsonl` (0600 on
+Unix), using the same OS cache base as relay slots. If the cache cannot be written, the
+journal tries the existing private per-user relay-slot temp directory described above:
+`<temp>/octopool-relay-slots-<uid>/native-delegations.jsonl` on Unix, or the SID-based
+directory with a current-user-only ACL on Windows. Unix fallback directories must be
+owned by this user and have no group/other permissions. Insecure directories are rejected.
+The summary reads both locations and their `.1` files, ignoring unavailable files and
+malformed or truncated records. Temp cleanup and rotation can shorten the requested window.
+
+When the active journal exceeds 2 MiB, the next append renames it to `.1`, replacing
+the single previous generation. Appends use one `O_APPEND` write without fsync. A
+nonblocking local lock coordinates rotation; ordinary appends need no lock and rotation
+contention defers rotation without dropping the append. Concurrent writes can land in
+either retained generation. Unusable storage may drop an observation. Failures are silent
+and do not change command output or exit status. Counts describe native dispatch attempts,
+including failed starts; they are not GitHub request counts or measured GraphQL points. Set
+`OCTOPOOL_NATIVE_JOURNAL=0` to disable recording; existing records remain readable.
+
 ### `octopool request --path <p> [--method GET] [--query k=v] [--header k=v] [--route-hint k=v]`
 
 Debug/admin raw wrapper over `POST /v1/github/request`. Prints the full relay envelope.
@@ -1598,6 +1654,8 @@ These are dev/CI escape hatches, not the everyday UX:
 - `OCTOPOOL_TOKEN` — caller token override (required to use a non-saved URL).
 - `OCTOPOOL_POOL` — pool id (default `maintainers`).
 - `OCTOPOOL_GH_PATH` — path to the real `gh` binary.
+- `OCTOPOOL_NATIVE_JOURNAL=0` — disable the default-on, local-only native delegation
+  journal. Records are never uploaded; inspect existing counts with `native-delegations`.
 - `OCTOPOOL_REST_WRITES=0` — disable common PR REST writes and retain guarded native `gh`.
 - `OCTOPOOL_GRAPHQL_RELAY=0` — keep arbitrary repository GraphQL queries native; the
   existing exact landing projections retain their pooled routing.

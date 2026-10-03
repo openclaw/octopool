@@ -42,6 +42,7 @@ func TestCommandHelp(t *testing.T) {
 		{[]string{"whoami", "--help"}, "usage: octopool whoami"},
 		{[]string{"health", "--help"}, "usage: octopool health"},
 		{[]string{"stats", "--help"}, "usage: octopool stats"},
+		{[]string{"native-delegations", "--help"}, "usage: octopool native-delegations"},
 		{[]string{"request", "--help"}, "usage: octopool request"},
 		{[]string{"admin", "--help"}, "usage: octopool admin"},
 		{[]string{"admin", "caller", "--help"}, "usage: octopool admin caller"},

@@ -137,7 +137,7 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 				"octopool: relay requested local fallback (%s); continuing watch with real gh\n",
 				watchSafeText(handoff.fallback.Reason),
 			)
-			return execRealGH(ctx, args, stdout, stderr)
+			return execRealGH(withNativeFallback(ctx, handoff.fallback), args, stdout, stderr)
 		default:
 			return errors.New("invalid gh dispatch outcome")
 		}
@@ -156,7 +156,7 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		return err
 	}
 	if request.jq != "" && !jqAvailable() {
-		return execRealGH(ctx, args, stdout, stderr)
+		return execRealGH(withNativeFallback(ctx, localFallbackError{Reason: "jq_unavailable"}), args, stdout, stderr)
 	}
 	client, err := newGHRelayClient()
 	if err != nil {

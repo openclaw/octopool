@@ -131,6 +131,7 @@ func readPersonalGraphQLQuota(ctx context.Context, path string, env []string, po
 	cmd.Env = env
 	cmd.Stdout = &output
 	cmd.WaitDelay = 100 * time.Millisecond
+	journalNativeDelegation(ctx, args, env, "quota-probe")
 	if cmd.Run() != nil {
 		return nil
 	}

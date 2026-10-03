@@ -88,7 +88,13 @@ octopool gh run list -R openclaw/openclaw --branch main --limit 10 --json databa
 octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/openclaw/pulls/85341 --jq .number
 octopool stats
+octopool native-delegations --since 24h
 ```
+
+Native `gh` delegations are recorded in a bounded, local-only journal with redacted
+command shapes and parent-process attribution, including when a desktop app discards
+stderr. `octopool native-delegations` shows the busiest groups; add `--json` for scripts.
+Records are never uploaded. Set `OCTOPOOL_NATIVE_JOURNAL=0` to opt out.
 
 Install it as a `gh` shim — safe reads try Octopool first, while supported writes and explicit server fallback signals use your local `gh` after outbound-policy checks. Active rewrite rules strictly snapshot modeled publication bodies and media attachments; evolving native command shapes receive bounded best-effort filtering:
 

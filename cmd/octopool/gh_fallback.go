@@ -73,7 +73,7 @@ func execRealGHAfterLocalFallback(
 	} else {
 		fmt.Fprintf(stderr, "octopool: %v; falling back to real gh\n", reason)
 	}
-	return execRealGH(ctx, args, stdout, stderr)
+	return execRealGH(withNativeFallback(ctx, reason), args, stdout, stderr)
 }
 
 func runJQ(ctx context.Context, stdout io.Writer, input []byte, expr string) error {
@@ -142,7 +142,8 @@ func execRealGHWithStdinAndEnv(
 		if prepared.afterPreflight != nil {
 			stdout = &output
 		}
-		if err := execRealGHWithStdinAndEnv(ctx, prepared.preflight, strings.NewReader(""), stdout, io.Discard, env); err != nil {
+		preflightCtx := context.WithValue(ctx, nativeJournalCategoryKey{}, "preflight")
+		if err := execRealGHWithStdinAndEnv(preflightCtx, prepared.preflight, strings.NewReader(""), stdout, io.Discard, env); err != nil {
 			return errRewriteBlocked
 		}
 		if prepared.afterPreflight != nil {
@@ -189,6 +190,7 @@ func execRealGHWithStdinAndEnv(
 		}, prepared.args[0] == "api")
 		cmd.Stderr = graphQLOutput
 	}
+	journalNativeDelegation(ctx, prepared.args, env, "")
 	if diagnostic == nil {
 		err = cmd.Run()
 	} else {
