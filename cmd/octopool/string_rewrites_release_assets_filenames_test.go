@@ -11,6 +11,7 @@ import (
 
 func TestReleaseAssetsStagingProcessRejectsSpecialTempRoots(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 	// Create the original before selecting a special temp root: only the generated
 	// operand should contain native gh label/pattern syntax.
 	source := releaseAssetFile(t, "asset.zip", []byte{0, 0xff, 1})
@@ -45,6 +46,7 @@ func TestReleaseAssetsStagingProcessRejectsSpecialTempRoots(t *testing.T) {
 
 func TestReleaseAssetsStagingProcessPreservesMetadata(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 	for _, name := range []string{"notes#staging", "notes[staging]"} {
 		t.Run(name, func(t *testing.T) {
 			for _, test := range []struct {

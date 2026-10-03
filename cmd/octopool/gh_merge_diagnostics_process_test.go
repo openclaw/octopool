@@ -409,6 +409,7 @@ func TestGHMergeDiagnosticsFailures(t *testing.T) {
 			}
 			snapshotRoot := t.TempDir()
 			t.Setenv("TMPDIR", snapshotRoot)
+			t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 			args := mergeDiagnosticArgs()
 			if mode != "native_stdout_writer" {
 				args = append(args, "--subject=subject", "--body-file=-")
@@ -510,6 +511,7 @@ func TestGHMergeDiagnosticsCanceledBeforeStart(t *testing.T) {
 	t.Setenv("OCTOPOOL_DIAGNOSTICS", "1")
 	snapshotRoot := t.TempDir()
 	t.Setenv("TMPDIR", snapshotRoot)
+	t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	var stderr bytes.Buffer

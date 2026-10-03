@@ -494,6 +494,7 @@ func TestDeclaredInput(t *testing.T) {
 		t.Run("final budget and material/"+test.name, func(t *testing.T) { run(t, api, strings.NewReader(test.body), true, false) })
 	}
 	t.Run("aggregate sources and cleanup", func(t *testing.T) {
+		t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 		temp := t.TempDir()
 		for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
 			t.Setenv(key, temp)
@@ -520,6 +521,7 @@ func TestDeclaredInput(t *testing.T) {
 	})
 	for _, failure := range []string{"start", "exit"} {
 		t.Run("cleanup on child "+failure, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 			temp := t.TempDir()
 			for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
 				t.Setenv(key, temp)

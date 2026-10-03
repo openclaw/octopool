@@ -309,7 +309,7 @@ func parseRepositoryGraphQL(args []string) (ghAPIRequest, bool) {
 	if freshReadRequested() {
 		request.headers["cache-control"] = "max-age=0"
 	} else if _, present := opts.headers["cache-control"]; !present {
-		request.headers["cache-control"] = "max-age=20"
+		request.headers["cache-control"] = "max-age=60"
 	}
 	return request, true
 }

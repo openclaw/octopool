@@ -16,6 +16,15 @@ func isolateTestConfig(t *testing.T) {
 		name, value, _ := strings.Cut(entry, "=")
 		t.Setenv(name, value)
 	}
+	isolateRelaySlotResolver(t)
+}
+
+func isolateRelaySlotResolver(t *testing.T) {
+	t.Helper()
+	// Destructive slot fixtures must never use macOS's real canonical pool.
+	original := relaySlotTempDirectory
+	relaySlotTempDirectory = os.TempDir
+	t.Cleanup(func() { relaySlotTempDirectory = original })
 }
 
 func testConfigEnv(root string) []string {
@@ -25,6 +34,10 @@ func testConfigEnv(root string) []string {
 	for _, name := range []string{"HOME", "XDG_CONFIG_HOME", "AppData", "APPDATA", "USERPROFILE", "GH_CONFIG_DIR", "ZDOTDIR", "XDG_DATA_HOME", "XDG_CACHE_HOME", "LOCALAPPDATA"} {
 		// Windows environment keys are case insensitive; both spellings must agree.
 		env = append(env, name+"="+filepath.Join(root, strings.ToLower(name)))
+	}
+	// Isolate temp paths; in-process tests also replace the canonical slot resolver.
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		env = append(env, name+"="+root)
 	}
 	return env
 }

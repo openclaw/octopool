@@ -269,8 +269,9 @@ then inserts its login into `data` in document key order, preserving error array
 leaving `data: null` unchanged. The login never enters the shared cache. Other viewer
 fields or nested viewer uses stay native.
 
-Repository queries default to `Cache-Control: max-age=20`, including explicit
-`--hostname github.com` calls. Explicit Cache-Control headers retain their requested bound;
+Repository queries default to `Cache-Control: max-age=60`, including explicit
+`--hostname github.com` calls, matching the Worker's `graphql_read` TTL.
+Explicit Cache-Control headers retain their requested bound;
 `-H 'Cache-Control: max-age=0'` and `OCTOPOOL_FRESH=1` force live reads (the environment
 override takes precedence). Cached responses have a 60-second server ceiling and no outage
 stale fallback. Full queries and variables partition PR and cursor pages. HTTP-200 GraphQL
@@ -916,26 +917,37 @@ and PR-check watches never hand off a client timeout after printing progress. Th
 apply per relay read, not to the entire command, policy checks, or native `gh` execution.
 
 To keep scripts spawning many `gh` processes from flooding the relay, CLI processes for
-the same user share eight advisory lock slots in the OS cache directory's
-`octopool/relay-slots` folder (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or
-`~/.cache` on Linux, `%LOCALAPPDATA%` on Windows). One slot covers an attempt's policy
+the same user share eight advisory lock slots in a private directory under the OS temp
+directory (`octopool-relay-slots-<uid>` on Unix, with the user SID on Windows).
+Sandboxed and normal callers use this same primary pool so their combined budget matches
+the server's default per-client limit of eight. One slot covers an attempt's policy
 fetch, including its policy retries, and relay POST, avoiding a second queue wait between
 policy approval and dispatch. Standalone policy fetches use the same slots. A crashed
 process releases its lock automatically; slot files stay in place and must not be deleted
 while commands are running.
 
-Sandboxed callers that cannot create, open, or lock cache slots try a private directory
-under the OS temp directory instead (`octopool-relay-slots-<uid>` on Unix, with the user
-SID on Windows). Unix fallback directories must belong to the current user and have no
-group/other permissions; Windows requires a protected current-user-only ACL. Insecure
-pre-existing directories and symlinks are rejected, not repaired.
+On macOS, the pool uses the canonical per-user temp directory under
+`/var/folders/<x>/<y>/T/`, so callers overriding `TMPDIR` still share the same slots.
+When `TMPDIR` already has that form, no subprocess is needed. Otherwise the CLI resolves
+`/usr/bin/getconf DARWIN_USER_TEMP_DIR` once per process with a one-second timeout;
+if resolution fails, it uses `os.TempDir()`. Linux and Windows retain `os.TempDir()`;
+temp-directory overrides (`TMPDIR` on Linux, `TMP`/`TEMP` on Windows) can split their pools.
+
+Unix temp directories must belong to the current user and have no group/other permissions;
+Windows requires a protected current-user-only ACL. Insecure pre-existing directories
+and symlinks are rejected, not repaired. Callers that cannot create, open, or lock temp
+slots fall back to the OS cache directory's `octopool/relay-slots` folder
+(`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux, `%LOCALAPPDATA%`
+on Windows).
 
 Slot acquisition polls with short jittered backoff for at most 30 seconds, then proceeds
 without a slot. Filesystem or lock errors fail open only if both directories are unusable;
 ordinary contention never switches directories.
 This is a best-effort cap, shared across pools and servers, and all processes should use
-the same `OCTOPOOL_RELAY_CONCURRENCY` setting and directory. Cache and temp slots are
-separate pools; processes using different directories do not share a local cap.
+the same `OCTOPOOL_RELAY_CONCURRENCY` setting and resolved temp directory. Cache and temp slots
+remain separate pools when temp is unusable. During a mixed-version upgrade, v0.9.4
+normal callers still use cache slots and do not share the new temp cap; upgrade all CLI
+copies on the machine to share the primary pool.
 Initial waiting adds command latency before policy timeout/retry clocks and the relay read
 timeout start. Caller cancellation and earlier caller deadlines still apply. Relay retries
 acquire a new slot after backoff. Slots are released before relay retry
@@ -1608,7 +1620,7 @@ These are dev/CI escape hatches, not the everyday UX:
   across CLI processes for the same user on this machine (default `8`; `0` disables).
   Nonnegative integers are accepted; invalid or negative values use the default. Each
   acquisition waits up to 30 seconds before failing open without changing command errors.
-  Unusable cache slots try private per-user temp slots before failing open.
+  All callers prefer private per-user temp slots; unusable temp slots try cache slots before failing open.
 - `OCTOPOOL_RELAY_TIMEOUT_SECONDS` — per-attempt timeout for shim relay GET and validated GraphQL reads,
   including response-body reads. Default `20`; nonnegative integer values below `5`
   are clamped to `5` seconds. Invalid, negative, or unrepresentable durations use the

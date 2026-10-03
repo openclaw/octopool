@@ -13,7 +13,7 @@ import (
 )
 
 func fallbackRelaySlotDirectory() (string, error) {
-	directory := filepath.Join(os.TempDir(), "octopool-relay-slots-"+strconv.Itoa(os.Getuid()))
+	directory := filepath.Join(relaySlotTempDirectory(), "octopool-relay-slots-"+strconv.Itoa(os.Getuid()))
 	if err := os.Mkdir(directory, 0700); err != nil && !errors.Is(err, os.ErrExist) {
 		return "", err
 	}

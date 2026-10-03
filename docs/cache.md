@@ -43,9 +43,9 @@ Arbitrary [repository GraphQL reads](relay.md#repository-graphql-reads) reuse th
 publication/coalescing machinery, with a separate key containing the canonically printed
 document, recursively sorted variable objects (list order is preserved), operation name,
 repository, pool, and App identity. They have a 60-second TTL and no stale fallback;
-HTTP-200 GraphQL errors do not cache. The CLI sends `max-age=20` by default, including
-explicit `--hostname github.com` reads. Explicit Cache-Control headers set the caller's
-bound; `max-age=0` or `OCTOPOOL_FRESH=1` forces live reads. A positive requested age is
+HTTP-200 GraphQL errors do not cache. The CLI sends `max-age=60` by default to match this
+TTL, including explicit `--hostname github.com` reads. Explicit Cache-Control headers
+set the caller's bound; `max-age=0` or `OCTOPOOL_FRESH=1` forces live reads. A positive requested age is
 bounded by the 60-second server TTL. The full query and variables keep different PRs,
 batches, and cursor pages separate. Same-repository aliases share one verified public
 repository/App-token boundary; cross-repository batches are refused. The CLI can remove

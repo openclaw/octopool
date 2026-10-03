@@ -1087,6 +1087,7 @@ func TestStringRewriteIssueAttachmentStrictBlocks(t *testing.T) {
 						args = append(args, "--body-file", body)
 					}
 					t.Setenv("TMPDIR", staging)
+					t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 					if !slices.ContainsFunc(test.args, func(arg string) bool { return strings.HasPrefix(arg, "--attach") }) {
 						args = append(args, "--attach", image)
 					}

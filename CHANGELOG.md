@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Share private per-user temp relay slots between sandboxed and normal CLI callers to keep one concurrency budget, resolving macOS's canonical temp directory across `TMPDIR` overrides and falling back to cache slots only when temp is unusable.
+- Accept repository GraphQL cache entries up to 60 seconds old by default, matching the Worker's TTL while preserving explicit Cache-Control headers and `OCTOPOOL_FRESH` live reads.
 - Relay single-repository searches with common issue/PR filters, dates, quoted phrases, and non-scope negation while preserving public-repository and pooled-identity safeguards.
 - Relay live PR-view boolean `maintainerCanModify`, native `mergedBy` exports, and explicitly null `autoMergeRequest` from REST, retaining native fallback for incomplete or unsupported metadata.
 

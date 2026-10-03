@@ -32,7 +32,7 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 	} {
 		t.Run(query, func(t *testing.T) {
 			request, ok := parseRepositoryGraphQL(repositoryReadArgs(query)[1:])
-			if !ok || request.method != "POST" || request.path != "/graphql" || request.headers["cache-control"] != "max-age=20" || request.graphql.Query != query || request.graphql.Variables["pr"] != 42 {
+			if !ok || request.method != "POST" || request.path != "/graphql" || request.headers["cache-control"] != "max-age=60" || request.graphql.Query != query || request.graphql.Variables["pr"] != 42 {
 				t.Fatalf("query not relayed: %#v, %v", request, ok)
 			}
 		})
@@ -108,7 +108,7 @@ func TestRepositoryGraphQLRelayNativeFixture(t *testing.T) {
 				if request["method"] != "POST" || request["path"] != "/graphql" || graphql["query"] != repositoryReadQuery || !reflect.DeepEqual(graphql["variables"], map[string]any{"owner": "openclaw", "name": "octopool", "pr": float64(42)}) {
 					t.Errorf("request=%#v", request)
 				}
-				if request["headers"].(map[string]any)["cache-control"] != "max-age=20" {
+				if request["headers"].(map[string]any)["cache-control"] != "max-age=60" {
 					t.Error("read missing bounded reuse")
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"status": 200, "body": string(fixture), "body_encoding": "text", "relay": map[string]string{"route_kind": "graphql_read", "cache": "miss"}})

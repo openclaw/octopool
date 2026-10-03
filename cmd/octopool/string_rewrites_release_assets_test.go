@@ -206,6 +206,8 @@ func releaseAssetFile(t *testing.T, name string, data []byte) string {
 
 func releaseAssetTemp(t *testing.T) string {
 	t.Helper()
+	// Cleanup assertions inspect staging only, without persistent relay slots.
+	t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "0")
 	path := t.TempDir()
 	t.Setenv("TMPDIR", path)
 	t.Setenv("TMP", path)

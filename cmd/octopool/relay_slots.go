@@ -13,6 +13,7 @@ import (
 const relaySlotWait = 30 * time.Second
 
 var lockRelaySlot = tryLockRelaySlot
+var relaySlotTempDirectory = platformRelaySlotTempDirectory
 
 type relaySlotContextKey struct{}
 
@@ -45,6 +46,15 @@ func acquireRelaySlot(ctx context.Context, count int, wait time.Duration) *os.Fi
 		return nil
 	}
 	deadline := time.Now().Add(wait)
+	// Sandboxed and normal callers must share one budget matching the server's
+	// per-client limit, even when only normal callers can access the cache.
+	directory, err := fallbackRelaySlotDirectory()
+	if err == nil {
+		file, err := acquireRelaySlotInDirectory(ctx, count, deadline, directory)
+		if err == nil {
+			return file
+		}
+	}
 	cache, err := os.UserCacheDir()
 	if err == nil {
 		directory := filepath.Join(cache, "octopool", "relay-slots")
@@ -55,13 +65,7 @@ func acquireRelaySlot(ctx context.Context, count int, wait time.Duration) *os.Fi
 			}
 		}
 	}
-	// Sandboxed callers may be allowed to lock files in temp but not the cache.
-	directory, err := fallbackRelaySlotDirectory()
-	if err != nil {
-		return nil
-	}
-	file, _ := acquireRelaySlotInDirectory(ctx, count, deadline, directory)
-	return file
+	return nil
 }
 
 func acquireRelaySlotInDirectory(ctx context.Context, count int, deadline time.Time, directory string) (*os.File, error) {

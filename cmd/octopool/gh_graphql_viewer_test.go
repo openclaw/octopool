@@ -65,7 +65,7 @@ func TestGraphQLViewerCodexBatch(t *testing.T) {
 				if strings.Contains(query, "viewer") || !strings.Contains(query, "p1 : repository") || !strings.Contains(query, "p2 : repository") || strings.Contains(query, "alice") || len(graphql) != 2 {
 					t.Errorf("viewer not kept local: %#v", graphql)
 				}
-				if request["headers"].(map[string]any)["cache-control"] != "max-age=20" {
+				if request["headers"].(map[string]any)["cache-control"] != "max-age=60" {
 					t.Error("missing default cache bound")
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"status": 200, "body": `{"data":{"p1":{"pullRequest":{"number":157854}},"p2":{"pullRequest":{"number":146339}}}}`, "body_encoding": "text", "relay": map[string]string{"route_kind": "graphql_read"}})
@@ -284,7 +284,7 @@ func TestRepositoryGraphQLFreshness(t *testing.T) {
 	t.Setenv("GH_HOST", "github.com")
 	t.Setenv("OCTOPOOL_GRAPHQL_RELAY", "")
 	for _, hostname := range [][]string{nil, {"--hostname", "github.com"}, {"--hostname=github.com"}} {
-		for _, test := range []struct{ fresh, header, want string }{{"", "", "max-age=20"}, {"", "max-age=0", "max-age=0"}, {"", "max-age=30", "max-age=30"}, {"1", "", "max-age=0"}, {"1", "max-age=30", "max-age=0"}} {
+		for _, test := range []struct{ fresh, header, want string }{{"", "", "max-age=60"}, {"", "max-age=0", "max-age=0"}, {"", "max-age=30", "max-age=30"}, {"1", "", "max-age=0"}, {"1", "max-age=30", "max-age=0"}} {
 			t.Setenv("OCTOPOOL_FRESH", test.fresh)
 			args := append(repositoryReadArgs(repositoryReadQuery)[1:], hostname...)
 			if test.header != "" {

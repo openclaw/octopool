@@ -40,6 +40,7 @@ func TestRelaySlotProcess(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	isolateRelaySlotResolver(t)
 	if mode == "hold" {
 		file := acquireRelaySlot(t.Context(), 1, time.Second)
 		if file == nil {
@@ -70,7 +71,7 @@ type relaySlotProcess struct {
 	stderr bytes.Buffer
 }
 
-func startRelaySlotProcess(t *testing.T, mode string) *relaySlotProcess {
+func startRelaySlotProcess(t *testing.T, mode string, env ...string) *relaySlotProcess {
 	t.Helper()
 	executable, err := os.Executable()
 	if err != nil {
@@ -78,6 +79,7 @@ func startRelaySlotProcess(t *testing.T, mode string) *relaySlotProcess {
 	}
 	child := &relaySlotProcess{cmd: exec.CommandContext(t.Context(), executable, "-test.run=^TestRelaySlotProcess$", "-test.timeout=45s")}
 	child.cmd.Env = append(os.Environ(), "OCTOPOOL_TEST_SLOT_PROCESS="+mode)
+	child.cmd.Env = append(child.cmd.Env, env...)
 	child.cmd.Stderr = &child.stderr
 	child.stdin, err = child.cmd.StdinPipe()
 	if err != nil {
@@ -110,22 +112,38 @@ func (child *relaySlotProcess) ready(t *testing.T) {
 }
 
 func TestRelaySlotCrossProcessConcurrency(t *testing.T) {
-	for _, mode := range []string{"4", "0", "fallback"} {
+	for _, mode := range []string{"4", "0", "cache fallback", "mixed cache access"} {
 		t.Run(mode, func(t *testing.T) {
 			isolateTestConfig(t)
 			concurrency := mode
-			if mode == "fallback" {
+			if mode == "cache fallback" || mode == "mixed cache access" {
 				concurrency = "4"
-				isolateRelaySlotTemp(t)
-				cache, err := os.UserCacheDir()
+			}
+			if mode == "cache fallback" {
+				directory, err := fallbackRelaySlotDirectory()
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := os.MkdirAll(cache, 0700); err != nil {
+				if err := os.Remove(directory); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(cache, "octopool"), nil, 0600); err != nil {
+				if err := os.WriteFile(directory, nil, 0600); err != nil {
 					t.Fatal(err)
+				}
+			}
+			var blockedCacheEnv []string
+			if mode == "mixed cache access" {
+				blockedHome := t.TempDir()
+				blocked := filepath.Join(blockedHome, "Library", "Caches")
+				if err := os.MkdirAll(filepath.Dir(blocked), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(blocked, nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+				blockedCacheEnv = append(blockedCacheEnv, "HOME="+blockedHome)
+				for _, name := range []string{"XDG_CACHE_HOME", "LOCALAPPDATA"} {
+					blockedCacheEnv = append(blockedCacheEnv, name+"="+blocked)
 				}
 			}
 			t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", concurrency)
@@ -160,7 +178,11 @@ func TestRelaySlotCrossProcessConcurrency(t *testing.T) {
 			t.Setenv("OCTOPOOL_POOL", "maintainers")
 			children := make([]*relaySlotProcess, 20)
 			for i := range children {
-				children[i] = startRelaySlotProcess(t, "read")
+				if i%2 == 0 {
+					children[i] = startRelaySlotProcess(t, "read", blockedCacheEnv...)
+				} else {
+					children[i] = startRelaySlotProcess(t, "read")
+				}
 			}
 			for _, child := range children {
 				child.ready(t)
@@ -226,6 +248,16 @@ func TestRelaySlotFailOpen(t *testing.T) {
 			t.Setenv("OCTOPOOL_RELAY_CONCURRENCY", "1")
 			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 			isolateRelaySlotTemp(t)
+			primary, err := fallbackRelaySlotDirectory()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(primary); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(primary, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
 			cache, err := os.UserCacheDir()
 			if err != nil {
 				t.Fatal(err)
@@ -281,16 +313,17 @@ func isolateRelaySlotTemp(t *testing.T) string {
 }
 
 func TestRelaySlotDirectoryFallback(t *testing.T) {
-	for _, failure := range []string{"mkdir", "open", "lock", "both unavailable", "both lock errors"} {
+	for _, failure := range []string{"none", "mkdir", "open", "lock", "both unavailable", "both lock errors"} {
 		t.Run(failure, func(t *testing.T) {
 			isolateTestConfig(t)
-			temp := isolateRelaySlotTemp(t)
+			isolateRelaySlotTemp(t)
 			cache, err := os.UserCacheDir()
 			if err != nil {
 				t.Fatal(err)
 			}
-			primary := filepath.Join(cache, "octopool", "relay-slots")
-			if err := os.MkdirAll(primary, 0700); err != nil {
+			fallback := filepath.Join(cache, "octopool", "relay-slots")
+			primary, err := fallbackRelaySlotDirectory()
+			if err != nil {
 				t.Fatal(err)
 			}
 			switch failure {
@@ -316,12 +349,11 @@ func TestRelaySlotDirectoryFallback(t *testing.T) {
 				t.Cleanup(func() { lockRelaySlot = original })
 			}
 			if failure == "both unavailable" {
-				blocked := filepath.Join(temp, "blocked")
-				if err := os.WriteFile(blocked, nil, 0600); err != nil {
+				if err := os.MkdirAll(filepath.Dir(fallback), 0700); err != nil {
 					t.Fatal(err)
 				}
-				for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
-					t.Setenv(name, blocked)
+				if err := os.WriteFile(fallback, nil, 0600); err != nil {
+					t.Fatal(err)
 				}
 			}
 			file := acquireRelaySlot(t.Context(), 1, time.Second)
@@ -333,12 +365,16 @@ func TestRelaySlotDirectoryFallback(t *testing.T) {
 				return
 			}
 			if file == nil {
-				t.Fatal("did not acquire fallback slot")
+				t.Fatal("did not acquire slot")
 			}
 			name := file.Name()
 			file.Close()
-			if filepath.Dir(filepath.Dir(name)) != temp {
-				t.Fatalf("slot %q is not under temp %q", name, temp)
+			want := fallback
+			if failure == "none" {
+				want = primary
+			}
+			if filepath.Dir(name) != want {
+				t.Fatalf("slot %q is not under %q", name, want)
 			}
 			if _, err := os.Stat(name); err != nil {
 				t.Fatalf("slot file removed: %v", err)
@@ -350,7 +386,11 @@ func TestRelaySlotDirectoryFallback(t *testing.T) {
 func TestRelaySlotContentionDoesNotFallBack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		isolateTestConfig(t)
-		temp := isolateRelaySlotTemp(t)
+		isolateRelaySlotTemp(t)
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			t.Fatal(err)
+		}
 		held := acquireRelaySlot(t.Context(), 1, time.Second)
 		if held == nil {
 			t.Fatal("could not hold primary slot")
@@ -360,9 +400,8 @@ func TestRelaySlotContentionDoesNotFallBack(t *testing.T) {
 			file.Close()
 			t.Fatal("contention bypassed primary slots")
 		}
-		entries, err := os.ReadDir(temp)
-		if err != nil || len(entries) != 0 {
-			t.Fatalf("contention created fallback: entries=%v err=%v", entries, err)
+		if _, err := os.Stat(filepath.Join(cache, "octopool", "relay-slots")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("contention created fallback: %v", err)
 		}
 	})
 }
