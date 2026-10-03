@@ -1,13 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.9.5 - 2026-10-03
+
+**Highlights:** Move more reads off the caller's personal GitHub budget: repo-scoped searches and `pr list --search` run through pooled REST search, every CLI caller on a machine shares one relay concurrency budget, repository GraphQL reads reuse the Worker's 60-second cache, and a local journal attributes the native `gh` delegations that remain.
+
+### Features
 
 - Journal native `gh` delegations locally with redacted command shapes, parent-process attribution, private sandbox fallback, and `octopool native-delegations` summaries; records are never uploaded and `OCTOPOOL_NATIVE_JOURNAL=0` opts out.
 - Relay JSON PR/issue lists with `--search` and richer top-level search qualifiers through cacheable REST search, preserving native exports and falling back for unsupported queries, fields, search denial, or rate limits; accept comma-separated `in:` fields.
-- Share private per-user temp relay slots between sandboxed and normal CLI callers to keep one concurrency budget, resolving macOS's canonical temp directory across `TMPDIR` overrides and falling back to cache slots only when temp is unusable.
-- Accept repository GraphQL cache entries up to 60 seconds old by default, matching the Worker's TTL while preserving explicit Cache-Control headers and `OCTOPOOL_FRESH` live reads.
 - Relay single-repository searches with common issue/PR filters, dates, quoted phrases, and non-scope negation while preserving public-repository and pooled-identity safeguards.
 - Relay live PR-view boolean `maintainerCanModify`, native `mergedBy` exports, and explicitly null `autoMergeRequest` from REST, retaining native fallback for incomplete or unsupported metadata.
+
+### Fixes
+
+- Share private per-user temp relay slots between sandboxed and normal CLI callers to keep one concurrency budget, resolving macOS's canonical temp directory across `TMPDIR` overrides and falling back to cache slots only when temp is unusable.
+- Accept repository GraphQL cache entries up to 60 seconds old by default, matching the Worker's TTL while preserving explicit Cache-Control headers and `OCTOPOOL_FRESH` live reads.
+
+### Upgrade notes
+
+- The Worker search changes are already deployed from main b6e5a35, and the `maintainers` pool now has `allow_search: true`; no D1 migrations. Run `brew upgrade octopool` for the CLI changes; no re-login or cache purge is required. Upgrade every CLI copy on a machine so sandboxed and normal callers share the new temp-directory slot pool.
 
 ## 0.9.4 - 2026-10-02
 
