@@ -289,9 +289,9 @@ direct-fetch bypass.
 
 ### Check suites
 
-| GET route | Audit route kind | Query parameters |
-| --- | --- | --- |
-| `/repos/{owner}/{repo}/check-suites/{id}` | `check_suite_view` | None |
+| GET route                                            | Audit route kind         | Query parameters                                     |
+| ---------------------------------------------------- | ------------------------ | ---------------------------------------------------- |
+| `/repos/{owner}/{repo}/check-suites/{id}`            | `check_suite_view`       | None                                                 |
 | `/repos/{owner}/{repo}/check-suites/{id}/check-runs` | `check_suite_check_runs` | `check_name`, `status`, `filter`, `per_page`, `page` |
 
 Both routes use the normal owner policy, public-repository proof and pooled identity
