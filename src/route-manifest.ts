@@ -1,6 +1,7 @@
 type RouteResource = "core" | "search";
 
 type RouteOptions = {
+  queryKeys?: readonly string[];
   cacheable?: boolean;
   largePayload?: boolean;
   search?: boolean;
@@ -18,6 +19,7 @@ export type RouteCapabilities = {
 };
 
 type RouteRule<Kind extends string> = {
+  queryKeys?: readonly string[];
   id: string;
   template: string;
   routeKeyTemplate: string;
@@ -90,6 +92,7 @@ function route<const Kind extends string>(
   options: RouteOptions = {},
 ): RouteRule<Kind> {
   return {
+    ...(options.queryKeys === undefined ? {} : { queryKeys: options.queryKeys }),
     id: `${kind}:${template}`,
     template,
     routeKeyTemplate: normalizeRouteKeyTemplate(template),
@@ -152,6 +155,7 @@ function normalizeRouteKeyTemplate(template: string): string {
     .replace(/\/attempts\/\{attempt\}/g, "/attempts/:attempt")
     .replace(/\/actions\/jobs\/\{id\}/g, "/actions/jobs/:id")
     .replace(/\/check-runs\/\{id\}/g, "/check-runs/:id")
+    .replace(/\/check-suites\/\{id\}/g, "/check-suites/:id")
     .replace(/\/milestones\/\{id\}/g, "/milestones/:id")
     .replace(/\/git\/(blobs|commits|tags|trees)\/\{sha\}/g, "/git/$1/:sha")
     .replace(/\/git\/ref\/\{gitRef\}/g, "/git/ref/:ref")
@@ -263,6 +267,12 @@ export const ROUTES = [
   route("/repos/{owner}/{repo}/commits/{commitRef}/check-runs", "commit_check_runs_ref"),
   route("/repos/{owner}/{repo}/commits/{sha}/check-suites", "commit_check_suites"),
   route("/repos/{owner}/{repo}/commits/{commitRef}/check-suites", "commit_check_suites_ref"),
+  route("/repos/{owner}/{repo}/check-suites/{id}", "check_suite_view", "core", {
+    queryKeys: [],
+  }),
+  route("/repos/{owner}/{repo}/check-suites/{id}/check-runs", "check_suite_check_runs", "core", {
+    queryKeys: ["check_name", "status", "filter", "per_page", "page"],
+  }),
   route("/repos/{owner}/{repo}/commits/{sha}/status", "commit_status"),
   route("/repos/{owner}/{repo}/commits/{commitRef}/status", "commit_status_ref"),
   route("/repos/{owner}/{repo}/statuses/{sha}", "ref_statuses"),

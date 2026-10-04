@@ -9,6 +9,7 @@ const collections = [
   ["commits/main/check-runs", "check_runs", 120],
   ["commits/abc1234/check-suites", "check_suites", 300],
   ["commits/main/check-suites", "check_suites", 120],
+  ["check-suites/42/check-runs", "check_runs", 300],
   ["commits/abc1234/status", "statuses", 300],
   ["commits/main/status", "statuses", 120],
   ["commits/abc1234/statuses", "array", 300],

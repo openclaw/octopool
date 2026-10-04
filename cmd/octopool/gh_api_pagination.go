@@ -15,6 +15,7 @@ import (
 type ghAPIPaginationState struct {
 	objectArrayKey string
 	objectItems    int
+	objectTotal    *int
 }
 
 func prepareGHAPIPagination(request ghAPIRequest) ghAPIRequest {
@@ -40,6 +41,10 @@ func relayPaginatedGHAPI(
 	perPage, validPerPage := positiveQueryInt(request.query["per_page"])
 	page, validPage := positiveQueryInt(request.query["page"])
 	state := ghAPIPaginationState{}
+	suiteChecks := isCheckSuiteAPIPath(request.path) && strings.HasSuffix(request.path, "/check-runs")
+	if suiteChecks {
+		state.objectArrayKey = "check_runs"
+	}
 	if validPerPage && validPage {
 		// total_count covers the whole collection; count the pages a
 		// caller-supplied start page skipped so has-next stays accurate.
@@ -55,15 +60,36 @@ func relayPaginatedGHAPI(
 		if envelope.Status >= 400 {
 			return writeGHBody(ctx, stdout, envelope, request.jq)
 		}
+		var hasNext, empty, inferable bool
+		if suiteChecks {
+			perPage, validPerPage = positiveQueryInt(request.query["per_page"])
+			page, validPage = positiveQueryInt(request.query["page"])
+			body, err := decodeRelayBody(envelope)
+			if err != nil {
+				return err
+			}
+			if !validPerPage || !validPage {
+				return localFallbackError{Reason: "pagination_shape_unsupported"}
+			}
+			// Check suites can rerun while pages are being fetched. Even Link-backed
+			// pages must agree on total_count before any bytes reach stdout.
+			hasNext, empty, inferable = relayPageHasNext(body, perPage, &state)
+			if !inferable {
+				return localFallbackError{Reason: "pagination_shape_unsupported"}
+			}
+		}
 
 		if link, ok := relayResponseHeader(envelope.Headers, "link"); ok {
-			nextTarget, hasNext := relayNextLink(link)
+			nextTarget, linkHasNext := relayNextLink(link)
+			if suiteChecks && hasNext != linkHasNext {
+				return localFallbackError{Reason: "pagination_incomplete"}
+			}
 			// Every Link-followed page is one real gh would fetch and emit —
 			// even an empty terminal page. Probe suppression is only for the
 			// header-less heuristic, whose extra fetch real gh never makes.
 			pages = append(pages, envelope)
-			if !hasNext {
-				return writeGHAPIPages(ctx, stdout, pages, request.jq, request.slurp)
+			if !linkHasNext {
+				return writeGHAPIPages(ctx, stdout, pages, request)
 			}
 			if pageIndex == maxRelayPages-1 {
 				return localFallbackError{Reason: "pagination_exhausted"}
@@ -93,7 +119,9 @@ func relayPaginatedGHAPI(
 		if decodeErr != nil {
 			return decodeErr
 		}
-		hasNext, empty, inferable := relayPageHasNext(body, perPage, &state)
+		if !suiteChecks {
+			hasNext, empty, inferable = relayPageHasNext(body, perPage, &state)
+		}
 		if !inferable {
 			// Without Link headers the relay can only prove completion for
 			// plain arrays and total_count object lists; anything else (e.g.
@@ -106,7 +134,7 @@ func relayPaginatedGHAPI(
 			pages = append(pages, envelope)
 		}
 		if !hasNext {
-			return writeGHAPIPages(ctx, stdout, pages, request.jq, request.slurp)
+			return writeGHAPIPages(ctx, stdout, pages, request)
 		}
 		if pageIndex == maxRelayPages-1 {
 			return localFallbackError{Reason: "pagination_exhausted"}
@@ -254,6 +282,9 @@ func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (ha
 	}
 	switch typed := value.(type) {
 	case []any:
+		if state.objectArrayKey != "" {
+			return false, false, false
+		}
 		return len(typed) == perPage, len(typed) == 0, true
 	case map[string]any:
 		totalCount, ok := jsonNumericInt(typed["total_count"])
@@ -279,12 +310,20 @@ func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (ha
 		if arrayKey == "" {
 			return false, false, false
 		}
+		if state.objectTotal == nil {
+			state.objectTotal = &totalCount
+		} else if *state.objectTotal != totalCount {
+			return false, false, false
+		}
 		if state.objectArrayKey == "" {
 			state.objectArrayKey = arrayKey
 		} else if state.objectArrayKey != arrayKey {
 			return false, false, false
 		}
 		state.objectItems += pageItems
+		if (pageItems > 0 && state.objectItems > totalCount) || (pageItems == 0 && state.objectItems < totalCount) {
+			return false, false, false
+		}
 		return state.objectItems < totalCount && pageItems > 0, pageItems == 0, true
 	default:
 		return false, false, false
@@ -307,9 +346,9 @@ func writeGHAPIPages(
 	ctx context.Context,
 	stdout io.Writer,
 	pages []relayEnvelope,
-	jq string,
-	slurp bool,
+	request ghAPIRequest,
 ) error {
+	jq, slurp := request.jq, request.slurp
 	bodies := make([][]byte, 0, len(pages))
 	hasOpaqueBody := false
 	for _, envelope := range pages {
@@ -365,6 +404,10 @@ func writeGHAPIPages(
 		for _, body := range bodies {
 			output.Write(body)
 		}
+	}
+	if isCheckSuiteAPIPath(request.path) && jq == "" {
+		_, err := io.Copy(stdout, &output)
+		return err
 	}
 	return writeBytes(ctx, stdout, output.Bytes(), jq)
 }

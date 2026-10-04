@@ -38,6 +38,19 @@ const lines = [
   ...patterns.map((pattern) => `\tregexp.MustCompile(\`${pattern}\`),`),
   "}",
   "",
+  "var relayQueryRules = []struct {",
+  "\tpath *regexp.Regexp",
+  "\tkeys map[string]bool",
+  "}{",
+  ...ROUTES.flatMap((route, index) =>
+    route.queryKeys === undefined
+      ? []
+      : [
+          `\t{regexp.MustCompile(\`${patterns[index]}\`), map[string]bool{${route.queryKeys.map((key) => `${JSON.stringify(key)}: true`).join(", ")}}},`,
+        ],
+  ),
+  "}",
+  "",
   "var nativeReadPathPatterns = []*regexp.Regexp{",
   ...patterns
     .filter((_pattern, index) => isNativeReadRoute(ROUTES[index]))

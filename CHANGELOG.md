@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Relay public check-suite detail and check-run lists through the shared cache and pooled identities, including paginated and slurped `gh api` reads with native output and bounded, age-scaled freshness.
+
 ## 0.9.5 - 2026-10-03
 
 **Highlights:** Move more reads off the caller's personal GitHub budget: repo-scoped searches and `pr list --search` run through pooled REST search, every CLI caller on a machine shares one relay concurrency budget, repository GraphQL reads reuse the Worker's 60-second cache, and a local journal attributes the native `gh` delegations that remain.

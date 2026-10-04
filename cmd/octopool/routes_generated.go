@@ -83,6 +83,8 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/commits/(?:(?:[0-9A-Fa-f]{1,6}|[0-9A-Fa-f]{65,}|[^/?#]*[^/?#0-9A-Fa-f][^/?#]*))/check-runs$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/commits/(?:[0-9A-Fa-f]{7,64})/check-suites$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/commits/(?:(?:[0-9A-Fa-f]{1,6}|[0-9A-Fa-f]{65,}|[^/?#]*[^/?#0-9A-Fa-f][^/?#]*))/check-suites$`),
+	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/check-suites/(?:[0-9]+)$`),
+	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/check-suites/(?:[0-9]+)/check-runs$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/commits/(?:[0-9A-Fa-f]{7,64})/status$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/commits/(?:(?:[0-9A-Fa-f]{1,6}|[0-9A-Fa-f]{65,}|[^/?#]*[^/?#0-9A-Fa-f][^/?#]*))/status$`),
 	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/statuses/(?:[0-9A-Fa-f]{7,64})$`),
@@ -165,6 +167,14 @@ var relayQueryPathPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^/search/commits$`),
 	regexp.MustCompile(`^/search/repositories$`),
 	regexp.MustCompile(`^/rate_limit$`),
+}
+
+var relayQueryRules = []struct {
+	path *regexp.Regexp
+	keys map[string]bool
+}{
+	{regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/check-suites/(?:[0-9]+)$`), map[string]bool{}},
+	{regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/check-suites/(?:[0-9]+)/check-runs$`), map[string]bool{"check_name": true, "status": true, "filter": true, "per_page": true, "page": true}},
 }
 
 var nativeReadPathPatterns = []*regexp.Regexp{

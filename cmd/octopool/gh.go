@@ -182,7 +182,7 @@ func runGH(ctx context.Context, args []string, stdout io.Writer, stderr io.Write
 		}
 		return err
 	}
-	if err := writeGHBody(ctx, stdout, envelope, request.jq); err != nil {
+	if err := writeGHAPIBody(ctx, stdout, envelope, request); err != nil {
 		return err
 	}
 	if request.path == "/rate_limit" {

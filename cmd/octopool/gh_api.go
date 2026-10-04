@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
@@ -17,6 +20,26 @@ type ghAPIRequest struct {
 	jq        string
 	paginate  bool
 	slurp     bool
+}
+
+// The route allowlist validates the owner/repo and numeric ID before dispatch.
+func isCheckSuiteAPIPath(path string) bool {
+	parts := strings.Split(path, "/")
+	return (len(parts) == 6 || len(parts) == 7 && parts[6] == "check-runs") &&
+		parts[1] == "repos" && parts[4] == "check-suites"
+}
+
+func writeGHAPIBody(ctx context.Context, stdout io.Writer, envelope relayEnvelope, request ghAPIRequest) error {
+	if !isCheckSuiteAPIPath(request.path) || request.jq != "" || envelope.Status >= 400 {
+		return writeGHBody(ctx, stdout, envelope, request.jq)
+	}
+	body, err := decodeRelayBody(envelope)
+	if err != nil {
+		return err
+	}
+	// Native gh streams raw API JSON without adding a formatting newline.
+	_, err = io.Copy(stdout, bytes.NewReader(body))
+	return err
 }
 
 func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
@@ -99,8 +122,11 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 				request.jq = strings.TrimPrefix(arg, "--jq=")
 				continue
 			}
-			if strings.HasPrefix(arg, "--header=") {
-				key, value, ok := strings.Cut(strings.TrimPrefix(arg, "--header="), ":")
+			if raw, long := strings.CutPrefix(arg, "--header="); long || strings.HasPrefix(arg, "-H") {
+				if !long {
+					raw = strings.TrimPrefix(strings.TrimPrefix(arg, "-H"), "=")
+				}
+				key, value, ok := strings.Cut(raw, ":")
 				if ok {
 					header := strings.ToLower(strings.TrimSpace(key))
 					if !safeRelayHeader(header) {
@@ -236,6 +262,15 @@ func safeRelayRequest(request ghAPIRequest) bool {
 	for key := range request.query {
 		if sensitiveQueryKey(key) {
 			return false
+		}
+	}
+	for _, rule := range relayQueryRules {
+		if rule.path.MatchString(request.path) {
+			for key, value := range request.query {
+				if _, scalar := value.(string); !rule.keys[key] || !scalar {
+					return false
+				}
+			}
 		}
 	}
 	return true

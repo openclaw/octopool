@@ -144,6 +144,15 @@ export function classifyRoute(request: RelayRequest, policy: PoolPolicy): RouteI
     if (match === null) {
       continue;
     }
+    const queryKeys = rule.queryKeys;
+    if (
+      queryKeys !== undefined &&
+      Object.entries(request.query ?? {}).some(
+        ([key, value]) => !queryKeys.includes(key) || typeof value !== "string",
+      )
+    ) {
+      throw new HttpError(403, "route_denied", "Query parameters are not enabled for this route");
+    }
     if (isNativeReadRoute(rule) && match.groups?.branch !== undefined) {
       validateNativeReadBranch(match.groups.branch);
     }

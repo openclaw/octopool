@@ -67,7 +67,7 @@ func TestWriteGHAPIPagesPreservesRawBodies(t *testing.T) {
 				})
 			}
 			var out bytes.Buffer
-			if err := writeGHAPIPages(t.Context(), &out, pages, "", false); err != nil {
+			if err := writeGHAPIPages(t.Context(), &out, pages, ghAPIRequest{}); err != nil {
 				t.Fatal(err)
 			}
 			if out.String() != test.want {

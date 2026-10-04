@@ -62,8 +62,15 @@ func TestRawRelayOutputWriteErrors(t *testing.T) {
 				if err := writeGHBody(t.Context(), test.out, envelope, ""); !errors.Is(err, test.want) {
 					t.Errorf("direct output error = %v, want %v", err, test.want)
 				}
-				if err := writeGHAPIPages(t.Context(), test.out, []relayEnvelope{envelope}, "", false); !errors.Is(err, test.want) {
+				if err := writeGHAPIPages(t.Context(), test.out, []relayEnvelope{envelope}, ghAPIRequest{}); !errors.Is(err, test.want) {
 					t.Errorf("paginated output error = %v, want %v", err, test.want)
+				}
+				request := ghAPIRequest{path: suiteAPIPath + "/check-runs"}
+				if err := writeGHAPIBody(t.Context(), test.out, envelope, request); !errors.Is(err, test.want) {
+					t.Errorf("check suite output error = %v, want %v", err, test.want)
+				}
+				if err := writeGHAPIPages(t.Context(), test.out, []relayEnvelope{envelope}, request); !errors.Is(err, test.want) {
+					t.Errorf("check suite pages output error = %v, want %v", err, test.want)
 				}
 			})
 		}

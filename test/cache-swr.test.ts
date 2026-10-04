@@ -25,6 +25,8 @@ it.each<RouteKind>([
   "commit_check_runs_ref",
   "commit_check_suites",
   "commit_check_suites_ref",
+  "check_suite_view",
+  "check_suite_check_runs",
   "commit_status",
   "commit_status_ref",
   "commit_statuses",

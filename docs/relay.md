@@ -205,6 +205,8 @@ following read-only shapes are enabled. A safe CLI-shaped request outside this s
 - `commit_check_runs_ref`
 - `commit_check_suites`
 - `commit_check_suites_ref`
+- `check_suite_view`
+- `check_suite_check_runs`
 - `commit_status`
 - `commit_status_ref`
 - `ref_statuses`
@@ -284,6 +286,36 @@ for seven days only after the owning run completes, and is gated by the pool's `
 policy. Cached logs get at most a one-hour zero-contact window before an authenticated
 existence probe honors upstream deletion; active-run and failed-preflight logs retain the
 direct-fetch bypass.
+
+### Check suites
+
+| GET route | Audit route kind | Query parameters |
+| --- | --- | --- |
+| `/repos/{owner}/{repo}/check-suites/{id}` | `check_suite_view` | None |
+| `/repos/{owner}/{repo}/check-suites/{id}/check-runs` | `check_suite_check_runs` | `check_name`, `status`, `filter`, `per_page`, `page` |
+
+Both routes use the normal owner policy, public-repository proof and pooled identity
+gates. Other methods, unknown query keys (including `app_id`) and repeated query
+values are refused. Suite IDs are numeric; rerun and other write endpoints stay native.
+The CLI accepts the same safe headers as other REST reads: `Accept`,
+`X-GitHub-Api-Version`, `If-None-Match`, `If-Modified-Since`, and `Cache-Control`,
+with case-insensitive names and `-H` (separate or attached), `--header`, or `--header=` syntax.
+
+Suite detail and suite check-run lists stay fresh for 60 seconds while active or
+missing trustworthy timestamps. Completed suites and nonempty, fully completed
+lists scale freshness to 10% of the newest completion/update age, bounded to 60–300
+seconds. Reruns can change both routes, so they never receive the six-hour terminal
+job/attempt TTL or day-long terminal retention. They retain the ordinary five-minute
+outage stale window and 60-second stale-while-revalidate window; explicit caller age
+bounds still apply and disable SWR. Omitted `filter` and `filter=latest` share list cache
+entries, while `filter=all` stays separate.
+
+`gh api` check-run lists support `--paginate` and `--paginate --slurp` through the
+existing ten-page relay limit, preserving native object pages and the slurped
+array-of-pages shape. Totals must remain consistent across pages, including pages
+followed through GitHub Link headers; incomplete or changing responses fall back
+before printing partial output. Explicit `--hostname github.com` retains the existing
+live-read default unless `Cache-Control` specifies an age bound.
 
 ### Fixed public GraphQL landing reads
 

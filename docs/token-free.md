@@ -331,6 +331,8 @@ GET /repos/{owner}/{repo}/commits/{sha}/check-runs
 GET /repos/{owner}/{repo}/commits/{ref}/check-runs
 GET /repos/{owner}/{repo}/commits/{sha}/check-suites
 GET /repos/{owner}/{repo}/commits/{ref}/check-suites
+GET /repos/{owner}/{repo}/check-suites/{id}
+GET /repos/{owner}/{repo}/check-suites/{id}/check-runs
 GET /repos/{owner}/{repo}/commits/{sha}/status
 GET /repos/{owner}/{repo}/commits/{ref}/status
 GET /repos/{owner}/{repo}/statuses/{sha}

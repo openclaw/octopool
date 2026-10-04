@@ -166,6 +166,8 @@ function freshCacheStrategy(kind: RouteKind): CacheFreshStrategy {
     case "commit_check_runs_ref":
     case "commit_check_suites":
     case "commit_check_suites_ref":
+    case "check_suite_view":
+    case "check_suite_check_runs":
     case "commit_status":
     case "commit_status_ref":
     case "commit_statuses":
@@ -207,6 +209,8 @@ function staleCacheSeconds(kind: RouteKind): number {
     case "commit_check_runs_ref":
     case "commit_check_suites":
     case "commit_check_suites_ref":
+    case "check_suite_view":
+    case "check_suite_check_runs":
     case "commit_status":
     case "commit_status_ref":
     case "commit_statuses":

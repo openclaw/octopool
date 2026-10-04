@@ -136,7 +136,7 @@ media types, non-default API versions and non-default query values still produce
 pool-scoped, so pools never share cache entries.
 
 For raw REST reads, omitted `filter` and explicit `filter=latest` also share an entry
-for commit check-run lists and the base workflow-run jobs endpoint. GitHub defines `latest` as the default
+for commit and suite check-run lists and the base workflow-run jobs endpoint. GitHub defines `latest` as the default
 on these routes. `filter=all`, repeated filter parameters, attempt-qualified jobs,
 and filters on unrelated routes retain separate keys. This normalization changes no
 upstream query, freshness bound, or cache lifetime.

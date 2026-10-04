@@ -620,6 +620,7 @@ function normalizedCacheQuery(
         value === "latest" &&
         (route.kind === "commit_check_runs" ||
           route.kind === "commit_check_runs_ref" ||
+          route.kind === "check_suite_check_runs" ||
           (route.kind === "run_jobs" && route.run_attempt === undefined)))
     ) {
       continue;
@@ -677,12 +678,17 @@ function settledCITTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): 
   switch (route.kind) {
     case "commit_check_runs":
     case "commit_check_runs_ref":
+    case "check_suite_check_runs":
       items = isRecord(body) ? body.check_runs : undefined;
       checks = true;
       break;
     case "commit_check_suites":
     case "commit_check_suites_ref":
       items = isRecord(body) ? body.check_suites : undefined;
+      checks = true;
+      break;
+    case "check_suite_view":
+      items = [body];
       checks = true;
       break;
     case "commit_status":
@@ -708,7 +714,7 @@ function settledCITTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): 
       newest = Math.max(newest, parsed);
     }
   }
-  // New checks and reruns remain possible for the same SHA, even after completion.
+  // New checks and reruns remain possible for the same SHA or suite after completion.
   return ageScaledTimestampTTLSeconds(new Date(newest).toISOString(), 60, 300);
 }
 

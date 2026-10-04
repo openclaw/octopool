@@ -131,6 +131,8 @@ Use `--json` for scripts.
 
 Relays a read-only `gh api` call through Octopool's cache and pool. Prints the GitHub
 response body exactly like `gh api`, optionally piping it through `jq -r -- <expr>`.
+Check-suite detail and suite check-run lists preserve native raw JSON framing,
+including no added trailing newline; `--jq` retains its usual line-oriented output.
 Incomplete output, including a failed final newline write, returns an error without
 retrying the read or delegating to native `gh`.
 The expression is always a filter, never a jq command-line option.
