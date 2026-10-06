@@ -14,15 +14,15 @@ import (
 const asyncMergeTestPath = "repos/acme/repo/pulls/123/merge-async"
 const asyncMergeTestUUID = "12345678-abcd-4321-9876-123456789abc"
 
-func TestStringRewriteAPIMergeLocalFormatting(t *testing.T) {
+func TestStringRewriteAPILocalFormatting(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
-	for _, endpoint := range []string{"repos/acme/repo/pulls/123/merge", asyncMergeTestPath, asyncMergeTestPath + "/" + asyncMergeTestUUID} {
+	for _, endpoint := range []string{"repos/acme/repo/pulls/123/merge", asyncMergeTestPath, asyncMergeTestPath + "/" + asyncMergeTestUUID, "repos/acme/repo/rulesets"} {
 		for _, format := range [][]string{{"--template", "{{.status}} internal-model"}, {"--template={{.status}}"}, {"-t", "{{.status}}"}, {"-t{{.status}}"}, {"-t={{.status}}"}, {"-t="}} {
 			t.Run(endpoint+strings.Join(format, " "), func(t *testing.T) {
 				capture := captureRewriteGH(t)
 				args := []string{"api", endpoint}
-				poll := strings.HasSuffix(endpoint, asyncMergeTestUUID)
-				if !poll {
+				read := strings.HasSuffix(endpoint, asyncMergeTestUUID) || strings.HasSuffix(endpoint, "/rulesets")
+				if !read {
 					args = append(args, "--method=PUT", "--input=-")
 				}
 				args = append(args, format...)
@@ -34,7 +34,7 @@ func TestStringRewriteAPIMergeLocalFormatting(t *testing.T) {
 				if got.Stdin != "" || !slices.Equal(got.Args[len(got.Args)-len(format):], format) {
 					t.Fatalf("formatter spelling changed: %+v", got)
 				}
-				if poll && len(got.Files) != 0 || !poll && len(got.Files) != 1 {
+				if read && len(got.Files) != 0 || !read && len(got.Files) != 1 {
 					t.Fatalf("unexpected snapshots: %+v", got)
 				}
 				for _, content := range got.Files {

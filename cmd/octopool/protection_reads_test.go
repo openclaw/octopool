@@ -234,7 +234,6 @@ func TestProtectionReadsSafeUnsupportedBestEffort(t *testing.T) {
 	for _, flags := range [][]string{
 		{"--method=POST"}, {"--method=PATCH"}, {"--method=PUT"},
 		{"--input=-", "--method=GET"}, {"-f", "page=1", "--method=GET"}, {"-Fpage=1"},
-		{"--template=internal-model"},
 	} {
 		argsList = append(argsList, append([]string{"api", "repos/acme/demo/rulesets"}, flags...))
 	}
@@ -260,9 +259,6 @@ func TestProtectionReadsSafeUnsupportedBestEffort(t *testing.T) {
 			got := readRewriteCapture(t, capture)
 			if got.Args[1] != args[1] || !slices.Contains(got.Args, "--hostname=github.com") || got.Env["GH_HOST"] != "github.com" {
 				t.Fatalf("best-effort native shape lost: %v", got.Args)
-			}
-			if slices.Contains(args, "--template=internal-model") && !slices.Contains(got.Args, "--template=public") {
-				t.Fatal("unmodeled flag bypassed best-effort filtering")
 			}
 			if slices.Contains(args, "--input=-") && !rewriteCaptureHasContent(got, `{"note":"public"}`) {
 				t.Fatal("unmodeled input bypassed best-effort snapshot filtering")
