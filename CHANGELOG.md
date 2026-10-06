@@ -8,7 +8,7 @@
 
 ### Fixes
 
-- Protect asynchronous PR merges with immutable head, method, action, and bypass fields; rewrite only commit text, pin omitted heads, and poll status with the local writer. Reject unsupported merge syntax before native dispatch. Callers can require this guard with `gh api -H 'X-Octopool-Require: merge-async-v1'` as the first API option; older protected CLIs refuse it until upgraded.
+- Protect asynchronous PR merges with immutable head, method, action, and bypass fields; rewrite only commit text, pin omitted heads, and poll status with the local writer. Preserve local `--template`/`-t` formatting through modeled API snapshots alongside `--jq`; reject unsupported merge request syntax before native dispatch. Callers can require this guard with `gh api -H 'X-Octopool-Require: merge-async-v1'` as the first API option; older protected CLIs refuse it until upgraded.
 
 ## 0.9.5 - 2026-10-03
 

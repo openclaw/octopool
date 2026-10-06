@@ -14,6 +14,40 @@ import (
 const asyncMergeTestPath = "repos/acme/repo/pulls/123/merge-async"
 const asyncMergeTestUUID = "12345678-abcd-4321-9876-123456789abc"
 
+func TestStringRewriteAPIMergeLocalFormatting(t *testing.T) {
+	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
+	for _, endpoint := range []string{"repos/acme/repo/pulls/123/merge", asyncMergeTestPath, asyncMergeTestPath + "/" + asyncMergeTestUUID} {
+		for _, format := range [][]string{{"--template", "{{.status}} internal-model"}, {"--template={{.status}}"}, {"-t", "{{.status}}"}, {"-t{{.status}}"}, {"-t={{.status}}"}, {"-t="}} {
+			t.Run(endpoint+strings.Join(format, " "), func(t *testing.T) {
+				capture := captureRewriteGH(t)
+				args := []string{"api", endpoint}
+				poll := strings.HasSuffix(endpoint, asyncMergeTestUUID)
+				if !poll {
+					args = append(args, "--method=PUT", "--input=-")
+				}
+				args = append(args, format...)
+				input := `{"sha":"` + strings.Repeat("a", 40) + `","merge_method":"squash","commit_message":"internal-model body"}`
+				if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(input), io.Discard, io.Discard); err != nil {
+					t.Fatal(err)
+				}
+				got := readRewriteCapture(t, capture)
+				if got.Stdin != "" || !slices.Equal(got.Args[len(got.Args)-len(format):], format) {
+					t.Fatalf("formatter spelling changed: %+v", got)
+				}
+				if poll && len(got.Files) != 0 || !poll && len(got.Files) != 1 {
+					t.Fatalf("unexpected snapshots: %+v", got)
+				}
+				for _, content := range got.Files {
+					var payload map[string]string
+					if err := json.Unmarshal([]byte(content), &payload); err != nil || payload["merge_method"] != "squash" || payload["sha"] != strings.Repeat("a", 40) || payload["commit_message"] != "public body" {
+						t.Fatalf("formatter changed authority or snapshot: %q, %v", content, err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestStringRewriteAPIAsyncMergeSnapshot(t *testing.T) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	sha := strings.Repeat("a", 40)
@@ -101,7 +135,7 @@ func TestStringRewriteAPIAsyncMergeStructuralRules(t *testing.T) {
 
 func TestStringRewriteAPIMergeUnsupportedCannotRewrite(t *testing.T) {
 	for _, endpoint := range []string{asyncMergeTestPath, "repos/acme/repo/pulls/123/merge", "repos/acme/repo/pulls/123/merge%2Dasync", asyncMergeTestPath + "/" + asyncMergeTestUUID} {
-		for _, flags := range [][]string{{"-X", "POST"}, {"-X", "PUT", "--paginate"}, {"-X", "PUT", "-H", "Content-Type: application/json"}, {"-X", "PUT", "--cache=10s"}, {"-X", "PUT", "--template={{.status}}"}} {
+		for _, flags := range [][]string{{"-X", "POST"}, {"-X", "PUT", "--paginate"}, {"-X", "PUT", "-H", "Content-Type: application/json"}, {"-X", "PUT", "--cache=10s"}} {
 			t.Run(endpoint+strings.Join(flags, " "), func(t *testing.T) {
 				rewriteTestServer(t, prReadPolicy("^squash$"), nil)
 				capture := captureRewriteGH(t)

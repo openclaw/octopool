@@ -26,7 +26,7 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 	result := rewriteAPIOptions{headers: map[string]string{}}
 	seen := map[string]bool{}
 	jqCount := 0
-	values := rewriteFlagNames("--method,-X --input --field,-F --raw-field,-f --header,-H --jq,-q --hostname")
+	values := rewriteFlagNames("--method,-X --input --field,-F --raw-field,-f --header,-H --jq,-q --template,-t --hostname")
 	booleans := rewriteFlagNames("--include,-i --silent --paginate --slurp")
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -55,17 +55,21 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 			return result, errRewriteUnsupported
 		}
 		flag := parsed.ordered[0]
-		if flag.name == "--jq" {
-			jqCount++
-			specs := typedReadSpecs("api", "--jq,-q", "")
-			short := specs["-q"]
+		if flag.name == "--jq" || flag.name == "--template" {
+			alias := "-t"
+			if flag.name == "--jq" {
+				jqCount++
+				alias = "-q"
+			}
+			specs := typedReadSpecs("api", "--jq,-q --template,-t", "")
+			short := specs[alias]
 			short.attached = true
-			specs["-q"] = short
+			specs[alias] = short
 			owned, unsupported, err := parseReadOptions(args[i:i+count], specs)
 			if err != nil || unsupported {
 				return result, errRewriteUnsupported
 			}
-			flag.value = owned.values["--jq"].raw
+			flag.value = owned.values[flag.name].raw
 		}
 		i += count - 1
 		if flag.name != "--field" && flag.name != "--raw-field" && flag.name != "--header" {
@@ -115,7 +119,9 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 			result.headers[key] = value
 			result.output = append(result.output, "--header="+key+": "+value)
 		default:
-			if flag.name == "--jq" {
+			if flag.name == "--jq" || flag.name == "--template" {
+				// Native formatters run locally after the response; never rewrite
+				// their syntax or let them select generic payload preparation.
 				result.output = append(result.output, args[i-count+1:i+1]...)
 				continue
 			}

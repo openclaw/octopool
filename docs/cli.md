@@ -1337,7 +1337,10 @@ With active rules, the initial local publication vocabulary is deliberately cons
   only commit title/message text is rewritten. Omitted method/action/bypass fields retain
   GitHub's defaults. Status `GET .../merge-async/UUID` and `GET .../merge` use the local
   writer's credentials, with a pinned endpoint and empty stdin, without the read relay.
-  Unsupported merge syntax, payloads, query parameters, and pagination fail before dispatch.
+  Local `--jq`/`-q` and `--template`/`-t` output formatting stays supported without
+  rewriting formatter syntax. Unsupported request syntax, payloads, query parameters,
+  pagination, response caching (`--cache`), and raw-body headers (`Content-Type`) fail
+  before dispatch. Use the modeled JSON input directly instead of a raw-body header.
   Callers that require this contract across CLI upgrades should put
   `-H 'X-Octopool-Require: merge-async-v1'` immediately after `gh api`, before all other
   flags. Protected older CLIs reject this unknown header before rewriting or child I/O;
