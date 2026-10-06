@@ -237,6 +237,7 @@ func describeBestEffortInput(args []string) (bestEffortNativeInput, error) {
 		if endpoint == "" || strings.Contains(endpoint, "://") || rewriteEndpointPlaceholder.MatchString(endpoint) {
 			return out, errRewriteBlocked
 		}
+		out.subcommand = endpoint
 		kind, err := bestEffortContentType(headers)
 		if err != nil {
 			return out, err

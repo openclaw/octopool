@@ -1331,6 +1331,20 @@ With active rules, the initial local publication vocabulary is deliberately cons
   leaving the field omitted for GitHub's default, with optional rewritten `commit_message`
   and `commit_title` strings. A supplied `sha` must be a full 40-hex commit; when omitted,
   a guarded local GET resolves the current PR head and pins it into the immutable merge snapshot.
+  Async `PUT /repos/OWNER/REPO/pulls/NUMBER/merge-async` has the same snapshot and head
+  pinning, plus `merge_action` (`default`, `direct_merge`, or `merge_queue`) and Boolean
+  `bypass_rules`. These authority fields are preserved or rejected, never rewritten;
+  only commit title/message text is rewritten. Omitted method/action/bypass fields retain
+  GitHub's defaults. Status `GET .../merge-async/UUID` and `GET .../merge` use the local
+  writer's credentials, with a pinned endpoint and empty stdin, without the read relay.
+  Unsupported merge syntax, payloads, query parameters, and pagination fail before dispatch.
+  Callers that require this contract across CLI upgrades should put
+  `-H 'X-Octopool-Require: merge-async-v1'` immediately after `gh api`, before all other
+  flags. Protected older CLIs reject this unknown header before rewriting or child I/O;
+  this CLI consumes it locally for modeled merge requests. With no active rewrite rules,
+  native `gh` receives the header unchanged and performs no policy rewriting. Upgrade the
+  CLI if this marker is refused; do not remove it to work around protection. No Worker
+  deployment, login change, or policy change is required.
   Pull-request PATCHes accept a string `base` field with the same branch checks as the CLI;
   base-only updates do not republish an implicit title or body. Numeric branch names must be
   supplied as strings, such as `-f base=123` or JSON `{"base":"123"}`.

@@ -19,6 +19,9 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 	if err != nil {
 		return err
 	}
+	if rewriteMergeAPIRequiresSchema(declaration) {
+		return errRewriteBlocked
+	}
 	prepared.args, err = pinBestEffortRepositories(policy, args)
 	if err != nil {
 		return err
@@ -42,6 +45,9 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 	final, err := describeBestEffortInput(prepared.args)
 	if err != nil {
 		return err
+	}
+	if rewriteMergeAPIRequiresSchema(final) {
+		return errRewriteBlocked
 	}
 	prepared.args, err = pinBestEffortRepositories(policy, prepared.args)
 	if err != nil {
@@ -97,6 +103,31 @@ func prepareRewriteBestEffort(policy stringRewritePolicy, args []string, stdin i
 	}
 	prepared.stdin = strings.NewReader(string(rewritten))
 	return nil
+}
+
+// Unsupported merge syntax cannot enter generic text rewriting, which could
+// change the approved head, method, action, or polling target before dispatch.
+func rewriteMergeAPIRequiresSchema(declaration bestEffortNativeInput) bool {
+	if declaration.command != "api" {
+		return false
+	}
+	for _, token := range declaration.args {
+		key, _, _ := strings.Cut(token.value, ":")
+		if token.name == "--header" && strings.EqualFold(strings.TrimSpace(key), "x-octopool-require") {
+			return true
+		}
+	}
+	return rewriteMergeAPIFamily(declaration.subcommand)
+}
+
+func rewriteMergeAPIFamily(endpoint string) bool {
+	path, _, _ := strings.Cut(endpoint, "?")
+	path, err := url.PathUnescape(path)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	return len(parts) >= 6 && parts[0] == "repos" && parts[3] == "pulls" && (parts[5] == "merge" || parts[5] == "merge-async")
 }
 
 func rewriteBestEffortArguments(policy stringRewritePolicy, args []string, prepared *rewritePreparation) ([]string, error) {

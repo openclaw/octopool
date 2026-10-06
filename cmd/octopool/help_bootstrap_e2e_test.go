@@ -453,6 +453,42 @@ func testBootstrapOperational(t *testing.T, bin, native string, shim bool) {
 		t.Fatal(err)
 	}
 	base := []string{"pr", "merge", "123", "--repo", "acme/repo", "--squash", "--match-head-commit", sha}
+	for _, exit := range []int{0, 19} {
+		t.Run("async-merge/exit="+strconv.Itoa(exit), func(t *testing.T) {
+			input := `{"sha":"` + sha + `","merge_method":"squash","merge_action":"direct_merge","bypass_rules":false,"commit_title":"internal-model title","commit_message":"internal-model body"}`
+			source := filepath.Join(t.TempDir(), "merge.json")
+			if err := os.WriteFile(source, []byte(input), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"api", "-H", "X-Octopool-Require: merge-async-v1", asyncMergeTestPath, "-X", "PUT", "--input", source}
+			result, captures := fixture.run(t, args, bootstrapInputFile(t, "unused stdin"), true, exit)
+			if len(captures) != 1 || len(captures[0].Files) != 1 || captures[0].Stdin != "" {
+				t.Fatalf("async merge must dispatch one snapshot: %+v; %+v", result, captures)
+			}
+			for snapshot, content := range captures[0].Files {
+				assertBootstrapChild(t, result, captures, []string{"api", asyncMergeTestPath, "--method=PUT", "--hostname=github.com", "--input=" + snapshot}, exit)
+				var want map[string]any
+				if err := json.Unmarshal([]byte(strings.ReplaceAll(input, "internal-model", "public")), &want); err != nil {
+					t.Fatal(err)
+				}
+				encoded, _ := json.Marshal(want)
+				if content != string(encoded) {
+					t.Fatalf("async authority or content changed: %q", content)
+				}
+				assertBootstrapSnapshot(t, captures[0], snapshot)
+			}
+			if data, err := os.ReadFile(source); err != nil || string(data) != input {
+				t.Fatal("source was modified")
+			}
+			blocked := newBootstrapCLI(t, bin, native, "active", shim)
+			blocked.local = filepath.Join(blocked.dir, "policy.json")
+			if err := os.WriteFile(blocked.local, []byte(`{"schema_version":1,"rules":[{"pattern":"^squash$","replacement":"rebase"}]}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			result, captures = blocked.run(t, args, nil, true, 0)
+			assertBootstrapBlocked(t, result, captures)
+		})
+	}
 	for _, test := range []struct {
 		args []string
 		want string

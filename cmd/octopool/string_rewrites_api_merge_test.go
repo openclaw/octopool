@@ -57,6 +57,12 @@ func TestStringRewriteAPIMergeMethods(t *testing.T) {
 }
 
 func TestStringRewriteAPIMergeResolvesHead(t *testing.T) {
+	for _, endpoint := range []string{"repos/acme/repo/pulls/123/merge", asyncMergeTestPath} {
+		t.Run(endpoint, func(t *testing.T) { testStringRewriteAPIMergeResolvesHead(t, endpoint) })
+	}
+}
+
+func testStringRewriteAPIMergeResolvesHead(t *testing.T, endpoint string) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	sha := strings.Repeat("b", 40)
 	for _, input := range []string{`{}`, `{"merge_method":"merge","commit_title":"internal-model title","commit_message":"internal-model body"}`} {
@@ -74,7 +80,7 @@ func TestStringRewriteAPIMergeResolvesHead(t *testing.T) {
 			t.Setenv("OCTOPOOL_TEST_REWRITE_MUTATE_FILE", source)
 			t.Setenv("GH_HOST", "ghe.example")
 			t.Setenv("GH_REPO", "ghe.example/other/repo")
-			args := []string{"api", "repos/acme/repo/pulls/123/merge", "-X", "PUT", "--input", source}
+			args := []string{"api", endpoint, "-X", "PUT", "--input", source}
 			if err := execRealGH(t.Context(), args, io.Discard, io.Discard); err != nil {
 				t.Fatal(err)
 			}
@@ -109,6 +115,12 @@ func TestStringRewriteAPIMergeResolvesHead(t *testing.T) {
 }
 
 func TestStringRewriteAPIMergePreflightBlocks(t *testing.T) {
+	for _, endpoint := range []string{"repos/acme/repo/pulls/123/merge", asyncMergeTestPath} {
+		t.Run(endpoint, func(t *testing.T) { testStringRewriteAPIMergePreflightBlocks(t, endpoint) })
+	}
+}
+
+func testStringRewriteAPIMergePreflightBlocks(t *testing.T, endpoint string) {
 	rewriteTestServer(t, rewriteActiveTestPolicy, nil)
 	for _, test := range []struct{ name, response, exit string }{
 		{"failed GET", `{"head":{"sha":"` + strings.Repeat("a", 40) + `"}}`, "1"},
@@ -131,7 +143,7 @@ func TestStringRewriteAPIMergePreflightBlocks(t *testing.T) {
 			}
 			t.Setenv("OCTOPOOL_TEST_REWRITE_STDOUT_FILE", response)
 			t.Setenv("OCTOPOOL_TEST_REWRITE_EXIT", test.exit)
-			args := []string{"api", "repos/acme/repo/pulls/123/merge", "-X", "PUT"}
+			args := []string{"api", endpoint, "-X", "PUT"}
 			if err := execRealGH(t.Context(), args, io.Discard, io.Discard); !errors.Is(err, errRewriteBlocked) {
 				t.Fatalf("expected blocked preflight: %v", err)
 			}

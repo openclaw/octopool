@@ -11,14 +11,15 @@ import (
 )
 
 type rewriteAPIOptions struct {
-	endpoint string
-	hostname string
-	method   string
-	input    string
-	inputSet bool
-	fields   []rewriteFlag
-	output   []string
-	headers  map[string]string
+	endpoint   string
+	hostname   string
+	method     string
+	input      string
+	inputSet   bool
+	fields     []rewriteFlag
+	output     []string
+	headers    map[string]string
+	mergeGuard bool
 }
 
 func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
@@ -93,6 +94,13 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 			key, value, ok := strings.Cut(flag.value, ":")
 			key = strings.ToLower(strings.TrimSpace(key))
 			value = strings.TrimSpace(value)
+			if key == "x-octopool-require" {
+				if !ok || value != "merge-async-v1" || result.mergeGuard {
+					return result, errRewriteBlocked
+				}
+				result.mergeGuard = true
+				continue
+			}
 			// Content-Type declares native raw-body semantics; it is not a relay
 			// header capability. Final preparation validates every native header.
 			if ok && key == "content-type" {
@@ -156,6 +164,29 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 	}
 	if err := policy.checkStructural("github.com"); err != nil {
 		return err
+	}
+	if opts.mergeGuard {
+		if !rewriteMergeAPIFamily(request.path) {
+			return errRewriteBlocked
+		}
+		if err := policy.checkStructural("x-octopool-require: merge-async-v1"); err != nil {
+			return err
+		}
+	}
+	if rewriteMergeReadPath.MatchString(request.path) && opts.method == "GET" {
+		if opts.inputSet || len(opts.fields) != 0 || len(request.query) != 0 {
+			return errRewriteBlocked
+		}
+		for _, flag := range opts.output {
+			if strings.HasPrefix(flag, "--paginate") || strings.HasPrefix(flag, "--slurp") {
+				return errRewriteBlocked
+			}
+		}
+		// Merge status uses the writer's identity, including Contents:write for
+		// async polling. It must never enter the shared read relay.
+		prepared.args = append([]string{"api", opts.endpoint, "--method=GET", "--hostname=github.com"}, opts.output...)
+		prepared.stdin = strings.NewReader("")
+		return nil
 	}
 	if ciRetryPath(request.path) {
 		return prepareRewriteCIRetryAPI(policy, opts, request, prepared)
@@ -277,9 +308,10 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 	if err := rewriteAPIPayload(policy, prepared, payload, schema); err != nil {
 		return err
 	}
-	if schema == "pull-merge" {
+	if schema == "pull-merge" || schema == "pull-merge-async" {
 		if _, supplied := payload["sha"]; !supplied {
-			prepared.preflight = []string{"api", strings.TrimSuffix(request.path, "/merge"), "--method=GET", "--hostname=github.com"}
+			pullPath := request.path[:strings.LastIndex(request.path, "/")]
+			prepared.preflight = []string{"api", pullPath, "--method=GET", "--hostname=github.com"}
 			prepared.afterPreflight = func(data []byte) error {
 				value, err := strictRewriteJSON(data, rewriteMaxContent)
 				if err != nil {
@@ -362,6 +394,8 @@ var rewriteCommentCreate = regexp.MustCompile(`^issues/[0-9]+/comments$`)
 var rewriteCommentEdit = regexp.MustCompile(`^(issues|pulls)/comments/[0-9]+$`)
 var rewritePullNumber = regexp.MustCompile(`^pulls/[0-9]+$`)
 var rewritePullMerge = regexp.MustCompile(`^pulls/[0-9]+/merge$`)
+var rewritePullMergeAsync = regexp.MustCompile(`^pulls/[0-9]+/merge-async$`)
+var rewriteMergeReadPath = regexp.MustCompile(`^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pulls/[0-9]+/(merge|merge-async/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$`)
 var rewriteReviewCreate = regexp.MustCompile(`^pulls/[0-9]+/reviews$`)
 var rewriteReviewEdit = regexp.MustCompile(`^pulls/[0-9]+/reviews/[0-9]+$`)
 var rewriteReleaseNumber = regexp.MustCompile(`^releases/[0-9]+$`)
@@ -386,6 +420,8 @@ func rewriteMutationSchema(path, method string) (string, error) {
 		return "pull-edit", nil
 	case method == "PUT" && rewritePullMerge.MatchString(tail):
 		return "pull-merge", nil
+	case method == "PUT" && rewritePullMergeAsync.MatchString(tail):
+		return "pull-merge-async", nil
 	case method == "POST" && rewriteCommentCreate.MatchString(tail):
 		return "comment", nil
 	case method == "PATCH" && rewriteCommentEdit.MatchString(tail):
@@ -418,8 +454,11 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 	case "pull-edit":
 		spec = "title:text body:text base:branch"
 		required = ""
-	case "pull-merge":
+	case "pull-merge", "pull-merge-async":
 		spec = "sha:string merge_method:merge-method commit_message:text commit_title:text"
+		if schema == "pull-merge-async" {
+			spec += " merge_action:merge-action bypass_rules:bool"
+		}
 		required = ""
 	case "release-create":
 		spec = "name:text body:text tag_name:string draft:bool prerelease:bool make_latest:string"
@@ -447,7 +486,7 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 			return fmt.Errorf("%w: %s payload is missing required field %q", errRewriteBlocked, schema, key)
 		}
 	}
-	if len(payload) == 0 && schema != "pull-merge" {
+	if len(payload) == 0 && schema != "pull-merge" && schema != "pull-merge-async" {
 		return fmt.Errorf("%w: %s payload must contain at least one supported field", errRewriteBlocked, schema)
 	}
 	fieldError := func(key, requirement string) error {
@@ -483,7 +522,7 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 			payload[key] = rewritten
 		case "string", "branch":
 			text, ok := value.(string)
-			if schema == "pull-merge" && key == "sha" && (!ok || !rewriteCommitSHA.MatchString(text)) {
+			if (schema == "pull-merge" || schema == "pull-merge-async") && key == "sha" && (!ok || !rewriteCommitSHA.MatchString(text)) {
 				return fieldError(key, "must be a 40-hex head commit")
 			}
 			if !ok || text == "" {
@@ -499,6 +538,17 @@ func rewriteAPIPayload(policy stringRewritePolicy, prepared *rewritePreparation,
 			text, ok := value.(string)
 			if !ok || (text != "squash" && text != "merge" && text != "rebase") {
 				return fieldError(key, "must be one of squash, merge, rebase")
+			}
+			if err := policy.checkStructural(text); err != nil {
+				return err
+			}
+		case "merge-action":
+			text, ok := value.(string)
+			if !ok || (text != "default" && text != "direct_merge" && text != "merge_queue") {
+				return fieldError(key, "must be one of default, direct_merge, merge_queue")
+			}
+			if err := policy.checkStructural(text); err != nil {
+				return err
 			}
 		case "strings":
 			values, ok := value.([]any)
