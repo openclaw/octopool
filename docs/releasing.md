@@ -27,9 +27,14 @@ durable release evidence; signing uses the OpenClaw Foundation Developer ID.
    `Developer ID Application: OpenClaw Foundation (FWJYW4S8P8)` using
    `codesign --force --options runtime --timestamp`, notarize a zip of each
    binary with `xcrun notarytool submit --wait` using the canonical release
-   App Store Connect key from the approved private credential workflow, verify
-   `spctl -a -t install` reports `Notarized Developer ID`, repackage the
-   tarballs, rewrite the two darwin lines in `checksums.txt`, and use
+   App Store Connect key from the approved private credential workflow, and retain
+   both `Accepted` submissions. For each binary, run
+   `codesign --verify --strict --verbose=4 ./octopool` and
+   `codesign --verify --verbose=4 -R='notarized' --check-notarization ./octopool`.
+   Inspect `codesign --display --verbose=4 ./octopool` for Foundation team
+   `FWJYW4S8P8`, the runtime flag, and a timestamp. This follows Apple's
+   [notarized-code verification guidance](https://developer.apple.com/forums/thread/130560).
+   Repackage the tarballs, rewrite the two darwin lines in `checksums.txt`, and use
    `ghx release upload vX.Y.Z --repo openclaw/octopool --clobber` for the two
    tarballs and checksum file. Once signing starts, resume this existing draft;
    do not rerun GoReleaser and replace the staged binaries.
