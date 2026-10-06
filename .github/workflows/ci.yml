@@ -94,6 +94,10 @@ jobs:
       - name: Check
         run: pnpm check
 
+      - name: CLI to Worker release smoke
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm test:e2e:cli-worker
+
       - name: Build docs site
         run: pnpm docs:site
 

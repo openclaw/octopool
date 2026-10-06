@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.6 - 2026-10-06
 
 ### Features
 
@@ -9,6 +9,7 @@
 ### Fixes
 
 - Protect asynchronous PR merges with immutable head, method, action, and bypass fields; rewrite only commit text, pin omitted heads, and poll status with the local writer. Preserve local `--template`/`-t` formatting through modeled API snapshots alongside `--jq`; reject unsupported merge request syntax before native dispatch. Callers can require this guard with `gh api -H 'X-Octopool-Require: merge-async-v1'` as the first API option; older protected CLIs refuse it until upgraded.
+- Keep new releases in draft until macOS binaries are signed and notarized and the uploaded final assets and checksums are verified, preventing unsigned downloads and changing Homebrew hashes after publication.
 
 ## 0.9.5 - 2026-10-03
 

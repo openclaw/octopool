@@ -2,6 +2,9 @@ version: 2
 
 project_name: octopool
 
+release:
+  draft: true
+
 changelog:
   disable: true
 
