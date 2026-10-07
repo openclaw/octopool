@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.9.7 - 2026-10-07
+
+**Highlights:** REST PR writes (`gh pr comment`, `gh pr close`, `gh pr edit --body-file`) follow GitHub repository-rename redirects safely instead of failing, and token-free Actions run lists no longer report an empty list for numeric workflow ids or missing workflow names.
 
 ### Fixes
 
 - Trust a zero-run public Actions workflow page only when it links the workflow file, so numeric workflow ids and missing workflow names fall back to the API instead of reporting an empty run list. Thanks @SebTardif.
 - Follow GitHub repository-rename redirects for REST PR comment, close, and edit writes by resolving the canonical owner/name and applying string-rewrite policy before replaying the write once. Thanks @SebTardif.
+
+### Upgrade notes
+
+- The Worker fix is already deployed from main fb72d9f; no D1 migrations. Run `brew upgrade octopool` for the CLI fix; no re-login or cache purge is required.
 
 ## 0.9.6 - 2026-10-06
 
