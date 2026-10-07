@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Maintenance
+
+- Refresh pnpm, Wrangler, Vite, Node type definitions, and formatting/linting tooling within the existing runtime floors and 48-hour dependency cooldown.
+
 ## 0.9.7 - 2026-10-07
 
 **Highlights:** REST PR writes (`gh pr comment`, `gh pr close`, `gh pr edit --body-file`) follow GitHub repository-rename redirects safely instead of failing, and token-free Actions run lists no longer report an empty list for numeric workflow ids or missing workflow names.

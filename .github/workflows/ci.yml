@@ -63,7 +63,7 @@ jobs:
       - name: Set up pnpm
         run: |
           corepack enable
-          corepack prepare pnpm@11.27.1 --activate
+          corepack prepare pnpm@11.28.2 --activate
 
       - name: Install
         run: pnpm install --frozen-lockfile
