@@ -1033,9 +1033,13 @@ already-merged behavior. Close posts its optional comment before PATCHing `state
 non-TTY result to stderr, including `✓ Closed pull request owner/repo#123 (title)`.
 
 Repository or credential lookup failures can delegate before any REST request or stdin
-consumption. REST errors return nonzero with a diagnostic; requests never follow redirects,
-retry writes, or fall back to native execution after an attempted write. A close can
-therefore leave its comment posted when the subsequent close fails, as native gh can.
+consumption. REST errors return nonzero with a diagnostic. A repository rename may return
+one redirect to `https://api.github.com/repositories/<id>/...`. The CLI reads that
+repository's canonical `owner/name` and runs the same string-rewrite policy before it
+replays the write on `/repos/<owner>/<name>/...`. A forbidden canonical name produces no
+replayed write. Any other redirect is refused. Writes are not retried after an uncertain
+response, and the CLI does not fall back to native execution after an attempted write.
+A close can therefore leave its comment posted when the subsequent close fails, as native gh can.
 An interrupted response may mean GitHub accepted the write; inspect its state before
 retrying. Set `OCTOPOOL_REST_WRITES=0` to restore guarded native execution for all these
 commands.

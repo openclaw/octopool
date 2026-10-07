@@ -5,6 +5,7 @@
 ### Fixes
 
 - Trust a zero-run public Actions workflow page only when it links the workflow file, so numeric workflow ids and missing workflow names fall back to the API instead of reporting an empty run list. Thanks @SebTardif.
+- Follow GitHub repository-rename redirects for REST PR comment, close, and edit writes by resolving the canonical owner/name and applying string-rewrite policy before replaying the write once. Thanks @SebTardif.
 
 ## 0.9.6 - 2026-10-06
 

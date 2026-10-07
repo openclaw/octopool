@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -530,4 +531,288 @@ func TestRESTPRWriteEffectiveChildEnvironment(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRESTPRWriteFollowsRepositoryRename(t *testing.T) {
+	for _, command := range []string{"comment", "edit", "close"} {
+		t.Run(command, func(t *testing.T) {
+			var requests []string
+			capture := restWriteFixture(t, rewriteEmptyTestPolicy, func(r *http.Request) (*http.Response, error) {
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				canonical := `{"number":7,"html_url":"https://github.com/mislav/hub/pull/7","title":"A title","state":"open","merged":false}`
+				switch r.URL.Path {
+				case "/repos/github/hub/pulls/7":
+					status := http.StatusTemporaryRedirect
+					if r.Method == http.MethodGet {
+						status = http.StatusMovedPermanently
+					}
+					response, _ := restWriteResponse(status, `{}`)
+					response.Header.Set("Location", "https://api.github.com/repositories/401025/pulls/7")
+					return response, nil
+				case "/repositories/401025":
+					if r.Method == http.MethodGet {
+						return restWriteResponse(http.StatusOK, `{"full_name":"mislav/hub"}`)
+					}
+				case "/repos/mislav/hub/issues/7/comments":
+					return restWriteResponse(http.StatusCreated, `{"html_url":"https://github.com/mislav/hub/pull/7#issuecomment-42"}`)
+				case "/repos/mislav/hub/pulls/7":
+					if r.Method == http.MethodPatch && command == "close" {
+						return restWriteResponse(http.StatusOK, strings.ReplaceAll(canonical, `"open"`, `"closed"`))
+					}
+					return restWriteResponse(http.StatusOK, canonical)
+				}
+				t.Errorf("unexpected %s %s", r.Method, r.URL.RequestURI())
+				return restWriteResponse(http.StatusNotFound, `{"message":"Not Found"}`)
+			})
+			args := []string{"pr", command, "7", "-R", "github/hub", "-b", "renamed"}
+			if command == "close" {
+				args = []string{"pr", "close", "7", "-R", "github/hub"}
+			}
+			var out, stderr bytes.Buffer
+			if err := execRealGHWithStdin(t.Context(), args, nil, &out, &stderr); err != nil {
+				t.Fatalf("%v stderr=%q requests=%v", err, stderr.String(), requests)
+			}
+			switch command {
+			case "comment":
+				if out.String() != "https://github.com/mislav/hub/pull/7#issuecomment-42\n" {
+					t.Fatalf("stdout=%q requests=%v", out.String(), requests)
+				}
+			case "edit":
+				if out.String() != "https://github.com/mislav/hub/pull/7\n" {
+					t.Fatalf("stdout=%q requests=%v", out.String(), requests)
+				}
+			case "close":
+				if stderr.String() != "✓ Closed pull request mislav/hub#7 (A title)\n" {
+					t.Fatalf("stderr=%q requests=%v", stderr.String(), requests)
+				}
+			}
+			if strings.Contains(out.String()+stderr.String(), restWriteTestToken) {
+				t.Fatal("token was printed")
+			}
+			assertNoRESTWriteChild(t, capture)
+		})
+	}
+}
+
+func TestRESTResourceSuffixSkipsRepositoryName(t *testing.T) {
+	for _, test := range []struct{ path, want string }{
+		{"/repos/github/hub/pulls/7", "/pulls/7"},
+		{"/repos/acme/pulls/pulls/7", "/pulls/7"},
+		{"/repos/pulls/hub/pulls/7", "/pulls/7"},
+		{"/repos/issues/hub/issues/7/comments", "/issues/7/comments"},
+		{"/repos/acme/issues/issues/7/comments", "/issues/7/comments"},
+		{"/repositories/401025/pulls/7", "/pulls/7"},
+		{"/repositories/401025/issues/7/comments", "/issues/7/comments"},
+		{"/repos/acme/hub/contents/readme", ""},
+	} {
+		if got := restResourceSuffix(test.path); got != test.want {
+			t.Fatalf("%s suffix=%q want %q", test.path, got, test.want)
+		}
+	}
+	location, ok := restRenameLocation("https://api.github.com/repositories/401025/pulls/7", "/repos/acme/pulls/pulls/7")
+	if !ok || location != "/repositories/401025/pulls/7" {
+		t.Fatalf("location=%q ok=%v", location, ok)
+	}
+}
+
+func TestRESTPRWriteRenameAfterPreflight(t *testing.T) {
+	for _, command := range []string{"comment", "close-comment", "close"} {
+		t.Run(command, func(t *testing.T) {
+			var requests []string
+			canonical := strings.ReplaceAll(restWritePRJSON, "acme/repo", "mislav/hub")
+			capture := restWriteFixture(t, rewriteEmptyTestPolicy, func(r *http.Request) (*http.Response, error) {
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/repo/pulls/7":
+					return restWriteResponse(http.StatusOK, restWritePRJSON)
+				case r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/acme/repo/"):
+					response, _ := restWriteResponse(http.StatusTemporaryRedirect, `{}`)
+					response.Header.Set("Location", "https://api.github.com/repositories/401025"+strings.TrimPrefix(r.URL.Path, "/repos/acme/repo"))
+					return response, nil
+				case r.Method == http.MethodGet && r.URL.Path == "/repositories/401025":
+					return restWriteResponse(http.StatusOK, `{"full_name":"mislav/hub"}`)
+				case r.Method == http.MethodPost && r.URL.Path == "/repos/mislav/hub/issues/7/comments":
+					return restWriteResponse(http.StatusCreated, strings.ReplaceAll(restWriteCommentJSON, "acme/repo", "mislav/hub"))
+				case r.Method == http.MethodPatch && r.URL.Path == "/repos/mislav/hub/pulls/7":
+					return restWriteResponse(http.StatusOK, strings.ReplaceAll(canonical, `"open"`, `"closed"`))
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					return restWriteResponse(http.StatusNotFound, `{}`)
+				}
+			})
+			args := []string{"pr", "comment", "7", "-R", "acme/repo", "-b", "hello"}
+			want := []string{"GET /repos/acme/repo/pulls/7", "POST /repos/acme/repo/issues/7/comments", "GET /repositories/401025", "POST /repos/mislav/hub/issues/7/comments"}
+			wantOut, wantErr := "https://github.com/mislav/hub/pull/7#issuecomment-42\n", ""
+			if command != "comment" {
+				args = []string{"pr", "close", "7", "-R", "acme/repo"}
+				wantOut, wantErr = "", "✓ Closed pull request mislav/hub#7 (A title)\n"
+				if command == "close-comment" {
+					args = append(args, "-c", "hello")
+					want = append(want, "PATCH /repos/mislav/hub/pulls/7")
+				} else {
+					want = []string{"GET /repos/acme/repo/pulls/7", "PATCH /repos/acme/repo/pulls/7", "GET /repositories/401025", "PATCH /repos/mislav/hub/pulls/7"}
+				}
+			}
+			var out, stderr bytes.Buffer
+			if err := execRealGHWithStdin(t.Context(), args, nil, &out, &stderr); err != nil {
+				t.Fatalf("%v stderr=%q requests=%v", err, stderr.String(), requests)
+			}
+			if out.String() != wantOut || stderr.String() != wantErr || !reflect.DeepEqual(requests, want) {
+				t.Fatalf("stdout=%q stderr=%q requests=%v; want requests=%v", out.String(), stderr.String(), requests, want)
+			}
+			assertNoRESTWriteChild(t, capture)
+		})
+	}
+}
+
+func TestRESTRenameLocationRejectsDifferentResourceTail(t *testing.T) {
+	for _, test := range []struct{ path, location string }{
+		{"/repos/acme/repo/pulls/7", "https://api.github.com/repositories/401025/issues/9/pulls/7"},
+		{"/repos/acme/repo/issues/7/comments", "https://api.github.com/repositories/401025/pulls/9/issues/7/comments"},
+	} {
+		if location, ok := restRenameLocation(test.location, test.path); ok {
+			t.Errorf("accepted different resource tail: %s", location)
+		}
+	}
+}
+
+func TestRESTPRWriteRenameRepoNamedPulls(t *testing.T) {
+	for _, test := range []struct {
+		repo, first string
+	}{
+		{"acme/pulls", "/repos/acme/pulls/pulls/7"},
+		{"issues/hub", "/repos/issues/hub/pulls/7"},
+	} {
+		t.Run(test.repo, func(t *testing.T) {
+			var requests []string
+			canonical := `{"number":7,"html_url":"https://github.com/` + test.repo + `/pull/7","title":"A title","state":"open","merged":false}`
+			capture := restWriteFixture(t, rewriteEmptyTestPolicy, func(r *http.Request) (*http.Response, error) {
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				switch {
+				case r.URL.Path == test.first && len(requests) == 1:
+					response, _ := restWriteResponse(http.StatusTemporaryRedirect, `{}`)
+					response.Header.Set("Location", "https://api.github.com/repositories/401025/pulls/7")
+					return response, nil
+				case r.Method == http.MethodGet && r.URL.Path == "/repositories/401025":
+					return restWriteResponse(http.StatusOK, `{"full_name":"`+test.repo+`"}`)
+				case r.Method == http.MethodPatch && r.URL.Path == test.first:
+					return restWriteResponse(http.StatusOK, canonical)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					return restWriteResponse(http.StatusNotFound, `{"message":"Not Found"}`)
+				}
+			})
+			var out, stderr bytes.Buffer
+			if err := execRealGHWithStdin(t.Context(), []string{"pr", "edit", "7", "-R", test.repo, "-b", "renamed"}, nil, &out, &stderr); err != nil {
+				t.Fatalf("%v stderr=%q requests=%v", err, stderr.String(), requests)
+			}
+			if out.String() != "https://github.com/"+test.repo+"/pull/7\n" {
+				t.Fatalf("stdout=%q requests=%v", out.String(), requests)
+			}
+			want := []string{"PATCH " + test.first, "GET /repositories/401025", "PATCH " + test.first}
+			if !reflect.DeepEqual(requests, want) {
+				t.Fatalf("requests=%v", requests)
+			}
+			assertNoRESTWriteChild(t, capture)
+		})
+	}
+}
+
+func TestRESTPRWriteRenameStopsBeforeForbiddenCanonicalWrite(t *testing.T) {
+	var requests []string
+	policy := strings.ReplaceAll(rewriteActiveTestPolicy, "internal-model", "mislav")
+	capture := restWriteFixture(t, policy, func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/github/hub/pulls/7":
+			response, _ := restWriteResponse(http.StatusTemporaryRedirect, `{}`)
+			response.Header.Set("Location", "https://api.github.com/repositories/401025/pulls/7")
+			return response, nil
+		case "/repositories/401025":
+			if r.Method == http.MethodGet {
+				return restWriteResponse(http.StatusOK, `{"full_name":"mislav/hub"}`)
+			}
+		}
+		t.Errorf("canonical write %s %s", r.Method, r.URL.Path)
+		return restWriteResponse(http.StatusInternalServerError, `{}`)
+	})
+	var out, stderr bytes.Buffer
+	err := execRealGHWithStdin(t.Context(), []string{"pr", "edit", "7", "-R", "github/hub", "-b", "hello"}, nil, &out, &stderr)
+	if err == nil || out.Len() != 0 || !strings.Contains(stderr.String(), errRewriteBlocked.Error()) {
+		t.Fatalf("err=%v stdout=%q stderr=%q requests=%v", err, out.String(), stderr.String(), requests)
+	}
+	if !reflect.DeepEqual(requests, []string{"PATCH /repos/github/hub/pulls/7", "GET /repositories/401025"}) {
+		t.Fatalf("requests=%v", requests)
+	}
+	assertNoRESTWriteChild(t, capture)
+}
+
+func TestRESTPRWriteRenameHarness(t *testing.T) {
+	transcript := runRenameHarness(t, true)
+	t.Log("forbidden canonical\n" + transcript)
+	allowed := runRenameHarness(t, false)
+	t.Log("allowed rename\n" + allowed)
+	if !strings.Contains(transcript, "GET /repositories/401025") || !strings.Contains(transcript, "canonical writes=0") {
+		t.Fatalf("forbidden transcript:\n%s", transcript)
+	}
+	if strings.Contains(transcript, "PATCH /repos/mislav/hub/pulls/7") {
+		t.Fatalf("forbidden transcript replayed the write:\n%s", transcript)
+	}
+	if !strings.Contains(allowed, "PATCH /repos/mislav/hub/pulls/7") || !strings.Contains(allowed, "https://github.com/mislav/hub/pull/7") {
+		t.Fatalf("allowed transcript:\n%s", allowed)
+	}
+}
+
+func runRenameHarness(t *testing.T, forbid bool) string {
+	t.Helper()
+	var lines []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lines = append(lines, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/github/hub/pulls/7":
+			w.Header().Set("Location", "https://api.github.com/repositories/401025/pulls/7")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		case "/repositories/401025":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"full_name":"mislav/hub"}`)
+		case "/repos/mislav/hub/pulls/7":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"number":7,"html_url":"https://github.com/mislav/hub/pull/7","title":"A title","state":"open","merged":false}`)
+		default:
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(server.Close)
+	previous := restGitHubAPIRoot
+	restGitHubAPIRoot = server.URL
+	t.Cleanup(func() { restGitHubAPIRoot = previous })
+	policy := stringRewritePolicy{}
+	if forbid {
+		var err error
+		policy, err = compileStringRewriteRules([]stringRewriteRule{{Pattern: "mislav", Replacement: "public"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := server.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	var out, stderr bytes.Buffer
+	err := (&restPRWrite{command: "edit", number: "7", repo: "github/hub", body: "hello"}).execute(t.Context(), client, "harness-token", policy, &out, &stderr)
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	if forbid {
+		if !errors.Is(err, errRewriteBlocked) {
+			t.Fatalf("err=%v stderr=%q", err, stderr.String())
+		}
+		fmt.Fprintf(&b, "result: %s\ncanonical writes=0\n", errRewriteBlocked.Error())
+		return b.String()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(&b, "stdout: %s", out.String())
+	return b.String()
 }
