@@ -32,15 +32,15 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@types/node": "^26.6.2",
-    "oxfmt": "^0.68.0",
-    "oxlint": "^1.83.0",
+    "@types/node": "^26.6.4",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.135.0"
+    "wrangler": "^4.147.0"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@11.27.1"
+  "packageManager": "pnpm@11.28.2"
 }
