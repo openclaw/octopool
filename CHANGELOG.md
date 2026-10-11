@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9.8 - 2026-10-11
+
+**Highlights:** `gh pr diff --name-only` now relays through the token-free diff transport instead of spending personal GraphQL on every call, and pooled relay misses no longer queue behind unrelated cache publications in the pool coordinator.
 
 ### Fixes
 
@@ -10,6 +12,10 @@
 ### Maintenance
 
 - Refresh pnpm, Wrangler, Vite, Node type definitions, and formatting/linting tooling within the existing runtime floors and 48-hour dependency cooldown.
+
+### Upgrade notes
+
+- Run `brew upgrade octopool` for the `--name-only` relay; no re-login or cache purge is required. The Worker coordination fix deploys from the release commit with no D1 migrations.
 
 ## 0.9.7 - 2026-10-07
 
