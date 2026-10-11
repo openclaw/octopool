@@ -932,6 +932,13 @@ guards, body-key switches, finalization, or canonical/exact continuation. Body o
 precede proof ownership; proof ownership never waits for a body owner. Anonymous `304`
 revalidates a body, never repository visibility.
 
+Publication acquisition, renewal, completion, and waiter expiry serialize per resource
+inside each coordinator. D1 waits for one cache key or repository do not block unrelated
+resources or pool identity selection and feedback. Followers release that resource's queue
+before waiting for notification; owner lookup and waiter registration remain ordered with
+completion. D1 still owns fencing and expiry across coordinator restarts and pools; the
+existing pool and global proof Durable Object names and quota state are unchanged.
+
 Body fetch/304 validation time is captured with the initial response, before awaited proof
 publication, explicit guards or first-page aggregation. Internal response/time metadata
 keeps that evidence and its original expiry through SQL acknowledgment without adding fields

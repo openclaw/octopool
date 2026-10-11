@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- Serialize publication coordination per resource so slow D1 acquisitions no longer block unrelated cache fills, public proofs, or pool identity selection and feedback.
+
 ### Maintenance
 
 - Refresh pnpm, Wrangler, Vite, Node type definitions, and formatting/linting tooling within the existing runtime floors and 48-hour dependency cooldown.

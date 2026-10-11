@@ -7,7 +7,7 @@ export { PoolCoordinator } from "../../src/pool-coordinator";
 export { PolicyCoordinator } from "../../src/policy-coordinator";
 export { BackendAdmission } from "../../src/backend-admission";
 
-// This protocol negative needs a native request lifetime around the real relay.
+// RPC failure tests need a native request lifetime around the real relay.
 // The ordinary test setup still owns storage reset and graceful DO eviction.
 export default {
   ...worker,
@@ -16,7 +16,11 @@ export default {
       return withConfigCacheScope(() => configCacheLifetimeRequest(request));
     }
     const protocol = request.headers.get("x-test-identity-protocol");
-    if (protocol !== "missing-method" && protocol !== "missing-publication") {
+    if (
+      protocol !== "missing-method" &&
+      protocol !== "missing-publication" &&
+      protocol !== "storage-failure"
+    ) {
       return worker.fetch(request, env, native);
     }
     let calls = 0;
@@ -69,7 +73,9 @@ export default {
     try {
       response = await worker.fetch(
         request,
-        { ...env, TEST_PAT_PRIMARY: undefined, POOL_COORDINATOR: namespace } as Env,
+        protocol === "storage-failure"
+          ? env
+          : ({ ...env, TEST_PAT_PRIMARY: undefined, POOL_COORDINATOR: namespace } as Env),
         ctx,
       );
     } catch (error) {
