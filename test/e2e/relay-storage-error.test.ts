@@ -17,6 +17,7 @@ import {
 import { requestWithEnv } from "./identity-routing-support";
 import { observePublicationD1 } from "./publication-d1-observer";
 import { ownedWork } from "./owned-work";
+import { clearConfigCache } from "../../src/config-cache";
 
 const path = "/repos/openclaw/octopool/actions/runs";
 
@@ -131,10 +132,25 @@ describe("relay storage failure boundary", () => {
     const upstream = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", upstream);
     try {
-      await expectStorageFallback(await relay(path));
+      // Rejected RPCs need a native request lifetime, as in the protocol-negative tests.
+      clearConfigCache();
+      const response = await ownedWork.track(
+        (env as Env & { IDENTITY_PROTOCOL: Fetcher }).IDENTITY_PROTOCOL.fetch(
+          "https://octopool.dev/v1/github/request",
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${CALLER_TOKEN}`,
+              "content-type": "application/json",
+              "x-test-identity-protocol": "storage-failure",
+            },
+            body: JSON.stringify({ pool: POOL, method: "GET", path }),
+          },
+        ),
+      );
+      await expectStorageFallback(response);
       expect(upstream).not.toHaveBeenCalled();
     } finally {
-      // A failed blockConcurrencyWhile resets the instance and breaks its stub.
       await runInDurableObject(poolCoordinatorStub(env, POOL), (instance) => {
         const target = instance as unknown as Observed;
         if (target.originalEnv !== undefined) target.env = target.originalEnv;

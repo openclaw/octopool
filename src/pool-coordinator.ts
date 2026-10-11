@@ -53,18 +53,18 @@ type CacheFillWaiterGroup = {
   timer?: ReturnType<typeof setTimeout>;
 };
 
+type PublicationWaiterGroup = {
+  owner: PublicationOwner;
+  resolve(value: CacheFillAcquisition): void;
+  promise: Promise<CacheFillAcquisition>;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
 export class PoolCoordinator extends DurableObject<Env> {
   private readonly cacheFillWaiters = new Map<string, CacheFillWaiterGroup>();
 
-  private readonly publicationWaiters = new Map<
-    string,
-    {
-      owner: PublicationOwner;
-      resolve(value: CacheFillAcquisition): void;
-      promise: Promise<CacheFillAcquisition>;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  >();
+  private readonly publicationWaiters = new Map<string, PublicationWaiterGroup>();
+  private readonly publicationOperations = new Map<string, Promise<void>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -85,12 +85,16 @@ export class PoolCoordinator extends DurableObject<Env> {
   }
 
   async tryAcquirePublication(resource: string): Promise<PublicationOwner | undefined> {
-    this.ctx.storage.sql.exec(queries.drainExpiredLegacyCacheFills, Date.now());
-    return tryPublicationOwner(this.env, resource);
+    return this.withPublicationResource(resource, async () => {
+      this.ctx.storage.sql.exec(queries.drainExpiredLegacyCacheFills, Date.now());
+      const owner = await tryPublicationOwner(this.env, resource);
+      if (owner !== undefined) this.wakePublication(resource, { kind: "retry" });
+      return owner;
+    });
   }
 
   async acquirePublication(resource: string): Promise<CacheFillAcquisition> {
-    const acquisition = await this.ctx.blockConcurrencyWhile(async () => {
+    const acquisition = await this.withPublicationResource(resource, async () => {
       this.ctx.storage.sql.exec(queries.drainExpiredLegacyCacheFills, Date.now());
       const owner = await tryPublicationOwner(this.env, resource);
       if (owner !== undefined) {
@@ -112,32 +116,28 @@ export class PoolCoordinator extends DurableObject<Env> {
           owner: current,
           resolve,
           promise,
-          timer: setTimeout(
-            () => this.wakePublication(resource, { kind: "retry" }),
-            PUBLICATION_LEASE_MS,
-          ),
         };
         this.publicationWaiters.set(resource, group);
+        this.schedulePublicationExpiry(resource, group);
       }
       return { waiting: group!.promise };
     });
+    // Waiting must release the resource so renewal/completion can wake followers.
     return acquisition.result ?? acquisition.waiting!;
   }
 
   async renewPublication(owner: PublicationOwner): Promise<boolean> {
-    const row = await this.env.DB.prepare(queries.renewPublicationOwner)
-      .bind(...publicationBinding(owner), PUBLICATION_LEASE_MS)
-      .first<PublicationOwner>();
-    if (row === null) return false;
-    const group = this.publicationWaiters.get(owner.resource_key);
-    if (group?.owner.id === owner.id && group.owner.owner_token === owner.owner_token) {
-      clearTimeout(group.timer);
-      group.timer = setTimeout(
-        () => this.wakePublication(owner.resource_key, { kind: "retry" }),
-        PUBLICATION_LEASE_MS,
-      );
-    }
-    return true;
+    return this.withPublicationResource(owner.resource_key, async () => {
+      const row = await this.env.DB.prepare(queries.renewPublicationOwner)
+        .bind(...publicationBinding(owner), PUBLICATION_LEASE_MS)
+        .first<PublicationOwner>();
+      if (row === null) return false;
+      const group = this.publicationWaiters.get(owner.resource_key);
+      if (group?.owner.id === owner.id && group.owner.owner_token === owner.owner_token) {
+        this.schedulePublicationExpiry(owner.resource_key, group);
+      }
+      return true;
+    });
   }
 
   async completePublication(
@@ -151,30 +151,69 @@ export class PoolCoordinator extends DurableObject<Env> {
     ) {
       throw new Error("Invalid publication completion");
     }
-    const row = await this.env.DB.prepare(
-      outcome === "none" || outcome === "failed" || outcome === "rejected" || outcome === "unknown"
-        ? queries.revokePublicationOwner
-        : queries.completePublicationOwner,
-    )
-      .bind(...publicationBinding(owner))
-      .first<{ id: number; was_live?: number }>();
-    if (row === null) return false;
-    // Revocation cleans expired rows too; only a live receipt accepts completion.
-    const accepted = row.was_live !== 0;
-    const group = this.publicationWaiters.get(owner.resource_key);
-    if (group?.owner.id === owner.id && group.owner.owner_token === owner.owner_token) {
-      this.wakePublication(
-        owner.resource_key,
-        accepted
-          ? {
-              kind: "completed",
-              outcome,
-              ...(publicationId === undefined ? {} : { publicationId }),
-            }
-          : { kind: "retry" },
-      );
+    return this.withPublicationResource(owner.resource_key, async () => {
+      const row = await this.env.DB.prepare(
+        outcome === "none" ||
+          outcome === "failed" ||
+          outcome === "rejected" ||
+          outcome === "unknown"
+          ? queries.revokePublicationOwner
+          : queries.completePublicationOwner,
+      )
+        .bind(...publicationBinding(owner))
+        .first<{ id: number; was_live?: number }>();
+      if (row === null) return false;
+      // Revocation cleans expired rows too; only a live receipt accepts completion.
+      const accepted = row.was_live !== 0;
+      const group = this.publicationWaiters.get(owner.resource_key);
+      if (group?.owner.id === owner.id && group.owner.owner_token === owner.owner_token) {
+        this.wakePublication(
+          owner.resource_key,
+          accepted
+            ? {
+                kind: "completed",
+                outcome,
+                ...(publicationId === undefined ? {} : { publicationId }),
+              }
+            : { kind: "retry" },
+        );
+      }
+      return accepted;
+    });
+  }
+
+  private async withPublicationResource<T>(
+    resource: string,
+    operation: () => T | Promise<T>,
+  ): Promise<T> {
+    const previous = this.publicationOperations.get(resource);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.publicationOperations.set(resource, current);
+    try {
+      await previous;
+      return await operation();
+    } finally {
+      if (this.publicationOperations.get(resource) === current) {
+        this.publicationOperations.delete(resource);
+      }
+      release();
     }
-    return accepted;
+  }
+
+  private schedulePublicationExpiry(resource: string, group: PublicationWaiterGroup): void {
+    clearTimeout(group.timer);
+    const timer = setTimeout(() => {
+      void this.withPublicationResource(resource, () => {
+        // A queued expiry must not wake a replacement or a renewed waiter group.
+        if (this.publicationWaiters.get(resource) === group && group.timer === timer) {
+          this.wakePublication(resource, { kind: "retry" });
+        }
+      });
+    }, PUBLICATION_LEASE_MS);
+    group.timer = timer;
   }
 
   private wakePublication(resource: string, result: CacheFillAcquisition): void {
