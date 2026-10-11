@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { relayTiming } from "./relay-timing";
 
 // Process-local TTL cache for hot D1 config lookups: caller auth, pool policy,
 // and identity lists. These rows change only on rare admin action, so a warm
@@ -29,11 +30,13 @@ export async function cachedConfigLookup<T>(key: string, load: () => Promise<T>)
   const now = Date.now();
   const hit = store.get(key);
   if (hit !== undefined && hit.expires > now) {
+    relayTiming()?.configHit(key);
     return hit.value as T;
   }
   const pending = requestLoads.getStore();
   const existing = pending?.get(key);
   if (existing !== undefined && existing.expires > now && existing.generation === generation) {
+    relayTiming()?.configHit(key, true);
     return existing.promise as Promise<T>;
   }
   const entry: Pending = {

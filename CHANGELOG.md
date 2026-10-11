@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Maintenance
+
+- Add sampled Worker traces, outer relay `Server-Timing`, and versioned audit phase timings and operation counts for production latency measurement.
+
 ## 0.9.8 - 2026-10-11
 
 **Highlights:** `gh pr diff --name-only` now relays through the token-free diff transport instead of spending personal GraphQL on every call, and pooled relay misses no longer queue behind unrelated cache publications in the pool coordinator.

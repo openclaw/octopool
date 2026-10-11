@@ -1,4 +1,5 @@
 import { isRecord } from "./object";
+import { relayPhase } from "./relay-timing";
 import type { JsonObject } from "./types";
 
 export class HttpError extends Error {
@@ -13,6 +14,7 @@ export class HttpError extends Error {
 }
 
 export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit): Response {
+  using _phase = relayPhase("response_encode");
   return Response.json(body, {
     status,
     headers: {

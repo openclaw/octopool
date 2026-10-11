@@ -1,3 +1,4 @@
+import { relayPhase } from "./relay-timing";
 import { base64ToBytes, bytesToBase64URL } from "./encoding";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
@@ -143,6 +144,7 @@ export class IdentityCredentialError extends HttpError {
 }
 
 export async function githubToken(env: GitHubEgressEnv, identity: Identity): Promise<string> {
+  using _phase = relayPhase("token");
   switch (identity.kind) {
     case "pat":
       return githubSecret(env, identity.secret_ref);
@@ -155,6 +157,7 @@ async function githubAppInstallationToken(
   env: GitHubEgressEnv,
   identity: Identity,
 ): Promise<string> {
+  using _phase = relayPhase("token");
   if (!Number.isSafeInteger(identity.installation_id) || identity.installation_id! <= 0) {
     throw new IdentityCredentialError("github_app_installation_missing");
   }

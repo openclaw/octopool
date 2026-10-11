@@ -1,3 +1,4 @@
+import { relayPhasePromise } from "./relay-timing";
 import { requestTimeoutMs } from "./github-limits";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { HttpError } from "./http";
@@ -113,11 +114,13 @@ export function readWebBody(
   capBytes: number,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  return readBodyCapped(
-    response,
-    capBytes,
-    () => new HttpError(502, "github_web_response_too_large", "GitHub web response is too large"),
-    signal,
+  return relayPhasePromise("github_body", () =>
+    readBodyCapped(
+      response,
+      capBytes,
+      () => new HttpError(502, "github_web_response_too_large", "GitHub web response is too large"),
+      signal,
+    ),
   );
 }
 

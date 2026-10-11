@@ -1,4 +1,6 @@
 import { responseCapBytes } from "./github-limits";
+import { timingD1Identity } from "./relay-timing-bindings";
+import { withRelayTiming } from "./relay-timing";
 import { isLandingGraphQLRoute } from "./github-landing";
 import { appendRelayQuery } from "./github-path";
 import { publicJSONResponse, parseJSONBytes, scalarQuery } from "./github-public-utils";
@@ -98,10 +100,11 @@ export async function storePublicAPIRate(
   if (limit === undefined || remaining === undefined || resetAt === undefined || limit <= 0) {
     return;
   }
-  let snapshots = rateSnapshots.get(env.DB);
+  const database = timingD1Identity(env.DB);
+  let snapshots = rateSnapshots.get(database);
   if (snapshots === undefined) {
     snapshots = new Map();
-    rateSnapshots.set(env.DB, snapshots);
+    rateSnapshots.set(database, snapshots);
   }
   const now = Date.now();
   const previous = snapshots.get(resource);
@@ -114,7 +117,7 @@ export async function storePublicAPIRate(
     return;
   // Reserve before I/O; never share a pending promise across request lifetimes.
   snapshots.set(resource, { writtenAt: now, remaining, resetAt });
-  const write = (async () => {
+  const write = async () => {
     try {
       await env.DB.prepare(queries.upsertPublicApiRate)
         .bind(resource, limit, remaining, resetAt)
@@ -122,9 +125,9 @@ export async function storePublicAPIRate(
     } catch {
       // Keep the interval on failure too: advisory writes must not amplify a D1 outage.
     }
-  })();
-  if (ctx !== undefined) ctx.waitUntil(write);
-  else await write;
+  };
+  if (ctx !== undefined) ctx.waitUntil(withRelayTiming(undefined, write));
+  else await write();
 }
 
 function publicAPIHeaders(request: RelayRequest): Record<string, string> {

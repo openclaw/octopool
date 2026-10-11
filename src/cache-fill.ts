@@ -1,3 +1,4 @@
+import { relayPhase } from "./relay-timing";
 import type { PublicationOwner } from "./cache-publication";
 import { admitBackendWork, assertBackendWorkActive } from "./backend-work";
 
@@ -146,6 +147,9 @@ export function startOwnedCacheFill(
   const publish = async (
     publisher: () => Promise<CacheFillOutcome>,
   ): Promise<PublicationResult> => {
+    using _phase = relayPhase(
+      capability.resource_key.startsWith("public-repo:") ? "proof_publish" : "body_publish",
+    );
     if (!(await renew())) {
       return { storage: "rejected", completion: "lost" };
     }

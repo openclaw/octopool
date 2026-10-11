@@ -1,3 +1,4 @@
+import { relayPhase, relayTiming } from "./relay-timing";
 import { base64ToBytes } from "./encoding";
 import type { CacheMissObserver } from "./cache";
 import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
@@ -144,6 +145,7 @@ export async function readTerminalLogCache(
   key: string,
   onMiss?: CacheMissObserver,
 ): Promise<CachedTerminalLog | undefined> {
+  using _phase = relayPhase("cache_lookup");
   try {
     const object = await env.ACTIONS_LOGS.get(key);
     if (object === null) {
@@ -175,6 +177,7 @@ export async function readTerminalLogCache(
     const bytes = new Uint8Array(await object.arrayBuffer());
     const contentType = object.httpMetadata?.contentType ?? "application/octet-stream";
     const encoding = terminalLogEncoding(object.customMetadata?.[BODY_ENCODING_METADATA]);
+    relayTiming()?.cacheHit("r2");
     return {
       status: 200,
       headers: { "content-type": contentType },

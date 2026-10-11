@@ -1,4 +1,5 @@
 import { bytesToBase64URL } from "./encoding";
+import { relayPhase } from "./relay-timing";
 import { cachedConfigLookup, invalidateConfigValue } from "./config-cache";
 import { normalizeClientName } from "./client-name";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
@@ -29,6 +30,7 @@ export async function authenticateCaller(
   pool: string,
   beforeMembership?: () => Promise<GitHubEgressEnv["githubEgress"]>,
 ): Promise<Caller> {
+  using _auth = relayPhase("auth");
   const token = requestBearer(request);
   const tokenHash = await hashToken(token);
   const key = `caller:${tokenHash}:${pool}`;
@@ -52,6 +54,7 @@ export async function authenticateCaller(
   // its own protection before joining a refresh or accepting a cached success.
   const egress = await beforeMembership?.();
   const scope = egress === undefined ? "unprotected" : await egress.sharingScope();
+  using _membership = relayPhase("membership");
   try {
     // A new row generation cannot reuse an older authorization. Distinct
     // transport policies must never share a request-specific egress denial.

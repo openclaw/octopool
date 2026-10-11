@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { relayPhase, withRelayTiming } from "./relay-timing";
 import { HttpError, parsePositiveInt } from "./http";
 import { relayStorageUnavailableError } from "./local-fallback";
 
@@ -28,6 +29,7 @@ export function withBackendWorkSignal<T>(
 }
 
 export async function admitBackendWork(): Promise<void> {
+  using _phase = relayPhase("admission");
   await scope.getStore()?.enter();
 }
 
@@ -222,7 +224,8 @@ export class BackendWork {
           () => undefined,
         ),
       );
-      if (this.pending !== undefined) ctx.waitUntil(this.release());
+      if (this.pending !== undefined)
+        ctx.waitUntil(withRelayTiming(undefined, () => this.release()));
     }
   }
 }

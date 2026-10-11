@@ -8,6 +8,10 @@
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.2,
+    },
   },
   "vars": {
     "ALLOWED_GITHUB_ORG": "openclaw",

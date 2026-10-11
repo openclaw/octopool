@@ -1,3 +1,4 @@
+import { relayPhase } from "./relay-timing";
 import {
   CACHE_PUBLICATION_EPOCH,
   proofPublicationResource,
@@ -39,6 +40,7 @@ export async function ensurePublicGitHubRepo(
   route: RouteInfo,
   cacheCreatedAt?: string,
 ): Promise<void> {
+  using _phase = relayPhase("public_guard");
   if (route.owner === undefined || route.repo === undefined) return;
   const owner = route.owner.toLowerCase();
   const repo = route.repo.toLowerCase();

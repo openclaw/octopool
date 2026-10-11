@@ -1,3 +1,4 @@
+import { relayPhase } from "./relay-timing";
 import { requestTimeoutMs } from "./github-limits";
 import { isLandingGraphQLRoute } from "./github-landing";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
@@ -28,6 +29,7 @@ export async function callGitHubWeb(
   route: RouteInfo,
   options: { skipAnonymousAPI?: boolean; skipNoQuota?: boolean; ctx?: ExecutionContext } = {},
 ): Promise<GitHubRelayResponse | undefined> {
+  using _phase = relayPhase("anonymous_fetch");
   let requests = webRequests(env, request, route);
   if (requests.length === 0) {
     return undefined;
@@ -87,6 +89,7 @@ export async function callAnonymousGitHubAPI(
   route: RouteInfo,
   ctx?: ExecutionContext,
 ): Promise<AnonymousGitHubAPIResult> {
+  using _phase = relayPhase("anonymous_fetch");
   const api = webRequests(env, request, route).find((candidate) => candidate.usesApiQuota);
   if (api === undefined) {
     return {};
