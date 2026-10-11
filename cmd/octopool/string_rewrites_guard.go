@@ -196,7 +196,7 @@ func prepareRewriteRead(policy stringRewritePolicy, args []string, prepared *rew
 	switch command {
 	case "pr view", "issue view":
 	case "pr diff":
-		booleans = "--patch"
+		booleans = "--patch --name-only"
 	case "pr list":
 		values += " --limit,-L --state --author --assignee --label --head,-H --search,-S"
 	case "issue list":

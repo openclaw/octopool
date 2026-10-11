@@ -37,7 +37,7 @@ func topReadSpecs(command string) map[string]readOptionSpec {
 	switch command {
 	case "pr view", "issue view", "repo view", "release view", "workflow view", "gist view":
 	case "pr diff":
-		values, booleans = "--repo,-R", "--patch"
+		values, booleans = "--repo,-R", "--patch --name-only"
 	case "pr list", "issue list":
 		values += " --limit,-L --state --author --assignee --label --search,-S"
 	case "run list":

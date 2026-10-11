@@ -5,6 +5,7 @@
 ### Fixes
 
 - Serialize publication coordination per resource so slow D1 acquisitions no longer block unrelated cache fills, public proofs, or pool identity selection and feedback.
+- Relay `gh pr diff --name-only` through the token-free diff transport with native path output, avoiding personal GraphQL reads to resolve numeric PRs.
 
 ### Maintenance
 

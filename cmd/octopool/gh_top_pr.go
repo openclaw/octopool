@@ -100,13 +100,17 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 			return ghDelegated()
 		}
 		accept := "application/vnd.github.v3.diff"
-		if opts.patch {
+		nameOnly := opts.read.values["--name-only"].boolean
+		if opts.patch && !nameOnly {
 			accept = "application/vnd.github.v3.patch"
 		}
 		request := ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "pulls", number),
 			headers: map[string]string{"accept": accept},
+		}
+		if nameOnly {
+			return ghCompleted(relayPRDiffNames(ctx, stdout, request))
 		}
 		return ghCompleted(relayTop(ctx, stdout, request, ghTopOptions{}, nil))
 	case "checks":
