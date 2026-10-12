@@ -31,7 +31,8 @@ import { cacheResponseEligible } from "./cache-policy";
 import { projectRunListItem, runViewListLookup } from "./run-view-superset";
 import { startOwnedCacheFill, type CacheFillOutcome, type OwnedCacheFill } from "./cache-fill";
 import { scheduleCacheRefresh, supportsStaleWhileRevalidate, withinSWRWindow } from "./cache-swr";
-import { insertAudit, loadIdentities, loadPoolPolicy } from "./db";
+import { insertAudit, scheduleRelayAudit, loadIdentities, loadPoolPolicy } from "./db";
+import { relayPhase, relayPhasePromise, relayTiming, withRelayTiming } from "./relay-timing";
 import { callGitHub, callPublicGitHub, GitHubTransportError, probeGitHubLog } from "./github";
 import { githubToken, githubRepositoryToken, IdentityCredentialError } from "./github-auth";
 import { graphQLReadCacheable } from "./graphql-read";
@@ -276,8 +277,9 @@ async function relayGitHubRequest(
       }
     });
     // Start outside the completed request's cancelled backend scope.
-    if (active?.deferredTerminalLog !== undefined) ctx.waitUntil(active.deferredTerminalLog());
-    active?.deferredCacheRefresh?.();
+    if (active?.deferredTerminalLog !== undefined)
+      ctx.waitUntil(withRelayTiming(undefined, active.deferredTerminalLog));
+    withRelayTiming(undefined, () => active?.deferredCacheRefresh?.());
     return response;
   } catch (error) {
     if (backend.signal.aborted && error === backend.signal.reason)
@@ -516,6 +518,7 @@ function readRelayCache(
 async function coalesceRelayCacheMiss(
   state: ActiveRelay,
 ): Promise<CachedGitHubResponse | undefined> {
+  using _phase = relayPhase("body_acquire");
   if (state.cacheKey === undefined) {
     return undefined;
   }
@@ -657,6 +660,7 @@ async function attemptStaleRelayCacheRevalidation(
 }
 
 async function staleRevalidationCandidates(state: ActiveRelay): Promise<RevalidationCandidate[]> {
+  using _phase = relayPhase("validator_lookup");
   const candidates: RevalidationCandidate[] = [];
   for (const candidate of staleCacheCandidates(state)) {
     // Age bounds restrict serving; old validators can still confirm the body live.
@@ -952,11 +956,13 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     if (candidates.length === 0 || attempt === identities.length) {
       break;
     }
-    const selection = await state.coordinator.selectIdentity({
-      routeKey: state.route.routeKey,
-      resource: state.route.resource,
-      candidates,
-    });
+    const selection = await relayPhasePromise("identity_select", () =>
+      state.coordinator.selectIdentity({
+        routeKey: state.route.routeKey,
+        resource: state.route.resource,
+        candidates,
+      }),
+    );
     if (selection.kind === "unavailable") {
       throw (
         state.firstCredentialError ??
@@ -1057,7 +1063,7 @@ async function recoverGitHubServerResponse(
   }
   const stale = await serveStaleRelayCache(state, "github_unavailable");
   if (stale !== undefined && identity !== undefined) {
-    state.ctx.waitUntil(state.coordinator.recordResult(coordinatorResult(state, identity, github)));
+    recordBackgroundResult(state, coordinatorResult(state, identity, github));
   }
   return stale;
 }
@@ -1066,6 +1072,7 @@ async function acquireIdentityToken(
   state: ActiveRelay,
   identity: Identity,
 ): Promise<string | undefined> {
+  using _phase = relayPhase("token");
   try {
     if (state.route.kind === "graphql_read")
       return await githubRepositoryToken(
@@ -1113,10 +1120,9 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   const cacheStatus = result.revalidated === true ? "hit" : state.cacheStatus;
   if (runJobsSupersetIncomplete(result.github, state.runJobsSuperset)) {
     if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
-      state.ctx.waitUntil(
-        state.coordinator.recordResult(
-          coordinatorResult(state, result.identity, result.github, result.rate),
-        ),
+      recordBackgroundResult(
+        state,
+        coordinatorResult(state, result.identity, result.github, result.rate),
       );
     }
     throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
@@ -1151,10 +1157,9 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     runListSupersetUnderfilled(result.github, state.runListSuperset)
   ) {
     if (result.identity !== undefined) {
-      state.ctx.waitUntil(
-        state.coordinator.recordResult(
-          coordinatorResult(state, result.identity, result.github, result.rate),
-        ),
+      recordBackgroundResult(
+        state,
+        coordinatorResult(state, result.identity, result.github, result.rate),
       );
     }
     await switchToExactRunList(state);
@@ -1202,27 +1207,27 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   // Successful log downloads have already passed the response body cap. Keep
   // the exact served response for publication, and capture latency before proof.
   if (state.terminalLogProofDeferred && clientResponse.status === 200) {
+    const timing = relayTiming();
     state.deferredTerminalLog = async () => {
       const proven = await proveAndPublishTerminalLog(state, clientResponse);
-      await insertAudit(state.env, {
-        ...audit,
-        cacheable: proven,
-        cacheMissReason:
-          !proven && state.maxAgeSeconds !== 0 ? "uncacheable" : (audit.cacheMissReason ?? null),
-      });
+      withRelayTiming(timing, () =>
+        scheduleRelayAudit(state.env, state.ctx, {
+          ...audit,
+          cacheable: proven,
+          cacheMissReason:
+            !proven && state.maxAgeSeconds !== 0 ? "uncacheable" : (audit.cacheMissReason ?? null),
+        }),
+      );
     };
   } else if (!state.background) {
-    background.push(insertAudit(state.env, audit));
+    scheduleRelayAudit(state.env, state.ctx, audit);
   }
   if (result.identity !== undefined && !state.paginatedIdentityRateRecorded) {
+    const identity = result.identity;
     background.push(
-      state.coordinator.recordResult(
-        coordinatorResult(
-          state,
-          result.identity,
-          result.github,
-          result.rate,
-          result.upstreamStatus,
+      withRelayTiming(undefined, () =>
+        state.coordinator.recordResult(
+          coordinatorResult(state, identity, result.github, result.rate, result.upstreamStatus),
         ),
       ),
     );
@@ -1247,6 +1252,10 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
       ...(result.leaseReason === undefined ? {} : { lease_reason: result.leaseReason }),
     },
   });
+}
+
+function recordBackgroundResult(state: ActiveRelay, result: RecordResult): void {
+  state.ctx.waitUntil(withRelayTiming(undefined, () => state.coordinator.recordResult(result)));
 }
 
 function coordinatorResult(
@@ -1337,27 +1346,25 @@ async function handleRelayError(
   assertBackendWorkActive();
   const audit = auditError(reported);
   const fallbackReason = auditFallbackReason(reported);
-  base.ctx.waitUntil(
-    insertAudit(base.env, {
-      requestId: base.requestId,
-      callerId: base.callerId,
-      callerTokenId: base.callerTokenId,
-      clientName: base.clientName,
-      pool: base.request.pool,
-      routeKey: active?.route.routeKey ?? normalizeRouteKey(base.request.method, base.request.path),
-      routeKind: active?.route.kind ?? "denied",
-      status: audit.status,
-      errorCode: audit.code,
-      ...(fallbackReason === undefined ? {} : { fallbackReason }),
-      durationMs: Date.now() - base.started,
-      cacheStatus: active?.cacheStatus ?? "unknown",
-      cacheable: active?.cacheable ?? false,
-      requestedMaxAge: base.maxAgeSeconds ?? null,
-      cacheMissReason: active?.cacheMissReason ?? null,
-      ...(active?.identity === undefined ? {} : { identityId: active.identity.id }),
-      ...(active?.identity === undefined ? {} : { backend: "github_identity" }),
-    }),
-  );
+  scheduleRelayAudit(base.env, base.ctx, {
+    requestId: base.requestId,
+    callerId: base.callerId,
+    callerTokenId: base.callerTokenId,
+    clientName: base.clientName,
+    pool: base.request.pool,
+    routeKey: active?.route.routeKey ?? normalizeRouteKey(base.request.method, base.request.path),
+    routeKind: active?.route.kind ?? "denied",
+    status: audit.status,
+    errorCode: audit.code,
+    ...(fallbackReason === undefined ? {} : { fallbackReason }),
+    durationMs: Date.now() - base.started,
+    cacheStatus: active?.cacheStatus ?? "unknown",
+    cacheable: active?.cacheable ?? false,
+    requestedMaxAge: base.maxAgeSeconds ?? null,
+    cacheMissReason: active?.cacheMissReason ?? null,
+    ...(active?.identity === undefined ? {} : { identityId: active.identity.id }),
+    ...(active?.identity === undefined ? {} : { backend: "github_identity" }),
+  });
   throw reported;
 }
 
@@ -1959,28 +1966,26 @@ async function serveCachedGitHubResponse(
   assertBackendWorkActive();
   const sanitizedCached = sanitizeGitHubResponse(params.route, params.cached);
   if (params.background !== true)
-    ctx.waitUntil(
-      insertAudit(env, {
-        requestId: params.requestId,
-        callerId: params.callerId,
-        callerTokenId: params.callerTokenId,
-        clientName: params.clientName,
-        pool: params.pool,
-        routeKey: params.route.routeKey,
-        routeKind: params.route.kind,
-        status: params.cached.status,
-        durationMs: Date.now() - params.started,
-        ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
-        cacheStatus: params.cacheStatus,
-        cacheable: true,
-        requestedMaxAge: params.maxAgeSeconds ?? null,
-        ...(params.staleReason === "stale_while_revalidate"
-          ? { fallbackReason: params.staleReason }
-          : {}),
-        ...(params.fallbackReason === undefined ? {} : { fallbackReason: params.fallbackReason }),
-        ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
-      }),
-    );
+    scheduleRelayAudit(env, ctx, {
+      requestId: params.requestId,
+      callerId: params.callerId,
+      callerTokenId: params.callerTokenId,
+      clientName: params.clientName,
+      pool: params.pool,
+      routeKey: params.route.routeKey,
+      routeKind: params.route.kind,
+      status: params.cached.status,
+      durationMs: Date.now() - params.started,
+      ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
+      cacheStatus: params.cacheStatus,
+      cacheable: true,
+      requestedMaxAge: params.maxAgeSeconds ?? null,
+      ...(params.staleReason === "stale_while_revalidate"
+        ? { fallbackReason: params.staleReason }
+        : {}),
+      ...(params.fallbackReason === undefined ? {} : { fallbackReason: params.fallbackReason }),
+      ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
+    });
   return jsonResponse({
     status: sanitizedCached.status,
     headers: sanitizedCached.headers,
@@ -2059,6 +2064,7 @@ async function publishTerminalLogCache(
   key: string,
   response: GitHubRelayResponse,
 ): Promise<void> {
+  using _phase = relayPhase("body_publish");
   try {
     await writeTerminalLogCache(env, key, response);
   } catch (error) {
@@ -2138,7 +2144,7 @@ async function revalidateCachedTerminalLog(
   }
   if (probe.kind === "exists") {
     await publishTerminalLogCache(state.env, key, cached);
-    state.ctx.waitUntil(state.coordinator.recordResult(coordinatorResult(state, identity, probe)));
+    recordBackgroundResult(state, coordinatorResult(state, identity, probe));
     return serveCachedGitHubResponse(
       state.env,
       state.ctx,
@@ -2373,6 +2379,7 @@ async function selectIdentity(
   coordinator: DurableObjectStub<PoolCoordinator>,
   request: SelectionRequest,
 ) {
+  using _phase = relayPhase("identity_select");
   const selection = await coordinator.selectIdentity(request);
   if (selection.kind === "unavailable") {
     throw new HttpError(503, "identities_cooling_down", "All identity candidates are cooling down");

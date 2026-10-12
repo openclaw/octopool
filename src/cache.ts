@@ -1,3 +1,4 @@
+import { relayPhase, relayTiming } from "./relay-timing";
 import {
   CACHE_PUBLICATION_EPOCH,
   bodyPublicationResource,
@@ -193,6 +194,7 @@ export async function readGitHubCacheWithSource(
   sharedOnly = false,
   onMiss?: CacheMissObserver,
 ): Promise<GitHubCacheRead | undefined> {
+  using _phase = relayPhase("cache_lookup");
   if (maxAgeSeconds === 0) return undefined;
   const edge = sharedOnly ? undefined : await readEdgeGitHubCache(cacheKey, maxAgeSeconds, onMiss);
   if (edge !== undefined) {
@@ -225,6 +227,7 @@ export async function readGitHubCacheWithSource(
   if (ctx !== undefined) {
     ctx.waitUntil(writeEdgeCachedResponse(cacheKey, cached));
   }
+  relayTiming()?.cacheHit("shared");
   return { cached, source: "shared" };
 }
 
@@ -235,6 +238,7 @@ export async function readRunListCacheCandidates(
   runId: number,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse[]> {
+  using _phase = relayPhase("cache_lookup");
   if (maxAgeSeconds === 0) return [];
   const rows = await env.DB.prepare(queries.readRunListCacheCandidates)
     .bind(
@@ -268,6 +272,7 @@ export async function readEdgeGitHubCache(
   maxAgeSeconds?: number,
   onMiss?: CacheMissObserver,
 ): Promise<CachedGitHubResponse | undefined> {
+  using _phase = relayPhase("cache_lookup");
   if (maxAgeSeconds === 0) return undefined;
   const edge = await readEdgeJSON<CachedGitHubResponse & { protocol_epoch: string }>(
     EDGE_CACHE_NAMESPACE,
@@ -285,6 +290,7 @@ export async function readEdgeGitHubCache(
     if (freshCachedResponse(edge)) {
       if (withinRequestedMaxAge(edge, maxAgeSeconds)) {
         const { protocol_epoch: _epoch, ...cached } = edge;
+        relayTiming()?.cacheHit("edge");
         return cached;
       }
       // Keep the still-fresh edge copy; another data center may have refilled
@@ -315,6 +321,7 @@ export async function readStaleGitHubCache(
   route: RouteInfo,
   maxAgeSeconds?: number,
 ): Promise<CachedGitHubResponse | undefined> {
+  using _phase = relayPhase("cache_lookup");
   if (maxAgeSeconds === 0 || isLandingGraphQLRoute(route) || route.kind === "graphql_read")
     return undefined;
   const row = await env.DB.prepare(queries.readGitHubCacheAny)

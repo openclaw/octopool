@@ -297,7 +297,7 @@ async function preservedHistory(beforeMaxAgeUpgrade = false) {
     env.DB.prepare("SELECT * FROM web_sessions ORDER BY session_hash").all(),
     // Audit migrations add only nullable fields to historical rows.
     env.DB.prepare(
-      `SELECT *${beforeMaxAgeUpgrade ? ", NULL AS requested_max_age, NULL AS cache_miss_reason" : ""} FROM audit_events ORDER BY request_id`,
+      `SELECT *${beforeMaxAgeUpgrade ? ", NULL AS requested_max_age, NULL AS cache_miss_reason, NULL AS timings_json" : ""} FROM audit_events ORDER BY request_id`,
     ).all(),
     env.DB.prepare("SELECT * FROM caller_tokens WHERE id LIKE 'other-%' ORDER BY id").all(),
     env.DB.prepare(

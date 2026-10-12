@@ -1,4 +1,5 @@
 import { cachedConfigLookup } from "./config-cache";
+import { relayTiming, relayPhasePromise, withRelayTiming } from "./relay-timing";
 import type { CacheMissReason } from "./cache";
 
 function uncachedLookup<T>(_key: string, load: () => Promise<T>): Promise<T> {
@@ -27,13 +28,15 @@ export async function ensurePool(env: Env, pool: string): Promise<void> {
 }
 
 export async function loadPoolPolicy(env: Env, pool: string): Promise<PoolPolicy | null> {
-  return cachedConfigLookup(`policy:${pool}`, async () => {
-    const row = await env.DB.prepare(queries.getPoolPolicy).bind(pool).first<PoolRow>();
-    if (row === null) {
-      return null;
-    }
-    return parsePolicy(row.policy_json, env.DEFAULT_ALLOWED_OWNERS);
-  });
+  return relayPhasePromise("pool_policy", () =>
+    cachedConfigLookup(`policy:${pool}`, async () => {
+      const row = await env.DB.prepare(queries.getPoolPolicy).bind(pool).first<PoolRow>();
+      if (row === null) {
+        return null;
+      }
+      return parsePolicy(row.policy_json, env.DEFAULT_ALLOWED_OWNERS);
+    }),
+  );
 }
 
 export async function loadIdentities(
@@ -44,7 +47,10 @@ export async function loadIdentities(
   // identity is still active after a 304) must not serve from the config cache.
   options: { fresh?: boolean } = {},
 ): Promise<Identity[]> {
-  const lookup = options.fresh === true ? uncachedLookup : cachedConfigLookup;
+  const lookup = <T>(key: string, load: () => Promise<T>) =>
+    relayPhasePromise("identity_eligibility", () =>
+      (options.fresh === true ? uncachedLookup : cachedConfigLookup)(key, load),
+    );
   if (route.owner === undefined) {
     return lookup(`identities:${pool}:*`, async () => {
       const rows = await env.DB.prepare(queries.listActiveIdentitiesForPool)
@@ -95,6 +101,7 @@ export async function insertAudit(
     coalesced?: boolean;
     requestedMaxAge?: number | null;
     cacheMissReason?: CacheMissReason | null;
+    timingsJSON?: string;
   },
 ): Promise<void> {
   await env.DB.prepare(queries.insertAudit)
@@ -117,8 +124,30 @@ export async function insertAudit(
       event.coalesced === true ? 1 : 0,
       event.requestedMaxAge ?? null,
       event.cacheMissReason ?? null,
+      event.timingsJSON ?? null,
     )
     .run();
+}
+
+// Register the existing background insert only after response encoding and
+// foreground cleanup, so the audit and outer header share one frozen snapshot.
+export function scheduleRelayAudit(
+  env: Env,
+  ctx: ExecutionContext,
+  event: Parameters<typeof insertAudit>[1],
+): void {
+  const timing = relayTiming();
+  const insert = () =>
+    withRelayTiming(undefined, () =>
+      ctx.waitUntil(
+        insertAudit(env, {
+          ...event,
+          ...(timing?.json === undefined ? {} : { timingsJSON: timing.json }),
+        }),
+      ),
+    );
+  if (timing === undefined) insert();
+  else timing.onReady(insert);
 }
 
 export async function pruneOldAuditEvents(env: Env, limit = 500): Promise<number> {

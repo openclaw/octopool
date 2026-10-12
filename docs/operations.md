@@ -188,6 +188,108 @@ Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
 ## Migrations
 
+### Relay phase timing
+
+Apply the additive `0025_audit_timings.sql` migration before running the timing-enabled
+Worker. It adds nullable `audit_events.timings_json TEXT`; existing rows remain `NULL`,
+and older Workers can still insert rows. No backfill is needed.
+
+`wrangler.jsonc` enables Workers traces with a head sampling rate of `0.2`; the existing
+log settings are unchanged. Only the authoritative Worker runs relay authentication,
+cache, admission, and publication. The public proxy forwards requests and responses,
+including `Server-Timing`, so its config is unchanged. The timings exclude the proxy
+hop and caller/network latency. Use native traces to inspect D1 serving regions,
+Worker-to-DO transport, and D1/SQLite operations inside each DO.
+
+Every relay HTTP response has an outer `Server-Timing` header such as
+`response_ready;dur=42, auth;dur=5, rewrite_policy;dur=2, ...`. These metrics are never
+added to the forwarded GitHub headers or the JSON envelope. Existing audited paths
+persist the same snapshot as version 1 JSON; requests rejected before an audit context
+exists still have the header but do not create new audit rows.
+
+`response_ready_ms` is elapsed time from authoritative Worker relay entry through
+response encoding, security headers, and foreground cleanup. It is measured directly,
+**never by summing phases**. Existing `duration_ms` retains its earlier capture point.
+The audit INSERT remains background `waitUntil` work, registered after the snapshot is
+frozen; audit completion, successful quota feedback, admission release, deferred log
+proofs, and stale-while-revalidate refreshes are excluded. Deferred log audits retain
+the original response snapshot even when their proof completes later.
+
+`phases_ms` contains all the following keys (zero for skipped or sub-clock phases).
+Durations are inclusive: `auth` includes rewrite-policy and membership work;
+`public_guard` includes probes and proof publication; acquisition can include admission
+and cache rechecks; publication includes renewal, storage, edge warming, and completion.
+Different phases can overlap. Repeated calls accumulate elapsed time, with overlapping
+or nested calls to the **same** phase counted once. `phase_calls` separately counts
+entries, including unsuccessful attempts and early returns.
+
+| Phase                  | Measured work                                                     |
+| ---------------------- | ----------------------------------------------------------------- |
+| `auth`                 | Caller authentication, policy callback, and membership validation |
+| `rewrite_policy`       | Authoritative policy lookup, decode, and compilation              |
+| `membership`           | Membership config-cache lookup and any refresh                    |
+| `pool_policy`          | Pool policy config-cache lookup/load and parsing                  |
+| `cache_lookup`         | Fresh/stale body cache reads, including R2 log reads              |
+| `identity_eligibility` | Identity config lookups and authoritative fresh identity queries  |
+| `admission`            | Existing backend admission waits                                  |
+| `body_acquire`         | Body ownership acquisition/coalescing and rechecks                |
+| `validator_lookup`     | Stored revalidation candidate lookup and selection                |
+| `anonymous_fetch`      | Token-free API/web resource attempts through body decode          |
+| `public_guard`         | Public visibility proof validation, probe, and publication        |
+| `identity_select`      | Coordinator identity selection                                    |
+| `token`                | Local PAT lookup or App credential acquisition                    |
+| `pooled_fetch`         | Credentialed resource fetch through body decode                   |
+| `proof_publish`        | Owned public-proof publication protocol                           |
+| `body_publish`         | Owned body publication protocol or foreground R2 log publication  |
+| `response_encode`      | Outer JSON response serialization/construction                    |
+| `github_headers`       | Outbound GitHub fetch attempts through response headers           |
+| `github_body`          | Capped API/web resource body reads, separately from headers       |
+
+`d1_ops` counts Worker-issued D1 execution calls (`first`, `all`, `run`, `raw`, or one
+`batch` invocation), including failures and retries. Preparing/binding SQL does not count.
+`do_calls` counts Worker-issued RPC/fetch invocations; merely obtaining a stub does not
+count. These are boundary-call counts: **D1 operations inside a DO are not added to
+`d1_ops`**; use native traces for that breakdown. `github_fetches` counts actual outbound
+egress attempts, including visibility probes, membership refreshes, redirects, and token
+exchanges. It is not restricted to the final resource attempt. Counts stop at response
+readiness, and explicitly detached background work does not borrow the request timer.
+
+`config_cache_hits` gives settled-hit counts for `caller`, `membership`, `policy`, and
+`identities`; `config_cache_pending_hits` separately counts reuse of in-request pending
+loads. A positive count is the corresponding hit flag. `cache_hits` counts successful
+fresh body lookups from `edge` or `shared` (D1), plus `r2` log lookups, including repeated
+rechecks; these are lookup observations, not a guarantee that the entry was ultimately
+served. No token hashes, SQL, URLs, repository keys, or credential values are retained.
+
+Instrumentation adds synchronous clock/counter work and promise completion observers,
+with no new foreground awaits or I/O. It uses `Date.now()`: Workers clocks advance on I/O,
+so CPU-only phases can legitimately report zero. These are latency measurements, not
+CPU profiles; small differences below the clock resolution are not meaningful.
+
+Query the JSON with SQLite JSON functions, filtering by version and cache outcome:
+
+```sql
+SELECT request_id, cache_status, duration_ms,
+       json_extract(timings_json, '$.response_ready_ms') AS ready_ms,
+       json_extract(timings_json, '$.phases_ms.pooled_fetch') AS pooled_ms,
+       json_extract(timings_json, '$.phases_ms.body_publish') AS publish_ms,
+       json_extract(timings_json, '$.d1_ops') AS worker_d1_ops,
+       json_extract(timings_json, '$.do_calls') AS do_calls,
+       json_extract(timings_json, '$.github_fetches') AS github_attempts
+FROM audit_events
+WHERE json_extract(timings_json, '$.version') = 1
+ORDER BY created_at DESC LIMIT 100;
+
+SELECT cache_status, count(*) AS requests,
+       avg(json_extract(timings_json, '$.response_ready_ms')) AS avg_ready_ms,
+       avg(json_extract(timings_json, '$.phases_ms.public_guard')) AS avg_guard_ms,
+       sum(json_extract(timings_json, '$.config_cache_hits.caller') > 0) AS warm_callers
+FROM audit_events
+WHERE created_at >= datetime('now', '-1 hour')
+  AND json_extract(timings_json, '$.version') = 1
+GROUP BY cache_status;
+```
+
 ### Cache publication upgrade and restore
 
 Apply additive `0020_cache_publication.sql` after `0019` and before routing traffic to

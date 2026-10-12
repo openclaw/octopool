@@ -214,7 +214,7 @@ describe("exact run views from indexed fresh REST lists", () => {
     await restoreD1Baseline(env.DB, []);
     await applyD1Migrations(
       env.DB,
-      migrations.filter(({ name }) => name < "0024_run_list_items.sql"),
+      migrations.filter(({ name }) => name !== "0024_run_list_items.sql"),
     );
     await setup();
     await relay(list);

@@ -1,3 +1,4 @@
+import { relayPhase, relayPhasePromise } from "./relay-timing";
 import { encodeOpaqueBytes } from "./encoding";
 import type { GitHubEgressEnv } from "./github-egress";
 import { landingGraphQLRequest } from "./github-landing";
@@ -71,6 +72,7 @@ async function callGitHubAPI(
   route: RouteInfo,
   token?: string,
 ): Promise<GitHubRelayResponse> {
+  using _phase = relayPhase(token === undefined ? "anonymous_fetch" : "pooled_fetch");
   const landing =
     request.graphql === undefined
       ? landingGraphQLRequest(request)
@@ -95,7 +97,9 @@ async function callGitHubAPI(
   });
   if (response.status >= 300 && response.status < 400 && response.status !== 304) {
     if (route.logs) {
-      return fetchGitHubLogRedirect(env, response, responseCapBytes(env), timeoutMs);
+      return relayPhasePromise(token === undefined ? "anonymous_fetch" : "pooled_fetch", () =>
+        fetchGitHubLogRedirect(env, response, responseCapBytes(env), timeoutMs),
+      );
     }
     await cancelResponseBody(response);
     throw new HttpError(502, "github_redirect_denied", "GitHub returned a redirect");
@@ -261,6 +265,7 @@ async function fetchGitHubResponse(
 }
 
 async function readGitHubBody(response: Response, capBytes: number): Promise<Uint8Array> {
+  using _phase = relayPhase("github_body");
   const unread = !response.bodyUsed && !response.body?.locked;
   try {
     return await readBodyCapped(

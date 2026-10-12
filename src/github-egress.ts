@@ -1,4 +1,5 @@
 import { HttpError } from "./http";
+import { relayPhasePromise, relayTiming } from "./relay-timing";
 import { bytesToBase64URL } from "./encoding";
 import { admitBackendWork, backendWorkSignal, rethrowBackendWorkError } from "./backend-work";
 import {
@@ -91,19 +92,22 @@ export function withGitHubEgress(env: Env, rules: readonly StringRewriteRule[]):
       }
       await admitBackendWork();
       const backendSignal = backendWorkSignal();
-      return fetch(request.url, {
-        ...init,
-        ...(backendSignal === undefined
-          ? {}
-          : {
-              signal:
-                init?.signal === undefined || init.signal === null
-                  ? backendSignal
-                  : AbortSignal.any([init.signal, backendSignal]),
-            }),
-        headers: Object.fromEntries(request.headers),
-        redirect: "manual",
-      });
+      relayTiming()?.count("github_fetches");
+      return relayPhasePromise("github_headers", () =>
+        fetch(request.url, {
+          ...init,
+          ...(backendSignal === undefined
+            ? {}
+            : {
+                signal:
+                  init?.signal === undefined || init.signal === null
+                    ? backendSignal
+                    : AbortSignal.any([init.signal, backendSignal]),
+              }),
+          headers: Object.fromEntries(request.headers),
+          redirect: "manual",
+        }),
+      );
     },
   });
   return Object.freeze({ ...env, githubEgress });

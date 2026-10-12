@@ -1,3 +1,4 @@
+import { relayPhase } from "./relay-timing";
 import { HttpError } from "./http";
 import {
   policyCoordinatorStub,
@@ -7,6 +8,7 @@ import {
 import { compileStringRewriteRules, invalidStringRewritePolicy } from "./string-rewrites";
 
 export async function loadStringRewritePolicy(env: Env) {
+  using _phase = relayPhase("rewrite_policy");
   try {
     const policy = await (await getStringRewritePolicy(env)).json<StringRewritePolicy>();
     // RE2 instances cannot cross the DO boundary. Compile only this request's
