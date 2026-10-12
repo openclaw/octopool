@@ -19,9 +19,11 @@ import {
   githubCacheRevalidationHeaders,
   githubCacheKey,
   readGitHubCache,
+  createGitHubCacheCandidateReader,
   readRunListCacheCandidates,
   cachedResponseStillFresh,
   readStaleGitHubCache,
+  readStaleGitHubCacheCandidates,
   requestCacheMaxAgeSeconds,
   shouldUseGitHubCache,
   writeGitHubCache,
@@ -662,9 +664,13 @@ async function attemptStaleRelayCacheRevalidation(
 async function staleRevalidationCandidates(state: ActiveRelay): Promise<RevalidationCandidate[]> {
   using _phase = relayPhase("validator_lookup");
   const candidates: RevalidationCandidate[] = [];
-  for (const candidate of staleCacheCandidates(state)) {
-    // Age bounds restrict serving; old validators can still confirm the body live.
-    const cached = await readStaleGitHubCache(state.env, candidate.cacheKey, state.route);
+  // Age bounds restrict serving; old validators can still confirm the body live.
+  const cachedCandidates = await readStaleGitHubCacheCandidates(
+    state.env,
+    staleCacheCandidates(state).map((candidate) => candidate.cacheKey),
+    state.route,
+  );
+  for (const cached of cachedCandidates) {
     if (cached === undefined) {
       continue;
     }
@@ -2340,16 +2346,34 @@ async function serveFreshIdentityCache(
   if (!state.cacheEnabled || state.maxAgeSeconds === 0) {
     return undefined;
   }
-  for (const identity of identities) {
-    const cacheKey = await githubCacheKey(
-      state.request.pool,
-      state.cacheRequest,
-      state.route,
-      identity,
-    );
+  const candidates = new Map(
+    await Promise.all(
+      identities.map(
+        async (identity) =>
+          [
+            await githubCacheKey(state.request.pool, state.cacheRequest, state.route, identity),
+            identity,
+          ] as const,
+      ),
+    ),
+  );
+  const readCandidate = createGitHubCacheCandidateReader(
+    state.env,
+    [...candidates.keys()],
+    state.ctx,
+    state.maxAgeSeconds,
+    (reason) => recordCacheMiss(state, reason),
+  );
+  for (const [cacheKey, identity] of candidates) {
     rememberIdentityCacheKey(state, cacheKey, identity);
-    const cached = await readCacheEntry(state, cacheKey, identity);
+    const cached = await readCandidate(cacheKey);
     if (cached === undefined) {
+      continue;
+    }
+    if (
+      !(await cachedResponseAvailable(state.env, state.request.pool, state.route, cached, identity))
+    ) {
+      recordCacheMiss(state, "unusable");
       continue;
     }
     state.identity = identity;

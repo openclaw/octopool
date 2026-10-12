@@ -1,4 +1,4 @@
-import { relayPhase, relayTiming } from "./relay-timing";
+import { relayPhase, relayPhasePromise, relayTiming } from "./relay-timing";
 import {
   CACHE_PUBLICATION_EPOCH,
   bodyPublicationResource,
@@ -203,6 +203,77 @@ export async function readGitHubCacheWithSource(
   const row = await env.DB.prepare(queries.readGitHubCache)
     .bind(cacheKey)
     .first<CacheRow & { publication_epoch: string }>();
+  return sharedGitHubCacheResponse(row, cacheKey, ctx, maxAgeSeconds, onMiss);
+}
+
+// This snapshot belongs to one candidate pass only. A later pass (especially
+// after publication acquisition) must observe storage again.
+export function createGitHubCacheCandidateReader(
+  env: Env,
+  cacheKeys: string[],
+  ctx?: ExecutionContext,
+  maxAgeSeconds?: number,
+  onMiss?: CacheMissObserver,
+): (cacheKey: string) => Promise<CachedGitHubResponse | undefined> {
+  const keys = [...new Set(cacheKeys)];
+  const edges = new Map<
+    string,
+    {
+      cached: CachedGitHubResponse | undefined;
+      misses: CacheMissReason[];
+    }
+  >();
+  const probe = async (key: string) => {
+    const misses: CacheMissReason[] = [];
+    const cached = await probeEdgeGitHubCache(key, maxAgeSeconds, (reason) => misses.push(reason));
+    const entry = { cached, misses };
+    edges.set(key, entry);
+    return entry;
+  };
+  let rows: Map<string, (CacheRow & { publication_epoch: string }) | null> | undefined;
+  return async (key) => {
+    if (maxAgeSeconds === 0) return undefined;
+    const edge = edges.get(key) ?? (await probe(key));
+    for (const reason of edge.misses) onMiss?.(reason);
+    if (edge.cached !== undefined) {
+      // Eligibility checks for an earlier candidate may have crossed this expiry.
+      if (!cachedResponseStillFresh(edge.cached, maxAgeSeconds))
+        return readGitHubCache(env, key, ctx, maxAgeSeconds, onMiss);
+      relayTiming()?.cacheHit("edge");
+      return edge.cached;
+    }
+    if (rows === undefined) {
+      // Probe every key's edge before including it in the single D1 fallback.
+      // Buffer observations so unvisited candidates cannot change miss reasons.
+      await Promise.all(keys.filter((candidate) => !edges.has(candidate)).map(probe));
+      const missing = keys.filter((candidate) => edges.get(candidate)!.cached === undefined);
+      const results = await relayPhasePromise("cache_lookup", () =>
+        env.DB.batch<CacheRow & { publication_epoch: string }>(
+          missing.map((candidate) => env.DB.prepare(queries.readGitHubCache).bind(candidate)),
+        ),
+      );
+      rows = new Map(
+        missing.map((candidate, index) => [candidate, results[index]!.results[0] ?? null]),
+      );
+    }
+    const result = sharedGitHubCacheResponse(
+      rows.get(key) ?? null,
+      key,
+      ctx,
+      maxAgeSeconds,
+      onMiss,
+    );
+    return result?.cached;
+  };
+}
+
+function sharedGitHubCacheResponse(
+  row: (CacheRow & { publication_epoch: string }) | null,
+  cacheKey: string,
+  ctx?: ExecutionContext,
+  maxAgeSeconds?: number,
+  onMiss?: CacheMissObserver,
+): GitHubCacheRead | undefined {
   if (row === null) {
     onMiss?.("absent");
     return undefined;
@@ -272,6 +343,16 @@ export async function readEdgeGitHubCache(
   maxAgeSeconds?: number,
   onMiss?: CacheMissObserver,
 ): Promise<CachedGitHubResponse | undefined> {
+  const cached = await probeEdgeGitHubCache(cacheKey, maxAgeSeconds, onMiss);
+  if (cached !== undefined) relayTiming()?.cacheHit("edge");
+  return cached;
+}
+
+async function probeEdgeGitHubCache(
+  cacheKey: string,
+  maxAgeSeconds?: number,
+  onMiss?: CacheMissObserver,
+): Promise<CachedGitHubResponse | undefined> {
   using _phase = relayPhase("cache_lookup");
   if (maxAgeSeconds === 0) return undefined;
   const edge = await readEdgeJSON<CachedGitHubResponse & { protocol_epoch: string }>(
@@ -290,7 +371,6 @@ export async function readEdgeGitHubCache(
     if (freshCachedResponse(edge)) {
       if (withinRequestedMaxAge(edge, maxAgeSeconds)) {
         const { protocol_epoch: _epoch, ...cached } = edge;
-        relayTiming()?.cacheHit("edge");
         return cached;
       }
       // Keep the still-fresh edge copy; another data center may have refilled
@@ -327,6 +407,43 @@ export async function readStaleGitHubCache(
   const row = await env.DB.prepare(queries.readGitHubCacheAny)
     .bind(cacheKey, CACHE_PUBLICATION_EPOCH)
     .first<CacheRow>();
+  return staleGitHubCacheResponse(row, route, maxAgeSeconds);
+}
+
+export async function readStaleGitHubCacheCandidates(
+  env: Env,
+  cacheKeys: string[],
+  route: RouteInfo,
+  maxAgeSeconds?: number,
+): Promise<(CachedGitHubResponse | undefined)[]> {
+  using _phase = relayPhase("cache_lookup");
+  if (
+    cacheKeys.length === 0 ||
+    maxAgeSeconds === 0 ||
+    isLandingGraphQLRoute(route) ||
+    route.kind === "graphql_read"
+  )
+    return cacheKeys.map(() => undefined);
+  const keys = [...new Set(cacheKeys)];
+  const results = await env.DB.batch<CacheRow>(
+    keys.map((key) =>
+      env.DB.prepare(queries.readGitHubCacheAny).bind(key, CACHE_PUBLICATION_EPOCH),
+    ),
+  );
+  const cached = new Map(
+    keys.map((key, index) => [
+      key,
+      staleGitHubCacheResponse(results[index]!.results[0] ?? null, route, maxAgeSeconds),
+    ]),
+  );
+  return cacheKeys.map((key) => cached.get(key));
+}
+
+function staleGitHubCacheResponse(
+  row: CacheRow | null,
+  route: RouteInfo,
+  maxAgeSeconds?: number,
+): CachedGitHubResponse | undefined {
   if (
     row === null ||
     !cacheResponseEligible(route.kind, row.status) ||

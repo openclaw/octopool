@@ -4,6 +4,7 @@
 
 ### Maintenance
 
+- Batch relay identity-cache fallbacks and validator reads to reduce D1 round trips while preserving candidate order, eligibility checks, and publication rereads.
 - Add sampled Worker traces, outer relay `Server-Timing`, and versioned audit phase timings and operation counts for production latency measurement.
 
 ## 0.9.8 - 2026-10-11
