@@ -69,6 +69,14 @@ quota cooldown does not invalidate an otherwise eligible cached body. This preve
 warm pooled response from needlessly hitting GitHub again just because the shared
 anonymous key is empty.
 
+Each identity-candidate pass probes the edge first and batches the remaining keyed
+D1 reads in one call. Candidates retain their original preference order: an earlier
+D1 hit wins over a later edge hit. Validator candidates likewise use one D1 batch,
+retaining anonymous-first preference and the existing stale/epoch predicates. Duplicate
+keys share reads only within that pass; later passes and post-acquisition rechecks read
+storage again. Current identity eligibility and public-visibility checks remain separate
+and authoritative. Forced-fresh requests skip fresh body reads but still batch validators.
+
 ### Public PR landing snapshots
 
 The fixed `pr-ci-summary-v1`, `pr-ci-rollup-v1`, `pr-merge-snapshot-v1`,

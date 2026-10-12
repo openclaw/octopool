@@ -254,6 +254,11 @@ egress attempts, including visibility probes, membership refreshes, redirects, a
 exchanges. It is not restricted to the final resource attempt. Counts stop at response
 readiness, and explicitly detached background work does not borrow the request timer.
 
+Identity-candidate D1 fallbacks and validator reads use `batch`, so their `d1_ops`
+count is one per batch, not one per candidate statement. The identity pass records
+one `cache_lookup` per edge probe and one for its D1 batch; validators record one
+for the whole batch. Later passes and post-acquisition rereads remain separate.
+
 `config_cache_hits` gives settled-hit counts for `caller`, `membership`, `policy`, and
 `identities`; `config_cache_pending_hits` separately counts reuse of in-request pending
 loads. A positive count is the corresponding hit flag. `cache_hits` counts successful
