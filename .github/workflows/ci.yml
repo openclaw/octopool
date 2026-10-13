@@ -26,7 +26,8 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
+          cache-dependency-path: go.sum
       - name: Test native Windows staging and filesystem protection
         run: go test -v ./cmd/octopool -run '^TestReleaseAssets(Windows.*|Filename(Validation|SourceDirectories)|StagingFilesystemSyntax|LimitsAndIdentity|BoundedCopyFailures|SnapshotWriteCloseAndCancellationCleanup|ExactBasenameAndTextBudget)$' -count=1
       - name: Verify native Windows jq output support
@@ -38,22 +39,22 @@ jobs:
       - name: Vet native Windows Go code
         run: go vet ./...
 
-  check:
-    name: Check
+  worker:
+    name: Worker checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            package.json
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -67,6 +68,33 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Verify jq test dependency
+        run: jq --version
+
+      - name: Check Worker
+        run: pnpm check:worker
+
+      - name: CLI to Worker release smoke
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm test:e2e:cli-worker
+
+      - name: Build docs site
+        run: pnpm docs:site
+
+  go:
+    name: Linux Go suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Verify jq test dependency
         run: jq --version
@@ -91,15 +119,26 @@ jobs:
             fi
           fi
 
-      - name: Check
-        run: pnpm check
+      - name: Test and vet Go
+        run: |
+          go test ./...
+          go vet ./...
 
-      - name: CLI to Worker release smoke
-        if: github.event_name == 'workflow_dispatch'
-        run: pnpm test:e2e:cli-worker
-
-      - name: Build docs site
-        run: pnpm docs:site
+  snapshot:
+    name: Release snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Snapshot release build
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
@@ -107,3 +146,22 @@ jobs:
           distribution: goreleaser
           version: "v2.18.2"
           args: release --snapshot --clean --skip=publish
+
+  check:
+    name: Check
+    if: always()
+    needs: [worker, go, snapshot, release-asset-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require every check
+        env:
+          WORKER_RESULT: ${{ needs.worker.result }}
+          GO_RESULT: ${{ needs.go.result }}
+          SNAPSHOT_RESULT: ${{ needs.snapshot.result }}
+          WINDOWS_RESULT: ${{ needs.release-asset-windows.result }}
+        run: |
+          test "$WORKER_RESULT" = success
+          test "$GO_RESULT" = success
+          test "$SNAPSHOT_RESULT" = success
+          test "$WINDOWS_RESULT" = success
