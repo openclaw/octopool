@@ -856,8 +856,14 @@ and never reconfigure authentication as a diagnostic shortcut.
 
 The main Worker has an hourly cron trigger at minute 17. It deletes bounded batches of
 cache entries after each entry's route-specific stale deadline and audit rows older than
-30 days; this retains every configured stale window and the full supported stats window
-without unbounded D1 growth.
+30 days; this retains every configured stale window and the full supported stats window.
+
+Each table emits an `octopool.maintenance` log with deleted rows, completed batches,
+duration, failure status, and `budget_exhausted`. The budget is 20 batches of 500 rows
+per table per run. A full final batch means cleanup used all available capacity;
+check expired-row counts and oldest timestamps before concluding a backlog remains.
+Repeated exhausted budgets require comparing arrival and cleanup rates. Failures retain
+the existing fail-fast behavior, so a failed table prevents later tables from running.
 
 `GET /v1/pools/<pool>/stats?since=24h` returns pool-, caller-, and client-specific cache stats,
 plus bounded backend-by-route and local-fallback-reason aggregates.

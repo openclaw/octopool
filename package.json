@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "wrangler types && tsc --noEmit -p tsconfig.src.json && tsc --noEmit -p tsconfig.test.json",
-    "check": "pnpm routes:check && pnpm sql:check && pnpm format:check && pnpm lint && pnpm test && pnpm test:e2e && pnpm build && go test ./... && go vet ./...",
+    "check": "pnpm check:worker && pnpm check:go",
+    "check:worker": "pnpm routes:check && pnpm sql:check && pnpm format:check && pnpm lint && pnpm test && pnpm test:e2e && pnpm build",
+    "check:go": "go test ./... && go vet ./...",
     "deploy": "pnpm run deploy:authoritative && pnpm run deploy:public-proxy",
     "deploy:authoritative": "wrangler deploy",
     "deploy:public-proxy": "wrangler deploy --config wrangler.public-proxy.jsonc",
