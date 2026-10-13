@@ -138,7 +138,7 @@ function maintenanceEnv(prune: (table: Table) => number): { env: Env; calls: Tab
               return prune(table);
             };
             return {
-              all: async () => ({ results: new Array(run()) }),
+              all: async () => ({ results: Array.from({ length: run() }) }),
               run: async () => ({ meta: { changes: run() } }),
             };
           },
