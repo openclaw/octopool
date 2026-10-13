@@ -56,24 +56,27 @@ describe("scheduled maintenance", () => {
     }
   });
 
-  it.each(TABLES)("bounds a busy %s without consuming another table's budget", async (busyTable) => {
-    const { env, calls } = maintenanceEnv((table) => (table === busyTable ? 500 : 0));
+  it.each(TABLES)(
+    "bounds a busy %s without consuming another table's budget",
+    async (busyTable) => {
+      const { env, calls } = maintenanceEnv((table) => (table === busyTable ? 500 : 0));
 
-    await runScheduledMaintenance(env);
+      await runScheduledMaintenance(env);
 
-    expect(calls.filter((table) => table === busyTable)).toHaveLength(20);
-    expect(calls).toHaveLength(23);
-    expect(console.log).toHaveBeenCalledWith(
-      expect.objectContaining({
-        table: busyTable,
-        deleted_rows: 10_000,
-        batches: 20,
-        budget_exhausted: true,
-        failed: false,
-      }),
-    );
-    expect(console.log).toHaveBeenCalledTimes(TABLES.length);
-  });
+      expect(calls.filter((table) => table === busyTable)).toHaveLength(20);
+      expect(calls).toHaveLength(23);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          table: busyTable,
+          deleted_rows: 10_000,
+          batches: 20,
+          budget_exhausted: true,
+          failed: false,
+        }),
+      );
+      expect(console.log).toHaveBeenCalledTimes(TABLES.length);
+    },
+  );
 
   it("reports a drained backlog after the first short batch", async () => {
     const counts = [500, 500, 12];

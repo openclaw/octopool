@@ -7,7 +7,9 @@ const BATCH_SIZE = 500;
 const MAX_BATCHES = 20;
 
 export async function runScheduledMaintenance(env: Env): Promise<void> {
-  await pruneTable("cache_publication_owners", () => pruneExpiredPublicationOwners(env, BATCH_SIZE));
+  await pruneTable("cache_publication_owners", () =>
+    pruneExpiredPublicationOwners(env, BATCH_SIZE),
+  );
   await pruneTable("github_public_repo_proofs", async () => {
     const result = await env.DB.prepare(queries.deleteExpiredPublicRepoProofs)
       .bind(BATCH_SIZE)
