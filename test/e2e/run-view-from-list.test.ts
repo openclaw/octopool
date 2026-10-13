@@ -269,15 +269,82 @@ describe("exact run views from indexed fresh REST lists", () => {
     expect(await memberships()).toEqual(before);
   });
 
-  it("returns at most eight candidate pages for a run", async () => {
+  it("preserves candidate filters, newest-first order, and the eight-page limit", async () => {
     await setup();
-    for (let pageSize = 1; pageSize <= 9; pageSize++)
-      await relay(list, undefined, { query: { per_page: String(pageSize) } });
-    expect(await memberships()).toHaveLength(9);
-    const rows = await env.DB.prepare(queries.readRunListCacheCandidates)
-      .bind(POOL, repo, 42, "publication-v1", "{}")
-      .all();
-    expect(rows.results).toHaveLength(8);
+    await env.DB.prepare(
+      "INSERT INTO pools (id, name, policy_json) VALUES ('other', 'other', '{}')",
+    ).run();
+    const candidate = (
+      key: string,
+      values: {
+        pool?: string;
+        path?: string;
+        runId?: number;
+        headers?: string;
+        epoch?: string | null;
+        created?: string;
+        expires?: string;
+        kind?: string;
+      } = {},
+    ) =>
+      env.DB.prepare(
+        `INSERT INTO github_cache_entries
+          (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,
+           status, response_headers_json, body_json, body_encoding, created_at, expires_at,
+           publication_epoch)
+         VALUES (?, ?, 'GET', ?, '{}', ?, 'run_list', ?, 200, '{}', ?, 'json', ?, ?, ?)`,
+      ).bind(
+        key,
+        values.pool ?? POOL,
+        values.path ?? list,
+        values.headers ?? "{}",
+        values.kind ?? "run_list",
+        JSON.stringify({ source: key, workflow_runs: [{ id: values.runId ?? 42 }] }),
+        values.created ?? "2001-01-01 00:00:59",
+        values.expires ?? "2999-01-01 00:00:00",
+        values.epoch === undefined ? "publication-v1" : values.epoch,
+      );
+    await env.DB.batch([
+      ...Array.from({ length: 10 }, (_, index) =>
+        candidate(`good-${index}`, {
+          created: `2001-01-01 00:00:0${Math.floor(index / 2)}`,
+          kind: index % 2 === 0 ? "run_list" : "workflow_run_list",
+        }),
+      ),
+      candidate("expired", { expires: "2000-01-01 00:00:00" }),
+      candidate("old-epoch", { epoch: "old" }),
+      candidate("null-epoch", { epoch: null }),
+      candidate("headers", { headers: '{"accept":"application/vnd.github.raw"}' }),
+      candidate("pool", { pool: "other" }),
+      candidate("repo", { path: "/repos/openclaw/other/actions/runs" }),
+      candidate("run", { runId: 43 }),
+      ...["method", "kind", "status", "encoding"].map((key) => candidate(key)),
+    ]);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE github_cache_entries SET method = 'HEAD' WHERE cache_key = 'method'"),
+      env.DB.prepare(
+        "UPDATE github_cache_entries SET route_kind = 'run_view' WHERE cache_key = 'kind'",
+      ),
+      env.DB.prepare("UPDATE github_cache_entries SET status = 404 WHERE cache_key = 'status'"),
+      env.DB.prepare(
+        "UPDATE github_cache_entries SET body_encoding = 'text' WHERE cache_key = 'encoding'",
+      ),
+    ]);
+    const previousJoin = queries.readRunListCacheCandidates.replace(
+      "\nCROSS JOIN github_cache_entries",
+      "\nJOIN github_cache_entries",
+    );
+    for (const runId of [42, 404]) {
+      const read = async (sql: string) =>
+        (await env.DB.prepare(sql).bind(POOL, repo, runId, "publication-v1", "{}").all()).results;
+      const rows = await read(queries.readRunListCacheCandidates);
+      expect(rows).toEqual(await read(previousJoin));
+      expect(rows.map((row) => JSON.parse(String(row.body_json)).source)).toEqual(
+        runId === 42
+          ? ["good-8", "good-9", "good-6", "good-7", "good-4", "good-5", "good-2", "good-3"]
+          : [],
+      );
+    }
   });
 
   it.each([[], [exactWorkflowRun(43)], [run, run]].map((runs) => ({ runs })))(
@@ -357,13 +424,27 @@ describe("exact run views from indexed fresh REST lists", () => {
     );
     await relay(list);
     expect(await memberships()).toHaveLength(100);
+    await env.DB.prepare(
+      `WITH RECURSIVE n(value) AS (VALUES(1) UNION ALL SELECT value + 1 FROM n WHERE value < 1000)
+       INSERT INTO github_cache_entries
+         (cache_key, pool_id, method, path, query_json, headers_json, route_key, route_kind,
+          status, response_headers_json, body_json, body_encoding, created_at, expires_at)
+       SELECT 'unrelated-' || value, ?, 'GET', '/repos/openclaw/other', '{}', '{}', 'repo_view',
+              'repo_view', 200, '{}', '{}', 'json', CURRENT_TIMESTAMP, '2999-01-01 00:00:00'
+       FROM n`,
+    )
+      .bind(POOL)
+      .run();
     const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${queries.readRunListCacheCandidates}`)
       .bind(POOL, repo, 42, "publication-v1", "{}")
       .all<{ detail: string }>();
-    expect(plan.results.some((row) => row.detail.includes("idx_github_run_list_item_lookup"))).toBe(
-      true,
-    );
-    expect(plan.results.some((row) => /SCAN c\b/.test(row.detail))).toBe(false);
+    const lookups = plan.results.filter(({ detail }) => /^(SEARCH|SCAN) [ic]\b/.test(detail));
+    expect(lookups.map(({ detail }) => detail)).toEqual([
+      expect.stringMatching(
+        /^SEARCH i .*idx_github_run_list_item_lookup.*pool_id=\?.*repo_path=\?.*run_id=\?/,
+      ),
+      expect.stringMatching(/^SEARCH c .*cache_key=\?/),
+    ]);
     upstream.mockImplementation(async () =>
       jsonResponse({
         workflow_runs: Array.from({ length: 101 }, (_, id) => exactWorkflowRun(id + 1)),

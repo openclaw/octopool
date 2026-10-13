@@ -102,10 +102,12 @@ WHERE pool_id = ?1 AND path = ?2 AND publication_epoch = ?3
 LIMIT 1;
 
 -- name: ReadRunListCacheCandidates :many
+-- Keep the run membership lookup outermost; a reordered join can read the whole
+-- pool through the cache's pool/route index before checking the requested run.
 SELECT c.status, c.response_headers_json, c.body_json, c.body_encoding,
        c.identity_id, c.identity_kind, c.created_at, c.expires_at, c.query_json
 FROM github_run_list_items AS i INDEXED BY idx_github_run_list_item_lookup
-JOIN github_cache_entries AS c ON c.cache_key = i.cache_key
+CROSS JOIN github_cache_entries AS c ON c.cache_key = i.cache_key
 WHERE i.pool_id = ?1 AND i.repo_path = ?2 AND i.run_id = ?3
   AND c.pool_id = ?1 AND c.publication_epoch = ?4 AND c.headers_json = ?5
   AND c.method = 'GET' AND c.route_kind IN ('run_list', 'workflow_run_list')
