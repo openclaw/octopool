@@ -1,10 +1,6 @@
 import { cachedConfigLookup } from "./config-cache";
 import { relayTiming, relayPhasePromise, withRelayTiming } from "./relay-timing";
 import type { CacheMissReason } from "./cache";
-
-function uncachedLookup<T>(_key: string, load: () => Promise<T>): Promise<T> {
-  return load();
-}
 import { defaultPolicy, parsePolicy } from "./policy";
 import { queries } from "./generated/sql";
 import type { AuditBackend, Identity, PoolPolicy, RouteInfo } from "./types";
@@ -49,7 +45,7 @@ export async function loadIdentities(
 ): Promise<Identity[]> {
   const lookup = <T>(key: string, load: () => Promise<T>) =>
     relayPhasePromise("identity_eligibility", () =>
-      (options.fresh === true ? uncachedLookup : cachedConfigLookup)(key, load),
+      options.fresh === true ? load() : cachedConfigLookup(key, load),
     );
   if (route.owner === undefined) {
     return lookup(`identities:${pool}:*`, async () => {
@@ -129,8 +125,7 @@ export async function insertAudit(
     .run();
 }
 
-// Register the existing background insert only after response encoding and
-// foreground cleanup, so the audit and outer header share one frozen snapshot.
+// Wait for the frozen response snapshot so the audit and header agree.
 export function scheduleRelayAudit(
   env: Env,
   ctx: ExecutionContext,
