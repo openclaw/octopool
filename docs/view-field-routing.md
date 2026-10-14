@@ -12,7 +12,7 @@ routes the entire export to native gh; `--jq` does not reduce the upstream field
 | `pr view`    | `mergeStateStatus`                                                                                                                                                                                                           | No GraphQL projection was wired into PR-view exports; REST `mergeable_state` is not equivalent (native `BLOCKED` versus REST `unstable`). |
 | `pr view`    | `closed`, `closingIssuesReferences`, `fullDatabaseId`, `id`, `isCrossRepository`, `latestReviews`, `milestone`, `potentialMergeCommit`, `projectCards`, `projectItems`, `reactionGroups`, `reviewDecision`, `reviewRequests` | Not admitted by `supportedPRFields`; native exports have no implemented exact projection.                                                 |
 | `pr view`    | `reviews`                                                                                                                                                                                                                    | Admitted by the table but always requests typed native fallback: private pending reviews depend on the caller.                            |
-| `pr view`    | non-null `autoMergeRequest`                                                                                                                                                                                                  | Admitted by the table, but REST lacks native `enabledAt` and `authorEmail`; previously only explicit null was supported.                  |
+| `pr view`    | non-null `autoMergeRequest`                                                                                                                                                                                                  | Admitted by the table, but REST lacks native `enabledAt` and `authorEmail`; only explicit null is supported.                              |
 | `issue view` | `blockedBy`, `blocking`, `closed`, `closedByPullRequestsReferences`, `comments`, `id`, `isPinned`, `issueType`, `parent`, `projectCards`, `projectItems`, `reactionGroups`, `stateReason`, `subIssues`, `subIssuesSummary`   | Not admitted by `supportedIssueFields`; no exact view projection implemented.                                                             |
 
 `maintainerCanModify`, `mergeable`, and `statusCheckRollup` already relay at the
@@ -46,14 +46,18 @@ arbitrary unknown strings, so subsequent samples identify the exact field.
 ## Changes and retained boundaries
 
 Issue views now support `stateReason` through live REST and native assignee
-projection. Lists retain their original field table. PR `mergeStateStatus` now reuses the existing live merge snapshot, and enabled PR `autoMergeRequest`
-uses the complete fixed pooled `pr-auto-merge-v1` GraphQL shape. Disabled
-auto-merge, mergeability, and maintainer permission keep their existing live REST
-paths. Every new projection completes before output or `--jq` evaluation.
+projection. Lists retain their original field table. PR `mergeStateStatus` now
+reuses the existing live merge snapshot. Explicitly null auto-merge, mergeability,
+and maintainer permission keep their existing live REST paths. Non-null or missing
+`auto_merge` keeps the base commit's native fallback. Every new projection
+completes before output or `--jq` evaluation.
 
 `pr-merge-snapshot-v1` lacks five native auto-merge fields, and `pr-ci-summary-v1`
-and `pr-ci-rollup-v1` cannot replace that export. The new shape is necessary for
-full native auto-merge data. No deployment or schema migration is part of this change.
+and `pr-ci-rollup-v1` cannot replace that export. Enabled auto-merge must use caller
+credentials: pooled credentials may have maintainer permissions, and the native
+`authorEmail` and `enabledBy` fields are not proven visible to every caller of a
+shared response. No pooled full auto-merge shape is admitted. No deployment or
+schema migration is part of this change.
 
 The fixed pooled merge snapshot matched native on openclaw/openclaw PRs 157854,
 171553, 171790, 171704, and 170742 on October 13. A separate comparison with native

@@ -6,6 +6,6 @@ synthetic credentials; it does not contact GitHub. `*.graphql.json` is the serve
 issue/PR node, `*.native.txt` is exact nonterminal `--json` stdout, and `*.jq.txt`
 is exact nonterminal `--jq` stdout. No output is normalized.
 
-The cases cover enabled auto-merge with user/bot/deleted actors, nullable text,
-HTML characters, multiline text, all supported issue reasons, and native assignee
-field ordering. Disabled auto-merge is covered by existing PR field tests.
+The cases cover the PR merge-state field bundle, HTML characters, all supported
+issue reasons, and native assignee field ordering. Null auto-merge and native
+fallback for enabled auto-merge are covered by existing PR field tests.

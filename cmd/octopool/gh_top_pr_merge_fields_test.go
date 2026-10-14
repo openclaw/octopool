@@ -76,7 +76,7 @@ func TestRunGHPRViewMergeFieldsFallback(t *testing.T) {
 		pr           map[string]any
 	}{
 		{"missing auto merge", "autoMergeRequest", map[string]any{}},
-		{"enabled auto merge", "autoMergeRequest", map[string]any{"auto_merge": map[string]any{"merge_method": "squash"}}},
+		{"enabled auto merge", "autoMergeRequest", map[string]any{"head": map[string]any{"sha": prMergeableTestHead}, "auto_merge": map[string]any{"merge_method": "squash"}}},
 		{"empty auto merge object", "autoMergeRequest", map[string]any{"auto_merge": map[string]any{}}},
 		{"boolean auto merge", "autoMergeRequest", map[string]any{"auto_merge": false}},
 		{"string auto merge", "autoMergeRequest", map[string]any{"auto_merge": "null"}},

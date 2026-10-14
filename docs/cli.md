@@ -560,12 +560,10 @@ GraphQL `BLOCKED` versus REST `unstable`). Missing or unknown enums, incomplete
 projections and changing heads request guarded native fallback. Head consistency
 does not make separate check/policy observations an atomic snapshot.
 `autoMergeRequest` exports JSON `null` when REST explicitly supplies `auto_merge: null`.
-Enabled auto-merge uses the fixed `pr-auto-merge-v1` pooled GraphQL projection for
-native `authorEmail`, `commitBody`, `commitHeadline`, `mergeMethod`, `enabledAt`, and
-`enabledBy` fields. It reads live, checks the projection's head against REST, and
-verifies the head again before output. Missing metadata, old Workers, incomplete
-projections, or a moving head retain guarded native fallback. Nulls, enum casing,
-actor exports, nested field order and `--jq` JSON formatting match gh v2.102.0.
+Non-null or missing `auto_merge` retains guarded native fallback, as before.
+Enabled auto-merge exports use caller credentials: pooled credentials may have
+maintainer permissions, so `authorEmail` and `enabledBy` cannot be assumed visible
+to every caller of a shared relay response.
 `maintainerCanModify` exports REST `maintainer_can_modify` only when it is a JSON boolean;
 missing, null, or other types use guarded native fallback.
 `mergedBy` exports JSON `null` only when REST explicitly supplies `merged_by: null`.

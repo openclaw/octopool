@@ -40,9 +40,7 @@ def capture(name, kind, fields, payload, env, host):
     output = subprocess.check_output(args, env=env)
     (ROOT / (name + ".native.txt")).write_bytes(output)
     (ROOT / (name + ".graphql.json")).write_text(json.dumps(payload, indent=2) + "\n")
-    jq = ".autoMergeRequest" if kind == "pr" else "{stateReason,assignees}"
-    if name == "merge-state":
-        jq = ".mergeStateStatus"
+    jq = ".mergeStateStatus" if kind == "pr" else "{stateReason,assignees}"
     (ROOT / (name + ".jq.txt")).write_bytes(subprocess.check_output(args + ["--jq", jq], env=env))
     if name == "issue-open":
         (ROOT / "numbers.jq.txt").write_bytes(subprocess.check_output(args + ["--jq", '1/3,1.0,1e20,-0.5,true,null,"a\\nb"'], env=env))
@@ -63,25 +61,6 @@ with tempfile.TemporaryDirectory() as directory:
     env = {**os.environ, "GH_HOST": host, "GH_ENTERPRISE_TOKEN": "synthetic-fixture-token",
            "GH_TOKEN": "synthetic-fixture-token", "SSL_CERT_FILE": directory + "/cert",
            "NO_PROXY": "127.0.0.1", "GH_CONFIG_DIR": directory + "/config"}
-    for name, actor in [
-        ("user", {"id": "U_alice", "login": "alice", "name": "Alice"}),
-        ("bot", {"login": "clockwork[bot]"}),
-        ("deleted", None),
-        ("null-text", {"id": "U_alice", "login": "alice", "name": None}),
-    ]:
-        node = {
-            "id": "PR_synthetic", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
-            "autoMergeRequest": {"authorEmail": None, "commitBody": "Body\nwith newline",
-                "commitHeadline": "Headline <>&", "mergeMethod": "SQUASH",
-                "enabledAt": "2026-10-12T01:02:03Z", "enabledBy": actor},
-        }
-        if name == "null-text":
-            node["autoMergeRequest"].update(commitBody=None, commitHeadline=None, authorEmail="alice@example.test", mergeMethod="REBASE")
-        capture("auto-" + name, "pr", "autoMergeRequest", node, env, host)
-    capture("auto-disabled", "pr", "autoMergeRequest", {
-        "id": "PR_synthetic", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
-        "autoMergeRequest": None,
-    }, env, host)
     capture("merge-state", "pr", "additions,author,deletions,isDraft,maintainerCanModify,mergeStateStatus,number,state,title", {
         "id": "PR_synthetic", "headRefOid": "0123456789abcdef0123456789abcdef01234567",
         "additions": 4, "deletions": 2, "author": {"id": "U_alice", "login": "alice", "name": "Alice"},

@@ -1,1 +1,0 @@
-{"autoMergeRequest":{"authorEmail":null,"commitBody":"Body\nwith newline","commitHeadline":"Headline <>&","mergeMethod":"SQUASH","enabledAt":"2026-10-12T01:02:03Z","enabledBy":{"is_bot":true,"login":"app/"}}}

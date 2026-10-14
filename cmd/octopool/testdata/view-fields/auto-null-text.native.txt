@@ -1,1 +1,0 @@
-{"autoMergeRequest":{"authorEmail":"alice@example.test","commitBody":null,"commitHeadline":null,"mergeMethod":"REBASE","enabledAt":"2026-10-12T01:02:03Z","enabledBy":{"id":"U_alice","is_bot":false,"login":"alice","name":""}}}

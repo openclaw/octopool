@@ -41,7 +41,6 @@ describe("public landing GraphQL cache", () => {
     ["pr-commits-v1", "commits(first:100,after:$cursor)", "pr"],
     ["pr-ci-rollup-v1", "contexts(first:100,after:$cursor)", "pr"],
     ["pr-merge-snapshot-v1", 'ref(qualifiedName:"refs/heads/main")', "number"],
-    ["pr-auto-merge-v1", "enabledBy{login ...on User{id name}}", "pr"],
   ])("pools %s, reuses it, and revalidates once with max-age=0", async (shape, field, variable) => {
     await seedPool();
     let queries = 0;
@@ -328,7 +327,6 @@ describe("public landing GraphQL cache", () => {
       [path, { ...summary, headers: { ...summary.headers, "if-none-match": '"old"' } }],
       ["/repos/openclaw/octopool/issues/42", summary],
       ["/repos/openclaw/octopool/pulls/2147483648", summary],
-      [path, { ...options("pr-auto-merge-v1"), query: { cursor: "unexpected" } }],
       [path, { ...options("pr-ci-rollup-v1"), query: { cursor: ["first", "second"] } }],
       [path, { ...options("pr-ci-rollup-v1"), query: { cursor: "prefix\u0001suffix" } }],
       [path, { ...options("pr-ci-rollup-v1"), query: { cursor: "x".repeat(513) } }],

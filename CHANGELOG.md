@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- Relay PR `mergeStateStatus` and enabled auto-merge details through live pooled GraphQL, relay issue-view `stateReason` with native assignee exports, and retain native JSON formatting and known field names in delegation journals.
+- Relay PR `mergeStateStatus` through live pooled GraphQL and issue-view `stateReason` with native assignee exports, retain native JSON formatting and known field names in delegation journals, and keep enabled auto-merge exports on caller credentials.
 - Prevent avoidable relay overloads with eight concurrent CLI reads by reserving foreground admission capacity beside background refreshes and acknowledging normal permit release before returning responses, with bounded cleanup waits.
 
 ### Maintenance

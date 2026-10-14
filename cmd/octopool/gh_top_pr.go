@@ -217,7 +217,7 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 		case "mergeStateStatus":
 			// Scoped read-only GraphQL can report UNKNOWN; use the fixed pooled snapshot.
 			head := nestedStringValue(pr, "head", "sha")
-			snapshot, err := relayPRLandingFields(ctx, client, repo, number, head, publicShapePullRequestMergeSnapshot)
+			snapshot, err := relayPRMergeSnapshot(ctx, client, repo, number, head)
 			if err != nil {
 				return err
 			}
@@ -239,20 +239,11 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			}
 			pr[field] = canModify
 		case "autoMergeRequest":
-			autoMerge, present := pr["auto_merge"]
-			if !present {
-				return localFallbackError{Reason: "pull request response did not include auto_merge"}
+			// Only explicit null is faithful: REST lacks GraphQL enabledAt/authorEmail.
+			if autoMerge, present := pr["auto_merge"]; !present || autoMerge != nil {
+				return localFallbackError{Reason: "unsupported pull request auto-merge shape"}
 			}
 			pr[field] = nil
-			if autoMerge != nil {
-				head := nestedStringValue(pr, "head", "sha")
-				value, err := relayPRAutoMerge(ctx, client, repo, number, head)
-				if err != nil {
-					return err
-				}
-				pr[field] = value
-				hydratedHeadSHA = head
-			}
 		case "comments", "commits":
 			detail, err := relayPRDetail(ctx, client, repo, number, field, viewer, nestedStringValue(pr, "head", "sha"))
 			if err != nil {

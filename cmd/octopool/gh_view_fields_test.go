@@ -22,41 +22,6 @@ func viewFieldFixture(t *testing.T, name, kind string) []byte {
 	return raw
 }
 
-func TestPRAutoMergeNativeFixtures(t *testing.T) {
-	for _, name := range []string{"auto-user", "auto-bot", "auto-deleted", "auto-null-text", "auto-disabled"} {
-		for _, jq := range []string{"", ".autoMergeRequest"} {
-			t.Run(name+jq, func(t *testing.T) {
-				if jq != "" && !jqAvailable() {
-					t.Skip("jq unavailable")
-				}
-				var pr map[string]json.RawMessage
-				if err := json.Unmarshal(viewFieldFixture(t, name, "graphql"), &pr); err != nil {
-					t.Fatal(err)
-				}
-				value, err := mapPRAutoMerge(pr["autoMergeRequest"])
-				if err != nil {
-					t.Fatal(err)
-				}
-				raw, err := marshalGHFields(map[string]any{"autoMergeRequest": value}, []string{"autoMergeRequest"}, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var out bytes.Buffer
-				if err := writeGHViewJSON(t.Context(), &out, raw, jq); err != nil {
-					t.Fatal(err)
-				}
-				kind := "native"
-				if jq != "" {
-					kind = "jq"
-				}
-				if want := viewFieldFixture(t, name, kind); !bytes.Equal(out.Bytes(), want) {
-					t.Fatalf("got %s want %s", out.Bytes(), want)
-				}
-			})
-		}
-	}
-}
-
 func TestIssueReasonNativeFixtures(t *testing.T) {
 	for _, name := range []string{"issue-open", "issue-completed", "issue-not-planned", "issue-reopened"} {
 		for _, jq := range []string{"", "{stateReason,assignees}"} {
@@ -116,101 +81,11 @@ func TestIssueReasonUnsupported(t *testing.T) {
 	}
 }
 
-func TestPRAutoMergeLiveHydration(t *testing.T) {
-	for _, changedHead := range []bool{false, true} {
-		t.Run(map[bool]string{false: "stable", true: "moving"}[changedHead], func(t *testing.T) {
-			var pr map[string]any
-			if err := json.Unmarshal(viewFieldFixture(t, "auto-user", "graphql"), &pr); err != nil {
-				t.Fatal(err)
-			}
-			calls := 0
-			relayTestServer(t, func(request map[string]any) any {
-				calls++
-				headers, _ := request["headers"].(map[string]any)
-				if headers["cache-control"] != "max-age=0" {
-					t.Errorf("not live: %v", request)
-				}
-				if calls == 2 {
-					if headers["x-octopool-public-shape"] != publicShapePullRequestAutoMerge {
-						t.Errorf("shape: %v", request)
-					}
-					return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pr}}}
-				}
-				head := prMergeableTestHead
-				if calls == 3 && changedHead {
-					head = strings.Repeat("a", 40)
-				}
-				return map[string]any{"head": map[string]any{"sha": head}, "auto_merge": map[string]any{"merge_method": "squash"}}
-			})
-			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{"view", "7", "-R", "openclaw/octopool", "--json", "autoMergeRequest,autoMergeRequest"}, &out)
-			if changedHead {
-				if !isLocalFallback(result.err) || out.Len() != 0 {
-					t.Fatalf("err=%v out=%s", result.err, out.String())
-				}
-			} else if result.err != nil || !bytes.Equal(out.Bytes(), viewFieldFixture(t, "auto-user", "native")) {
-				t.Fatalf("err=%v out=%s", result.err, out.String())
-			}
-			if calls != 3 {
-				t.Errorf("calls=%d", calls)
-			}
-		})
-	}
-}
-
-func TestPRAutoMergeIncomplete(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"mergeMethod":"SQUASH"}`, `false`, `"bad"`, ``} {
-		if _, err := mapPRAutoMerge(json.RawMessage(raw)); !isLocalFallback(err) {
-			t.Fatalf("raw=%s err=%v", raw, err)
-		}
-	}
-}
-
 func TestJournalNativeIssueFieldNames(t *testing.T) {
 	for _, field := range strings.Fields("stateReason blockedBy blocking closedByPullRequestsReferences isPinned issueType projectCards subIssues subIssuesSummary") {
 		if got := journalJSONFields(field + ",title"); strings.Contains(got, ":field") {
 			t.Errorf("%s = %s", field, got)
 		}
-	}
-}
-
-func TestPRAutoMergeRejectsIncompleteProjection(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		edit func(map[string]any) any
-	}{
-		{"old worker", func(pr map[string]any) any { return map[string]any{"auto_merge": nil} }},
-		{"graphql errors", func(pr map[string]any) any {
-			return map[string]any{"errors": []any{map[string]any{"message": "unavailable"}}, "data": map[string]any{"repository": map[string]any{"pullRequest": pr}}}
-		}},
-		{"wrong head", func(pr map[string]any) any {
-			pr["headRefOid"] = strings.Repeat("a", 40)
-			return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pr}}}
-		}},
-		{"missing auto merge", func(pr map[string]any) any {
-			delete(pr, "autoMergeRequest")
-			return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pr}}}
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var pr map[string]any
-			if err := json.Unmarshal(viewFieldFixture(t, "auto-user", "graphql"), &pr); err != nil {
-				t.Fatal(err)
-			}
-			calls := 0
-			relayTestServer(t, func(request map[string]any) any {
-				calls++
-				if calls == 1 {
-					return map[string]any{"head": map[string]any{"sha": prMergeableTestHead}, "auto_merge": map[string]any{"merge_method": "squash"}}
-				}
-				return test.edit(pr)
-			})
-			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{"view", "7", "-R", "openclaw/octopool", "--json", "autoMergeRequest"}, &out)
-			if !isLocalFallback(result.err) || out.Len() != 0 || calls != 2 {
-				t.Fatalf("err=%v calls=%d out=%s", result.err, calls, out.String())
-			}
-		})
 	}
 }
 
