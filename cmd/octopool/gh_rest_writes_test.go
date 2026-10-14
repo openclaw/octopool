@@ -451,18 +451,19 @@ func TestRESTPRWriteRepositoryResolution(t *testing.T) {
 				t.Setenv("GH_REPO", "acme/repo")
 			} else {
 				t.Chdir(t.TempDir())
-				if _, err := gitProbe("init", "-q"); err != nil {
+				// Fixture writes can outlast the production read deadline on a loaded disk.
+				if _, err := gitProbeContext(t.Context(), "init", "-q"); err != nil {
 					t.Fatal(err)
 				}
 				name := "origin"
 				if source == "ambiguous" {
 					name = "one"
 				}
-				if _, err := gitProbe("remote", "add", name, "https://github.com/acme/repo.git"); err != nil {
+				if _, err := gitProbeContext(t.Context(), "remote", "add", name, "https://github.com/acme/repo.git"); err != nil {
 					t.Fatal(err)
 				}
 				if source == "ambiguous" {
-					if _, err := gitProbe("remote", "add", "two", "https://github.com/other/repo.git"); err != nil {
+					if _, err := gitProbeContext(t.Context(), "remote", "add", "two", "https://github.com/other/repo.git"); err != nil {
 						t.Fatal(err)
 					}
 				}

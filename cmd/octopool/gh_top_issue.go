@@ -41,7 +41,7 @@ func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResul
 		if nativeHumanFormat(opts) {
 			return ghCompleted(relayHumanIssueView(ctx, stdout, repo, number))
 		}
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueViewFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayIssueView(ctx, stdout, repo, number, opts))
@@ -96,6 +96,12 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 		path:    repoPath(repo, "issues", number),
 		headers: publicShapeHeaders(opts, supportedPublicIssueViewFields, publicShapeIssueSummary),
 	}
+	if hasJSONField(opts.json, "stateReason") {
+		if request.headers == nil {
+			request.headers = map[string]string{}
+		}
+		request.headers["cache-control"] = "max-age=0"
+	}
 	if !safeRelayRequest(request) {
 		return errors.New("internal error: top-level gh command built an unsupported relay request")
 	}
@@ -116,15 +122,56 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 		return err
 	}
 	normalizeIssueJSONState(issue)
-	raw, err := json.Marshal(issue)
+	if hasJSONField(opts.json, "stateReason") {
+		if err := normalizeIssueStateReason(issue); err != nil {
+			return err
+		}
+	}
+	if hasJSONField(opts.json, "assignees") {
+		assignees, ok := issue["assignees"].([]any)
+		if !ok || len(assignees) > 100 {
+			return localFallbackError{Reason: "unsupported issue assignees"}
+		}
+		users := map[string]map[string]any{}
+		mapped := make([]any, 0, len(assignees))
+		for _, assignee := range assignees {
+			profile, err := relayPRUser(ctx, client, assignee, users)
+			if err != nil {
+				return err
+			}
+			mapped = append(mapped, issueAssignee{firstString(profile, "node_id"), firstString(profile, "login"), firstString(profile, "name"), profile["id"]})
+		}
+		issue["assignees"] = mapped
+	}
+	filtered, err := marshalGHFields(issue, opts.json, fieldMapIssue)
 	if err != nil {
 		return err
 	}
-	filtered, err := filterJSONFields(raw, opts.json, fieldMapIssue)
-	if err != nil {
-		return err
+	return writeGHViewJSON(ctx, stdout, filtered, opts.jq)
+}
+
+type issueAssignee struct {
+	ID         string `json:"id"`
+	Login      string `json:"login"`
+	Name       string `json:"name"`
+	DatabaseID any    `json:"databaseId"`
+}
+
+func normalizeIssueStateReason(issue map[string]any) error {
+	reason, present := issue["state_reason"]
+	if !present {
+		return localFallbackError{Reason: "issue response did not include state_reason"}
 	}
-	return writeBytes(ctx, stdout, filtered, opts.jq)
+	// Native gh decodes GraphQL null into its zero-value string.
+	switch reason {
+	case nil:
+		issue["stateReason"] = ""
+	case "completed", "not_planned", "reopened":
+		issue["stateReason"] = strings.ToUpper(reason.(string))
+	default:
+		return localFallbackError{Reason: "unsupported issue state_reason"}
+	}
+	return nil
 }
 
 func normalizeIssueJSONState(issue map[string]any) {

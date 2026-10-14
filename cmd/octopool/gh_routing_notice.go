@@ -44,7 +44,9 @@ func nativeReadRoutingNotice(args []string) string {
 		fields = supportedPRFields
 	case "pr list":
 		fields = supportedPRListFields
-	case "issue view", "issue list":
+	case "issue view":
+		fields = supportedIssueViewFields
+	case "issue list":
 		fields = supportedIssueFields
 	case "search issues":
 		fields = supportedIssueSearchFields

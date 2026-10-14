@@ -1,0 +1,15 @@
+{
+  "state": "OPEN",
+  "stateReason": "REOPENED",
+  "title": "Synthetic <issue>",
+  "assignees": {
+    "nodes": [
+      {
+        "id": "U_alice",
+        "login": "alice",
+        "name": "Alice",
+        "databaseId": 12
+      }
+    ]
+  }
+}

@@ -213,7 +213,7 @@ func journalJSONFields(value string) string {
 		for _, allowed := range []map[string]bool{supportedPRFields, supportedIssueFields, supportedRepoFields, supportedRunViewFields, supportedReleaseFields, supportedCheckRunFields, supportedWorkflowFields, supportedLabelFields, supportedGistFields} {
 			known = known || allowed[field]
 		}
-		known = known || slices.Contains(strings.Fields("mergeStateStatus reviewDecision reviewRequests latestReviews potentialMergeCommit isInMergeQueue isMergeQueueEnabled licenseInfo assets participants reactionGroups totalCount viewerCanUpdate viewerDidAuthor viewerSubscription viewerCanAdminister viewerCanDelete viewerCanReact closed diskUsage forkCount homepageUrl isArchived isEmpty isFork isTemplate languages parent primaryLanguage projects projectItems repositoryTopics sshUrl stargazerCount watchers"), field)
+		known = known || slices.Contains(strings.Fields("mergeStateStatus reviewDecision reviewRequests latestReviews potentialMergeCommit isInMergeQueue isMergeQueueEnabled licenseInfo assets participants reactionGroups totalCount viewerCanUpdate viewerDidAuthor viewerSubscription viewerCanAdminister viewerCanDelete viewerCanReact closed diskUsage forkCount homepageUrl isArchived isEmpty isFork isTemplate languages parent primaryLanguage projects projectItems repositoryTopics sshUrl stargazerCount watchers stateReason blockedBy blocking closedByPullRequestsReferences isPinned issueType projectCards subIssues subIssuesSummary closingIssuesReferences fullDatabaseId isCrossRepository"), field)
 		if !known {
 			field = ":field"
 		}

@@ -214,6 +214,24 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	users := map[string]map[string]any{}
 	for _, field := range opts.json {
 		switch field {
+		case "mergeStateStatus":
+			// Scoped read-only GraphQL can report UNKNOWN; use the fixed pooled snapshot.
+			head := nestedStringValue(pr, "head", "sha")
+			snapshot, err := relayPRMergeSnapshot(ctx, client, repo, number, head)
+			if err != nil {
+				return err
+			}
+			var state string
+			if json.Unmarshal(snapshot[field], &state) != nil {
+				return prDetailFallback()
+			}
+			switch state {
+			case "BEHIND", "BLOCKED", "CLEAN", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN", "UNSTABLE":
+			default:
+				return prDetailFallback()
+			}
+			pr[field] = state
+			hydratedHeadSHA = head
 		case "maintainerCanModify":
 			canModify, ok := pr["maintainer_can_modify"].(bool)
 			if !ok {
@@ -380,15 +398,11 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			return localFallbackError{Reason: "pr_comment_viewer_changed"}
 		}
 	}
-	raw, err := json.Marshal(pr)
+	filtered, err := marshalGHFields(pr, opts.json, fieldMapPR)
 	if err != nil {
 		return err
 	}
-	filtered, err := filterJSONFields(raw, opts.json, fieldMapPR)
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, filtered, opts.jq)
+	return writeGHViewJSON(ctx, stdout, filtered, opts.jq)
 }
 
 func relayPRViewBody(ctx context.Context, client ghRelayClient, request ghAPIRequest) (map[string]any, error) {

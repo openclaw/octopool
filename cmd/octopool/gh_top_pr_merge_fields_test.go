@@ -8,32 +8,28 @@ import (
 	"testing"
 )
 
-func TestRunGHPRViewMergeStateStatusDelegates(t *testing.T) {
-	for _, fields := range []string{
-		"mergeStateStatus",
-		"headRefOid,state,mergeable,mergeStateStatus",
-		"mergeStateStatus,autoMergeRequest,maintainerCanModify,mergedBy",
-	} {
-		t.Run(fields, func(t *testing.T) {
-			// Unsupported field sets delegate even when typed local fallback is disabled.
-			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
-			t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+func TestRunGHPRViewMergeStateStatus(t *testing.T) {
+	for _, state := range []string{"BEHIND", "BLOCKED", "CLEAN", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN", "UNSTABLE"} {
+		t.Run(state, func(t *testing.T) {
 			calls := 0
 			relayTestServer(t, func(request map[string]any) any {
 				calls++
-				t.Error("viewer-dependent merge state must not request relay data")
-				return map[string]any{"mergeable_state": "unstable"}
+				headers, _ := request["headers"].(map[string]any)
+				if headers["cache-control"] != "max-age=0" {
+					t.Errorf("not live: %v", request)
+				}
+				if calls == 2 {
+					if headers["x-octopool-public-shape"] != publicShapePullRequestMergeSnapshot {
+						t.Errorf("shape=%v", headers)
+					}
+					return map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"id": "PR_synthetic", "headRefOid": prMergeableTestHead, "mergeStateStatus": state}}}}
+				}
+				return map[string]any{"head": map[string]any{"sha": prMergeableTestHead}, "mergeable_state": "unstable"}
 			})
-			args := []string{"pr", "view", "7", "--repo", "openclaw/octopool", "--json", fields}
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), args[1:], &out)
-			if result.err != nil || result.action != ghDelegate || out.Len() != 0 || calls != 0 {
-				t.Fatalf("action=%v err=%v calls=%d output=%q", result.action, result.err, calls, out.String())
-			}
-			err := runGH(t.Context(), args, &out, io.Discard)
-			want := "real-gh:" + strings.Join(args, " ") + "\n"
-			if err != nil || calls != 0 || out.String() != want {
-				t.Fatalf("err=%v calls=%d output=%q, want %q", err, calls, out.String(), want)
+			result := handleGHPR(t.Context(), []string{"view", "7", "-R", "openclaw/octopool", "--json", "mergeStateStatus"}, &out)
+			if result.err != nil || result.action != ghComplete || calls != 3 || out.String() != `{"mergeStateStatus":"`+state+`"}`+"\n" {
+				t.Fatalf("result=%v calls=%d out=%s", result, calls, out.String())
 			}
 		})
 	}
@@ -80,7 +76,7 @@ func TestRunGHPRViewMergeFieldsFallback(t *testing.T) {
 		pr           map[string]any
 	}{
 		{"missing auto merge", "autoMergeRequest", map[string]any{}},
-		{"enabled auto merge", "autoMergeRequest", map[string]any{"auto_merge": map[string]any{"merge_method": "squash"}}},
+		{"enabled auto merge", "autoMergeRequest", map[string]any{"head": map[string]any{"sha": prMergeableTestHead}, "auto_merge": map[string]any{"merge_method": "squash"}}},
 		{"empty auto merge object", "autoMergeRequest", map[string]any{"auto_merge": map[string]any{}}},
 		{"boolean auto merge", "autoMergeRequest", map[string]any{"auto_merge": false}},
 		{"string auto merge", "autoMergeRequest", map[string]any{"auto_merge": "null"}},

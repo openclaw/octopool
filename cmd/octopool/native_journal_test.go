@@ -67,7 +67,7 @@ func TestNativeJournalCategories(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"pr", "view", "1", "--json", "mergeStateStatus"}, "native-json-fields"},
+		{[]string{"pr", "view", "1", "--json", "reviewDecision"}, "native-json-fields"},
 		{[]string{"issue", "view", "1", "--json=comments"}, "native-json-fields"},
 		{[]string{"api", "graphql", "-fquery=query Panel {viewer{login}}"}, "graphql-delegated"},
 		{[]string{"api", "graphql", "-fquery=mutation {addComment(input:{body:\"secret\"}){id}}"}, "write"},
@@ -266,7 +266,7 @@ func TestNativeJournalDoesNotChangeDelegation(t *testing.T) {
 		code string
 	}{
 		{"include", []string{"api", "user", "--include", "--jq", ".login"}, "0"},
-		{"graphql", []string{"pr", "view", "721", "-R", "synthetic/repo", "--json", "mergeStateStatus"}, "0"},
+		{"graphql", []string{"pr", "view", "721", "-R", "synthetic/repo", "--json", "reviewDecision"}, "0"},
 		{"write-failure", []string{"pr", "create", "--title=synthetic-title", "--body=synthetic-body"}, "7"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -361,7 +361,7 @@ func TestNativeJournalCLIProof(t *testing.T) {
 	t.Setenv("GH_REPO", "")
 	for _, args := range [][]string{
 		{"gh", "api", "--include", "user", "--jq", ".login"},
-		{"gh", "pr", "view", "721", "-R", "synthetic/repository", "--json", "title,mergeStateStatus"},
+		{"gh", "pr", "view", "721", "-R", "synthetic/repository", "--json", "title,reviewDecision"},
 	} {
 		cmd := exec.CommandContext(t.Context(), binary, args...)
 		cmd.Env = os.Environ()

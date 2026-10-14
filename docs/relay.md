@@ -341,6 +341,15 @@ Consumers must inspect `errors` even on HTTP 200, as the CLI does.
 The PR-view CLI reads comment and commit projections live and reconstructs the
 [native export contract](pr-details.md). Reviews remain native because pending
 reviews depend on the requesting account.
+Enabled `autoMergeRequest` exports stay on native gh with caller credentials.
+Pooled credentials may have maintainer permissions; `authorEmail` and `enabledBy`
+are not proven visible to every caller and must not enter shared relay responses.
+An explicit REST `auto_merge: null` still exports `null`; missing data falls back.
+The smaller `pr-merge-snapshot-v1` selects only `autoMergeRequest.mergeMethod`;
+it cannot supply the complete native auto-merge export. The CI summary and rollup
+shapes likewise cannot supply that export. PR-view `mergeStateStatus`
+reuses the existing live landing snapshot, preserving the GraphQL enum instead of
+inferring it from REST `mergeable_state`, with the same head consistency checks.
 
 Only default JSON media is accepted. Conditional validators, extra query parameters,
 non-scalar/empty cursors, cursors longer than 512 characters or containing control

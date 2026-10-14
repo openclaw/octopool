@@ -165,7 +165,7 @@ func TestRunGHIssueListStateProjection(t *testing.T) {
 func TestRunGHIssueStateUnsupportedFieldsDelegate(t *testing.T) {
 	emptyRewriteTestServer(t)
 	for _, command := range []string{"view", "list"} {
-		for _, fields := range []string{"number,title,state,closedAt,url,author,comments", "state,closed", "state,stateReason"} {
+		for _, fields := range []string{"number,title,state,closedAt,url,author,comments", "state,closed", "state,issueType"} {
 			args := []string{command}
 			if command == "view" {
 				args = append(args, "5")
