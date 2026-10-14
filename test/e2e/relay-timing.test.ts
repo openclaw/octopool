@@ -5,7 +5,8 @@ import { withTimingBindings } from "../../src/relay-timing-bindings";
 import { storePublicAPIRate } from "../../src/github-public-api";
 import { queries } from "../../src/generated/sql";
 import { observePublicationD1 } from "./publication-d1-observer";
-import { bearer, CALLER_TOKEN, callWarmWorker, jsonResponse, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { requestWithWarmEnv } from "./identity-routing-support";
 
 type Timing = {
   version: number;
@@ -109,18 +110,7 @@ describe("relay timing on the outer HTTP response and audit", () => {
     });
     expect(hit.phase_calls.pooled_fetch).toBe(0);
     expect(hit.phase_calls.public_guard).toBeGreaterThan(0);
-    const warm = await inspect(
-      await callWarmWorker("/v1/github/request", {
-        method: "POST",
-        headers: { authorization: `Bearer ${CALLER_TOKEN}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          pool: "maintainers",
-          method: "GET",
-          path: "/repos/openclaw/octopool",
-        }),
-      }),
-      "hit",
-    );
+    const warm = await inspect(await requestWithWarmEnv({}, "/repos/openclaw/octopool", {}), "hit");
     expect(warm).toMatchObject({
       d1_ops: 0,
       do_calls: 1,
