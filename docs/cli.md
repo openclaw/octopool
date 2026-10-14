@@ -950,9 +950,11 @@ apply per relay read, not to the entire command, policy checks, or native `gh` e
 To keep scripts spawning many `gh` processes from flooding the relay, CLI processes for
 the same user share eight advisory lock slots in a private directory under the OS temp
 directory (`octopool-relay-slots-<uid>` on Unix, with the user SID on Windows).
-Sandboxed and normal callers use this same primary pool so their combined budget matches
-the server's default per-client limit of eight. One slot covers an attempt's policy
-fetch, including its policy retries, and relay POST, avoiding a second queue wait between
+Sandboxed and normal callers use this same primary pool. The server's default per-client
+limit is sixteen because it also counts detached cache refreshes and permits left by
+cancelled attempts; background refreshes leave room for all eight foreground slots.
+Equal client and server limits do not cover these different lifetimes. One slot covers
+an attempt's policy fetch, including its policy retries, and relay POST, avoiding a second queue wait between
 policy approval and dispatch. Standalone policy fetches use the same slots. A crashed
 process releases its lock automatically; slot files stay in place and must not be deleted
 while commands are running.

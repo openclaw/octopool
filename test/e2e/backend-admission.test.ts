@@ -327,16 +327,16 @@ it("finishes audit, rate snapshots and edge warming after normal completion abor
       headers: { authorization: `Bearer ${CALLER_TOKEN}`, "content-type": "application/json" },
       body: JSON.stringify({ pool: POOL, method: "GET", path: path(1) }),
     });
-  let returned = false;
+  const returned = ownedWork.gate();
   const miss = runWithContext(async (ctx) => {
     const response = await worker.fetch(request(), traced, ctx);
     expect(response.status).toBe(200);
     expect(signal?.aborted).toBe(true);
-    returned = true;
+    returned.release();
   });
   let cacheKey!: string;
   try {
-    await expect.poll(() => returned).toBe(true);
+    await returned.promise;
     expect(entered).toEqual(new Set([queries.insertAudit, queries.upsertPublicApiRate]));
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_events").first("n")).toBe(0);
     expect(
@@ -371,16 +371,16 @@ it("finishes audit, rate snapshots and edge warming after normal completion abor
       },
     },
   });
-  returned = false;
+  const hitReturned = ownedWork.gate();
   const hit = runWithContext(async (ctx) => {
     const response = await worker.fetch(request(), traced, ctx);
     expect(await response.json()).toMatchObject({ relay: { cache: "hit" } });
     expect(signal?.aborted).toBe(true);
-    returned = true;
+    hitReturned.release();
   });
   try {
     await edgeEntered.promise;
-    await expect.poll(() => returned).toBe(true);
+    await hitReturned.promise;
     expect(await readEdgeGitHubCache(cacheKey)).toBeUndefined();
   } finally {
     edgeGate.release();

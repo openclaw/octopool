@@ -529,8 +529,9 @@ responses, explicit authentication/policy errors, admin endpoints and write reje
 retain their existing behavior. This mapping alone adds no storage retries.
 
 When a client's backend-work allowance is full or its permit expires, the relay returns
-`424 fallback_local` with reason `relay_overloaded`. The default is eight concurrent backend-work requests per authenticated caller/client
-in each pool, configurable with `CLIENT_BACKEND_CONCURRENCY`. Fresh cache-only hits bypass
+`424 fallback_local` with reason `relay_overloaded`. The default is sixteen concurrent backend-work requests per authenticated caller/client
+in each pool, configurable with `CLIENT_BACKEND_CONCURRENCY`. At most eight background
+refreshes share this count, leaving room for the CLI's eight foreground slots. Fresh cache-only hits bypass
 admission, including eligible identity-cache entries; misses, revalidations, and live
 probes require a permit. See [backend-work admission](operations.md#backend-work-admission)
 for lease deadlines, cancellation, upgrade requirements, and client-attributed stats.

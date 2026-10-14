@@ -52,7 +52,7 @@ export function scheduleCacheRefresh(
   client: string,
   refresh: () => Promise<void>,
 ): void {
-  const limit = BackendWork.limit(env) - 1;
+  const limit = Math.min(MAX_REFRESHES, Math.floor(BackendWork.limit(env) / 2));
   if (limit < 1 || pending.size >= MAX_REFRESHES || pending.has(cacheKey)) return;
   pending.add(cacheKey);
   const backend = new BackendWork(backendAdmissionStub(env, pool), client, limit);
@@ -60,8 +60,8 @@ export function scheduleCacheRefresh(
     backend
       .run(AbortSignal.timeout(20_000), ctx, async () => {
         try {
-          // acquire is a nonblocking try; the reduced limit reserves a slot for
-          // foreground work under the same caller/client admission key.
+          // The shared count includes foreground work. Reserve at least half
+          // the total cap (eight by default) for foreground CLI slots.
           await admitBackendWork();
           const capability = await coordinator.tryAcquirePublication(`swr:${cacheKey}`);
           if (capability === undefined) return;

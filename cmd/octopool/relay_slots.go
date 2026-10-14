@@ -46,8 +46,8 @@ func acquireRelaySlot(ctx context.Context, count int, wait time.Duration) *os.Fi
 		return nil
 	}
 	deadline := time.Now().Add(wait)
-	// Sandboxed and normal callers must share one budget matching the server's
-	// per-client limit, even when only normal callers can access the cache.
+	// Sandboxed and normal callers must share one foreground budget, even when
+	// only normal callers can access the cache. The server also counts background work.
 	directory, err := fallbackRelaySlotDirectory()
 	if err == nil {
 		file, err := acquireRelaySlotInDirectory(ctx, count, deadline, directory)
