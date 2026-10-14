@@ -1,0 +1,2 @@
+# Preserve exact native gh fixture bytes on every platform.
+cmd/octopool/testdata/view-fields/** -text
