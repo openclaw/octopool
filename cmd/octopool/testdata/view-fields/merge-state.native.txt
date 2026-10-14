@@ -1,0 +1,1 @@
+{"additions":4,"author":{"id":"U_alice","is_bot":false,"login":"alice","name":"Alice"},"deletions":2,"isDraft":true,"maintainerCanModify":false,"mergeStateStatus":"BLOCKED","number":7,"state":"OPEN","title":"Synthetic <PR>"}

@@ -64,14 +64,12 @@ var fieldMapGist = map[string][]string{
 	"updatedAt": {"updated_at"},
 }
 
-// GraphQL mergeStateStatus is viewer-dependent; pooled REST mergeable_state diverges
-// (observed caller BLOCKED vs pooled unstable), so it stays native.
 var supportedPRFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"mergedAt", "headRefName", "headRefOid", "baseRefName", "baseRefOid", "isDraft", "labels",
 	"additions", "deletions", "changedFiles", "mergeable", "mergeCommit", "merged", "files", "commits", "comments",
 	"reviews", "headRepository", "headRepositoryOwner", "assignees", "statusCheckRollup", "autoMergeRequest",
-	"maintainerCanModify", "mergedBy",
+	"maintainerCanModify", "mergedBy", "mergeStateStatus",
 )
 
 var supportedPRListFields = supportedFields(
@@ -113,6 +111,14 @@ var supportedIssueFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "closedAt",
 	"labels", "assignees", "milestone",
 )
+
+var supportedIssueViewFields = func() map[string]bool {
+	fields := supportedFields("stateReason")
+	for field := range supportedIssueFields {
+		fields[field] = true
+	}
+	return fields
+}()
 
 var supportedPublicIssueViewFields = supportedFields(
 	"number", "title", "body", "state", "url", "author", "createdAt", "updatedAt", "labels",

@@ -1,0 +1,12 @@
+{
+  "id": "PR_synthetic",
+  "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+  "autoMergeRequest": {
+    "authorEmail": null,
+    "commitBody": "Body\nwith newline",
+    "commitHeadline": "Headline <>&",
+    "mergeMethod": "SQUASH",
+    "enabledAt": "2026-10-12T01:02:03Z",
+    "enabledBy": null
+  }
+}

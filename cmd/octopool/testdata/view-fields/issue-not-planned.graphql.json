@@ -1,0 +1,15 @@
+{
+  "state": "CLOSED",
+  "stateReason": "NOT_PLANNED",
+  "title": "Synthetic <issue>",
+  "assignees": {
+    "nodes": [
+      {
+        "id": "U_alice",
+        "login": "alice",
+        "name": "Alice",
+        "databaseId": 12
+      }
+    ]
+  }
+}

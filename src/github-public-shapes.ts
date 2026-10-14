@@ -10,6 +10,7 @@ export const PUBLIC_SHAPES = {
   pullRequestCISummary: "pr-ci-summary-v1",
   pullRequestCIRollup: "pr-ci-rollup-v1",
   pullRequestMergeSnapshot: "pr-merge-snapshot-v1",
+  pullRequestAutoMerge: "pr-auto-merge-v1",
   pullRequestComments: "pr-comments-v1",
   pullRequestCommits: "pr-commits-v1",
   pullRequestFiles: "pr-files-v1",
@@ -23,6 +24,7 @@ export const PUBLIC_SHAPES = {
 // These fixed public projections are also generated into the CLI's query allowlist.
 // Viewer-specific fields and caller-supplied GraphQL never reach pooled credentials.
 export const GITHUB_LANDING_QUERIES = {
+  pullRequestAutoMerge: `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){id headRefOid autoMergeRequest{authorEmail commitBody commitHeadline mergeMethod enabledAt enabledBy{login ...on User{id name}}}}}}`,
   pullRequestComments: `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){id comments(first:100,after:$cursor){totalCount pageInfo{hasNextPage endCursor} nodes{id author{login ...on User{id}} authorAssociation body createdAt includesCreatedEdit isMinimized minimizedReason reactionGroups{content users{totalCount}} url}}}}}`,
   pullRequestCommits: `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){id headRefOid commits(first:100,after:$cursor){totalCount pageInfo{hasNextPage endCursor} nodes{commit{authors(first:100){nodes{name email user{id login}}} messageHeadline messageBody oid committedDate authoredDate}}}}}}`,
   pullRequestCISummary: `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){state mergeable headRefOid statusCheckRollup{state contexts(first:1){checkRunCountsByState{state count} statusContextCountsByState{state count}}}}}}`,

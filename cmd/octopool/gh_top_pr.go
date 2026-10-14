@@ -214,6 +214,24 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	users := map[string]map[string]any{}
 	for _, field := range opts.json {
 		switch field {
+		case "mergeStateStatus":
+			// Scoped read-only GraphQL can report UNKNOWN; use the fixed pooled snapshot.
+			head := nestedStringValue(pr, "head", "sha")
+			snapshot, err := relayPRLandingFields(ctx, client, repo, number, head, publicShapePullRequestMergeSnapshot)
+			if err != nil {
+				return err
+			}
+			var state string
+			if json.Unmarshal(snapshot[field], &state) != nil {
+				return prDetailFallback()
+			}
+			switch state {
+			case "BEHIND", "BLOCKED", "CLEAN", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN", "UNSTABLE":
+			default:
+				return prDetailFallback()
+			}
+			pr[field] = state
+			hydratedHeadSHA = head
 		case "maintainerCanModify":
 			canModify, ok := pr["maintainer_can_modify"].(bool)
 			if !ok {
@@ -221,11 +239,20 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			}
 			pr[field] = canModify
 		case "autoMergeRequest":
-			// Only explicit null is faithful: REST lacks GraphQL enabledAt/authorEmail.
-			if autoMerge, present := pr["auto_merge"]; !present || autoMerge != nil {
-				return localFallbackError{Reason: "unsupported pull request auto-merge shape"}
+			autoMerge, present := pr["auto_merge"]
+			if !present {
+				return localFallbackError{Reason: "pull request response did not include auto_merge"}
 			}
 			pr[field] = nil
+			if autoMerge != nil {
+				head := nestedStringValue(pr, "head", "sha")
+				value, err := relayPRAutoMerge(ctx, client, repo, number, head)
+				if err != nil {
+					return err
+				}
+				pr[field] = value
+				hydratedHeadSHA = head
+			}
 		case "comments", "commits":
 			detail, err := relayPRDetail(ctx, client, repo, number, field, viewer, nestedStringValue(pr, "head", "sha"))
 			if err != nil {
@@ -380,15 +407,11 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			return localFallbackError{Reason: "pr_comment_viewer_changed"}
 		}
 	}
-	raw, err := json.Marshal(pr)
+	filtered, err := marshalGHFields(pr, opts.json, fieldMapPR)
 	if err != nil {
 		return err
 	}
-	filtered, err := filterJSONFields(raw, opts.json, fieldMapPR)
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, filtered, opts.jq)
+	return writeGHViewJSON(ctx, stdout, filtered, opts.jq)
 }
 
 func relayPRViewBody(ctx context.Context, client ghRelayClient, request ghAPIRequest) (map[string]any, error) {

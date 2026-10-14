@@ -1,0 +1,17 @@
+{
+  "id": "PR_synthetic",
+  "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+  "additions": 4,
+  "deletions": 2,
+  "author": {
+    "id": "U_alice",
+    "login": "alice",
+    "name": "Alice"
+  },
+  "isDraft": true,
+  "maintainerCanModify": false,
+  "mergeStateStatus": "BLOCKED",
+  "number": 7,
+  "state": "OPEN",
+  "title": "Synthetic <PR>"
+}

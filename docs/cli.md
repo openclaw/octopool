@@ -286,11 +286,13 @@ existing exact landing projections and their routing.
 ### Read routing and freshness
 
 `--json` selects output fields; it does not guarantee a relay read. A bundle containing
-unsupported fields such as PR `mergeStateStatus` or issue `comments` delegates the entire
+unsupported fields such as PR `reviewDecision` or issue `comments` delegates the entire
 export to native gh. The shim now explains this on stderr before native execution, after
 protection checks. Request only fields the consumer needs, but retain required merge,
 permission and review decisions. Separate descriptive and decision reads only when the
 consumer can preserve consistency across observations.
+See the [complete field-delegation inventory](view-field-routing.md), including the
+lossy historical `:field` journal mapping and retained parity boundaries.
 
 `gh api --include` (or `-i`) selects native gh and caller credentials, and now prints a
 routing notice on stderr. It changes the reader identity and quota, not just response
@@ -534,8 +536,13 @@ search state. Search conversion also precedes field filtering and `--jq` and lea
 `CLOSED` values across supported field subsets, including REST and public-page/cache
 payloads. This conversion happens before field filtering and `--jq`, without changing
 the cached representation. Raw `gh api` REST issue states remain lowercase; issue search
-states and human-format output remain unchanged. Unsupported issue fields such as
-`comments`, `closed`, and `stateReason` still delegate the entire request to real `gh`.
+states and human-format output remain unchanged. Issue views also relay `stateReason`
+from a live REST read: `completed`, `not_planned`, and `reopened` become `COMPLETED`,
+`NOT_PLANNED`, and `REOPENED`; explicit null becomes the native empty string. Missing
+or unrecognized reasons fall back before output. Issue-view assignees export native
+`id`, `login`, `name`, and `databaseId` fields using validated shared profile reads.
+Issue lists still delegate `stateReason`; unsupported issue fields such as `comments`
+and `closed` delegate the entire request to real `gh`.
 `gh pr view --json mergeable` likewise returns a JSON enum string before filtering and
 `--jq`: REST `true` becomes `"MERGEABLE"`, `false` becomes `"CONFLICTING"`, and null or
 absent values become `"UNKNOWN"`. This uses only REST `mergeable`, not `mergeable_state`,
@@ -546,19 +553,26 @@ for a merged PR or `null` for an unmerged PR. An open or closed-unmerged PR's sy
 test merge SHA is never exported as its merged commit. Missing merge status or an
 invalid merged-commit SHA requests guarded native fallback before printing output.
 Raw `gh api` reads retain `merge_commit_sha`.
-`mergeStateStatus` remains native, including when combined with supported fields.
-GraphQL evaluates it per viewer, so pooled-token REST `mergeable_state` cannot reproduce
-the caller's result (observed native `BLOCKED` versus pooled REST `unstable`).
-`autoMergeRequest` is supported only when REST explicitly supplies `auto_merge: null`,
-which exports JSON `null`. Missing or non-null values delegate the entire request because
-REST cannot reproduce native gh's `enabledAt` and `authorEmail` fields.
+`mergeStateStatus` reads the existing `pr-merge-snapshot-v1` GraphQL projection live,
+validates the head against REST, and verifies the head again before output. Its enum
+is preserved verbatim; REST `mergeable_state` is not equivalent (for example, native
+GraphQL `BLOCKED` versus REST `unstable`). Missing or unknown enums, incomplete
+projections and changing heads request guarded native fallback. Head consistency
+does not make separate check/policy observations an atomic snapshot.
+`autoMergeRequest` exports JSON `null` when REST explicitly supplies `auto_merge: null`.
+Enabled auto-merge uses the fixed `pr-auto-merge-v1` pooled GraphQL projection for
+native `authorEmail`, `commitBody`, `commitHeadline`, `mergeMethod`, `enabledAt`, and
+`enabledBy` fields. It reads live, checks the projection's head against REST, and
+verifies the head again before output. Missing metadata, old Workers, incomplete
+projections, or a moving head retain guarded native fallback. Nulls, enum casing,
+actor exports, nested field order and `--jq` JSON formatting match gh v2.102.0.
 `maintainerCanModify` exports REST `maintainer_can_modify` only when it is a JSON boolean;
 missing, null, or other types use guarded native fallback.
 `mergedBy` exports JSON `null` only when REST explicitly supplies `merged_by: null`.
 Non-null actors use the same validated user/bot export and shared profile lookup as
 `author`; missing or unrepresentable identities use guarded native fallback.
-These three fields read live (`max-age=0`) from the full REST pull response, bypassing public
-page shapes; incomplete cached projections fall back before any JSON or `--jq` output.
+These three fields read live (`max-age=0`), bypassing public page shapes; incomplete
+projections fall back before any JSON or `--jq` output.
 PR lists and searches do not support these fields. `gh pr list --json mergeable` and
 `gh pr list --json mergeCommit` also delegate.
 Supported summary-only combinations use the `pr-summary-v2` public page shape, including
@@ -620,7 +634,7 @@ Zero-count reaction groups are omitted exactly as in native gh.
 Every request containing `reviews` still delegates in full, including
 `--json comments,reviews,commits`. Native reviews can contain the caller's private
 pending review, which a viewer-independent pooled projection cannot reproduce.
-`mergeStateStatus` also remains native. Unsupported grammar retains its existing
+Unsupported grammar retains its existing
 native routing; raw REST commit/comment/review routes and human rendering are unchanged.
 See [the native export contract](pr-details.md) for selections, field classification,
 pagination and the deliberate review exclusion. Upgrade both the Worker and CLI for
@@ -1630,7 +1644,7 @@ requests a tighter age bound.
 Three things keep that honest:
 
 - **Gate fields read live.** `gh pr view --json` reads that include `headRefOid`,
-  `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `autoMergeRequest`,
+  `baseRefOid`, `state`, `merged`, `mergedAt`, `mergeable`, `mergeStateStatus`, `autoMergeRequest`,
   `maintainerCanModify`, `mergedBy`, `closedAt`, or `statusCheckRollup` send
   `cache-control: max-age=0` automatically. These are the values callers
   branch on, so they require an upstream fetch or successful conditional revalidation.

@@ -319,19 +319,20 @@ live-read default unless `Cache-Control` specifies an age bound.
 
 ### Fixed public GraphQL landing reads
 
-`GET /repos/{owner}/{repo}/pulls/{number}` supports five additional
+`GET /repos/{owner}/{repo}/pulls/{number}` supports six additional
 `x-octopool-public-shape` values. The Worker constructs the exact upstream query
 from its allowlist in `src/github-public-shapes.ts`; these shapes do not accept caller GraphQL.
 The existing `pr_view` owner routes these projections through the pool's `graphql`
 budget instead of REST's `core` budget.
 
-| Shape                  | Public response                                                                                             | Query parameters  |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------- |
-| `pr-ci-summary-v1`     | PR state, mergeability, head, rollup state and check/status counts                                          | None              |
-| `pr-ci-rollup-v1`      | PR state, mergeability, head and up to 100 rollup contexts, including check suite/workflow IDs              | Optional `cursor` |
-| `pr-merge-snapshot-v1` | Repository identity, main ref, PR identity/head/base, mergeability, merge commit and auto-merge/queue state | None              |
-| `pr-comments-v1`       | PR identity and up to 100 public comments, without viewer fields                                            | Optional `cursor` |
-| `pr-commits-v1`        | PR identity/head and up to 100 commits with the first 100 authors                                           | Optional `cursor` |
+| Shape                  | Public response                                                                                                      | Query parameters  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `pr-ci-summary-v1`     | PR state, mergeability, head, rollup state and check/status counts                                                   | None              |
+| `pr-ci-rollup-v1`      | PR state, mergeability, head and up to 100 rollup contexts, including check suite/workflow IDs                       | Optional `cursor` |
+| `pr-merge-snapshot-v1` | Repository identity, main ref, PR identity/head/base, mergeability, merge commit and auto-merge/queue state          | None              |
+| `pr-auto-merge-v1`     | PR identity/head and complete native auto-merge details, including author email, commit text, enabled time and actor | None              |
+| `pr-comments-v1`       | PR identity and up to 100 public comments, without viewer fields                                                     | Optional `cursor` |
+| `pr-commits-v1`        | PR identity/head and up to 100 commits with the first 100 authors                                                    | Optional `cursor` |
 
 The envelope's `body` is the unchanged GraphQL JSON response, including `data` and
 any `errors`. Successful non-null PR responses cache for 60 seconds without stale
@@ -341,6 +342,14 @@ Consumers must inspect `errors` even on HTTP 200, as the CLI does.
 The PR-view CLI reads comment and commit projections live and reconstructs the
 [native export contract](pr-details.md). Reviews remain native because pending
 reviews depend on the requesting account.
+Enabled `autoMergeRequest` exports use `pr-auto-merge-v1` with `max-age=0`,
+validate its head against the live REST response, and verify the head again before
+printing. Disabled auto-merge retains the single live REST read and exports `null`.
+The smaller `pr-merge-snapshot-v1` selects only `autoMergeRequest.mergeMethod`;
+it cannot supply the complete native auto-merge export. The CI summary and rollup
+shapes likewise cannot substitute for this projection. PR-view `mergeStateStatus`
+reuses the existing live landing snapshot, preserving the GraphQL enum instead of
+inferring it from REST `mergeable_state`, with the same head consistency checks.
 
 Only default JSON media is accepted. Conditional validators, extra query parameters,
 non-scalar/empty cursors, cursors longer than 512 characters or containing control

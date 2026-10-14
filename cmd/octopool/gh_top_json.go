@@ -6,6 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"os/exec"
+	"strconv"
+	"time"
 )
 
 func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) error {
@@ -20,6 +24,67 @@ func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) e
 		return err
 	}
 	return nil
+}
+
+// Keep native nested struct field order and literal HTML characters in gh exports.
+func marshalGHFields(value map[string]any, fields []string, fieldMap map[string][]string) ([]byte, error) {
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(filterJSONValue(value, fields, fieldMap)); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func writeGHViewJSON(ctx context.Context, stdout io.Writer, data []byte, jq string) error {
+	if jq == "" {
+		return writeBytes(ctx, stdout, data, "")
+	}
+	child, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(child, "jq", "-c", "--", jq)
+	cmd.Stdin = bytes.NewReader(data)
+	cmd.Stderr = io.Discard
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	decoder.UseNumber()
+	for {
+		var value any
+		if err := decoder.Decode(&value); err == io.EOF {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		// Native gh's jq printer uses raw strings, but compact, HTML-escaped JSON
+		// for arrays and objects, including sorted nested object keys.
+		switch value := value.(type) {
+		case nil:
+			_, err = fmt.Fprintln(stdout)
+		case string:
+			_, err = fmt.Fprintln(stdout, value)
+		case json.Number:
+			if _, integerErr := strconv.ParseInt(string(value), 10, 64); integerErr == nil {
+				_, err = fmt.Fprintln(stdout, value)
+			} else if number, floatErr := value.Float64(); floatErr == nil {
+				if math.Trunc(number) == number {
+					_, err = fmt.Fprintf(stdout, "%.0f\n", number)
+				} else {
+					_, err = fmt.Fprintf(stdout, "%.2f\n", number)
+				}
+			} else {
+				return floatErr
+			}
+		default:
+			err = json.NewEncoder(stdout).Encode(value)
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {
