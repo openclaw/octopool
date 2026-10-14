@@ -481,7 +481,7 @@ async function coveringPublicRepoProofSource(
   return "shared";
 }
 
-async function rejectFreshNegativePublicRepoProof(
+export async function rejectFreshNegativePublicRepoProof(
   env: Env,
   owner: string,
   repo: string,

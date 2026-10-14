@@ -283,7 +283,8 @@ describe("Worker end-to-end cache revalidation", () => {
       expect(await response.json()).toMatchObject({
         error: { details: { reason: "repo_not_public" } },
       });
-      expect(pooled).toBe(0);
+      // The miss read overlaps the guard; its response must still be discarded.
+      expect(pooled).toBe(1);
       return;
     }
     expect(response.status).toBe(200);

@@ -217,9 +217,16 @@ Deferred log audits retain the original response snapshot when their proof compl
 Durations are inclusive: `auth` includes rewrite-policy and membership work;
 `public_guard` includes probes and proof publication; acquisition can include admission
 and cache rechecks; publication includes renewal, storage, edge warming, and completion.
-Different phases can overlap. Repeated calls accumulate elapsed time; overlapping or
+On pooled identity misses, `public_guard` overlaps identity selection, token acquisition,
+and `pooled_fetch` (including `github_headers`/`github_body`). Both must complete before
+the response can be used; their durations in `timings_json` and `Server-Timing` must not
+be added to estimate response latency. Different phases can overlap. Repeated calls accumulate elapsed time; overlapping or
 nested calls to the **same** phase count once. `phase_calls` separately counts
 entries, including unsuccessful attempts and early returns.
+
+The pooled miss's serial negative-proof preflight also counts toward `public_guard`.
+The guard retains its own check, so an edge-cold pooled miss adds one D1 negative-proof
+read before the guard and identity work overlap.
 
 | Phase                  | Measured work                                                     |
 | ---------------------- | ----------------------------------------------------------------- |

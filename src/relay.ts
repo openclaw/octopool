@@ -61,6 +61,7 @@ import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import {
   anonymousGitHubResponseProvesPublicRepo,
   ensurePublicGitHubRepo,
+  rejectFreshNegativePublicRepoProof,
   observeAnonymousPublicRepo,
   type GitHubObservation,
 } from "./public-repos";
@@ -444,8 +445,28 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
     throw new HttpError(503, "token_free_unavailable", "Token-free GitHub search is unavailable");
   }
 
-  await ensurePublicGitHubRepo(state.env, state.route);
   const fallback = capabilitiesForRouteKind(state.route.kind).fallback;
+  if (fallback === "pool") {
+    if (state.route.owner !== undefined && state.route.repo !== undefined) {
+      await relayPhasePromise("public_guard", () =>
+        rejectFreshNegativePublicRepoProof(
+          state.env,
+          state.route.owner!.toLowerCase(),
+          state.route.repo!.toLowerCase(),
+        ),
+      );
+    }
+    const publicGuard = ensurePublicGitHubRepo(state.env, state.route);
+    // Observe rejection immediately, even while selection or upstream work is pending.
+    void publicGuard.catch(() => {});
+    try {
+      return await callIdentityPool(state, publicGuard);
+    } finally {
+      // Guard errors take precedence over selection, credentials, and upstream failures.
+      await publicGuard;
+    }
+  }
+  await ensurePublicGitHubRepo(state.env, state.route);
   if (fallback === "local") {
     throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
       reason: "web_only_unavailable",
@@ -944,7 +965,10 @@ async function callPublicBackend(state: ActiveRelay): Promise<Response> {
   });
 }
 
-async function callIdentityPool(state: ActiveRelay): Promise<Response> {
+async function callIdentityPool(
+  state: ActiveRelay,
+  publicGuard?: Promise<void>,
+): Promise<Response> {
   const identities = await loadIdentities(state.env, state.request.pool, state.route);
   if (identities.length === 0) {
     throw new HttpError(503, "no_identity", "No active identity can serve this route");
@@ -954,7 +978,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
   // ordinary resource attempt in this phase replaces it with its own reason.
   let fallbackReason = "identities_cooling_down";
   for (let attempt = 0; attempt <= identities.length; attempt++) {
-    const identityCached = await serveFreshIdentityCache(state, identities);
+    const identityCached = await serveFreshIdentityCache(state, identities, publicGuard);
     if (identityCached !== undefined) return identityCached;
     const candidates = identities
       .filter((candidate) => !state.failedIdentityIds.has(candidate.id))
@@ -984,14 +1008,17 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     await switchRelayCacheKey(state, identityCacheKey);
     const cached = await readAvailableCache(state);
     if (cached !== undefined) {
+      await publicGuard;
       return serveFreshCachedRelayResponse(state, cached);
     }
     const coalesced = await coalesceRelayCacheMiss(state);
     if (coalesced !== undefined) {
+      await publicGuard;
       return serveFreshCachedRelayResponse(state, coalesced, { coalesced: true });
     }
     const token = await acquireIdentityToken(state, identity);
     if (token === undefined) continue;
+    if (state.terminalLogCached !== undefined) await publicGuard;
     const terminalLog = await revalidateCachedTerminalLog(state, identity, selection.reason, token);
     if (terminalLog !== undefined) return terminalLog;
     if (state.failedIdentityIds.has(identity.id)) continue;
@@ -999,12 +1026,26 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
     try {
       fetched = await callGitHub(state.env, token, state.cacheRequest, state.route);
     } catch (error) {
+      await publicGuard;
       const stale = await recoverGitHubTransportFailure(state, error);
       if (stale !== undefined) return stale;
       throw error;
     }
-    const firstPage = sanitizeGitHubResponse(state.route, fetched);
     const observedAt = Date.now();
+    try {
+      // No upstream data may reach sanitization, recovery, or publication before proof.
+      await publicGuard;
+    } catch (error) {
+      // Only quota headers survive a failed guard, never status or error classification.
+      const rate = rateFromHeaders(fetched.headers);
+      delete rate.retryAfter;
+      recordBackgroundResult(
+        state,
+        coordinatorResult(state, identity, { status: 200, headers: {} }, rate),
+      );
+      throw error;
+    }
+    const firstPage = sanitizeGitHubResponse(state.route, fetched);
     state.paginatedIdentityRateRecorded = false;
     let github = firstPage;
     try {
@@ -1039,6 +1080,7 @@ async function callIdentityPool(state: ActiveRelay): Promise<Response> {
       rate,
     });
   }
+  await publicGuard;
   if (state.firstCredentialError !== undefined) throw state.firstCredentialError;
   const stale = await serveStaleRelayCache(state, fallbackReason);
   if (stale !== undefined) {
@@ -2342,6 +2384,7 @@ function staleFallbackReasonFromError(error: unknown): string | undefined {
 async function serveFreshIdentityCache(
   state: ActiveRelay,
   identities: Identity[],
+  publicGuard?: Promise<void>,
 ): Promise<Response | undefined> {
   if (!state.cacheEnabled || state.maxAgeSeconds === 0) {
     return undefined;
@@ -2370,6 +2413,7 @@ async function serveFreshIdentityCache(
     if (cached === undefined) {
       continue;
     }
+    await publicGuard;
     if (
       !(await cachedResponseAvailable(state.env, state.request.pool, state.route, cached, identity))
     ) {

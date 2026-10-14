@@ -302,15 +302,21 @@ describe("terminal Actions log cache", () => {
   it("retains proven audit cacheability when an in-flight R2 write outlives the background deadline", async () => {
     await seedJobEvidence();
     const gate = ownedWork.gate();
+    const writing = ownedWork.gate();
+    const audited = ownedWork.gate();
+    const db = observePublicationD1(env.DB, {
+      after: async (sql) => {
+        if (sql === queries.insertAudit) audited.release();
+      },
+    });
     const deadline = new AbortController();
     const timeout = AbortSignal.timeout.bind(AbortSignal);
     vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) =>
       ms === 20_000 ? deadline.signal : timeout(ms),
     );
     const put = env.ACTIONS_LOGS.put.bind(env.ACTIONS_LOGS);
-    let writing = false;
     vi.spyOn(env.ACTIONS_LOGS, "put").mockImplementation(async (...args) => {
-      writing = true;
+      writing.release();
       await gate.promise;
       return put(...args);
     });
@@ -318,25 +324,23 @@ describe("terminal Actions log cache", () => {
     let served: RelayEnvelope | undefined;
     await runWithContext(async (ctx) => {
       const response = ownedWork.track(
-        fetchLogWithContext(ctx).then(async (result) => {
+        fetchLogWithContext(ctx, { DB: db }).then(async (result) => {
           served = await result.json<RelayEnvelope>();
         }),
       );
       try {
-        await vi.waitFor(() => {
-          expect(writing).toBe(true);
-          expect(served).toMatchObject({
-            status: 200,
-            body: "build log\n",
-            relay: { cache: "miss" },
-          });
+        await writing.promise;
+        await response;
+        expect(served).toMatchObject({
+          status: 200,
+          body: "build log\n",
+          relay: { cache: "miss" },
         });
         deadline.abort();
-        await vi.waitFor(async () => {
-          expect(
-            await env.DB.prepare("SELECT cache_status, cacheable FROM audit_events").first(),
-          ).toEqual({ cache_status: "miss", cacheable: 1 });
-        });
+        await audited.promise;
+        expect(
+          await env.DB.prepare("SELECT cache_status, cacheable FROM audit_events").first(),
+        ).toEqual({ cache_status: "miss", cacheable: 1 });
         expect((await env.ACTIONS_LOGS.list()).objects).toEqual([]);
       } finally {
         gate.release();

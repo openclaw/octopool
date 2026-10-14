@@ -205,9 +205,12 @@ describe("Worker restricted search shape and protection boundaries", () => {
     const requests = upstream.mock.calls.map(([input, init]) => new Request(input, init));
     expect(
       requests
-        .filter((request) => new URL(request.url).pathname === "/search/issues")
-        .every((request) => bearer(request) === undefined),
-    ).toBe(true);
+        .filter(
+          (request) =>
+            new URL(request.url).pathname === "/search/issues" && bearer(request) !== undefined,
+        )
+        .map((request) => bearer(request)),
+    ).toEqual(["test-primary-token"]);
     expect(await cacheRows()).toEqual([]);
   });
 

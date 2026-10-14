@@ -242,7 +242,7 @@ describe("repository GraphQL relay", () => {
   });
 
   it.each([query, batchQuery])(
-    "refuses private repositories before token exchange or query execution: %s",
+    "refuses private repository responses after a scoped-token read: %s",
     async (query) => {
       const id = await seedApp();
       const calls = upstream(id, { visibility: true });
@@ -251,8 +251,12 @@ describe("repository GraphQL relay", () => {
       expect(await response.json()).toMatchObject({
         error: { code: "fallback_local", details: { reason: "repo_not_public" } },
       });
-      expect(calls.mock).toHaveBeenCalledTimes(1);
-      expect(calls.minted).toEqual([]);
+      expect(calls.mock).toHaveBeenCalledTimes(4);
+      expect(calls.minted).toEqual(["octopool"]);
+      expect(calls.queries()).toBe(1);
+      expect(
+        await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
+      ).toEqual({ count: 0 });
     },
   );
 
@@ -264,12 +268,11 @@ describe("repository GraphQL relay", () => {
     expect(mock).toHaveBeenCalledTimes(1);
   });
 
-  it("never executes when public visibility is unknown", async () => {
+  it("fails closed when public visibility is unknown", async () => {
     await seedApp();
     const mock = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       expect(request.method).toBe("GET");
-      expect(request.url).not.toContain("/app/installations/");
       expect(request.url).not.toContain("/graphql");
       return jsonResponse({ message: "unavailable" }, 503);
     });
