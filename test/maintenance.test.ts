@@ -19,20 +19,7 @@ describe("scheduled maintenance", () => {
   });
 
   it("prunes expired cache and old audit rows", async () => {
-    const queries: string[] = [];
-    const env = {
-      DB: {
-        prepare: (query: string) => {
-          queries.push(query);
-          return {
-            bind: () => ({
-              all: async () => ({ results: [] }),
-              run: async () => ({ meta: { changes: 0 } }),
-            }),
-          };
-        },
-      },
-    } as unknown as Env;
+    const { env, queries } = maintenanceEnv(() => 0);
 
     await runScheduledMaintenance(env);
 
@@ -123,11 +110,13 @@ describe("scheduled maintenance", () => {
   });
 });
 
-function maintenanceEnv(prune: (table: Table) => number): { env: Env; calls: Table[] } {
+function maintenanceEnv(prune: (table: Table) => number) {
   const calls: Table[] = [];
+  const queries: string[] = [];
   const env = {
     DB: {
       prepare: (query: string) => {
+        queries.push(query);
         const table = TABLES.find((name) => query.includes(`DELETE FROM ${name}`));
         if (table === undefined) throw new Error("Unexpected maintenance statement");
         return {
@@ -146,5 +135,5 @@ function maintenanceEnv(prune: (table: Table) => number): { env: Env; calls: Tab
       },
     },
   } as unknown as Env;
-  return { env, calls };
+  return { env, calls, queries };
 }

@@ -190,37 +190,34 @@ Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
 ### Relay phase timing
 
-Apply the additive `0025_audit_timings.sql` migration before running the timing-enabled
-Worker. It adds nullable `audit_events.timings_json TEXT`; existing rows remain `NULL`,
-and older Workers can still insert rows. No backfill is needed.
+Apply `0025_audit_timings.sql` before running the timing-enabled Worker. It adds nullable
+`audit_events.timings_json TEXT`; existing rows remain `NULL`, older Workers can still
+insert rows, and no backfill is needed.
 
-`wrangler.jsonc` enables Workers traces with a head sampling rate of `0.2`; the existing
-log settings are unchanged. Only the authoritative Worker runs relay authentication,
-cache, admission, and publication. The public proxy forwards requests and responses,
-including `Server-Timing`, so its config is unchanged. The timings exclude the proxy
-hop and caller/network latency. Use native traces to inspect D1 serving regions,
-Worker-to-DO transport, and D1/SQLite operations inside each DO.
+`wrangler.jsonc` enables Worker traces at a head sampling rate of `0.2`, leaving log
+settings unchanged. The authoritative Worker runs relay authentication, cache, admission,
+and publication; the public proxy forwards requests, responses, and `Server-Timing`
+without config changes. Timings exclude the proxy hop and caller/network latency.
+Use native traces for D1 serving regions, Worker-to-DO transport, and DO-internal D1/SQLite.
 
 Every relay HTTP response has an outer `Server-Timing` header such as
-`response_ready;dur=42, auth;dur=5, rewrite_policy;dur=2, ...`. These metrics are never
-added to the forwarded GitHub headers or the JSON envelope. Existing audited paths
-persist the same snapshot as version 1 JSON; requests rejected before an audit context
-exists still have the header but do not create new audit rows.
+`response_ready;dur=42, auth;dur=5, rewrite_policy;dur=2, ...`, separate from forwarded
+GitHub headers and the JSON envelope. Audited paths persist the same snapshot as version
+1 JSON. Requests rejected before an audit context exists get the header without an audit row.
 
-`response_ready_ms` is elapsed time from authoritative Worker relay entry through
-response encoding, security headers, and foreground cleanup. It is measured directly,
-**never by summing phases**. Existing `duration_ms` retains its earlier capture point.
-The audit INSERT remains background `waitUntil` work, registered after the snapshot is
-frozen; audit completion, successful quota feedback, admission release, deferred log
-proofs, and stale-while-revalidate refreshes are excluded. Deferred log audits retain
-the original response snapshot even when their proof completes later.
+`response_ready_ms` measures elapsed time from authoritative Worker relay entry through
+response encoding, security headers, and foreground cleanup, **not the sum of phases**.
+`duration_ms` retains its earlier capture point. The audit INSERT runs in `waitUntil`
+after the snapshot freezes. Timings exclude audit completion, successful quota feedback,
+admission release, deferred log proofs, and stale-while-revalidate refreshes. Deferred
+log audits retain the original response snapshot when their proof completes later.
 
-`phases_ms` contains all the following keys (zero for skipped or sub-clock phases).
+`phases_ms` contains every key below (zero for skipped or sub-clock phases).
 Durations are inclusive: `auth` includes rewrite-policy and membership work;
 `public_guard` includes probes and proof publication; acquisition can include admission
 and cache rechecks; publication includes renewal, storage, edge warming, and completion.
-Different phases can overlap. Repeated calls accumulate elapsed time, with overlapping
-or nested calls to the **same** phase counted once. `phase_calls` separately counts
+Different phases can overlap. Repeated calls accumulate elapsed time; overlapping or
+nested calls to the **same** phase count once. `phase_calls` separately counts
 entries, including unsuccessful attempts and early returns.
 
 | Phase                  | Measured work                                                     |
@@ -245,31 +242,26 @@ entries, including unsuccessful attempts and early returns.
 | `github_headers`       | Outbound GitHub fetch attempts through response headers           |
 | `github_body`          | Capped API/web resource body reads, separately from headers       |
 
-`d1_ops` counts Worker-issued D1 execution calls (`first`, `all`, `run`, `raw`, or one
-`batch` invocation), including failures and retries. Preparing/binding SQL does not count.
-`do_calls` counts Worker-issued RPC/fetch invocations; merely obtaining a stub does not
-count. These are boundary-call counts: **D1 operations inside a DO are not added to
-`d1_ops`**; use native traces for that breakdown. `github_fetches` counts actual outbound
-egress attempts, including visibility probes, membership refreshes, redirects, and token
-exchanges. It is not restricted to the final resource attempt. Counts stop at response
-readiness, and explicitly detached background work does not borrow the request timer.
+`d1_ops` counts Worker-issued D1 executions (`first`, `all`, `run`, `raw`, or `batch`),
+including failures and retries, but excludes preparing/binding SQL and **DO-internal D1
+operations**. Use native traces for the latter. `do_calls` counts Worker-issued RPC/fetch
+calls, excluding stub acquisition. `github_fetches` counts all outbound GitHub attempts,
+including visibility probes, membership refreshes, redirects, and token exchanges.
+Counts stop at response readiness; detached background work has no request timer.
 
-Identity-candidate D1 fallbacks and validator reads use `batch`, so their `d1_ops`
-count is one per batch, not one per candidate statement. The identity pass records
-one `cache_lookup` per edge probe and one for its D1 batch; validators record one
-for the whole batch. Later passes and post-acquisition rereads remain separate.
+Identity-candidate D1 fallbacks and validator reads count one `d1_ops` per batch.
+Identity passes count one `cache_lookup` per edge probe and one per D1 batch; validators
+count one per batch. Later passes and post-acquisition rereads count separately.
 
-`config_cache_hits` gives settled-hit counts for `caller`, `membership`, `policy`, and
-`identities`; `config_cache_pending_hits` separately counts reuse of in-request pending
-loads. A positive count is the corresponding hit flag. `cache_hits` counts successful
-fresh body lookups from `edge` or `shared` (D1), plus `r2` log lookups, including repeated
-rechecks; these are lookup observations, not a guarantee that the entry was ultimately
-served. No token hashes, SQL, URLs, repository keys, or credential values are retained.
+`config_cache_hits` counts settled hits for `caller`, `membership`, `policy`, and
+`identities`; `config_cache_pending_hits` counts reuse of in-request pending loads.
+A positive count indicates a hit. `cache_hits` counts successful fresh `edge` or `shared`
+(D1) body lookups and `r2` log lookups, including rechecks, even if the entry is not served.
+No token hashes, SQL, URLs, repository keys, or credential values are retained.
 
 Instrumentation adds synchronous clock/counter work and promise completion observers,
-with no new foreground awaits or I/O. It uses `Date.now()`: Workers clocks advance on I/O,
-so CPU-only phases can legitimately report zero. These are latency measurements, not
-CPU profiles; small differences below the clock resolution are not meaningful.
+with no foreground awaits or I/O. `Date.now()` advances on I/O in Workers, so CPU-only
+phases can report zero. These measure latency, not CPU; sub-clock differences are meaningless.
 
 Query the JSON with SQLite JSON functions, filtering by version and cache outcome:
 
@@ -859,11 +851,10 @@ cache entries after each entry's route-specific stale deadline and audit rows ol
 30 days; this retains every configured stale window and the full supported stats window.
 
 Each table emits an `octopool.maintenance` log with deleted rows, completed batches,
-duration, failure status, and `budget_exhausted`. The budget is 20 batches of 500 rows
-per table per run. A full final batch means cleanup used all available capacity;
-check expired-row counts and oldest timestamps before concluding a backlog remains.
-Repeated exhausted budgets require comparing arrival and cleanup rates. Failures retain
-the existing fail-fast behavior, so a failed table prevents later tables from running.
+duration, failure status, and `budget_exhausted`. Each run allows 20 batches of 500 rows
+per table. A full final batch means capacity was exhausted; check expired-row counts and
+oldest timestamps to confirm a backlog. For repeated exhaustion, compare arrival and
+cleanup rates. A failed table stops the run before later tables.
 
 `GET /v1/pools/<pool>/stats?since=24h` returns pool-, caller-, and client-specific cache stats,
 plus bounded backend-by-route and local-fallback-reason aggregates.

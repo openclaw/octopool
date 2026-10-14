@@ -52,7 +52,6 @@ describe("cache candidate round trips", () => {
       .bind(body.relay.request_id)
       .first<{ timings_json: string; cache_miss_reason: string | null }>();
     const timing = JSON.parse(audit!.timings_json);
-    // Same test against the parent: ordinary 23/29, forced-fresh 11/7.
     expect({ d1_ops: timing.d1_ops, cache_lookup: timing.phase_calls.cache_lookup }).toEqual({
       d1_ops: maxAge === 0 ? 7 : 13,
       cache_lookup: maxAge === 0 ? 3 : 19,

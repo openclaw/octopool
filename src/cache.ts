@@ -206,8 +206,7 @@ export async function readGitHubCacheWithSource(
   return sharedGitHubCacheResponse(row, cacheKey, ctx, maxAgeSeconds, onMiss);
 }
 
-// This snapshot belongs to one candidate pass only. A later pass (especially
-// after publication acquisition) must observe storage again.
+// Each pass, including post-acquisition rechecks, needs a new storage snapshot.
 export function createGitHubCacheCandidateReader(
   env: Env,
   cacheKeys: string[],
@@ -243,8 +242,7 @@ export function createGitHubCacheCandidateReader(
       return edge.cached;
     }
     if (rows === undefined) {
-      // Probe every key's edge before including it in the single D1 fallback.
-      // Buffer observations so unvisited candidates cannot change miss reasons.
+      // Batch only edge misses; unvisited candidates must not affect miss reasons.
       await Promise.all(keys.filter((candidate) => !edges.has(candidate)).map(probe));
       const missing = keys.filter((candidate) => edges.get(candidate)!.cached === undefined);
       const results = await relayPhasePromise("cache_lookup", () =>
@@ -256,14 +254,8 @@ export function createGitHubCacheCandidateReader(
         missing.map((candidate, index) => [candidate, results[index]!.results[0] ?? null]),
       );
     }
-    const result = sharedGitHubCacheResponse(
-      rows.get(key) ?? null,
-      key,
-      ctx,
-      maxAgeSeconds,
-      onMiss,
-    );
-    return result?.cached;
+    return sharedGitHubCacheResponse(rows.get(key) ?? null, key, ctx, maxAgeSeconds, onMiss)
+      ?.cached;
   };
 }
 

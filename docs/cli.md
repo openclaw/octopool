@@ -422,13 +422,12 @@ octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content
 ```
 
-`pr diff NUMBER --name-only` extracts changed paths from the relayed diff, using the
-same header parsing as native gh. It preserves diff order, Git quoting and escapes,
-reports the destination path for renames, and prints one newline per name (no output
-for an empty diff). Names are uncolored, including on a terminal; `--name-only` takes
-precedence over `--patch` and still requests diff media. Explicit `--color`, `--web`,
-`--exclude`, `--allow-escape-sequences`, and other unsupported modifiers continue to
-delegate to native gh. Public diffs use the Worker's existing [token-free transport](token-free.md#diff-and-patch-media).
+`pr diff NUMBER --name-only` parses relayed diff headers like native gh: paths retain
+diff order, Git quoting and escapes, and renames use the destination path. Output is
+uncolored even on a terminal, with one newline per name and no output for an empty diff.
+`--name-only` takes precedence over `--patch` and requests diff media. Explicit `--color`,
+`--web`, `--exclude`, `--allow-escape-sequences`, and other unsupported modifiers delegate
+to native gh. Public diffs use the [token-free transport](token-free.md#diff-and-patch-media).
 
 Bounded CI retries use your local GitHub identity after structural policy checks:
 
