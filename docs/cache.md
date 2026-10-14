@@ -69,13 +69,12 @@ quota cooldown does not invalidate an otherwise eligible cached body. This preve
 warm pooled response from needlessly hitting GitHub again just because the shared
 anonymous key is empty.
 
-Each identity-candidate pass probes the edge first and batches the remaining keyed
-D1 reads in one call. Candidates retain their original preference order: an earlier
-D1 hit wins over a later edge hit. Validator candidates likewise use one D1 batch,
-retaining anonymous-first preference and the existing stale/epoch predicates. Duplicate
-keys share reads only within that pass; later passes and post-acquisition rechecks read
-storage again. Current identity eligibility and public-visibility checks remain separate
-and authoritative. Forced-fresh requests skip fresh body reads but still batch validators.
+Each identity-candidate pass probes the edge first, then batches the remaining D1 reads.
+Preference order is unchanged: an earlier D1 hit wins over a later edge hit. Validators
+use one D1 batch with anonymous-first order and the same stale/epoch predicates. Duplicate
+keys share reads within a pass; later passes and post-acquisition rechecks reread storage.
+Identity eligibility and public visibility remain separate authoritative checks.
+Forced-fresh requests skip fresh body reads but still batch validators.
 
 ### Public PR landing snapshots
 
@@ -940,12 +939,11 @@ guards, body-key switches, finalization, or canonical/exact continuation. Body o
 precede proof ownership; proof ownership never waits for a body owner. Anonymous `304`
 revalidates a body, never repository visibility.
 
-Publication acquisition, renewal, completion, and waiter expiry serialize per resource
-inside each coordinator. D1 waits for one cache key or repository do not block unrelated
-resources or pool identity selection and feedback. Followers release that resource's queue
-before waiting for notification; owner lookup and waiter registration remain ordered with
-completion. D1 still owns fencing and expiry across coordinator restarts and pools; the
-existing pool and global proof Durable Object names and quota state are unchanged.
+Each coordinator serializes publication acquisition, renewal, completion, and waiter expiry
+per resource. D1 waits do not block unrelated resources or pool identity selection and
+feedback. Followers release the resource queue before waiting; owner lookup and waiter
+registration stay ordered with completion. D1 owns fencing and expiry across restarts and
+pools. Pool and global proof Durable Object names and quota state are unchanged.
 
 Body fetch/304 validation time is captured with the initial response, before awaited proof
 publication, explicit guards or first-page aggregation. Internal response/time metadata

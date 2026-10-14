@@ -4,10 +4,10 @@
 
 ### Maintenance
 
-- Avoid pool-wide D1 cache reads when finding cached Actions runs by keeping the run-membership lookup first.
-- Run Worker checks, native Go checks, and release snapshots in parallel while preserving the required aggregate CI check; report per-table scheduled retention progress and exhausted batch budgets.
-- Batch relay identity-cache fallbacks and validator reads to reduce D1 round trips while preserving candidate order, eligibility checks, and publication rereads.
-- Add sampled Worker traces, outer relay `Server-Timing`, and versioned audit phase timings and operation counts for production latency measurement.
+- Keep Actions run-membership lookups first to avoid pool-wide D1 cache reads.
+- Parallelize Worker checks, native Go checks, and release snapshots; retain the required aggregate CI check and report per-table retention progress and exhausted batch budgets.
+- Batch relay identity-cache fallbacks and validator reads, preserving candidate order, eligibility checks, and publication rereads.
+- Add sampled Worker traces, outer relay `Server-Timing`, and versioned audit phase timings and operation counts.
 
 ## 0.9.8 - 2026-10-11
 
