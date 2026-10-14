@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9.9 - 2026-10-14
+
+**Highlights:** `gh pr view --json mergeStateStatus` and `gh issue view --json stateReason` now relay through the pool instead of spending personal GraphQL, and correctly queued CLIs no longer get `relay_overloaded` fallbacks onto personal tokens.
 
 ### Fixes
 
@@ -13,6 +15,10 @@
 - Parallelize Worker checks, native Go checks, and release snapshots; retain the required aggregate CI check and report per-table retention progress and exhausted batch budgets.
 - Batch relay identity-cache fallbacks and validator reads, preserving candidate order, eligibility checks, and publication rereads.
 - Add sampled Worker traces, outer relay `Server-Timing`, and versioned audit phase timings and operation counts.
+
+### Upgrade notes
+
+- Run `brew upgrade octopool` for the `mergeStateStatus`/`stateReason` relay; no re-login or cache purge is required. The Worker changes (admission headroom, batched cache reads, phase timing with D1 migration `0025_audit_timings`) are already deployed from main.
 
 ## 0.9.8 - 2026-10-11
 
