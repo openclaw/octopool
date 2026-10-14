@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Delegate `gh issue view --json` to native gh when the number is a pull request, so it reports `MERGED` and PR fields instead of a relayed `CLOSED` issue.
+
 ## 0.9.9 - 2026-10-14
 
 **Highlights:** `gh pr view --json mergeStateStatus` and `gh issue view --json stateReason` now relay through the pool instead of spending personal GraphQL, and correctly queued CLIs no longer get `relay_overloaded` fallbacks onto personal tokens.

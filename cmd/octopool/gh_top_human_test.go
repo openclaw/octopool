@@ -632,3 +632,21 @@ func TestSkippedJobMissingTimingMatchesNativeZeroDuration(t *testing.T) {
 		t.Fatalf("null timing output %q differs from native equal-time output %q", missing.String(), exact.String())
 	}
 }
+
+func TestJSONIssueViewDelegatesForPullRequests(t *testing.T) {
+	relayTestServer(t, func(body map[string]any) any {
+		return map[string]any{
+			"number": 25, "title": "actually a PR", "state": "closed", "state_reason": nil,
+			"pull_request": map[string]any{"url": "https://example.test/pulls/25", "merged_at": "2026-10-14T00:00:00Z"},
+		}
+	})
+	t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	if err := runGH(t.Context(), []string{"issue", "view", "25", "-R", "openclaw/octopool", "--json", "state,stateReason"}, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "real-gh:") || !strings.Contains(stderr.String(), "issue_number_is_pull_request") {
+		t.Fatalf("PR numbers must delegate to real gh: out=%q stderr=%q", out.String(), stderr.String())
+	}
+}
