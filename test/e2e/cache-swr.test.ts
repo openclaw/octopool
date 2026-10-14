@@ -116,7 +116,7 @@ describe("CI stale-while-revalidate", () => {
       });
       expect(acquire).toHaveBeenCalledTimes(2);
       expect(acquire.mock.calls[1]).toEqual(acquire.mock.calls[0]);
-      expect(acquire.mock.calls[0]![2]).toBe(7);
+      expect(acquire.mock.calls[0]![2]).toBe(8);
       expect(release).toHaveBeenCalledTimes(1);
       expect(upstream).toHaveBeenCalledTimes(recovers ? 1 : 0);
       if (!recovers) expect(await cacheRows()).toEqual(before);
@@ -422,7 +422,7 @@ describe("CI stale-while-revalidate", () => {
     }
   });
 
-  it("caps the isolate at eight refreshes and releases admission and ownership after completion", async () => {
+  it("reserves a full eight-request CLI wave beside eight refreshes and enforces the total cap", async () => {
     const upstream = await setup();
     const paths = Array.from({ length: 9 }, (_, i) => `${repo}/actions/runs/${i + 100}`);
     for (let i = 0; i < paths.length; i += 3)
@@ -430,30 +430,44 @@ describe("CI stale-while-revalidate", () => {
     await expire();
     const release = ownedWork.gate();
     let refreshes = 0;
-    upstream.mockImplementation(async () => {
-      refreshes++;
+    let foreground = 0;
+    upstream.mockImplementation(async (input) => {
+      const pathname = new URL(new Request(input).url).pathname;
+      if (paths.includes(pathname)) refreshes++;
+      else foreground++;
       await release.promise;
-      return jsonResponse({ status: "in_progress" });
+      return jsonResponse(paths.includes(pathname) ? { status: "in_progress" } : []);
     });
     await runWithContext(async (ctx) => {
+      const reads: Promise<Response>[] = [];
       try {
         for (const route of paths) {
-          expect(
-            await (await request(ctx, route, { CLIENT_BACKEND_CONCURRENCY: "16" })).json(),
-          ).toMatchObject({ relay: { cache: "stale" } });
+          expect(await (await request(ctx, route)).json()).toMatchObject({
+            relay: { cache: "stale" },
+          });
         }
         await expect.poll(() => refreshes).toBe(8);
+        for (let i = 0; i < 8; i++)
+          reads.push(request(ctx, `${repo}/check-runs/${i + 1}/annotations`));
+        await expect.poll(() => foreground).toBe(8);
         const admission = backendAdmissionStub(env, POOL);
         const count = await runInDurableObject(admission, (_instance, state) =>
           state.storage.sql.exec("SELECT COUNT(*) AS n FROM backend_permits").one(),
         );
-        expect(count.n).toBe(8);
+        expect(count.n).toBe(16);
+        const refused = await request(ctx, `${repo}/check-runs/9/annotations`);
+        expect(refused.status).toBe(424);
+        expect(await refused.json()).toMatchObject({
+          error: { code: "fallback_local", details: { reason: "relay_overloaded" } },
+        });
+        expect(foreground).toBe(8);
       } finally {
         release.release();
+        for (const response of await Promise.all(reads)) expect(response.status).toBe(200);
       }
     });
     expect(refreshes).toBe(8);
-    expect(await audits()).toHaveLength(18);
+    expect(await audits()).toHaveLength(27);
     expect(
       await env.DB.prepare("SELECT COUNT(*) AS n FROM cache_publication_owners").first("n"),
     ).toBe(0);

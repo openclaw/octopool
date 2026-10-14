@@ -119,15 +119,18 @@ describe("identity routing lifecycle boundaries", () => {
       follower = requestWithEnv(overrides, DIFF_PATH, diffOptions);
       // Observe registration without resolving Runner-owned gates inside the DO.
       await Promise.race([
-        vi.waitFor(async () => {
-          const waiting = await runInDurableObject(
-            coordinator(),
-            (instance) =>
-              (instance as unknown as { publicationWaiters: Map<string, unknown> })
-                .publicationWaiters.size,
-          );
-          expect(waiting).toBe(1);
-        }),
+        vi.waitFor(
+          async () => {
+            const waiting = await runInDurableObject(
+              coordinator(),
+              (instance) =>
+                (instance as unknown as { publicationWaiters: Map<string, unknown> })
+                  .publicationWaiters.size,
+            );
+            expect(waiting).toBe(1);
+          },
+          { timeout: 5_000 },
+        ),
         follower.then(() => {
           throw new Error("Follower completed before coordinator waiting");
         }),

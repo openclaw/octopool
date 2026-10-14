@@ -20,7 +20,7 @@ function fixture() {
   const admission = {
     acquire: vi.fn(async () => true),
     renew: vi.fn(async () => true),
-    release: vi.fn(async () => undefined),
+    release: vi.fn(async (): Promise<void> => undefined),
   };
   const background: Promise<unknown>[] = [];
   const ctx = {
@@ -42,10 +42,57 @@ function fixture() {
   return { admission, background, input, run, untilAbort };
 }
 
-it("defaults to eight CLI slots and honors a configured server limit", () => {
+it("reserves server headroom beyond the eight CLI slots and honors a configured limit", () => {
   for (const value of [undefined, "", "invalid"])
-    expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: value } as Env)).toBe(8);
+    expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: value } as Env)).toBe(16);
   expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: "3" } as unknown as Env)).toBe(3);
+});
+
+it("acknowledges normal permit release before returning the response to the CLI", async () => {
+  const f = fixture();
+  const released = Promise.withResolvers<void>();
+  f.admission.release.mockReturnValue(released.promise);
+  let returned = false;
+  const result = f
+    .run(async () => {
+      await admitBackendWork();
+      return "served";
+    })
+    .then((value) => {
+      returned = true;
+      return value;
+    });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(f.admission.release).toHaveBeenCalledTimes(1);
+  expect(returned).toBe(false);
+  released.resolve();
+  expect(await result).toEqual({ value: "served" });
+  await Promise.all(f.background);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("bounds a hung cleanup without losing background release ownership", async () => {
+  const f = fixture();
+  const released = Promise.withResolvers<void>();
+  f.admission.release.mockReturnValue(released.promise);
+  let returned = false;
+  const result = f
+    .run(async () => {
+      await admitBackendWork();
+      return "served";
+    })
+    .then((value) => {
+      returned = true;
+      return value;
+    });
+  await vi.advanceTimersByTimeAsync(999);
+  expect(returned).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await result).toEqual({ value: "served" });
+  expect(f.admission.release).toHaveBeenCalledTimes(1);
+  released.resolve();
+  await Promise.all(f.background);
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it("coalesces acquisition only inside one request and releases on success", async () => {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- Prevent avoidable relay overloads with eight concurrent CLI reads by reserving foreground admission capacity beside background refreshes and acknowledging normal permit release before returning responses, with bounded cleanup waits.
+
 ### Maintenance
 
 - Keep Actions run-membership lookups first to avoid pool-wide D1 cache reads.

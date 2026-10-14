@@ -6,6 +6,7 @@ import { relayStorageUnavailableError } from "./local-fallback";
 export const BACKEND_LEASE_MS = 30_000;
 export const BACKEND_DEADLINE_MS = 60_000;
 export const BACKEND_RENEW_MS = 10_000;
+const BACKEND_RELEASE_WAIT_MS = 1_000;
 
 type Admission = {
   acquire(id: string, client: string, limit: number): Promise<boolean>;
@@ -64,7 +65,8 @@ export class BackendWork {
   ) {}
 
   static limit(env: Env): number {
-    return parsePositiveInt(env.CLIENT_BACKEND_CONCURRENCY, 8);
+    // Eight foreground CLI slots can overlap detached refreshes or cleanup.
+    return parsePositiveInt(env.CLIENT_BACKEND_CONCURRENCY, 16);
   }
 
   check(): void {
@@ -212,20 +214,39 @@ export class BackendWork {
     try {
       return await Promise.race([work, aborted]);
     } finally {
+      const cancelled = this.signal.aborted;
       this.closed = true;
       this.signal.removeEventListener("abort", fail);
       signal.removeEventListener("abort", cancel);
       this.stop();
       // Own late non-abortable storage completions; guards prevent new backend
-      // operations when they resume. Do not keep the response waiting on cleanup.
+      // operations when they resume.
       ctx.waitUntil(
         work.then(
           () => undefined,
           () => undefined,
         ),
       );
-      if (this.pending !== undefined)
-        ctx.waitUntil(withRelayTiming(undefined, () => this.release()));
+      if (this.pending !== undefined) {
+        const released = withRelayTiming(undefined, () => this.release());
+        ctx.waitUntil(released);
+        if (!cancelled) {
+          // Normally free the server permit before the CLI frees its slot. A
+          // stalled cleanup must not hold a response (or cancelled caller) open.
+          using _phase = relayPhase("admission");
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              released,
+              new Promise<void>((resolve) => {
+                timer = setTimeout(resolve, BACKEND_RELEASE_WAIT_MS);
+              }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+      }
     }
   }
 }
