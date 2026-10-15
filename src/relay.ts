@@ -16,6 +16,8 @@ import {
   type CachedGitHubResponse,
   type CacheMissReason,
   cachedGitHubCreatedAt,
+  cachedResponseImmutable,
+  immutableCacheRoute,
   githubCacheRevalidationHeaders,
   githubCacheKey,
   readGitHubCache,
@@ -508,12 +510,29 @@ function recordCacheMiss(state: ActiveRelay, reason: CacheMissReason): void {
   }
 }
 
-function readRelayCache(
+async function readRelayCache(
   state: ActiveRelay,
   key: string,
 ): Promise<CachedGitHubResponse | undefined> {
-  return readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds, (reason) =>
-    recordCacheMiss(state, reason),
+  const cached = await readGitHubCache(
+    state.env,
+    key,
+    state.ctx,
+    relayCacheMaxAge(state),
+    (reason) => recordCacheMiss(state, reason),
+  );
+  return cached !== undefined && acceptsLiveCachedResponse(state, cached) ? cached : undefined;
+}
+
+function relayCacheMaxAge(state: ActiveRelay): number | undefined {
+  return state.maxAgeSeconds === 0 && immutableCacheRoute(state.cacheRequest, state.route)
+    ? undefined
+    : state.maxAgeSeconds;
+}
+
+function acceptsLiveCachedResponse(state: ActiveRelay, cached: CachedGitHubResponse): boolean {
+  return (
+    state.maxAgeSeconds !== 0 || cachedResponseImmutable(state.cacheRequest, state.route, cached)
   );
 }
 
@@ -1911,6 +1930,9 @@ function cachedResponseParams(
     maxAgeSeconds: state.maxAgeSeconds,
     cacheStatus,
     background: state.background,
+    ...(state.maxAgeSeconds === 0 && cacheStatus === "hit"
+      ? { fallbackReason: "immutable_live" as const }
+      : {}),
     ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
     ...(extras.coalesced === undefined ? {} : { coalesced: extras.coalesced }),
     ...(extras.fallbackReason === undefined ? {} : { fallbackReason: extras.fallbackReason }),
@@ -1966,7 +1988,7 @@ async function serveCachedGitHubResponse(
     staleReason?: string;
     coalesced?: boolean;
     background?: boolean;
-    fallbackReason?: "run_list_superset" | "run_jobs_superset";
+    fallbackReason?: "run_list_superset" | "run_jobs_superset" | "immutable_live";
   },
 ): Promise<Response> {
   assertBackendWorkActive();
@@ -2343,7 +2365,10 @@ async function serveFreshIdentityCache(
   state: ActiveRelay,
   identities: Identity[],
 ): Promise<Response | undefined> {
-  if (!state.cacheEnabled || state.maxAgeSeconds === 0) {
+  if (
+    !state.cacheEnabled ||
+    (state.maxAgeSeconds === 0 && !immutableCacheRoute(state.cacheRequest, state.route))
+  ) {
     return undefined;
   }
   const candidates = new Map(
@@ -2361,13 +2386,13 @@ async function serveFreshIdentityCache(
     state.env,
     [...candidates.keys()],
     state.ctx,
-    state.maxAgeSeconds,
+    relayCacheMaxAge(state),
     (reason) => recordCacheMiss(state, reason),
   );
   for (const [cacheKey, identity] of candidates) {
     rememberIdentityCacheKey(state, cacheKey, identity);
     const cached = await readCandidate(cacheKey);
-    if (cached === undefined) {
+    if (cached === undefined || !acceptsLiveCachedResponse(state, cached)) {
       continue;
     }
     if (

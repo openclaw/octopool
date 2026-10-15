@@ -792,7 +792,7 @@ describe("terminal Actions log cache", () => {
     expect(jobMetadataCalls(upstream)).toBe(0);
   });
 
-  it.each([undefined, "max-age=60"])(
+  it.each([undefined, "max-age=60", "max-age=0"])(
     "reuses a fresh completed log within %s",
     async (cacheControl) => {
       const upstream = terminalLogUpstream("completed");
@@ -821,6 +821,13 @@ describe("terminal Actions log cache", () => {
       expect(jobMetadataCalls(upstream)).toBe(1);
       expect(jobPageCalls(upstream)).toBe(1);
       expect(logBackendCalls(upstream)).toBe(1);
+      if (cacheControl === "max-age=0") {
+        expect(
+          await env.DB.prepare(
+            "SELECT fallback_reason, requested_max_age FROM audit_events ORDER BY rowid DESC LIMIT 1",
+          ).first(),
+        ).toEqual({ fallback_reason: "immutable_live", requested_max_age: 0 });
+      }
       expect(
         await env.DB.prepare(
           "SELECT cache_status, cacheable FROM audit_events ORDER BY rowid ASC",
@@ -1036,7 +1043,7 @@ describe("terminal Actions log cache", () => {
   it.each([
     { age: "-2 hours", cacheControl: undefined },
     { age: "-2 hours", cacheControl: "max-age=86400" },
-    { age: "+0 seconds", cacheControl: "max-age=0" },
+    { age: "-2 hours", cacheControl: "max-age=0" },
     { age: "-2 minutes", cacheControl: "max-age=60" },
   ])("honors log deletion for $age cache with $cacheControl", async ({ age, cacheControl }) => {
     let logRequests = 0;
@@ -1182,44 +1189,51 @@ describe("terminal Actions log cache", () => {
     ).toEqual([{ cache_miss_reason: "absent" }, { cache_miss_reason: "expired" }]);
   });
 
-  it("re-establishes fresh public proof before serving an R2 hit", async () => {
-    const fill = terminalLogUpstream("completed");
-    vi.stubGlobal("fetch", fill);
-    await relay(LOG_PATH);
-    await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
-    await deleteEdgeJSON("public-repo-publication-v1", "openclaw/octopool");
-    const guarded = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
-      const url = new URL(request.url);
-      if (bearer(request) === "test-org-token") {
-        expect(url.pathname).toBe("/repos/openclaw/octopool");
-        return jsonResponse({ private: false });
-      }
-      return jsonResponse({ message: "unavailable" }, 503);
-    });
-    vi.stubGlobal("fetch", guarded);
+  it.each([undefined, "max-age=0"])(
+    "re-establishes public proof before an R2 hit with %s",
+    async (cacheControl) => {
+      const fill = terminalLogUpstream("completed");
+      vi.stubGlobal("fetch", fill);
+      await relay(LOG_PATH);
+      await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+      await deleteEdgeJSON("public-repo-publication-v1", "openclaw/octopool");
+      const guarded = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (bearer(request) === "test-org-token") {
+          expect(url.pathname).toBe("/repos/openclaw/octopool");
+          return jsonResponse({ private: false });
+        }
+        return jsonResponse({ message: "unavailable" }, 503);
+      });
+      vi.stubGlobal("fetch", guarded);
 
-    const { db, proofQueries } = observeCompletionProofQueries();
-    const response = await requestWithWarmEnv({ DB: db }, LOG_PATH, {});
-    expect(response.status).toBe(200);
-    expect(await response.json<RelayEnvelope>()).toMatchObject({
-      body: "build log\n",
-      relay: { cache: "hit" },
-    });
-    expect(proofQueries).toEqual([]);
-    expect(jobMetadataCalls(guarded)).toBe(0);
-    expect(jobPageCalls(guarded)).toBe(0);
-    expect(logBackendCalls(guarded)).toBe(0);
-    expect(
-      guarded.mock.calls
-        .map(([input, init]) => new Request(input, init))
-        .filter(
-          (request) =>
-            bearer(request) === "test-org-token" &&
-            new URL(request.url).pathname === "/repos/openclaw/octopool",
-        ),
-    ).toHaveLength(1);
-  });
+      const { db, proofQueries } = observeCompletionProofQueries();
+      const response = await requestWithWarmEnv(
+        { DB: db },
+        LOG_PATH,
+        cacheControl === undefined ? {} : { headers: { "cache-control": cacheControl } },
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json<RelayEnvelope>()).toMatchObject({
+        body: "build log\n",
+        relay: { cache: "hit" },
+      });
+      expect(proofQueries).toEqual([]);
+      expect(jobMetadataCalls(guarded)).toBe(0);
+      expect(jobPageCalls(guarded)).toBe(0);
+      expect(logBackendCalls(guarded)).toBe(0);
+      expect(
+        guarded.mock.calls
+          .map(([input, init]) => new Request(input, init))
+          .filter(
+            (request) =>
+              bearer(request) === "test-org-token" &&
+              new URL(request.url).pathname === "/repos/openclaw/octopool",
+          ),
+      ).toHaveLength(1);
+    },
+  );
 });
 
 function fetchLogWithContext(ctx: ExecutionContext, overrides: Record<string, unknown> = {}) {

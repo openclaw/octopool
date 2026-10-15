@@ -9,6 +9,7 @@ import {
   terminalLogCacheKey,
   terminalLogCacheProof,
   terminalLogJobID,
+  terminalLogNeedsRevalidation,
 } from "../src/terminal-log-cache";
 import type { RelayRequest } from "../src/types";
 
@@ -50,6 +51,20 @@ function setup(completed = false) {
 }
 
 describe("terminal job completion proof", () => {
+  it("lets live reads reuse terminal bytes without extending the one-hour existence window", () => {
+    const log = (ageSeconds: number) => ({
+      status: 200,
+      headers: {},
+      body: "log",
+      created_at: new Date(Date.now() - ageSeconds * 1000).toISOString(),
+      expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(terminalLogNeedsRevalidation(log(120), 0)).toBe(false);
+    expect(terminalLogNeedsRevalidation(log(120), 60)).toBe(true);
+    expect(terminalLogNeedsRevalidation(log(3_600), 0)).toBe(true);
+    expect(terminalLogNeedsRevalidation(log(3_600), 86_400)).toBe(true);
+  });
+
   it("requires the exact classified repository/job-log path before reading R2", () => {
     const route = classifyRoute(request, policy);
     expect(terminalLogJobID(request, route)).toBe("42");

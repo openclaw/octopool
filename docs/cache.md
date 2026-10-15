@@ -74,7 +74,8 @@ Preference order is unchanged: an earlier D1 hit wins over a later edge hit. Val
 use one D1 batch with anonymous-first order and the same stale/epoch predicates. Duplicate
 keys share reads within a pass; later passes and post-acquisition rechecks reread storage.
 Identity eligibility and public visibility remain separate authoritative checks.
-Forced-fresh requests skip fresh body reads but still batch validators.
+Forced-fresh requests skip mutable body reads but still batch validators; proven immutable
+entries can satisfy live reads as described below.
 
 ### Public PR landing snapshots
 
@@ -293,15 +294,35 @@ upstream requests.
 
 Cacheable requests can bound cache age with a `cache-control: max-age=N` header.
 The bound applies to both fresh hits and outage stale fallback: an older entry cannot
-be served without successful upstream revalidation. `max-age=0` always requires an
-upstream fetch or conditional revalidation, including when a cached timestamp equals
-the current time. Old entries remain eligible for conditional requests; a successful
+be served without successful upstream revalidation. For mutable resources, `max-age=0`
+requires an upstream fetch or conditional revalidation, including when a cached timestamp
+equals the current time. Old entries remain eligible for conditional requests; a successful
 `304` confirms and republishes the stored body. Successful refills write through to
 the shared cache. Positive bounds let concurrent readers share an acceptable refill;
-zero-bound readers each require upstream validation. The CLI's `gh pr checks` resolves
+zero-bound readers require upstream validation unless the cached entry is proven immutable. The CLI's `gh pr checks` resolves
 the PR head SHA with `max-age=60`.
 Zero-age reads skip body-cache lookups that cannot satisfy the age bound, while retaining
 validator discovery and serialized fill ownership, including waiting for an existing fill.
+
+Live reads (including the CLI's `OCTOPOOL_FRESH=1`) may reuse an entry within its existing
+fresh TTL only for these proven immutable classes:
+
+- Completed attempt-pinned run views and completed individual job views, using their bodies.
+- Attempt-pinned job lists whose exact stored six-hour TTL class proves the existing
+  `run_attempt_completed` check succeeded, with every returned job still completed.
+  A merely long TTL or a completed job list without that class is insufficient.
+- Contents with a scalar full 40-hex `ref`, Git commit/tree/blob objects with a full
+  40-hex SHA, single commit views with a full SHA, and comparisons of two full SHAs.
+- Proven terminal logs in R2, subject to the existing one-hour existence-check window.
+
+Unpinned runs, run lists, PRs/issues, checks/statuses/check suites (even at a SHA),
+refs/branches/rules, search and GraphQL remain mutable. No new route becomes cacheable.
+Conditional headers retain their bypass. Positive caller age bounds, fresh expiry,
+identity eligibility, public-repository proof using the original entry creation time,
+and string-rewrite protection remain enforced. Live hits retain their original
+`cache_created_at`; they never manufacture newer run-watch completion evidence.
+Audit records use `cache_status = hit`, `fallback_reason = immutable_live`,
+`requested_max_age = 0`, and a null miss reason; no schema migration is needed.
 
 ### Token-free GitHub reads
 
@@ -451,7 +472,7 @@ Existing entries acquire the six-hour fresh TTL when refilled; cache keys and st
 The caps bound fresh-cache reuse after a re-run to at most 10m and after a
 PR reopens to its computed TTL (at most 1h). Outage stale fallback remains separately
 bounded as above. Explicit caller maximum ages still constrain both fresh and stale
-reuse; `max-age=0` requires upstream validation. CLI live-state PR fields and unproven watch
+reuse; `max-age=0` requires upstream validation except for the proven immutable classes above. CLI live-state PR fields and unproven watch
 completion confirmations request zero-age reads. Run watches can reuse terminal snapshots
 fetched after watch start and jobs proven newer than both watch start and run completion;
 see the [watch contract](cli.md).
@@ -624,8 +645,8 @@ the full retention period.
 
 An explicit `cache-control: max-age=N` also bounds this no-log-probe window. A log older
 than that bound requires the same authenticated existence check before reuse;
-`max-age=0` always checks, even immediately after a fill. Larger bounds never extend
-the one-hour default. A failed check retains the existing backend/fallback behavior
+`max-age=0` reuses proven immutable bytes within the default one-hour window. It still
+checks existence once that window expires. Positive bounds never extend the one-hour default. A failed check retains the existing backend/fallback behavior
 instead of serving an unvalidated cached success.
 
 Objects untouched and unconfirmed for seven days expire. Reads enforce that lifetime from
@@ -1084,7 +1105,7 @@ hard `404`/private response always denies.
 - `audit_events.backend` — bounded upstream classification (`github_web`,
   `github_api`, or `github_identity`) for route-level stats (migration `0013`).
 - `audit_events.requested_max_age` — parsed caller cache-age bound in seconds; `0`
-  requires upstream validation, positive values bound reuse, and `NULL` means no parsed
+  requires upstream validation except for proven immutable hits, positive values bound reuse, and `NULL` means no parsed
   bound (including older audit rows). Available after migration `0021`.
 - `ACTIONS_LOGS` R2 binding (`octopool-actions-logs`) — raw terminal Actions log objects;
   no D1 migration is required.

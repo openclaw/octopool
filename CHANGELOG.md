@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- Serve live reads of proven immutable Actions attempts, jobs, terminal logs, and full-SHA Git content from cache while preserving visibility and freshness guards.
+
 ## 0.9.9 - 2026-10-14
 
 **Highlights:** `gh pr view --json mergeStateStatus` and `gh issue view --json stateReason` now relay through the pool instead of spending personal GraphQL, and correctly queued CLIs no longer get `relay_overloaded` fallbacks onto personal tokens.

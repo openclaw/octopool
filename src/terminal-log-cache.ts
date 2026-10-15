@@ -127,8 +127,7 @@ export function terminalLogNeedsRevalidation(
   return (
     !Number.isFinite(createdAt) ||
     ageMs >= LOG_REVALIDATE_SECONDS * 1000 ||
-    maxAgeSeconds === 0 ||
-    (maxAgeSeconds !== undefined && ageMs > maxAgeSeconds * 1000)
+    (maxAgeSeconds !== undefined && maxAgeSeconds > 0 && ageMs > maxAgeSeconds * 1000)
   );
 }
 
