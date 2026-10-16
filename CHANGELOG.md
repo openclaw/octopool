@@ -4,7 +4,7 @@
 
 ### Performance
 
-- Serve live reads of proven immutable Actions attempts, jobs, terminal logs, and full-SHA Git content from cache while preserving visibility and freshness guards.
+- Reuse cached full-SHA file contents, Git trees, and blobs for live reads while preserving visibility and freshness guards; keep Actions deletion checks and mutable commit metadata live.
 
 ## 0.9.9 - 2026-10-14
 

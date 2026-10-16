@@ -16,7 +16,6 @@ import {
   type CachedGitHubResponse,
   type CacheMissReason,
   cachedGitHubCreatedAt,
-  cachedResponseImmutable,
   immutableCacheRoute,
   githubCacheRevalidationHeaders,
   githubCacheKey,
@@ -510,30 +509,19 @@ function recordCacheMiss(state: ActiveRelay, reason: CacheMissReason): void {
   }
 }
 
-async function readRelayCache(
+function readRelayCache(
   state: ActiveRelay,
   key: string,
 ): Promise<CachedGitHubResponse | undefined> {
-  const cached = await readGitHubCache(
-    state.env,
-    key,
-    state.ctx,
-    relayCacheMaxAge(state),
-    (reason) => recordCacheMiss(state, reason),
+  return readGitHubCache(state.env, key, state.ctx, relayCacheMaxAge(state), (reason) =>
+    recordCacheMiss(state, reason),
   );
-  return cached !== undefined && acceptsLiveCachedResponse(state, cached) ? cached : undefined;
 }
 
 function relayCacheMaxAge(state: ActiveRelay): number | undefined {
   return state.maxAgeSeconds === 0 && immutableCacheRoute(state.cacheRequest, state.route)
     ? undefined
     : state.maxAgeSeconds;
-}
-
-function acceptsLiveCachedResponse(state: ActiveRelay, cached: CachedGitHubResponse): boolean {
-  return (
-    state.maxAgeSeconds !== 0 || cachedResponseImmutable(state.cacheRequest, state.route, cached)
-  );
 }
 
 async function coalesceRelayCacheMiss(
@@ -1930,7 +1918,9 @@ function cachedResponseParams(
     maxAgeSeconds: state.maxAgeSeconds,
     cacheStatus,
     background: state.background,
-    ...(state.maxAgeSeconds === 0 && cacheStatus === "hit"
+    ...(state.maxAgeSeconds === 0 &&
+    cacheStatus === "hit" &&
+    immutableCacheRoute(state.cacheRequest, state.route)
       ? { fallbackReason: "immutable_live" as const }
       : {}),
     ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
@@ -2392,7 +2382,7 @@ async function serveFreshIdentityCache(
   for (const [cacheKey, identity] of candidates) {
     rememberIdentityCacheKey(state, cacheKey, identity);
     const cached = await readCandidate(cacheKey);
-    if (cached === undefined || !acceptsLiveCachedResponse(state, cached)) {
+    if (cached === undefined) {
       continue;
     }
     if (

@@ -167,43 +167,18 @@ export function shouldUseGitHubCache(request: RelayRequest, route: RouteInfo): b
 }
 
 export function immutableCacheRoute(request: RelayRequest, route: RouteInfo): boolean {
+  if (!shouldUseGitHubCache(request, route)) return false;
   switch (route.kind) {
-    case "run_view":
-    case "run_jobs":
-      return route.run_attempt !== undefined;
-    case "job_view":
-      return true;
     case "contents":
       return /^[0-9a-f]{40}$/i.test(scalarQuery(request.query, "ref") ?? "");
-    case "git_commit":
     case "git_tree":
     case "git_blob":
-    case "commit_view":
       return /\/[0-9a-f]{40}$/i.test(request.path);
-    case "compare":
-      return /\/compare\/[0-9a-f]{40}\.\.\.[0-9a-f]{40}$/i.test(request.path);
     default:
+      // Commit JSON includes mutable comments/verification; completed Actions
+      // records can be deleted. A pinned identifier alone cannot make them immutable.
       return false;
   }
-}
-
-export function cachedResponseImmutable(
-  request: RelayRequest,
-  route: RouteInfo,
-  cached: CachedGitHubResponse,
-): boolean {
-  if (!shouldUseGitHubCache(request, route) || !immutableCacheRoute(request, route)) return false;
-  if (route.kind === "run_jobs") {
-    // Only the completed-attempt proof grants this exact stored TTL class.
-    // Completed jobs alone, or an arbitrary long lifetime, do not prove the attempt.
-    const storedTTL =
-      (parseSQLiteTimestamp(cached.expires_at) - parseSQLiteTimestamp(cached.created_at)) / 1000;
-    return storedTTL === TERMINAL_CI_TTL_SECONDS && completedJobs(cached);
-  }
-  if (route.kind === "run_view" || route.kind === "job_view") {
-    return terminalCIResponse(route, cached);
-  }
-  return true;
 }
 
 export function requestCacheMaxAgeSeconds(request: RelayRequest): number | undefined {
@@ -703,7 +678,6 @@ function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse)
 
 export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
   if (isLandingGraphQLRoute(route)) return 60;
-  if (terminalCIResponse(route, response)) return TERMINAL_CI_TTL_SECONDS;
   const policy = cachePolicyForRouteKind(route.kind);
   const seconds = freshTTLSeconds(policy.fresh, route, response);
   return policy.freshCapSeconds === undefined ? seconds : Math.min(policy.freshCapSeconds, seconds);
@@ -728,30 +702,21 @@ function freshTTLSeconds(
       return closedIssue(response) ? 3_600 : 300;
     case "run":
       if (!completedRun(response)) return 60;
-      return ageScaledTTLSeconds(response, 60, 600);
+      return route.run_attempt !== undefined
+        ? TERMINAL_CI_TTL_SECONDS
+        : ageScaledTTLSeconds(response, 60, 600);
     case "run_list":
       return completedRunList(response) ? 120 : 60;
     case "jobs":
-      return 60;
+      return route.run_attempt_completed === true && completedJobs(response)
+        ? TERMINAL_CI_TTL_SECONDS
+        : 60;
     case "mutable_ci":
       return settledCITTLSeconds(route, response);
     case "job":
-      return 60;
+      return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "pr_state":
       return stateAwarePRSubresource(route, response) ? 300 : 60;
-  }
-}
-
-function terminalCIResponse(route: RouteInfo, response?: GitHubRelayResponse): boolean {
-  switch (route.kind) {
-    case "run_view":
-      return route.run_attempt !== undefined && completedRun(response);
-    case "run_jobs":
-      return route.run_attempt_completed === true && completedJobs(response);
-    case "job_view":
-      return completedJob(response);
-    default:
-      return false;
   }
 }
 

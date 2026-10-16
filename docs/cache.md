@@ -305,18 +305,14 @@ Zero-age reads skip body-cache lookups that cannot satisfy the age bound, while 
 validator discovery and serialized fill ownership, including waiting for an existing fill.
 
 Live reads (including the CLI's `OCTOPOOL_FRESH=1`) may reuse an entry within its existing
-fresh TTL only for these proven immutable classes:
+fresh TTL for file contents with a scalar full 40-hex `ref`, and Git tree/blob objects
+with a full 40-hex SHA.
 
-- Completed attempt-pinned run views and completed individual job views, using their bodies.
-- Attempt-pinned job lists whose exact stored six-hour TTL class proves the existing
-  `run_attempt_completed` check succeeded, with every returned job still completed.
-  A merely long TTL or a completed job list without that class is insufficient.
-- Contents with a scalar full 40-hex `ref`, Git commit/tree/blob objects with a full
-  40-hex SHA, single commit views with a full SHA, and comparisons of two full SHAs.
-- Proven terminal logs in R2, subject to the existing one-hour existence-check window.
-
-Unpinned runs, run lists, PRs/issues, checks/statuses/check suites (even at a SHA),
-refs/branches/rules, search and GraphQL remain mutable. No new route becomes cacheable.
+Commit and comparison JSON remain live even with full SHAs: comment counts, user
+metadata, and signature verification can change without changing the Git object.
+Completed Actions runs, attempts, jobs, and logs retain live checks because they can
+be deleted. PRs/issues, checks/statuses/check suites (even at a SHA), refs/branches/rules,
+search and GraphQL also remain mutable. No new route becomes cacheable.
 Conditional headers retain their bypass. Positive caller age bounds, fresh expiry,
 identity eligibility, public-repository proof using the original entry creation time,
 and string-rewrite protection remain enforced. Live hits retain their original
@@ -645,8 +641,8 @@ the full retention period.
 
 An explicit `cache-control: max-age=N` also bounds this no-log-probe window. A log older
 than that bound requires the same authenticated existence check before reuse;
-`max-age=0` reuses proven immutable bytes within the default one-hour window. It still
-checks existence once that window expires. Positive bounds never extend the one-hour default. A failed check retains the existing backend/fallback behavior
+`max-age=0` requires a fresh existence probe even for a newly cached log. Positive bounds
+never extend the one-hour default. A failed check retains the existing backend/fallback behavior
 instead of serving an unvalidated cached success.
 
 Objects untouched and unconfirmed for seven days expire. Reads enforce that lifetime from

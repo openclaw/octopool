@@ -12,19 +12,11 @@ const REPO = "/repos/openclaw/immutable-fixture";
 const SHA = "a".repeat(40);
 const LIVE = { "cache-control": "max-age=0" };
 const immutable: Fixture[] = [
-  { path: `${REPO}/actions/runs/42/attempts/2`, body: { status: "completed" } },
-  {
-    path: `${REPO}/actions/runs/42/attempts/2/jobs`,
-    body: { total_count: 1, jobs: [{ status: "completed" }] },
-    completedAttempt: true,
-  },
-  { path: `${REPO}/actions/jobs/7`, body: { status: "completed" } },
   { path: `${REPO}/contents/file.txt`, query: { ref: SHA }, body: { sha: SHA } },
-  ...["git/commits", "git/trees", "git/blobs", "commits"].map((kind) => ({
+  ...["git/trees", "git/blobs"].map((kind) => ({
     path: `${REPO}/${kind}/${SHA}`,
     body: { sha: SHA },
   })),
-  { path: `${REPO}/compare/${SHA}...${"b".repeat(40)}`, body: { commits: [] } },
 ];
 
 type Fixture = {
@@ -64,6 +56,60 @@ async function seed(fixture: Fixture, source = "anonymous", publicProof = true) 
 }
 
 describe("immutable live cache reads", () => {
+  it.each([
+    {
+      path: `${REPO}/commits/${SHA}`,
+      body: { sha: SHA, commit: { comment_count: 0 } },
+      updated: { sha: SHA, commit: { comment_count: 1 } },
+    },
+    {
+      path: `${REPO}/compare/${SHA}...${"b".repeat(40)}`,
+      body: { commits: [{ sha: SHA, commit: { comment_count: 0 } }] },
+      updated: { commits: [{ sha: SHA, commit: { comment_count: 1 } }] },
+    },
+    {
+      path: `${REPO}/git/commits/${SHA}`,
+      body: { sha: SHA, verification: { verified: false, reason: "unknown_key" } },
+      updated: { sha: SHA, verification: { verified: true, reason: "valid" } },
+    },
+  ])("refreshes mutable metadata at the same SHA for $path", async (fixture) => {
+    await seed(fixture);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () =>
+        jsonResponse(fixture.updated, 200, rateHeaders({ remaining: 4_999 })),
+      ),
+    );
+    const response = await relay(fixture.path, undefined, { headers: LIVE });
+    expect(await response.json()).toMatchObject({
+      body: fixture.updated,
+      relay: { cache: "miss" },
+    });
+  });
+
+  it.each([
+    { path: `${REPO}/actions/runs/42/attempts/2`, body: { status: "completed" } },
+    {
+      path: `${REPO}/actions/runs/42/attempts/2/jobs`,
+      body: { total_count: 1, jobs: [{ status: "completed" }] },
+      completedAttempt: true,
+    },
+    { path: `${REPO}/actions/jobs/7`, body: { status: "completed" } },
+  ])("observes deletion of completed Actions data for $path", async (fixture) => {
+    await seed(fixture);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        if (new URL(new Request(input, init).url).pathname === REPO) {
+          return jsonResponse({ private: false });
+        }
+        return jsonResponse({ message: "Not Found" }, 404, rateHeaders({ remaining: 4_999 }));
+      }),
+    );
+    const response = await relay(fixture.path, undefined, { headers: LIVE });
+    expect(await response.json()).toMatchObject({ status: 404, body: { message: "Not Found" } });
+  });
+
   it("applies current string-rewrite protection before reusing immutable content", async () => {
     const fixture = immutable[0]!;
     await seed(fixture);
@@ -200,7 +246,10 @@ describe("immutable live cache reads", () => {
       vi.stubGlobal("fetch", upstream);
       expect(
         await (
-          await relay(fixture.path, undefined, { headers: { ...LIVE, [header]: "validator" } })
+          await relay(fixture.path, undefined, {
+            ...(fixture.query === undefined ? {} : { query: fixture.query }),
+            headers: { ...LIVE, [header]: "validator" },
+          })
         ).json(),
       ).toMatchObject({ relay: { cache: "bypass" } });
       expect(upstream).toHaveBeenCalled();
@@ -211,7 +260,7 @@ describe("immutable live cache reads", () => {
     { age: 120, ttl: 86_400, maxAge: 60 },
     { age: 86_500, ttl: 86_400, maxAge: 0 },
   ])("preserves expiry and positive max-age: $maxAge at age $age", async ({ age, ttl, maxAge }) => {
-    const fixture = immutable[7]!;
+    const fixture = immutable[1]!;
     const { key } = await seed(fixture);
     await env.DB.prepare(
       "UPDATE github_cache_entries SET created_at = datetime('now', ?), expires_at = datetime('now', ?) WHERE cache_key = ?",
@@ -243,7 +292,14 @@ describe("immutable live cache reads", () => {
       jsonResponse(fixture.body, 200, rateHeaders({ remaining: 4_999 })),
     );
     vi.stubGlobal("fetch", upstream);
-    expect(await (await relay(fixture.path, undefined, { headers: LIVE })).json()).toMatchObject({
+    expect(
+      await (
+        await relay(fixture.path, undefined, {
+          ...(fixture.query === undefined ? {} : { query: fixture.query }),
+          headers: LIVE,
+        })
+      ).json(),
+    ).toMatchObject({
       relay: { cache: "miss" },
     });
     expect(upstream).toHaveBeenCalled();
