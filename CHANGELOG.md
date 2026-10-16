@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Performance
+
+- Reuse cached full-SHA file contents, Git trees, and blobs for live reads while preserving visibility and freshness guards; keep Actions deletion checks and mutable commit metadata live.
+
 ### Fixes
 
 - Delegate `gh issue view --json` to native gh when the number is a pull request, so it reports `MERGED` and PR fields instead of a relayed `CLOSED` issue.

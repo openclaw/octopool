@@ -166,6 +166,21 @@ export function shouldUseGitHubCache(request: RelayRequest, route: RouteInfo): b
   return headers["if-none-match"] === undefined && headers["if-modified-since"] === undefined;
 }
 
+export function immutableCacheRoute(request: RelayRequest, route: RouteInfo): boolean {
+  if (!shouldUseGitHubCache(request, route)) return false;
+  switch (route.kind) {
+    case "contents":
+      return /^[0-9a-f]{40}$/i.test(scalarQuery(request.query, "ref") ?? "");
+    case "git_tree":
+    case "git_blob":
+      return /\/[0-9a-f]{40}$/i.test(request.path);
+    default:
+      // Commit JSON includes mutable comments/verification; completed Actions
+      // records can be deleted. A pinned identifier alone cannot make them immutable.
+      return false;
+  }
+}
+
 export function requestCacheMaxAgeSeconds(request: RelayRequest): number | undefined {
   const cacheControl = request.headers?.["cache-control"];
   if (cacheControl === undefined) {
