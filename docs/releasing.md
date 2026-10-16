@@ -1,6 +1,6 @@
 # Releasing Octopool
 
-The CLI publishes through [release.yml](../.github/workflows/release.yml), calling the shared [Go CLI archetype at `@v1`](https://github.com/openclaw/release-workflows/blob/v1/README.md). Publication no longer stops at an unsigned GoReleaser draft. The workflow builds the six existing platform archives, signs and notarizes both Darwin binaries with the OpenClaw Foundation identity, verifies frozen assets independently, publishes the GitHub Release, and verifies the Homebrew handoff.
+The CLI publishes through [release.yml](https://github.com/openclaw/octopool/blob/main/.github/workflows/release.yml), calling the shared [Go CLI archetype at `@v1`](https://github.com/openclaw/release-workflows/blob/v1/README.md). Publication no longer stops at an unsigned GoReleaser draft. The workflow builds the six existing platform archives, signs and notarizes both Darwin binaries with the OpenClaw Foundation identity, verifies frozen assets independently, publishes the GitHub Release, and verifies the Homebrew handoff.
 
 The archive filenames, `checksums.txt`, and `openclaw/homebrew-tap` formula remain unchanged. GoReleaser runs without publication credentials; the shared publisher is the only promotion path. The Worker remains a separate service operation.
 
