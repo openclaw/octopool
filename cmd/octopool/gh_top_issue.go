@@ -121,6 +121,10 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 	if err := json.Unmarshal(body, &issue); err != nil {
 		return err
 	}
+	// Native gh reports PRs as MERGED/CLOSED with PR-only fields; REST only says "closed".
+	if _, isPR := issue["pull_request"]; isPR {
+		return localFallbackError{Reason: "issue_number_is_pull_request"}
+	}
 	normalizeIssueJSONState(issue)
 	if hasJSONField(opts.json, "stateReason") {
 		if err := normalizeIssueStateReason(issue); err != nil {

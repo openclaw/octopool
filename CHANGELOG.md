@@ -6,6 +6,10 @@
 
 - Reuse cached full-SHA file contents, Git trees, and blobs for live reads while preserving visibility and freshness guards; keep Actions deletion checks and mutable commit metadata live.
 
+### Fixes
+
+- Delegate `gh issue view --json` to native gh when the number is a pull request, so it reports `MERGED` and PR fields instead of a relayed `CLOSED` issue.
+
 ## 0.9.9 - 2026-10-14
 
 **Highlights:** `gh pr view --json mergeStateStatus` and `gh issue view --json stateReason` now relay through the pool instead of spending personal GraphQL, and correctly queued CLIs no longer get `relay_overloaded` fallbacks onto personal tokens.
