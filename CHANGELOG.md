@@ -5,6 +5,11 @@
 ### Performance
 
 - Overlap pooled identity cache-miss fetches with public-repository verification while withholding all response data and cache publication until the guard succeeds.
+- Reuse cached full-SHA file contents, Git trees, and blobs for live reads while preserving visibility and freshness guards; keep Actions deletion checks and mutable commit metadata live.
+
+### Fixes
+
+- Delegate `gh issue view --json` to native gh when the number is a pull request, so it reports `MERGED` and PR fields instead of a relayed `CLOSED` issue.
 
 ## 0.9.9 - 2026-10-14
 
