@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { coalesceGitHubCacheMiss } from "../src/cache-coalesce";
+import { withBackendWorkSignal } from "../src/backend-work";
 import { acquireOwnedCacheFill } from "../src/cache-fill";
 import type { GitHubCacheRead } from "../src/cache";
 import { fakeCacheFillCoordinator } from "./cache-fill-test-support";
@@ -239,3 +240,31 @@ function sharedRead(): GitHubCacheRead {
     },
   };
 }
+
+it("releases a publication grant that arrives after its backend owner is cancelled", async () => {
+  const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "late-owner" }]);
+  const acquired = Promise.withResolvers<void>();
+  const resumed = Promise.withResolvers<void>();
+  const originalAcquire = coordinator.acquirePublication.getMockImplementation()!;
+  coordinator.acquirePublication.mockImplementation(async (resource) => {
+    const grant = await originalAcquire(resource);
+    acquired.resolve();
+    await resumed.promise;
+    return grant;
+  });
+  const controller = new AbortController();
+  const failure = new Error("guard denied");
+  const result = withBackendWorkSignal(controller.signal, () =>
+    acquireOwnedCacheFill(coordinator, "cache:cache-key"),
+  );
+  await acquired.promise;
+  controller.abort(failure);
+  resumed.resolve();
+  await expect(result).rejects.toBe(failure);
+  expect(coordinator.completePublication).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ owner_token: "late-owner" }),
+    "failed",
+    undefined,
+  );
+  expect(coordinator.renewPublication).not.toHaveBeenCalled();
+});

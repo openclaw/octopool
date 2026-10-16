@@ -80,7 +80,7 @@ entries can satisfy live reads as described below.
 ### Public PR landing snapshots
 
 The fixed `pr-ci-summary-v1`, `pr-ci-rollup-v1`, `pr-merge-snapshot-v1`,
-`pr-comments-v1`, and `pr-commits-v1` projections use pooled GraphQL reads after the normal public-repository guard.
+`pr-comments-v1`, and `pr-commits-v1` projections use pooled GraphQL reads with the normal public-repository guard gating response use and publication.
 The shape and detail cursor vary the existing cache key; a raw REST PR response,
 a different projection, and another cursor can never satisfy the request.
 The merge snapshot includes `headRefName` so a landing can bind the observed source
@@ -1047,9 +1047,20 @@ still checks active route eligibility and public proof; see [identity feedback](
 
 ## Public-repo guard
 
-The shared cache and pooled identities are **public-repository only**. Before any repo
-route uses a pooled identity or a cache entry, `ensurePublicGitHubRepo` confirms the repo
-is public.
+The shared cache and pooled responses are **public-repository only**. Before any repo
+response is served or published, `ensurePublicGitHubRepo` confirms the repo is public.
+On the pooled identity miss path, a fresh negative proof is rejected first, then the
+proof owner may run its identity fetch concurrently with the guard; followers wait
+for the coordinated verdict. Pool tokens may therefore perform one speculative resource read before
+visibility is proven. Its response stays request-local until the guard
+succeeds: body, headers, status, errors, and validators cannot reach callers, cache
+storage, publication waiters, or stale recovery early. A guard failure wins over an
+upstream success or failure, aborts in-flight reads, and fails owned body fills. Queued
+work cannot dispatch after denial; late ownership grants are released. Only
+quota headers may update identity rate state; denied statuses and error classifications
+do not create cooldowns. Both operations reuse the request's single
+backend admission permit. Local/anonymous fallbacks, cached-candidate validation,
+revalidation, proof coordination, and proof TTLs retain their existing order and rules.
 
 - An unauthenticated `GET /repos/{owner}/{repo}` is made against GitHub.
 - If `OCTOPOOL_GITHUB_ORG_TOKEN` is configured, that server-side token is used for the

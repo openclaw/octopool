@@ -338,18 +338,29 @@ describe("public landing GraphQL cache", () => {
   });
 
   it.each(["pr-ci-summary-v1", "pr-comments-v1", "pr-commits-v1"])(
-    "requires public visibility for %s before using a pooled GraphQL identity",
+    "requires public visibility for %s before sharing pooled GraphQL results",
     async (shape) => {
       await seedPool();
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
-        expect(request.url).toBe("https://api.github.com/repos/openclaw/octopool");
-        expect(bearer(request)).toBe("test-org-token");
-        return jsonResponse({ private: true });
+        if (bearer(request) === "test-org-token") {
+          expect(request.url).toBe("https://api.github.com/repos/openclaw/octopool");
+          return jsonResponse({ private: true });
+        }
+        expect(request.url).toBe("https://api.github.com/graphql");
+        expect(bearer(request)).toBe("test-primary-token");
+        return jsonResponse({ data: { repository: { pullRequest: { id: "private-pr" } } } });
       });
       vi.stubGlobal("fetch", upstream);
-      expect((await relay(path, undefined, options(shape))).status).toBe(424);
+      const response = await relay(path, undefined, options(shape));
+      expect(response.status).toBe(424);
+      expect(await response.json()).toMatchObject({
+        error: { code: "fallback_local", details: { reason: "repo_not_public" } },
+      });
       expect(upstream).toHaveBeenCalledTimes(1);
+      expect(
+        await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
+      ).toEqual({ count: 0 });
     },
   );
 });

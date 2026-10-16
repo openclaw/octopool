@@ -144,11 +144,19 @@ describe("eligible and usable identity routing", () => {
             ? { code: "pool_policy_unavailable" }
             : { code: "fallback_local", details: { reason } },
       });
-      expect(upstream.mock.calls.map(([input, init]) => bearer(input, init))).toEqual(
+      expect(upstream.mock.calls.map(([input, init]) => bearer(input, init)).sort()).toEqual(
         boundary === "private" ? ["test-org-token"] : [],
       );
       expect(await poolCoordinatorStub(env, POOL).snapshot()).toMatchObject({
-        cooldowns: [],
+        cooldowns:
+          boundary === "private"
+            ? [
+                expect.objectContaining({
+                  identity_id: "primary",
+                  reason: "identity_secret_missing",
+                }),
+              ]
+            : [],
         rates: [],
       });
       expect(
@@ -310,7 +318,7 @@ describe("real D1 eligibility boundaries", () => {
     );
   });
 
-  it("uses the wildcard PAT outside the allowlist after public proof", async () => {
+  it("uses the wildcard PAT outside the allowlist with public proof", async () => {
     await seedPool();
     await env.DB.prepare("UPDATE identity_scopes SET owner = '*'").run();
     const upstream = githubUpstream({ primary: jsonResponse({ private: false }) });

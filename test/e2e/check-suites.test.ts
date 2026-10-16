@@ -13,7 +13,7 @@ describe.each([
   { path: base, kind: "check_suite_view", body: suite },
   { path: `${base}/check-runs`, kind: "check_suite_check_runs", body: checks },
 ])("check suite relay $kind", ({ path, kind, body }) => {
-  it("uses pooled reads after public proof and shares the cached body", async () => {
+  it("shares pooled reads only after public proof", async () => {
     await seedPool();
     let pooled = 0;
     vi.stubGlobal(
@@ -56,13 +56,14 @@ describe.each([
     ).toEqual({ route_kind: kind, route_key: `GET ${path.replace("/42", "/:id")}` });
   });
 
-  it("denies private repositories before using a pooled credential or body cache", async () => {
+  it("denies private repository responses and body cache publication", async () => {
     await seedPool();
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
         const request = new Request(input, init);
         if (bearer(request) === "test-org-token") return jsonResponse({ private: true });
+        if (bearer(request) === "test-primary-token") return jsonResponse(body);
         expect(bearer(request)).toBeUndefined();
         return jsonResponse({}, 404);
       }),

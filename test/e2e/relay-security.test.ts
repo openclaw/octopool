@@ -14,12 +14,15 @@ const LOG_PATH = "/repos/openclaw/octopool/actions/jobs/42/logs";
 const JOB_PAGE_URL = "https://github.com/openclaw/octopool/runs/42";
 
 describe("Worker end-to-end relay security boundaries", () => {
-  it("denies private repositories before a pooled credential is used", async () => {
+  it("denies private repository responses without publishing pooled data", async () => {
     await seedPool();
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       if (bearer(request) === "test-org-token") {
         return jsonResponse({ private: true });
+      }
+      if (bearer(request) === "test-primary-token") {
+        return jsonResponse({ id: 42, full_name: "openclaw/private-project", private: true });
       }
       expect(bearer(request)).toBeUndefined();
       return jsonResponse({ message: "anonymous backend unavailable" }, 503);

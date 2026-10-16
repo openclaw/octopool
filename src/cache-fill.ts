@@ -54,14 +54,19 @@ export async function acquireOwnedCacheFill(
     assertBackendWorkActive();
     acquisition = await coordinator.acquirePublication(cacheKey);
   }
-  assertBackendWorkActive();
   if (acquisition.kind !== "owner") {
+    assertBackendWorkActive();
     return acquisition;
   }
-  return {
-    kind: "owner",
-    owner: startOwnedCacheFill(coordinator, acquisition.owner),
-  };
+  const owner = startOwnedCacheFill(coordinator, acquisition.owner);
+  try {
+    assertBackendWorkActive();
+  } catch (error) {
+    // A non-abortable acquisition may grant ownership after this request was denied.
+    await owner.fail();
+    throw error;
+  }
+  return { kind: "owner", owner };
 }
 
 export function startOwnedCacheFill(

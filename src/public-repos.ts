@@ -39,6 +39,7 @@ export async function ensurePublicGitHubRepo(
   env: GitHubEgressEnv,
   route: RouteInfo,
   cacheCreatedAt?: string,
+  onProbeStart?: () => void,
 ): Promise<void> {
   using _phase = relayPhase("public_guard");
   if (route.owner === undefined || route.repo === undefined) return;
@@ -82,6 +83,8 @@ export async function ensurePublicGitHubRepo(
         await fill.complete("shared", reused.publication_id);
         return;
       }
+      // Only the current proof owner may overlap a resource read with this probe.
+      onProbeStart?.();
       const observation = await refreshPublicGitHubRepoProof(
         env,
         owner,

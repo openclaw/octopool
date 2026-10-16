@@ -50,7 +50,8 @@ identity.
 Each identity has one or more `identity_scopes` rows (`owner`, optional `repo`,
 `allow_private`). When a request targets `owner/repo`, only identities scoped to that
 owner (with a matching `repo` or an owner-wide `NULL` repo) are candidates. A PAT scoped
-to `*` with an owner-wide `NULL` repo can serve any public repository after public proof,
+to `*` with an owner-wide `NULL` repo can serve any public repository with response use
+and publication gated on public proof,
 including owners explicitly listed in `allowed_owners`; scoped PATs and GitHub Apps remain
 limited to their configured owner/repository. Routes with no owner (e.g. `/rate_limit`)
 consider all active identities in the pool.

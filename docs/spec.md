@@ -42,7 +42,10 @@ boundary confines nested traversals; AST limits and viewer/introspection rejecti
 defense in depth. See [repository GraphQL](relay.md#repository-graphql-reads).
 
 The shared relay is public-repository-only. Repository routes require a live or narrowly
-bounded historical public proof before pooled credentials or cached data can be used. A
+bounded historical public proof before responses can be served or published. On pooled
+identity misses, a fresh negative proof prevents dispatch; otherwise only the proof
+owner may overlap its credentialed read with the guard. Followers and all response
+handling wait for successful proof. Denial cancels the request's backend work. A
 hard private/404 result always denies. Broad `*` PAT scopes may serve any proven-public
 repository; scoped PATs and GitHub Apps remain limited to their configured owner/repository.
 
@@ -80,8 +83,11 @@ Durable Object partition key: `pool:<pool_id>`.
    completion (`shared`, `edge_only`, or `failed`) rather than polling cache storage.
 6. Try an exact token-free adapter: anonymous API, public pages, or Git smart HTTP.
 7. Establish public-repository proof from the direct response or the explicit guard.
-8. If the route requires credentials, select a scoped identity through the pool coordinator,
-   call GitHub, record rate state/cooldowns, and retry another candidate when appropriate.
+   For pooled identity misses, reject fresh negative proofs first. Only the proof owner
+   overlaps the guard with identity selection and the first GitHub read; followers wait.
+8. If the route requires credentials, select a scoped identity through the pool coordinator
+   and call GitHub. Wait for the guard before handling its response or error; guard failure
+   takes precedence. Record rate state/cooldowns and retry another candidate when appropriate.
 9. Sanitize and publish eligible `200` responses to D1 and the edge cache.
 10. Return the relay envelope; asynchronously record the authenticated/validated outcome.
 11. If a safe read cannot be served, return `424 fallback_local` with a reason. The CLI
