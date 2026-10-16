@@ -772,7 +772,10 @@ Supported `gh run watch` commands keep polling on the relay, including under act
 rules. Relay failures, including
 `fallback_local` for pagination or exhausted pool retries, stop the watch with an error;
 they never start a personal-token watcher. This applies to the initial read, later polls,
-completion confirmation, and final job hydration. A terminal poll needs a fresh confirmation
+completion confirmation, and final job hydration.
+If a poll returns stale progress, the next scheduled poll requests `max-age=0`; ordinary
+caching resumes after a non-stale response, without adding polls or changing the backoff.
+The terminal poll needs a fresh confirmation
 unless it is a non-coalesced cache miss or its RFC3339 `cache_created_at` is at or after
 `watchStart + 2s`. `watchStart` is captured once when the watch begins, before its first poll;
 the two-second margin allows for client/server clock skew. Earlier in-progress observations

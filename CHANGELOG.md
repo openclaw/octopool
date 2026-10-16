@@ -9,6 +9,7 @@
 
 ### Fixes
 
+- Refresh stale workflow-run progress on the next scheduled `gh run watch` poll so cached in-progress responses cannot indefinitely delay completion detection.
 - Delegate `gh issue view --json` to native gh when the number is a pull request, so it reports `MERGED` and PR fields instead of a relayed `CLOSED` issue.
 
 ## 0.9.9 - 2026-10-14

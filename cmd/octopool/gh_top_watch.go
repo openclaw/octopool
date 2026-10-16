@@ -179,12 +179,17 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 	backoff := newWatchBackoff(opts.interval)
 	previousStatus := ""
 	progressPrinted := false
+	var meta relayMeta
 	for {
 		var run map[string]any
-		var meta relayMeta
+		var headers map[string]string
+		if meta.Cache == "stale" {
+			// Keep the polling cadence, but do not repeatedly accept expired progress.
+			headers = watchFreshHeaders()
+		}
 		err := retryWatchTick(ctx, &backoff, func() error {
 			var pollErr error
-			run, meta, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, nil)
+			run, meta, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, headers)
 			return pollErr
 		})
 		if err != nil {
@@ -211,7 +216,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			if !watchRunComplete(meta, watchStart) {
 				err := retryWatchTick(ctx, &backoff, func() error {
 					var pollErr error
-					confirmed, _, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, watchFreshHeaders())
+					confirmed, meta, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, watchFreshHeaders())
 					return pollErr
 				})
 				if err != nil {

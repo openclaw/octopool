@@ -103,6 +103,62 @@ func TestGHRunWatchRequestedIntervalStartsAt45Seconds(t *testing.T) {
 	}
 }
 
+func TestGHRunWatchRefreshesStaleProgressOnNextPoll(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		caches        []string
+		headers       []string
+		firstTerminal bool
+	}{
+		{name: "stale progress", caches: []string{"stale", "miss"}, headers: []string{"", "max-age=0"}},
+		{name: "fresh progress clears override", caches: []string{"stale", "miss", "miss"}, headers: []string{"", "max-age=0", ""}},
+		{name: "stale response keeps override", caches: []string{"stale", "stale", "miss"}, headers: []string{"", "max-age=0", "max-age=0"}},
+		{name: "fresh confirmation resumes ordinary polling", caches: []string{"stale", "miss", "miss"}, headers: []string{"", "max-age=0", ""}, firstTerminal: true},
+		{name: "ordinary hit", caches: []string{"hit", "miss"}, headers: []string{"", ""}},
+		{name: "ordinary miss", caches: []string{"miss", "miss"}, headers: []string{"", ""}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_FRESH", "")
+			polls := 0
+			relayTestServer(t, func(request map[string]any) any {
+				if strings.HasSuffix(request["path"].(string), "/jobs") {
+					return relayTestResponse{Body: map[string]any{"total_count": 0, "jobs": []any{}}, Relay: relayMeta{Cache: "miss"}}
+				}
+				index := polls
+				polls++
+				if index >= len(test.caches) {
+					t.Errorf("unexpected extra run poll %d", polls)
+					return relayFallbackFixture("route_denied")
+				}
+				if got, _ := request["headers"].(map[string]any)["cache-control"].(string); got != test.headers[index] {
+					t.Errorf("poll %d cache-control=%q, want %q", polls, got, test.headers[index])
+				}
+				status, conclusion := "in_progress", ""
+				if polls == len(test.caches) || test.firstTerminal && polls == 1 {
+					status, conclusion = "completed", "success"
+				}
+				return relayTestResponse{
+					Body:  map[string]any{"status": status, "run_attempt": 1, "conclusion": conclusion},
+					Relay: relayMeta{Cache: test.caches[index]},
+				}
+			})
+			sleeps := recordWatchSleeps(t)
+			var out bytes.Buffer
+			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo"}, &out)
+			if result.action != ghComplete || result.err != nil || !strings.Contains(out.String(), "Run 42 completed with 'success'") {
+				t.Fatalf("action=%v err=%v output=%q", result.action, result.err, out.String())
+			}
+			wantSleeps := []time.Duration{30 * time.Second}
+			if len(test.caches) == 3 && !test.firstTerminal {
+				wantSleeps = append(wantSleeps, 60*time.Second)
+			}
+			if polls != len(test.caches) || !reflect.DeepEqual(*sleeps, wantSleeps) {
+				t.Fatalf("polls=%d sleeps=%v", polls, *sleeps)
+			}
+		})
+	}
+}
+
 func TestGHRunWatchCompletionProof(t *testing.T) {
 	beforeWatch := time.Now().UTC()
 	for _, test := range []struct {
