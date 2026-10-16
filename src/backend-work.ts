@@ -15,18 +15,28 @@ type Admission = {
 };
 
 // Pending work belongs only to this relay invocation, never another request.
-const scope = new AsyncLocalStorage<Pick<BackendWork, "signal" | "enter" | "check">>();
+const scope = new AsyncLocalStorage<Pick<BackendWork, "signal" | "enter" | "check" | "cancel">>();
 
 // Background callers bound concurrency separately, without borrowing caller permits.
 export function withBackendWorkSignal<T>(
   signal: AbortSignal,
   handler: () => Promise<T>,
 ): Promise<T> {
-  const check = () => signal.throwIfAborted();
-  return scope.run({ signal, check, enter: async () => check() }, async () => {
-    check();
-    return handler();
-  });
+  const controller = new AbortController();
+  const ownedSignal = AbortSignal.any([signal, controller.signal]);
+  const check = () => ownedSignal.throwIfAborted();
+  return scope.run(
+    {
+      signal: ownedSignal,
+      check,
+      enter: async () => check(),
+      cancel: (error) => controller.abort(error),
+    },
+    async () => {
+      check();
+      return handler();
+    },
+  );
 }
 
 export async function admitBackendWork(): Promise<void> {
@@ -36,6 +46,10 @@ export async function admitBackendWork(): Promise<void> {
 
 export function assertBackendWorkActive(): void {
   scope.getStore()?.check();
+}
+
+export function cancelBackendWork(error: unknown): void {
+  scope.getStore()?.cancel(error);
 }
 
 export function backendWorkSignal(): AbortSignal | undefined {
@@ -72,6 +86,10 @@ export class BackendWork {
   check(): void {
     if (Date.now() >= Math.min(this.until, this.deadline)) this.stop();
     if (this.signal.aborted) throw this.signal.reason;
+  }
+
+  cancel(error: unknown): void {
+    this.stop(error);
   }
 
   private stop(

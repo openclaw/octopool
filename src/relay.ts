@@ -5,6 +5,7 @@ import {
   BackendWork,
   admitBackendWork,
   assertBackendWorkActive,
+  cancelBackendWork,
   withBackendWorkSignal,
 } from "./backend-work";
 import {
@@ -62,7 +63,6 @@ import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import {
   anonymousGitHubResponseProvesPublicRepo,
   ensurePublicGitHubRepo,
-  rejectFreshNegativePublicRepoProof,
   observeAnonymousPublicRepo,
   type GitHubObservation,
 } from "./public-repos";
@@ -448,18 +448,19 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
 
   const fallback = capabilitiesForRouteKind(state.route.kind).fallback;
   if (fallback === "pool") {
-    if (state.route.owner !== undefined && state.route.repo !== undefined) {
-      await relayPhasePromise("public_guard", () =>
-        rejectFreshNegativePublicRepoProof(
-          state.env,
-          state.route.owner!.toLowerCase(),
-          state.route.repo!.toLowerCase(),
-        ),
-      );
-    }
-    const publicGuard = ensurePublicGitHubRepo(state.env, state.route);
-    // Observe rejection immediately, even while selection or upstream work is pending.
-    void publicGuard.catch(() => {});
+    const probeStarted = Promise.withResolvers<void>();
+    const publicGuard = ensurePublicGitHubRepo(
+      state.env,
+      state.route,
+      undefined,
+      probeStarted.resolve,
+    ).catch((error: unknown) => {
+      // The request owner aborts egress, releases admission, and observes late work.
+      cancelBackendWork(error);
+      throw error;
+    });
+    // Followers wait for proof; only its owner may begin a speculative resource read.
+    await Promise.race([probeStarted.promise, publicGuard]);
     try {
       return await callIdentityPool(state, publicGuard);
     } finally {

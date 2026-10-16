@@ -242,7 +242,7 @@ describe("repository GraphQL relay", () => {
   });
 
   it.each([query, batchQuery])(
-    "refuses private repository responses after a scoped-token read: %s",
+    "refuses private repositories before token exchange or query execution: %s",
     async (query) => {
       const id = await seedApp();
       const calls = upstream(id, { visibility: true });
@@ -251,9 +251,9 @@ describe("repository GraphQL relay", () => {
       expect(await response.json()).toMatchObject({
         error: { code: "fallback_local", details: { reason: "repo_not_public" } },
       });
-      expect(calls.mock).toHaveBeenCalledTimes(4);
-      expect(calls.minted).toEqual(["octopool"]);
-      expect(calls.queries()).toBe(1);
+      expect(calls.mock).toHaveBeenCalledTimes(1);
+      expect(calls.minted).toEqual([]);
+      expect(calls.queries()).toBe(0);
       expect(
         await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
       ).toEqual({ count: 0 });

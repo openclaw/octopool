@@ -210,7 +210,7 @@ describe("Worker restricted search shape and protection boundaries", () => {
             new URL(request.url).pathname === "/search/issues" && bearer(request) !== undefined,
         )
         .map((request) => bearer(request)),
-    ).toEqual(["test-primary-token"]);
+    ).toEqual([]);
     expect(await cacheRows()).toEqual([]);
   });
 

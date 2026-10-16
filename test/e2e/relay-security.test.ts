@@ -38,7 +38,7 @@ describe("Worker end-to-end relay security boundaries", () => {
       upstream.mock.calls.filter(
         ([input, init]) => bearer(new Request(input, init)) === "test-primary-token",
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
     ).toEqual({ count: 0 });

@@ -145,7 +145,7 @@ describe("eligible and usable identity routing", () => {
             : { code: "fallback_local", details: { reason } },
       });
       expect(upstream.mock.calls.map(([input, init]) => bearer(input, init)).sort()).toEqual(
-        boundary === "private" ? ["test-org-token", "test-secondary-token"] : [],
+        boundary === "private" ? ["test-org-token"] : [],
       );
       expect(await poolCoordinatorStub(env, POOL).snapshot()).toMatchObject({
         cooldowns:

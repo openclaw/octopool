@@ -401,7 +401,7 @@ headers are supported; query-string fields and conditional validators are refuse
 The owner must occur in `allowed_owners`, even when `allow_public_repos` is enabled.
 The existing public-repository proof guard must authorize the repository before any
 response is served or published. On pooled misses, App token acquisition and the read
-may overlap this guard after fresh negative proofs are rejected. Private or unknown visibility returns
+may overlap this guard for the proof owner after fresh negative proofs are rejected. Private or unknown visibility returns
 `424 fallback_local` (`repo_not_public` / `repo_public_check_failed`).
 
 **The credential is the primary security boundary.** Only active, route-eligible GitHub
@@ -556,8 +556,8 @@ Background SWR refreshes use the same handling without affecting the served resp
 deferred log proof uses its separate bounded scope without caller admission.
 
 Every repo route additionally passes a public-visibility check before a response is served
-or published. Pooled identity misses overlap this check with the upstream read after
-rejecting fresh negative proofs — see [Cache & public-repo guard](cache.md#public-repo-guard).
+or published. On pooled identity misses, only the proof owner overlaps this check with
+its upstream read after rejecting fresh negative proofs — see [Cache & public-repo guard](cache.md#public-repo-guard).
 An eligible wildcard PAT also covers explicitly allowed owners. Missing local bindings
 do not widen scopes or bypass policy, native-only, private-repository, or token-free
 release/event boundaries. Credentials are resolved only after identity selection; a
@@ -587,7 +587,8 @@ across head SHAs or closed/merged state.
 Issue, PR, code, and commit searches accept one unquoted, positive `repo:owner/name`;
 each component must match `[A-Za-z0-9_.-]+`. The repository still passes the existing
 owner policy and identity eligibility checks before dispatch, and public-visibility proof
-before serving or publishing results. The pooled miss read may overlap that proof.
+before serving or publishing results. Only the proof owner's pooled miss read may overlap
+that proof; followers wait for its verdict.
 `is:public` only narrows the query; it never
 replaces that proof.
 

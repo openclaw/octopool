@@ -6,6 +6,7 @@ import {
   admitBackendWork,
   assertBackendWorkActive,
   backendWorkSignal,
+  cancelBackendWork,
   withBackendWorkSignal,
 } from "../src/backend-work";
 import { HttpError } from "../src/http";
@@ -360,9 +361,10 @@ it("keeps background cancellation independent of caller admission and restores t
       const foregroundSignal = backendWorkSignal();
       await withBackendWorkSignal(background.signal, async () => {
         await admitBackendWork();
-        expect(backendWorkSignal()).toBe(background.signal);
+        expect(backendWorkSignal()!.aborted).toBe(false);
         expect(f.admission.acquire).not.toHaveBeenCalled();
         background.abort(expired);
+        expect(backendWorkSignal()!.reason).toBe(expired);
         expect(assertBackendWorkActive).toThrow(expired);
         await expect(admitBackendWork()).rejects.toBe(expired);
       });
@@ -382,4 +384,24 @@ it("does not start background work with an expired signal", async () => {
   const expired = new Error("background deadline");
   await expect(withBackendWorkSignal(AbortSignal.abort(expired), handler)).rejects.toBe(expired);
   expect(handler).not.toHaveBeenCalled();
+});
+
+it("cancels only the current background owner without cancelling its foreground", async () => {
+  const f = fixture();
+  const failure = new Error("guard denied");
+  expect(
+    await f.run(async () => {
+      const foreground = backendWorkSignal()!;
+      await withBackendWorkSignal(new AbortController().signal, async () => {
+        cancelBackendWork(failure);
+        expect(backendWorkSignal()!.reason).toBe(failure);
+        await expect(admitBackendWork()).rejects.toBe(failure);
+      });
+      expect(foreground.aborted).toBe(false);
+      await admitBackendWork();
+      return "served";
+    }),
+  ).toEqual({ value: "served" });
+  await Promise.all(f.background);
+  expect(f.admission.release).toHaveBeenCalledTimes(1);
 });

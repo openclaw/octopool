@@ -357,7 +357,7 @@ describe("public landing GraphQL cache", () => {
       expect(await response.json()).toMatchObject({
         error: { code: "fallback_local", details: { reason: "repo_not_public" } },
       });
-      expect(upstream).toHaveBeenCalledTimes(2);
+      expect(upstream).toHaveBeenCalledTimes(1);
       expect(
         await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
       ).toEqual({ count: 0 });

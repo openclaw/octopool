@@ -53,7 +53,7 @@ describe("cache candidate round trips", () => {
       .first<{ timings_json: string; cache_miss_reason: string | null }>();
     const timing = JSON.parse(audit!.timings_json);
     expect({ d1_ops: timing.d1_ops, cache_lookup: timing.phase_calls.cache_lookup }).toEqual({
-      d1_ops: maxAge === 0 ? 8 : 14,
+      d1_ops: maxAge === 0 ? 7 : 13,
       cache_lookup: maxAge === 0 ? 3 : 19,
     });
     expect(audit!.cache_miss_reason).toBe(maxAge === 0 ? null : "absent");

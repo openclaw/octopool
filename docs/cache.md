@@ -1050,11 +1050,13 @@ still checks active route eligibility and public proof; see [identity feedback](
 The shared cache and pooled responses are **public-repository only**. Before any repo
 response is served or published, `ensurePublicGitHubRepo` confirms the repo is public.
 On the pooled identity miss path, a fresh negative proof is rejected first, then the
-guard and identity fetch run concurrently. Pool tokens may therefore perform a GitHub
-read before visibility is proven. Its response stays request-local until the guard
+proof owner may run its identity fetch concurrently with the guard; followers wait
+for the coordinated verdict. Pool tokens may therefore perform one speculative resource read before
+visibility is proven. Its response stays request-local until the guard
 succeeds: body, headers, status, errors, and validators cannot reach callers, cache
 storage, publication waiters, or stale recovery early. A guard failure wins over an
-upstream success or failure, discards the response, and fails owned body fills. Only
+upstream success or failure, aborts in-flight reads, and fails owned body fills. Queued
+work cannot dispatch after denial; late ownership grants are released. Only
 quota headers may update identity rate state; denied statuses and error classifications
 do not create cooldowns. Both operations reuse the request's single
 backend admission permit. Local/anonymous fallbacks, cached-candidate validation,

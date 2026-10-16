@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi, type MockInstance } from "vitest";
+import { backendWorkSignal } from "../../src/backend-work";
 import { backendAdmissionStub } from "../../src/backend-admission";
 import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
@@ -26,7 +27,10 @@ function trackCacheWrites() {
   return put;
 }
 
-function observeCompletions(observe: (resource: string, outcome: string) => void) {
+function observeCompletions(
+  observe: (resource: string, outcome: string) => void,
+  acquire?: (resource: string) => void,
+) {
   return new Proxy(env.POOL_COORDINATOR, {
     get(target, key) {
       if (key === "get")
@@ -34,6 +38,11 @@ function observeCompletions(observe: (resource: string, outcome: string) => void
           const stub = target.get(...args);
           return new Proxy(stub, {
             get(real, method) {
+              if (method === "acquirePublication")
+                return (resource: string) => {
+                  acquire?.(resource);
+                  return real.acquirePublication(resource);
+                };
               if (method === "completePublication")
                 return async (...values: Parameters<typeof real.completePublication>) => {
                   const result = await real.completePublication(...values);
@@ -72,7 +81,7 @@ async function expectNoBodyPublication(put: MockInstance<Cache["put"]>, outcomes
   expect(await permits()).toEqual([]);
 }
 
-function holdUpstreams(resource: () => Response | Promise<Response>) {
+function holdUpstreams(resource: (signal: AbortSignal) => Response | Promise<Response>) {
   const guardStarted = ownedWork.gate();
   const fetchStarted = ownedWork.gate();
   const guard = ownedWork.gate();
@@ -86,7 +95,7 @@ function holdUpstreams(resource: () => Response | Promise<Response>) {
     }
     if (token === "test-primary-token") {
       fetchStarted.release();
-      return resource();
+      return resource(new Request(input, init).signal);
     }
     return jsonResponse({ message: "anonymous unavailable" }, 503);
   });
@@ -226,29 +235,110 @@ describe("pooled miss public guard overlap", () => {
     );
   });
 
-  it("observes a guard rejection while upstream remains in flight", async () => {
+  it("cancels a held pooled fetch and releases admission as soon as the guard rejects", async () => {
     await seedPool();
-    const guardCompleted = ownedWork.gate();
-    const coordinator = observeCompletions((resource, outcome) => {
-      if (resource.startsWith("public-repo:") && outcome === "shared") guardCompleted.release();
-    });
     const resource = ownedWork.gate();
-    const upstream = holdUpstreams(async () => {
-      await resource.promise;
-      return jsonResponse(body);
+    let signal: AbortSignal | undefined;
+    const upstream = holdUpstreams((current) => {
+      signal = current;
+      return new Promise<Response>((resolve, reject) => {
+        current.addEventListener("abort", () => reject(current.reason), { once: true });
+        void resource.promise.then(() => resolve(jsonResponse(body)));
+      });
     });
-    const response = requestWithEnv({ POOL_COORDINATOR: coordinator }, path, {});
+    const response = relay(path);
     await upstream.started;
     upstream.finish(jsonResponse({ private: true }));
-    await guardCompleted.promise;
-    // A native round trip lets the rejected guard settle while upstream stays held.
-    expect(
-      await env.DB.prepare("SELECT is_public FROM github_public_repo_proofs").first("is_public"),
-    ).toBe(0);
-    resource.release();
+    await expect.poll(() => signal?.aborted).toBe(true);
     expect(await (await response).json()).toMatchObject({
       error: { details: { reason: "repo_not_public" } },
     });
+    expect(await permits()).toEqual([]);
+    expect((await poolCoordinatorStub(env, POOL).snapshot()).cooldowns).toEqual([]);
+    expect(await env.DB.prepare("SELECT count(*) AS n FROM github_cache_entries").first("n")).toBe(
+      0,
+    );
+  });
+
+  it("allows only the public-proof owner to dispatch before a shared denial", async () => {
+    await seedPool();
+    const joined = ownedWork.gate();
+    let acquisitions = 0;
+    const coordinator = observeCompletions(
+      () => {},
+      (resource) => {
+        if (resource.startsWith("public-repo:") && ++acquisitions === 3) joined.release();
+      },
+    );
+    const upstream = holdUpstreams(() => jsonResponse(body));
+    const requests = [requestWithEnv({ POOL_COORDINATOR: coordinator }, path, {})];
+    await upstream.started;
+    requests.push(
+      ...[43, 44].map((id) =>
+        requestWithEnv({ POOL_COORDINATOR: coordinator }, path.replace("42", String(id)), {}),
+      ),
+    );
+    await joined.promise;
+    upstream.finish(jsonResponse({ private: true }));
+    for (const response of await Promise.all(requests)) {
+      expect(await response.json()).toMatchObject({
+        error: { details: { reason: "repo_not_public" } },
+      });
+    }
+    expect(
+      upstream.fetcher.mock.calls.filter(
+        ([input, init]) => bearer(input, init) === "test-primary-token",
+      ),
+    ).toHaveLength(1);
+    expect(await permits()).toEqual([]);
+  });
+
+  it("does not dispatch a pooled read after a delayed identity selection resumes", async () => {
+    await seedPool();
+    const selected = ownedWork.gate();
+    const resume = ownedWork.gate();
+    let signal: AbortSignal | undefined;
+    const real = poolCoordinatorStub(env, POOL);
+    const coordinator = new Proxy(env.POOL_COORDINATOR, {
+      get(target, key) {
+        if (key === "get")
+          return (...args: Parameters<typeof target.get>) => {
+            const stub = target.get(...args);
+            return new Proxy(stub, {
+              get(current, method) {
+                if (method === "selectIdentity")
+                  return async (...values: Parameters<typeof real.selectIdentity>) => {
+                    signal = backendWorkSignal();
+                    selected.release();
+                    await resume.promise;
+                    return current.selectIdentity(...values);
+                  };
+                const value = Reflect.get(current, method, current);
+                return typeof value === "function"
+                  ? (...values: unknown[]) => Reflect.apply(value, current, values)
+                  : value;
+              },
+            });
+          };
+        const value = Reflect.get(target, key, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const upstream = holdUpstreams(() => jsonResponse(body));
+    const response = requestWithEnv({ POOL_COORDINATOR: coordinator }, path, {});
+    await selected.promise;
+    upstream.finish(jsonResponse({ private: true }));
+    await expect.poll(() => signal?.aborted).toBe(true);
+    resume.release();
+    expect(await (await response).json()).toMatchObject({
+      error: { details: { reason: "repo_not_public" } },
+    });
+    expect(
+      upstream.fetcher.mock.calls.some(
+        ([input, init]) => bearer(input, init) === "test-primary-token",
+      ),
+    ).toBe(false);
+    expect(await permits()).toEqual([]);
   });
 
   it("rejects a fresh negative edge proof without starting a pooled fetch", async () => {
