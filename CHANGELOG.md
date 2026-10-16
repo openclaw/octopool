@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Maintenance
+
+- Publish signed and notarized CLI releases through the shared Actions workflow, with a no-publish rehearsal and verified Homebrew handoff.
+
 ### Performance
 
 - Overlap the public-proof owner's pooled cache-miss fetch with repository verification; hold followers until proof succeeds and cancel denied work without publishing responses or retaining late ownership grants.

@@ -1,93 +1,46 @@
 # Releasing Octopool
 
-Source of truth stays in this repo: tags, GitHub Releases, and `CHANGELOG.md`.
-The shared [openclaw/releases](https://github.com/openclaw/releases) repo holds
-durable release evidence; signing uses the OpenClaw Foundation Developer ID.
+The CLI publishes through [release.yml](../.github/workflows/release.yml), calling the shared [Go CLI archetype at `@v1`](https://github.com/openclaw/release-workflows/blob/v1/README.md). Publication no longer stops at an unsigned GoReleaser draft. The workflow builds the six existing platform archives, signs and notarizes both Darwin binaries with the OpenClaw Foundation identity, verifies frozen assets independently, publishes the GitHub Release, and verifies the Homebrew handoff.
 
-## Pipeline
+The archive filenames, `checksums.txt`, and `openclaw/homebrew-tap` formula remain unchanged. GoReleaser runs without publication credentials; the shared publisher is the only promotion path. The Worker remains a separate service operation.
 
-1. Land everything; `CHANGELOG.md` has a dated section for the version
-   (retitle the `Unreleased` heading). Commit `chore(release): X.Y.Z`, push.
-   Dispatch the existing CI workflow on the release-preparation branch and require
-   its exact commit to pass, including `CLI to Worker release smoke`. Manual
-   dispatch adds the networked `pnpm test:e2e:cli-worker` release gate to the
-   deterministic checks used for pushes and pull requests.
-2. Confirm the version has no release, or its existing release is still a draft,
-   before starting GoReleaser. Tag and push:
-   `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`.
-   `.github/workflows/release.yml` runs GoReleaser and stages a draft GitHub
-   Release with `checksums.txt`; release notes are extracted from the
-   changelog section and verified by the workflow. The pinned GoReleaser keeps
-   an existing published release published even with `release.draft: true`.
-   Never rerun it for a published version.
-3. Sign + notarize the darwin binaries (currently a maintainer-Mac step; see
-   below): download both darwin tarballs and `checksums.txt` from the draft with
-   authenticated `ghx release download vX.Y.Z --repo openclaw/octopool` and verify
-   their checksums. Sign each `octopool` binary with
-   `Developer ID Application: OpenClaw Foundation (FWJYW4S8P8)` using
-   `codesign --force --options runtime --timestamp`, notarize a zip of each
-   binary with `xcrun notarytool submit --wait` using the canonical release
-   App Store Connect key from the approved private credential workflow, and retain
-   both `Accepted` submissions. For each binary, run
-   `codesign --verify --strict --verbose=4 ./octopool` and
-   `codesign --verify --verbose=4 -R='notarized' --check-notarization ./octopool`.
-   Inspect `codesign --display --verbose=4 ./octopool` for Foundation team
-   `FWJYW4S8P8`, the runtime flag, and a timestamp. This follows Apple's
-   [notarized-code verification guidance](https://developer.apple.com/forums/thread/130560).
-   Repackage the tarballs, rewrite the two darwin lines in `checksums.txt`, and use
-   `ghx release upload vX.Y.Z --repo openclaw/octopool --clobber` for the two
-   tarballs and checksum file. Once signing starts, resume this existing draft;
-   do not rerun GoReleaser and replace the staged binaries.
-4. Download the uploaded final assets and `checksums.txt` into a separate clean
-   directory with authenticated
-   `ghx release download vX.Y.Z --repo openclaw/octopool --dir <fresh-directory>`.
-   Verify every archive's checksum and both downloaded darwin binaries'
-   signatures and notarization.
-   Confirm the draft's release notes exactly match the dated changelog section,
-   then publish:
-   `ghx release edit vX.Y.Z --repo openclaw/octopool --draft=false --latest`.
-   After publication, never rebuild or replace this version's assets; fixes need
-   a new version.
-5. Bump `openclaw/homebrew-tap` `Formula/octopool.rb`: version plus all four
-   platform sha256 values from the FINAL (post-signing) `checksums.txt`.
-6. Fleet rollout: `brew update && brew upgrade octopool` on every Mac;
-   verify `octopool version` matches and the shim still relays
-   (`OCTOPOOL_NO_FALLBACK=1 gh api repos/openclaw/octopool --jq .full_name`).
-7. Worker changes additionally need `pnpm run deploy` from the release commit. Load
-   `CLOUDFLARE_API_TOKEN` through the approved 1Password workflow from the Molty item
-   `OpenClaw Services Cloudflare API Token`; both `wrangler.jsonc` (`octopool`) and
-   `wrangler.public-proxy.jsonc` (`octopool-public-proxy`) are pinned to the OpenClaw
-   Services account. Use `pnpm run deploy:public-proxy` for a proxy-only proof. Never
-   substitute a personal-account Cloudflare token. R2/D1 bindings must be provisioned
-   first (see docs/cache.md for the actions-logs bucket and its lifecycle rule), and
-   `OCTOPOOL_PROXY_SECRET` must already exist on both Workers.
-   Preserve Durable Object migrations `v1` (`PoolCoordinator`) and `v2` (`PolicyCoordinator`),
-   and include `v3` (`BackendAdmission`) for admission control; follow
-   the [policy upgrade and rollback notes](operations.md#policy-coordinator-upgrade)
-   and [backend admission notes](operations.md#backend-work-admission).
-   Admin API writes through the coordinator are immediately visible; writes by older
-   Workers or direct D1 edits become visible within 60 seconds, with fail-closed reloads.
-8. Record evidence in openclaw/releases after publication: dispatch
-   `openclaw-release-evidence.yml` with `release_id=octopool-X.Y.Z` and
-   the Octopool CI/release workflow runs in `runs`. Leave `package_spec` and
-   `release_ref` empty: the shared resolvers support only the `openclaw` npm package
-   and refs in `openclaw/openclaw`, not this Go CLI. Put the verified Octopool tag,
-   commit and release URLs plus final signing/checksum proof in `notes` instead.
-   If the workflow cannot publish its evidence, generate locally with
-   `node scripts/openclaw-release-evidence.mjs` and commit the evidence
-   directory directly (precedent: `evidence/octopool-0.5.0`).
-9. Verify the published release body exactly matches the finalized dated changelog section,
-   the final assets/checksums match the Homebrew formula, and the working tree is clean.
-   Resume an `Unreleased` section when the next user-visible changes land; keep their notes
-   current as work lands rather than deferring changelog maintenance to release time.
+## One-time owner setup
 
-## Future: CI-hosted signing
+Before enabling this caller, provision the repository's `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_P8`, and `TAP_TOKEN` secrets through the approved credential workflow. `TAP_TOKEN` needs the existing tap's release handoff permissions. Never put values in the repository. Until those credentials are available, neither the signing rehearsal nor live publication can succeed.
 
-The manual step 3 should move into a macOS job gated like the shared repo's
-`mac-release` environment (release-manager approval, dispatch from
-openclaw/releases main, secrets held in the environment): a CI transport
-`.p12` of the Foundation identity plus the shared App Store Connect API key,
-with GoReleaser handing darwin archives to a sign/notarize/re-checksum step
-before release publication. Until that exists, releases are signed on an
-authorized maintainer Mac with the local Foundation release keychain
-(passwordless, never-locking; proof commands in the private release notes).
+The stable code-signing identifier is `org.openclaw.octopool`, with OpenClaw Foundation Team ID `FWJYW4S8P8`. Live tags must be annotated and reachable from protected main; preserve the existing annotated-tag convention.
+
+## Prepare and rehearse
+
+1. Land the release preparation with a dated changelog section and an empty `## Unreleased` above it. Do not drop contributor credit.
+2. Require green independent push CI on that exact main commit. Also dispatch the existing CI workflow for the release-preparation commit and require its `CLI to Worker release smoke` gate to pass, preserving the networked release preflight.
+3. Run the publishing rehearsal on merged main with the prepared version:
+
+   ```sh
+   gh workflow run release.yml --ref main -f version=X.Y.Z -F dry_run=true
+   ```
+
+The rehearsal freezes current protected main, builds, signs, notarizes, and verifies the assets. It creates no tag, draft, GitHub Release, Homebrew change, or Worker deployment. A historical version tag does not redirect a rehearsal away from current main.
+
+## Publish and verify
+
+Only after explicit release authorization, all preflights, and a successful rehearsal, create and push the annotated `vX.Y.Z` tag on the prepared commit. The tag starts publication. Never rebuild a published version or replace its tag or assets. Follow the shared workflow's immutable-byte recovery rules after a partial failure.
+
+After the exact release run succeeds, download every asset, verify `checksums.txt` and the asset inventory, and check both Darwin signatures and online notarization constraints. Run the native CLI version command and verify all four Homebrew platform URLs and digests. Compare the published notes with the dated changelog, then record the release/run evidence in `openclaw/releases`. Finish on clean, synchronized main.
+
+## Worker operations
+
+Worker changes additionally need `pnpm run deploy` from the release commit. Load
+`CLOUDFLARE_API_TOKEN` through the approved 1Password workflow from the Molty item
+`OpenClaw Services Cloudflare API Token`; both `wrangler.jsonc` (`octopool`) and
+`wrangler.public-proxy.jsonc` (`octopool-public-proxy`) are pinned to the OpenClaw
+Services account. Use `pnpm run deploy:public-proxy` for a proxy-only proof. Never
+substitute a personal-account Cloudflare token. R2/D1 bindings must be provisioned
+first (see docs/cache.md for the actions-logs bucket and its lifecycle rule), and
+`OCTOPOOL_PROXY_SECRET` must already exist on both Workers.
+Preserve Durable Object migrations `v1` (`PoolCoordinator`) and `v2` (`PolicyCoordinator`),
+and include `v3` (`BackendAdmission`) for admission control; follow
+the [policy upgrade and rollback notes](operations.md#policy-coordinator-upgrade)
+and [backend admission notes](operations.md#backend-work-admission).
+Admin API writes through the coordinator are immediately visible; writes by older
+Workers or direct D1 edits become visible within 60 seconds, with fail-closed reloads.
