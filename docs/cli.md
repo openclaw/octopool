@@ -260,13 +260,6 @@ conditional or credential headers, block strings, and unrecognized grammar stay 
 Only default JSON Accept and Cache-Control headers are eligible. `rateLimit` probes,
 mutations, and subscriptions stay native.
 
-Generic queries selecting `mergeStateStatus` also stay native, including aliases,
-fragments, and batches with other public fields. A repository-scoped read-only App
-can report a different merge state than the caller's credentials. The entire query
-uses native gh; Octopool does not combine merge state from a second request.
-The separately allowlisted [landing queries](#known-landing-graphql-reads) keep their
-fixed pooled projection and routing.
-
 A single top-level `viewer { login }` (optionally aliased) can accompany the repository
 roots. Its selection must be exactly `login`, without arguments, directives, aliases,
 or fragments inside it. The CLI reads the active `github.com` host's `user` from native

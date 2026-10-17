@@ -69,13 +69,3 @@ equality alone cannot prove an atomic merge-policy snapshot. The CLI now preserv
 the actual GraphQL enum, never translates REST mergeable_state, and refuses unrecognized
 enums or incomplete snapshots. Lists/searches still delegate this field, as do view
 exports containing any of the other unsupported fields in the baseline table.
-
-Generic repository GraphQL queries selecting `mergeStateStatus` now stay native,
-including aliases, fragments, and mixed public-field batches. The fixed landing
-snapshot and PR-view projection retain their separate pooled routing.
-
-Follow-up — fixed snapshot caller/bypass parity: the comparisons above cover the
-observed PRs, not every caller permission or bypass rule. Fixed projections use a
-pooled PAT or installation token, which is not bound to the native caller. Broader
-caller/bypass parity remains unproven and needs its own qualification before any
-universal equivalence claim.

@@ -384,8 +384,7 @@ Owner/name must be string literals or supplied string variables; variable defaul
 establish scope. Optional `operationName`
 must match the sole operation. Fragments are expanded for root and depth checks;
 missing, duplicate, cyclic, or excessively expanded fragments are refused. All field
-names, including unused fragments, are checked for `viewer*`, `mergeStateStatus`,
-`__schema`, and `__type`.
+names, including unused fragments, are checked for `viewer*`, `__schema`, and `__type`.
 Only `@include` and `@skip` directives are accepted. Other roots (including `viewer`,
 `rateLimit`, `node`, `nodes`, `search`, organization/user and enterprise lookups),
 mutations, subscriptions, and schema definitions are refused. The CLI can remove one
@@ -394,11 +393,6 @@ top-level `viewer { login }` (optionally aliased) after proving the active nativ
 ambiguous config. It restores that object locally in document order, preserves errors,
 and leaves null data unchanged. Viewer selections with arguments, directives, fragments,
 or additional fields stay native. The Worker never receives or answers viewer fields.
-
-Generic `mergeStateStatus` selections return `424 fallback_local` before backend or
-cache work. The scoped App can report a different merge state than native caller
-credentials; aliases and batches do not change that boundary. Fixed public landing
-projections use their separate allowlist and pooled credential contract.
 
 Query and variables are independently capped at 16 KiB; selection and JSON variable
 depth are capped at 12, with 4,000 document tokens and expanded selections. Variables
