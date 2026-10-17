@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { loadIdentities } from "../../src/db";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { historicalHead, runPage } from "../fixtures/actions-ownership";
 import { GITHUB_EDGE_CACHE_NAMESPACE, githubCacheKey } from "../../src/cache";
@@ -543,8 +544,37 @@ describe("Actions attempt job-list cache", () => {
       query: { per_page: "100" },
       headers: { "x-octopool-public-shape": "actions-jobs-v1" },
     });
-    expect((await second.json<RelayEnvelope>()).relay.cache).toBe("hit");
+    const firstPage = await second.json<RelayEnvelope>();
+    expect(firstPage.relay.cache).toBe("hit");
+    const cachedPages = () =>
+      env.DB.prepare(
+        "SELECT cache_key, created_at, expires_at, body_json FROM github_cache_entries WHERE route_kind = 'run_jobs'",
+      ).all();
+    const beforePages = (await cachedPages()).results;
+    for (const [page, size] of [
+      [2, 100],
+      [3, 100],
+      [2, 80],
+      [4, 100],
+    ] as const) {
+      const response = await relay(path, undefined, {
+        query: { page: String(page), per_page: String(size) },
+        headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+      });
+      const wire = await response.json<RelayEnvelope>();
+      const start = (page - 1) * size + 1;
+      expect(wire).toMatchObject({
+        body: {
+          total_count: 250,
+          jobs: Array.from({ length: Math.max(0, Math.min(size, 251 - start)) }, (_, i) => ({
+            id: start + i,
+          })),
+        },
+        relay: { cache: "hit" },
+      });
+    }
     expect(jobAPIRequests.map((url) => url.searchParams.get("page"))).toEqual(["1", "2", "3"]);
+    expect((await cachedPages()).results).toEqual(beforePages);
     const cached = await env.DB.prepare(
       "SELECT body_json FROM github_cache_entries WHERE route_kind = 'run_jobs'",
     ).first<{ body_json: string }>();
@@ -556,6 +586,126 @@ describe("Actions attempt job-list cache", () => {
          FROM github_cache_entries WHERE route_kind = 'run_jobs'`,
       ).first(),
     ).toEqual({ ttl: 21_600 });
+  });
+
+  it.each([
+    "public",
+    "pooled",
+    "cold",
+    "incomplete",
+    "malformed",
+    "expired",
+    "age bound",
+    "live",
+    "conditional",
+    "revoked identity",
+    "unshaped",
+    "all attempts",
+  ])("checks existing aggregate eligibility for a later jobs page: %s", async (variant) => {
+    const request = {
+      pool: "maintainers",
+      method: "GET" as const,
+      path: "/repos/openclaw/octopool/actions/runs/42/jobs",
+      query: { page: "1", per_page: "100" },
+      headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+    };
+    const route = classifyRoute(request, defaultPolicy("openclaw"));
+    const identity =
+      variant === "pooled" || variant === "revoked identity"
+        ? (await loadIdentities(env, request.pool, route))[0]
+        : undefined;
+    const key = await githubCacheKey(request.pool, request, route, identity);
+    await seedPublicRepoProof(env, route);
+    if (variant !== "cold") {
+      await writeOwnedGitHubCache(
+        env,
+        key,
+        request,
+        route,
+        {
+          status: 200,
+          headers: {
+            ...rateHeaders({ remaining: 59 }),
+            etag: '"source"',
+            "last-modified": "Sun, 20 Sep 2026 00:00:00 GMT",
+            "content-length": "1234",
+            link: '<https://api.github.com/jobs?page=1>; rel="prev"',
+          },
+          body:
+            variant === "malformed"
+              ? { total_count: 120 }
+              : {
+                  total_count: variant === "incomplete" ? 121 : 120,
+                  jobs: Array.from({ length: 120 }, (_, i) => ({ id: i + 1, status: "queued" })),
+                },
+          body_encoding: "json",
+        },
+        identity,
+      );
+      if (variant === "expired" || variant === "age bound") {
+        await env.DB.prepare(
+          "UPDATE github_cache_entries SET created_at = datetime('now', '-120 seconds'), expires_at = datetime('now', ?) WHERE cache_key = ?",
+        )
+          .bind(variant === "expired" ? "-1 second" : "+600 seconds", key)
+          .run();
+        await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
+      }
+    }
+    if (variant === "revoked identity") {
+      await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = 'primary'").run();
+    }
+    const source = await env.DB.prepare(
+      "SELECT created_at, expires_at FROM github_cache_entries WHERE cache_key = ?",
+    )
+      .bind(key)
+      .first<{ created_at: string; expires_at: string }>();
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const fetched = new Request(input, init);
+        const url = new URL(fetched.url);
+        if (url.hostname === "github.com") return new Response(null, { status: 404 });
+        if (bearer(fetched) === "test-org-token") return jsonResponse({ private: false });
+        expect(url.pathname).toBe(request.path);
+        calls.push(url.searchParams.get("page")!);
+        return jsonResponse({ total_count: 120, jobs: [{ id: 1001, status: "queued" }] });
+      }),
+    );
+    const response = await relay(request.path, undefined, {
+      query: {
+        page: "2",
+        per_page: "100",
+        ...(variant === "all attempts" ? { filter: "all" } : {}),
+      },
+      headers: {
+        ...(variant === "unshaped" ? {} : request.headers),
+        ...(variant === "live" ? { "cache-control": "max-age=0" } : {}),
+        ...(variant === "age bound" ? { "cache-control": "max-age=1" } : {}),
+        ...(variant === "conditional" ? { "if-none-match": '"caller"' } : {}),
+      },
+    });
+    const wire = await response.json<RelayEnvelope>();
+    expect(response.status).toBe(200);
+    if (variant === "public" || variant === "pooled") {
+      expect(calls).toEqual([]);
+      expect(wire).toMatchObject({
+        body: { total_count: 120, jobs: Array.from({ length: 20 }, (_, i) => ({ id: i + 101 })) },
+        ...(identity === undefined ? {} : { identity: { id: identity.id, kind: identity.kind } }),
+        relay: {
+          cache: "hit",
+          cache_created_at: new Date(source!.created_at + "Z").toISOString(),
+          cache_expires_at: source!.expires_at,
+        },
+      });
+      for (const header of ["etag", "last-modified", "content-length", "link"]) {
+        expect(wire.headers).not.toHaveProperty(header);
+      }
+    } else {
+      expect(calls).toEqual(["2"]);
+      expect(wire.body).toMatchObject({ jobs: [{ id: 1001 }] });
+      expect(wire.relay.cache).not.toBe("hit");
+    }
   });
 
   it("fails closed above the three-page API bound", async () => {
