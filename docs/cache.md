@@ -835,16 +835,22 @@ cached aggregate. Revalidation recognizes older merged entries with more than 10
 and ignores their page validators, so an expired or forced refresh fetches every page
 again. Single-page validators, fresh cache hits, and bounded outage stale reads retain
 their existing behavior. No cache-key or TTL change is needed. This protects the complete
-stored aggregate; each shaped response still returns at most 100 jobs, and human run view and watch
-fetch later pages separately.
+stored aggregate; each shaped response still returns at most 100 jobs. Human run view and watch
+request later pages separately, but those pages reuse a fresh, complete aggregate for the same
+path, shape, and source identity when available. Different page sizes and pages beyond the end
+are sliced locally without additional GitHub calls. The original source timestamps, expiry,
+public-repository and identity checks, and caller age bounds still apply. Live and conditional
+requests bypass this reuse. A cold later-page request keeps its exact upstream request and cache
+key; it does not fetch a new aggregate or publish an alias.
 
 If a partial rerun exposes count metadata that disagrees with the returned job set, a count
 disagreement alone does not establish another page or prove which successful jobs were
 reused. Octopool rejects that ambiguous shaped response with `pagination_exhausted`, without
 caching it, inventing jobs, or treating a short page as a complete summary. Supported
 `gh run watch` stops with an explicit error on that refusal and never starts real `gh`;
-ordinary run-view fallback remains available. `filter=all`, later pages, unshaped REST
-requests, and unsupported query variants retain exact upstream semantics.
+ordinary run-view fallback remains available. `filter=all`, unshaped REST requests,
+unsupported query variants, and later pages without a usable aggregate retain exact upstream
+semantics.
 
 Machine run-view jobs use up to 10 unshaped canonical returned-attempt pages of 100, with
 completeness/identity validation before output. Human run view and watch share that CLI

@@ -79,6 +79,7 @@ import {
   type RunListSupersetView,
 } from "./run-list-superset";
 import {
+  cachedRunJobsPageView,
   completeRawRunJobsPage,
   completeRunJobsSuperset,
   cachedLatestRunAttempt,
@@ -398,8 +399,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   if (largerPage !== undefined) return serveFreshCachedRelayResponse(state, largerPage);
   const workflow = await readWorkflowCatalogueCache(state);
   if (workflow !== undefined) return serveFreshCachedRelayResponse(state, workflow);
-  const rawJobs = await readRawRunJobsCache(state);
-  if (rawJobs !== undefined) return serveFreshCachedRelayResponse(state, rawJobs);
+  const jobs = await readRunJobsSupersetCache(state);
+  if (jobs !== undefined) return serveFreshCachedRelayResponse(state, jobs);
 
   if (
     state.cacheKey !== undefined &&
@@ -1563,20 +1564,33 @@ async function serveStaleRelayCache(
   return serveExactRunListCache(state, "stale", { staleReason });
 }
 
-async function readRawRunJobsCache(state: ActiveRelay): Promise<CachedGitHubResponse | undefined> {
+async function readRunJobsSupersetCache(
+  state: ActiveRelay,
+): Promise<CachedGitHubResponse | undefined> {
   if (!state.cacheEnabled || state.maxAgeSeconds === 0) return undefined;
-  const view = rawRunJobsSupersetView(state.request, state.route);
+  const page = cachedRunJobsPageView(state.request, state.route);
+  const view = page ?? rawRunJobsSupersetView(state.request, state.route);
   if (view === undefined) return undefined;
   const request = view.cacheRequest;
   const probe = async (identity?: Identity) => {
     const key = await githubCacheKey(request.pool, request, state.route, identity);
     const cached = await readCacheEntry(state, key, identity);
     if (cached === undefined) return undefined;
-    if (!completeRawRunJobsPage(cached, view.limit)) {
+    const complete =
+      page === undefined
+        ? completeRawRunJobsPage(cached, view.limit)
+        : cached.status === 200 &&
+          cached.body_encoding === "json" &&
+          isRecord(cached.body) &&
+          Array.isArray(cached.body.jobs) &&
+          !runJobsSupersetIncomplete(cached, view);
+    if (!complete || !cachedResponseStillFresh(cached, state.maxAgeSeconds)) {
       recordCacheMiss(state, "unusable");
       return undefined;
     }
-    return { ...cached, headers: transformedGitHubHeaders(cached.headers) };
+    return page === undefined
+      ? { ...cached, headers: transformedGitHubHeaders(cached.headers) }
+      : { ...cached, ...filterRunJobsSuperset(cached, page, page.offset) };
   };
   return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
 }
