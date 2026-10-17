@@ -408,7 +408,9 @@ describe("repository GraphQL relay", () => {
   ])("hands off merge state without backend or cache side effects: %s", async (query) => {
     const id = await seedApp();
     const calls = upstream(id);
-    const before = await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first();
+    const before = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM github_cache_entries",
+    ).first();
     const response = await read({ query });
     expect(response.status).toBe(424);
     expect(await response.json()).toMatchObject({
@@ -417,8 +419,8 @@ describe("repository GraphQL relay", () => {
     expect(calls.mock).not.toHaveBeenCalled();
     expect(calls.minted).toEqual([]);
     expect(calls.queries()).toBe(0);
-    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first()).toEqual(
-      before,
-    );
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
+    ).toEqual(before);
   });
 });

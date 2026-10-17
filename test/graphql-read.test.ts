@@ -126,9 +126,7 @@ describe("repository GraphQL AST boundary", () => {
   });
 
   it("keeps captured merge-state batches native after removing viewer", () => {
-    expect(() =>
-      parseGraphQLRead({ query: codexBatch.replace("viewer { login }", "") }),
-    ).toThrow();
+    expect(() => parseGraphQLRead({ query: codexBatch.replace("viewer { login }", "") })).toThrow();
   });
 
   it("accepts public batches after the CLI removes viewer", () => {
