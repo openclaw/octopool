@@ -1,99 +1,68 @@
-name: release
+name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to (re)release (e.g. v0.1.0)"
+      version:
+        description: SemVer to release or rehearse
         required: true
         type: string
+      dry_run:
+        description: Build, sign, notarize and verify without publishing
+        default: true
+        type: boolean
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  goreleaser:
+  preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
     steps:
-      - name: Check out
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         with:
-          go-version-file: go.mod
-          cache: false
-
-      - name: Resolve release tag
-        id: release
-        env:
-          DISPATCH_TAG: ${{ inputs.tag }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          tag="${DISPATCH_TAG:-$REF_NAME}"
-          if [ -z "$tag" ]; then
-            echo "::error::could not resolve release tag"
-            exit 1
-          fi
-          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){2}(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::release ref must be a version tag like v0.1.0, got $tag"
-            exit 1
-          fi
-          if ! commit="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
-            echo "::error::release ref must resolve to an existing tag: $tag"
-            exit 1
-          fi
-          echo "tag=$tag" >>"$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >>"$GITHUB_OUTPUT"
-          echo "commit=$commit" >>"$GITHUB_OUTPUT"
-
-      - name: Check out release tag
-        env:
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
-        run: |
-          git checkout --detach "refs/tags/$RELEASE_TAG"
-          if [ "$(git rev-parse HEAD)" != "$RELEASE_COMMIT" ]; then
-            echo "::error::checked out commit does not match $RELEASE_TAG"
-            exit 1
-          fi
-
-      - name: Stash GoReleaser config
-        run: cp .goreleaser.yaml /tmp/.goreleaser.yaml
-
-      - name: GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-        with:
-          distribution: goreleaser
-          version: "v2.18.2"
-          args: release --clean --config /tmp/.goreleaser.yaml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish changelog release notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          notes="$(awk -v version="$RELEASE_VERSION" '
-            $1 == "##" && $2 == version { in_section = 1 }
-            in_section && $1 == "##" && $2 != version { exit }
-            in_section { print }
-          ' CHANGELOG.md)"
-          if [ -z "$notes" ]; then
-            echo "::error::CHANGELOG.md has no section for $RELEASE_VERSION"
-            exit 1
-          fi
-          gh release edit "$RELEASE_TAG" --notes "$notes"
-          body="$(gh release view "$RELEASE_TAG" --json body --jq '.body')"
-          if ! grep -q "^## $RELEASE_VERSION" <<<"$body"; then
-            echo "::error::GitHub release $RELEASE_TAG does not contain the $RELEASE_VERSION changelog"
-            exit 1
-          fi
+          script: |
+            const { requireReleasePreflight } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/require-release-preflight.mjs`);
+            const run = await requireReleasePreflight({ github, context,
+              version: process.env.RELEASE_VERSION, dryRun: process.env.DRY_RUN === 'true' });
+            core.info(`Verified manual release preflight ${run}`);
+  release:
+    needs: preflight
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      pull-requests: write
+      statuses: read
+    uses: openclaw/release-workflows/.github/workflows/release-go-cli.yml@v1
+    with:
+      version: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+      dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+      repository-type: openclaw
+      homebrew-tap: openclaw/homebrew-tap
+      homebrew-formula: octopool
+      archive-files: '["LICENSE","README.md"]'
+      checksum-filename: checksums.txt
+      nfpm: disabled
+      stable-identifier: org.openclaw.octopool
+      darwin-universal: disabled
+      ci-check-events: '["push"]'
+      strict-checks: true
+      reproducible-rebuild: non-darwin
+    secrets:
+      MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+      MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_P8: ${{ secrets.ASC_PRIVATE_KEY_P8 }}
+      TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
