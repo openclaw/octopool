@@ -50,7 +50,12 @@ func codexGraphQLBatch(t *testing.T) string {
 	return strings.TrimSpace(string(raw))
 }
 
-func TestGraphQLViewerCodexBatch(t *testing.T) {
+func publicGraphQLBatch(t *testing.T) string {
+	t.Helper()
+	return strings.ReplaceAll(codexGraphQLBatch(t), "mergeStateStatus", "")
+}
+
+func TestGraphQLViewerPublicBatch(t *testing.T) {
 	for _, jq := range []string{"", ".data.viewer.login"} {
 		t.Run(jq, func(t *testing.T) {
 			if jq != "" && !jqAvailable() {
@@ -72,7 +77,7 @@ func TestGraphQLViewerCodexBatch(t *testing.T) {
 			})
 			configureGraphQLViewer(t)
 			capture := captureRewriteGH(t)
-			args := []string{"api", "graphql", "--hostname", "github.com", "-f", "query=" + codexGraphQLBatch(t)}
+			args := []string{"api", "graphql", "--hostname", "github.com", "-f", "query=" + publicGraphQLBatch(t)}
 			if jq != "" {
 				args = append(args, "--jq", jq)
 			}
@@ -202,7 +207,7 @@ func TestGraphQLViewerRelayErrors(t *testing.T) {
 			configureGraphQLViewer(t)
 			capture := captureRewriteGH(t)
 			var out bytes.Buffer
-			err := runGH(t.Context(), []string{"api", "graphql", "-f", "query=" + codexGraphQLBatch(t)}, &out, &bytes.Buffer{})
+			err := runGH(t.Context(), []string{"api", "graphql", "-f", "query=" + publicGraphQLBatch(t)}, &out, &bytes.Buffer{})
 			want := strings.Replace(body, `"data":{"p1"`, `"data":{"viewer":{"login":"alice"},"p1"`, 1)
 			if err == nil || isLocalFallback(err) || out.String() != want {
 				t.Fatalf("err=%v body=%s", err, out.String())
@@ -219,7 +224,7 @@ func TestGraphQLViewerNativeFallbacks(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
 			configureGraphQLViewer(t)
-			query := codexGraphQLBatch(t)
+			query := publicGraphQLBatch(t)
 			switch reason {
 			case "different-repo":
 				query = strings.Replace(query, `p2: repository(owner:"openclaw",name:"openclaw")`, `p2: repository(owner:"openclaw",name:"other")`, 1)

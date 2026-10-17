@@ -398,4 +398,29 @@ describe("repository GraphQL relay", () => {
     }
     expect(calls.mock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    query.replace("state mergeable headRefOid", "mergeStateStatus"),
+    query.replace("state mergeable headRefOid", "status: mergeStateStatus"),
+    query.replace("state mergeable headRefOid", "... on PullRequest { mergeStateStatus }"),
+    `${query.replace("state mergeable headRefOid", "...Merge")} fragment Merge on PullRequest { mergeStateStatus }`,
+    'query { safe:repository(owner:"openclaw",name:"octopool"){name} guarded:repository(owner:"openclaw",name:"octopool"){pullRequest(number:42){mergeStateStatus}} }',
+  ])("hands off merge state without backend or cache side effects: %s", async (query) => {
+    const id = await seedApp();
+    const calls = upstream(id);
+    const before = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM github_cache_entries",
+    ).first();
+    const response = await read({ query });
+    expect(response.status).toBe(424);
+    expect(await response.json()).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "route_denied" } },
+    });
+    expect(calls.mock).not.toHaveBeenCalled();
+    expect(calls.minted).toEqual([]);
+    expect(calls.queries()).toBe(0);
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
+    ).toEqual(before);
+  });
 });
