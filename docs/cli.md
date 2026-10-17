@@ -678,6 +678,10 @@ identity evidence: an attempt-qualified response may include successful jobs reu
 older attempts after rerunning failed jobs. Historical run identity/head evidence is checked
 without fetching today's branch head.
 
+When a view selects both `jobs` and `workflowName`, their reads overlap after the run is
+validated. Jobs still paginate in order, and both reads must settle successfully before
+JSON or jq output. A terminal policy or authentication failure cancels the sibling read.
+
 Only selected `workflowName` triggers metadata. View uses one verified workflow-ID lookup;
 filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists use
 the existing complete catalogue (at most 10 pages of 100), then one memoized direct lookup

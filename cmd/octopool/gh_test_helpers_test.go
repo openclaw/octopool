@@ -273,6 +273,7 @@ func prDetailExportResponse(t *testing.T, checks *prChecksFixture, request map[s
 
 // Complete REST data for run export tests, independent of the sparse option-parser fixture.
 type runExportFixture struct {
+	requestMu sync.Mutex
 	run       map[string]any
 	runs      []any
 	jobs      any
@@ -312,7 +313,9 @@ func runExportJob(id int) map[string]any {
 
 func (f *runExportFixture) response(t *testing.T, req map[string]any) any {
 	t.Helper()
+	f.requestMu.Lock()
 	f.requests = append(f.requests, req)
+	f.requestMu.Unlock()
 	path, _ := req["path"].(string)
 	if req["method"] != "GET" {
 		t.Errorf("run export used non-GET request: %v", req["method"])
