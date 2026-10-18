@@ -646,6 +646,9 @@ Files export only `path`, `additions`, `deletions`, and `changeType`, including 
 File change types use native enums; REST `removed` becomes `DELETED`. Unsupported or
 missing statuses, including REST `unchanged` with no native enum, follow guarded
 fallback before any JSON is printed.
+When both `files` and `statusCheckRollup` are selected, their reads overlap after
+the initial PR lookup. Both collections finish before the final live head check
+and JSON output; a terminal policy or authentication failure cancels the sibling read.
 Upgrade note: PR-view scripts using numeric author/label IDs, REST-only nested keys,
 lowercase file statuses, or `originalPath` must use these native projections instead.
 Upgrade note: scripts relying on earlier Octopool boolean/null output must use explicit

@@ -211,6 +211,7 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 	normalizePRViewState(pr)
 	normalizePRViewMergeable(pr)
 	hydratedHeadSHA := ""
+	collectionsLoaded := false
 	users := map[string]map[string]any{}
 	for _, field := range opts.json {
 		switch field {
@@ -346,38 +347,56 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 				mapped = append(mapped, map[string]any{"id": profile["node_id"], "login": profile["login"], "name": firstString(profile, "name"), "databaseId": profile["id"]})
 			}
 			pr[field] = mapped
-		case "statusCheckRollup":
+		case "statusCheckRollup", "files":
+			if collectionsLoaded {
+				continue
+			}
 			sha := nestedStringValue(pr, "head", "sha")
 			if sha == "" {
-				return errors.New("pull request response did not include head.sha")
-			}
-			rollup, err := relayPRStatusCheckRollup(ctx, client, repo, sha)
-			if err != nil {
-				return err
-			}
-			hydratedHeadSHA = sha
-			pr[field] = rollup
-		case "files":
-			sha := nestedStringValue(pr, "head", "sha")
-			if sha == "" {
+				if field == "statusCheckRollup" {
+					return errors.New("pull request response did not include head.sha")
+				}
 				return localFallbackError{Reason: "pull request response did not include head.sha"}
 			}
-			files, err := relayPagedArrayWithHeaders(
-				ctx,
-				client,
-				repoPath(repo, "pulls", number, "files"),
-				map[string]string{"pr_head_sha": sha},
-				map[string]string{"x-octopool-public-shape": publicShapePullRequestFiles},
-			)
+			needsFiles, needsChecks := hasJSONField(opts.json, "files"), hasJSONField(opts.json, "statusCheckRollup")
+			var files, rollup []any
+			readFiles := func(ctx context.Context) error {
+				items, err := relayPagedArrayWithHeaders(
+					ctx, client, repoPath(repo, "pulls", number, "files"),
+					map[string]string{"pr_head_sha": sha},
+					map[string]string{"x-octopool-public-shape": publicShapePullRequestFiles},
+				)
+				if err != nil {
+					return err
+				}
+				files, err = mapPRFiles(items)
+				return err
+			}
+			readChecks := func(ctx context.Context) error {
+				var err error
+				rollup, err = relayPRStatusCheckRollup(ctx, client, repo, sha)
+				return err
+			}
+			// Join independent collections before mutating the PR or verifying its head.
+			switch {
+			case needsFiles && needsChecks:
+				err = relayReadPair(ctx, readFiles, readChecks)
+			case needsFiles:
+				err = readFiles(ctx)
+			case needsChecks:
+				err = readChecks(ctx)
+			}
 			if err != nil {
 				return err
 			}
-			mapped, err := mapPRFiles(files)
-			if err != nil {
-				return err
+			if needsFiles {
+				pr["files"] = files
+			}
+			if needsChecks {
+				pr["statusCheckRollup"] = rollup
 			}
 			hydratedHeadSHA = sha
-			pr["files"] = mapped
+			collectionsLoaded = true
 		}
 	}
 	if hydratedHeadSHA != "" {
