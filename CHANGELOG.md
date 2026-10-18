@@ -4,6 +4,7 @@
 
 ### Performance
 
+- Fetch PR files and status-check rollups concurrently when both are selected in `gh pr view --json`, preserving pagination, cancellation, and final head verification.
 - Overlap the public-proof owner's pooled cache-miss fetch with repository verification; hold followers until proof succeeds and cancel denied work without publishing responses or retaining late ownership grants.
 - Reuse cached full-SHA file contents, Git trees, and blobs for live reads while preserving visibility and freshness guards; keep Actions deletion checks and mutable commit metadata live.
 
