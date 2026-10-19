@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Maintenance
+
+- Publish signed and notarized CLI releases through the shared Actions workflow, with a no-publish rehearsal and verified Homebrew handoff.
+
 ### Performance
 
 - Fetch PR files and status-check rollups concurrently when both are selected in `gh pr view --json`, preserving pagination, cancellation, and final head verification.

@@ -75,6 +75,9 @@ jobs:
       - name: Check Worker
         run: pnpm check:worker
 
+      - name: Test release preflight gate
+        run: node --test scripts/require-release-preflight.test.mjs
+
       - name: CLI to Worker release smoke
         if: github.event_name == 'workflow_dispatch'
         run: pnpm test:e2e:cli-worker
