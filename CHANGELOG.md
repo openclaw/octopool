@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- Relay `gh api` GET reads with `--cache` using the requested maximum age, preserving explicit Cache-Control headers and native fallback for invalid durations, non-GET requests, and cached rate-limit reads.
 - Keep generic repository GraphQL queries selecting `mergeStateStatus` on native gh credentials, since scoped read-only App tokens can report a different merge state; preserve fixed landing and PR-view projections.
 - Refresh stale workflow-run progress on the next scheduled `gh run watch` poll so cached in-progress responses cannot indefinitely delay completion detection.
 - Delegate `gh issue view --json` to native gh when the number is a pull request, so it reports `MERGED` and PR fields instead of a relayed `CLOSED` issue.

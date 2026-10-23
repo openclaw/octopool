@@ -40,6 +40,15 @@ Request body:
   the refill writes through to the shared cache, unlike conditional headers, which bypass
   it. Other `cache-control` directives are ignored, and the header never varies the cache
   key or reaches GitHub.
+- For REST GET reads, `gh api --cache <duration>` (or `--cache=<duration>`) maps a
+  positive Go duration to `cache-control: max-age=N`, truncated to whole seconds:
+  `60s` becomes `max-age=60`, `5m` becomes `max-age=300`, and `500ms` becomes
+  `max-age=0`. An explicit Cache-Control header wins. This caller cache policy also
+  overrides the live-read default for `--hostname github.com`. Invalid, zero, or
+  negative durations, non-GET REST requests, and `/rate_limit` reads with `--cache`
+  stay on native gh, preserving its errors and the caller's own rate-limit budget.
+  Repository GraphQL reads accept the flag but retain their existing cache policy;
+  fixed GraphQL landing reads use the same maximum-age mapping as REST.
 - `route_hint.pr_head_sha` and closed/merged `route_hint.pr_state` are validated cache
   discriminators for PR file lists.
 - Legacy `route_hint.owner`, `route_hint.repo`, `route_hint.kind`, `cache_key`, and
@@ -315,7 +324,7 @@ existing ten-page relay limit, preserving native object pages and the slurped
 array-of-pages shape. Totals must remain consistent across pages, including pages
 followed through GitHub Link headers; incomplete or changing responses fall back
 before printing partial output. Explicit `--hostname github.com` retains the existing
-live-read default unless `Cache-Control` specifies an age bound.
+live-read default unless `Cache-Control` or `--cache` specifies a cache policy.
 
 ### Fixed public GraphQL landing reads
 

@@ -14,6 +14,7 @@ type rewriteAPIOptions struct {
 	endpoint   string
 	hostname   string
 	method     string
+	cache      string
 	input      string
 	inputSet   bool
 	fields     []rewriteFlag
@@ -26,7 +27,7 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 	result := rewriteAPIOptions{headers: map[string]string{}}
 	seen := map[string]bool{}
 	jqCount := 0
-	values := rewriteFlagNames("--method,-X --input --field,-F --raw-field,-f --header,-H --jq,-q --template,-t --hostname")
+	values := rewriteFlagNames("--method,-X --input --field,-F --raw-field,-f --header,-H --jq,-q --template,-t --hostname --cache")
 	booleans := rewriteFlagNames("--include,-i --silent --paginate --slurp")
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -81,6 +82,9 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 		switch flag.name {
 		case "--hostname":
 			result.hostname = flag.value
+		case "--cache":
+			result.cache = flag.value
+			result.output = append(result.output, "--cache="+flag.value)
 		case "--method":
 			if flag.value == "" {
 				return result, errRewriteBlocked
