@@ -686,9 +686,10 @@ validated. Jobs still paginate in order, and both reads must settle successfully
 JSON or jq output. A terminal policy or authentication failure cancels the sibling read.
 
 Only selected `workflowName` triggers metadata. View uses one verified workflow-ID lookup;
-filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists use
-the existing complete catalogue (at most 10 pages of 100), then one memoized direct lookup
-per missing workflow ID. Only a genuine upstream 404 on that last list-specific lookup
+filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists read
+the workflow catalogue (at most 10 pages of 100), stopping after a fully validated page
+resolves every requested workflow ID. If the catalogue ends with IDs still missing, they
+use one memoized direct lookup per missing ID. Only a genuine upstream 404 on that list-specific lookup
 produces an empty name. Disabled workflows remain valid. Empty lists and unselected names
 do not fetch metadata. Logical data-operation bounds are 1 for scalar view, 2 with name,
 12 with jobs and name, 2 for filtered list with name, and 111 for unfiltered list with name.
