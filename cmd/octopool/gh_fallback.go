@@ -229,6 +229,9 @@ func execRealGHWithStdinAndEnv(
 		}
 		return err
 	}
+	if cleanup := prepared.mergeBranchCleanup; cleanup != nil {
+		return cleanup.execute(ctx, path, env, prepared.policy, stderr)
+	}
 	return nil
 }
 

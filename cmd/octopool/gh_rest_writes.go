@@ -300,6 +300,15 @@ func restPRRequest(ctx context.Context, client *http.Client, token string, polic
 	return restPRExchange(ctx, client, token, policy, method, path, payload, expected, result, true)
 }
 
+type restPRHTTPError struct {
+	status            int
+	message, endpoint string
+}
+
+func (err *restPRHTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d: %s (%s)", err.status, err.message, err.endpoint)
+}
+
 func restPRExchange(ctx context.Context, client *http.Client, token string, policy stringRewritePolicy, method, path string, payload map[string]string, expected int, result any, allowFollow bool) (bool, error) {
 	var body []byte
 	if payload != nil {
@@ -383,7 +392,10 @@ func restPRExchange(ctx context.Context, client *http.Client, token string, poli
 		if json.Unmarshal(data, &failure) == nil && failure.Message != "" {
 			message = failure.Message
 		}
-		return false, fmt.Errorf("HTTP %d: %s (%s)", resp.StatusCode, redactRESTWriteToken(message, token), endpoint)
+		return false, &restPRHTTPError{resp.StatusCode, redactRESTWriteToken(message, token), endpoint}
+	}
+	if result == nil && expected == http.StatusNoContent {
+		return false, nil
 	}
 	if json.Unmarshal(data, result) != nil {
 		return false, errors.New("invalid GitHub REST response; the write may have been accepted")

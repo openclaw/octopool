@@ -290,6 +290,13 @@ func TestProtectedPRReadOtherNumericRestrictions(t *testing.T) {
 			capture := captureRewriteGH(t)
 			var out, stderr bytes.Buffer
 			err := runGH(t.Context(), args, &out, &stderr)
+			if args[0] == "pr" && args[1] == "merge" {
+				if !errors.Is(err, errRewritePROption) || out.Len() != 0 || stderr.Len() != 0 {
+					t.Fatalf("expected unsupported protected merge selector: %v", err)
+				}
+				assertNoRESTWriteChild(t, capture)
+				return
+			}
 			assertPRReadDenied(t, err, capture, &out, &stderr, 0)
 		})
 	}

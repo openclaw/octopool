@@ -1594,6 +1594,17 @@ are literal text: a leading `@` never reads a file or stdin. The child receives 
 checked JSON snapshot, not the original subject, body path, or live stdin. Omitting the
 subject leaves `commit_title` absent.
 
+Protected immediate merges accept `--delete-branch`/`-d`, including
+`--delete-branch=true|false`. After a successful merge PUT, the shim reads the PR using
+the caller's native credentials and deletes its remote head ref only for a same-repository
+head that is not the repository's default branch. Fork heads are skipped with a notice.
+A 422 or 404 with `Reference does not exist` counts as already deleted; other cleanup
+failures return nonzero with `merge succeeded but branch deletion failed`, so callers
+can retry cleanup without repeating the merge. This follows native gh's nonzero cleanup
+failure behavior, but tolerates missing refs only when the response identifies that case.
+The shim never switches or deletes local branches; if the head branch exists locally,
+it prints a one-line notice that it was kept.
+
 Explicit `pr merge --auto --squash --match-head-commit FULL_SHA` also accepts a numeric
 selector, but requires both a nonempty `--subject`/`-t` and an explicit `--body-file`/`-F`.
 The subject and body pass through the same bounded text rewriting; a subject that becomes
@@ -1601,7 +1612,12 @@ empty or whitespace is rejected so native gh cannot generate an uninspected head
 An explicit empty body is allowed. Native gh receives the sanitized subject value and
 private body snapshot, an explicit repository, the full head SHA, and empty stdin.
 Original body files are never modified or reopened by the child. `--auto=false` retains
-the immediate REST path. Admin privileges, other merge methods, disabling auto-merge,
+the immediate REST path. `--auto --delete-branch` is accepted by native gh and is forwarded
+with the explicit repository pin, which disables native local branch deletion. Native gh
+owns remote cleanup: it deletes after an immediate merge, skips deletion when only
+enabling auto-merge, and rejects deletion on merge-queue branches. The shim checks for a
+local head branch after successful native execution and reports that it was kept.
+Admin privileges, other merge methods, disabling auto-merge,
 inline-body flags, URL selectors, and unpinned merges remain blocked on this strict path.
 
 The auto path preserves native gh semantics: it can merge immediately when requirements
@@ -1615,6 +1631,12 @@ Other editor/web/template/fill modes, unmodeled uploads, aliases/extensions, raw
 GraphQL, and newly introduced native commands/flags use best-effort filtering and retain
 native behavior. A denial reports only the generic unsafe-input boundary and never echoes the
 rejected text.
+
+Unmodeled `pr merge` and `pr ready` options or command shapes instead report a fixed
+`octopool: string rewrite protection does not support this gh pr ... option or command shape`
+error with the supported options. These commands stay on the protected path and never
+fall through to best-effort native execution. The error does not echo rejected arguments;
+genuine policy/content denials retain `string rewrite protection blocked unsafe input`.
 
 An empty final policy retains native `gh pr merge`; the final policy decision can differ
 from an earlier check. Neither route changes the local writer's authentication.
