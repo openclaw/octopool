@@ -2242,7 +2242,7 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
 			capture := captureRewriteGH(t)
 			err := execRealGHWithStdin(t.Context(), args, strings.NewReader(`{"body":"safe"}`), io.Discard, io.Discard)
-			if !errors.Is(err, errRewriteBlocked) {
+			if !errors.Is(err, errRewriteBlocked) && !errors.Is(err, errRewritePROption) {
 				t.Fatalf("expected block, got %v for %v", err, args)
 			}
 			if strings.Contains(err.Error(), "internal-model") {

@@ -78,20 +78,21 @@ func rewriteFlagNames(spec string) map[string]string {
 func (flags rewriteFlags) has(name string) bool { _, ok := flags.values[name]; return ok }
 
 type rewritePreparation struct {
-	ctx               context.Context
-	policy            stringRewritePolicy
-	closeDirectory    func()
-	preflight         []string
-	afterPreflight    func([]byte) error
-	args              []string
-	stdin             io.Reader
-	directory         string
-	inputBytes        int
-	outputBytes       int
-	bestEffortSources int
-	forceGitHubHost   bool
-	snapshots         map[string]bool
-	mergeDiagnostics  *ghMergePreparation
+	ctx                context.Context
+	policy             stringRewritePolicy
+	closeDirectory     func()
+	preflight          []string
+	afterPreflight     func([]byte) error
+	args               []string
+	stdin              io.Reader
+	directory          string
+	inputBytes         int
+	outputBytes        int
+	bestEffortSources  int
+	forceGitHubHost    bool
+	snapshots          map[string]bool
+	mergeDiagnostics   *ghMergePreparation
+	mergeBranchCleanup *rewriteMergeBranchCleanup
 }
 
 func (prepared *rewritePreparation) cleanup() {

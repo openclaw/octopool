@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"regexp"
 	"strings"
@@ -8,6 +9,19 @@ import (
 
 var rewriteCommitSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 var rewriteGitHubLogin = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
+
+var errRewritePROption = errors.New("unmodeled protected PR option")
+
+type rewritePROptionError struct{ merge bool }
+
+func (err rewritePROptionError) Error() string {
+	if err.merge {
+		return "octopool: string rewrite protection does not support this gh pr merge option or command shape; supported: --repo (-R), --squash, --match-head-commit, --subject (-t), --body-file (-F), --auto, --delete-branch (-d)"
+	}
+	return "octopool: string rewrite protection does not support this gh pr ready option or command shape; supported: --repo (-R), --undo"
+}
+
+func (err rewritePROptionError) Unwrap() error { return errRewritePROption }
 
 func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin io.Reader, prepared *rewritePreparation) error {
 	if len(args) < 2 || args[0] != "pr" {
@@ -21,13 +35,13 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		booleans = rewriteFlagNames("--undo")
 	case "pr merge":
 		values = rewriteFlagNames("--repo,-R --match-head-commit --body-file,-F --subject,-t")
-		booleans = rewriteFlagNames("--squash --auto")
+		booleans = rewriteFlagNames("--squash --auto --delete-branch,-d")
 	default:
 		return errRewriteBlocked
 	}
 	flags, err := parseRewriteFlags(args[2:], values, booleans)
 	if err != nil || len(flags.positionals) > 1 {
-		return errRewriteBlocked
+		return rewritePROptionError{merge: command == "pr merge"}
 	}
 	if command == "pr ready" && len(flags.positionals) == 0 {
 		selector, err := rewriteCurrentBranch()
@@ -37,12 +51,12 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		flags.positionals = []string{selector}
 	}
 	if len(flags.positionals) != 1 {
-		return errRewriteBlocked
+		return rewritePROptionError{merge: command == "pr merge"}
 	}
 	selector := flags.positionals[0]
 	if command == "pr merge" {
 		if !isDigits(selector) {
-			return errRewriteBlocked
+			return rewritePROptionError{merge: true}
 		}
 	} else if !isDigits(selector) && !validRewriteReadyBranch(selector) {
 		return errRewriteBlocked
@@ -101,6 +115,9 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 			}
 			diagnostic.captureHeaders = capture
 		}
+		if flags.values["--delete-branch"] == "true" {
+			prepared.mergeBranchCleanup = &rewriteMergeBranchCleanup{repo: flags.values["--repo"], number: selector, remote: true}
+		}
 		return nil
 	}
 	prepared.args = []string{"pr", args[1], flags.positionals[0], "--repo=" + flags.values["--repo"]}
@@ -144,6 +161,14 @@ func prepareRewriteAutoMerge(policy stringRewritePolicy, flags rewriteFlags, std
 		"pr", "merge", flags.positionals[0], "--repo=" + flags.values["--repo"],
 		"--squash", "--auto", "--match-head-commit=" + flags.values["--match-head-commit"],
 		"--subject=" + subject,
+	}
+	if flags.has("--delete-branch") {
+		// Explicit --repo disables native gh's local branch mutation, including
+		// when --auto merges immediately. Keep false explicit for native config.
+		args = append(args, "--delete-branch="+flags.values["--delete-branch"])
+		if flags.values["--delete-branch"] == "true" {
+			prepared.mergeBranchCleanup = &rewriteMergeBranchCleanup{repo: flags.values["--repo"], number: flags.positionals[0]}
+		}
 	}
 	if ghMergeArgBytes(args)+len("--body-file=")+len(text) > rewriteMaxContent {
 		return errRewriteBlocked

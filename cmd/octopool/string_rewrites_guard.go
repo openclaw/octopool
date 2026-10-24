@@ -74,7 +74,13 @@ func (policy stringRewritePolicy) guardRequest(request ghAPIRequest) error {
 			return err
 		}
 	}
-	if request.method != "GET" && request.method != "POST" && request.method != "PATCH" && request.method != "PUT" {
+	deleteBranch := ""
+	if request.method == "DELETE" {
+		if match := rewriteDeleteBranchPath.FindStringSubmatch(request.path); match != nil {
+			deleteBranch = match[1]
+		}
+	}
+	if request.method != "GET" && request.method != "POST" && request.method != "PATCH" && request.method != "PUT" && deleteBranch == "" {
 		return errRewriteBlocked
 	}
 	if !safeRelayPath(request.path) || strings.ContainsAny(request.path, "{}") || strings.Contains(request.path, "//") {
@@ -83,7 +89,7 @@ func (policy stringRewritePolicy) guardRequest(request ghAPIRequest) error {
 	if err := policy.checkStructural(request.path); err != nil {
 		return err
 	}
-	branch := ""
+	branch := deleteBranch
 	if request.method == "GET" {
 		for _, pattern := range nativeReadBranchPathPatterns {
 			if match := pattern.FindStringSubmatch(request.path); match != nil {
@@ -100,7 +106,7 @@ func (policy stringRewritePolicy) guardRequest(request ghAPIRequest) error {
 		if err != nil || decoded == "." || decoded == ".." || strings.ContainsAny(decoded, "?#%") {
 			return errRewriteBlocked
 		}
-		// A slash is data only in the generated native-read branch parameter.
+		// A slash is data only in a generated branch parameter.
 		// Inspect every decoded component as well as the whole path and parameter.
 		if branch != "" && segment == branch {
 			if strings.ContainsAny(decoded, "{}:*[]\t") {
@@ -178,6 +184,7 @@ func rewriteInternalShapeHeader(key, value string) bool {
 }
 
 var rewriteTagReadPath = regexp.MustCompile(`^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/git/ref/tags/[A-Za-z0-9_.-]+$`)
+var rewriteDeleteBranchPath = regexp.MustCompile(`^/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/git/refs/heads/([^/]+)$`)
 
 func rewriteReadPath(path string) bool {
 	return path == "/user" || relayQueryPath(path) || rewriteTagReadPath.MatchString(path)
@@ -586,7 +593,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	}
 	if err != nil {
 		prepared.cleanup()
-		if errors.Is(err, errRewriteBlocked) {
+		if errors.Is(err, errRewriteBlocked) || errors.Is(err, errRewritePROption) {
 			return prepared, err
 		}
 		return prepared, rewriteGitError(err)
