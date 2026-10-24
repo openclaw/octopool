@@ -1,14 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.9.10 - 2026-10-24
+
+**Highlights:** `gh pr merge --delete-branch`/`-d` now works under string rewrite protection instead of failing with a misleading policy block, CLI binaries build with Go 1.26.10 so TLS verification rejects the compromised eMudhra keys, and `gh api --cache` reads relay through the pool while several PR-view and run exports make fewer or overlapping GitHub reads.
 
 ### Performance
 
 - Skip the unused basic PR read for `gh pr view --json comments`, retaining live comment pagination and both local viewer checks.
 - Stop fetching workflow catalogue pages once `gh run list --json workflowName` has resolved every requested workflow ID, preserving page validation and missing-workflow lookups.
 - Fetch PR files and status-check rollups concurrently when both are selected in `gh pr view --json`, preserving pagination, cancellation, and final head verification.
+- Load jobs and workflow metadata concurrently for `gh run view --json jobs,workflowName` once the owning run is verified, preserving output, job order, request limits, and freshness.
 - Overlap the public-proof owner's pooled cache-miss fetch with repository verification; hold followers until proof succeeds and cancel denied work without publishing responses or retaining late ownership grants.
 - Reuse cached full-SHA file contents, Git trees, and blobs for live reads while preserving visibility and freshness guards; keep Actions deletion checks and mutable commit metadata live.
+- Serve later pages of large Actions run job lists from the cached complete job aggregate instead of refetching them, preserving freshness, visibility, and source-identity checks.
 
 ### Fixes
 
@@ -17,6 +21,11 @@
 - Keep generic repository GraphQL queries selecting `mergeStateStatus` on native gh credentials, since scoped read-only App tokens can report a different merge state; preserve fixed landing and PR-view projections.
 - Refresh stale workflow-run progress on the next scheduled `gh run watch` poll so cached in-progress responses cannot indefinitely delay completion detection.
 - Delegate `gh issue view --json` to native gh when the number is a pull request, so it reports `MERGED` and PR fields instead of a relayed `CLOSED` issue.
+- Build CLI binaries with the Go 1.26.10 toolchain so TLS verification rejects the compromised eMudhra intermediate keys.
+
+### Upgrade notes
+
+- Run `brew upgrade octopool` for the CLI changes, including `--delete-branch` support and the Go 1.26.10 toolchain; no re-login or cache purge is required. The Worker changes (denied pooled-read cancellation, immutable Git content reuse, cached Actions job pages, and generic GraphQL merge-state routing) need no D1 migrations and take effect when the Worker is deployed from the release commit.
 
 ## 0.9.9 - 2026-10-14
 
