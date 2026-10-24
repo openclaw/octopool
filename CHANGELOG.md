@@ -4,6 +4,7 @@
 
 ### Performance
 
+- Skip the unused basic PR read for `gh pr view --json comments`, retaining live comment pagination and both local viewer checks.
 - Stop fetching workflow catalogue pages once `gh run list --json workflowName` has resolved every requested workflow ID, preserving page validation and missing-workflow lookups.
 - Fetch PR files and status-check rollups concurrently when both are selected in `gh pr view --json`, preserving pagination, cancellation, and final head verification.
 - Overlap the public-proof owner's pooled cache-miss fetch with repository verification; hold followers until proof succeeds and cancel denied work without publishing responses or retaining late ownership grants.

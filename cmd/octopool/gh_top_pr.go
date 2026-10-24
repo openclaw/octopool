@@ -183,33 +183,37 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			return localFallbackError{Reason: "unknown_pr_comment_viewer"}
 		}
 	}
-	headers := prViewHeaders(opts)
-	if hasJSONField(opts.json, "files") || hasJSONField(opts.json, "comments") || hasJSONField(opts.json, "commits") || needsLivePRRead(opts.json) || freshReadRequested() {
-		if headers == nil {
-			headers = map[string]string{}
+	pr := map[string]any{}
+	// Comments carry their own PR identity and need no basic fields or head SHA.
+	if len(opts.json) != 1 || opts.json[0] != "comments" {
+		headers := prViewHeaders(opts)
+		if hasJSONField(opts.json, "files") || hasJSONField(opts.json, "comments") || hasJSONField(opts.json, "commits") || needsLivePRRead(opts.json) || freshReadRequested() {
+			if headers == nil {
+				headers = map[string]string{}
+			}
+			headers["cache-control"] = "max-age=0"
 		}
-		headers["cache-control"] = "max-age=0"
-	}
-	request := ghAPIRequest{
-		method: "GET", path: repoPath(repo, "pulls", number), headers: headers,
-	}
-	if !safeRelayRequest(request) {
-		return errors.New("internal error: top-level gh command built an unsupported relay request")
-	}
-	pr, err := relayPRViewBody(ctx, client, request)
-	if err != nil {
-		return err
-	}
-	if headers["x-octopool-public-shape"] == publicShapePullRequestSummary && prSummaryNeedsExactRead(pr, opts.json) {
-		// Missing page facts need exact REST, with the same freshness and relay policy.
-		delete(request.headers, "x-octopool-public-shape")
+		request := ghAPIRequest{
+			method: "GET", path: repoPath(repo, "pulls", number), headers: headers,
+		}
+		if !safeRelayRequest(request) {
+			return errors.New("internal error: top-level gh command built an unsupported relay request")
+		}
 		pr, err = relayPRViewBody(ctx, client, request)
 		if err != nil {
 			return err
 		}
+		if headers["x-octopool-public-shape"] == publicShapePullRequestSummary && prSummaryNeedsExactRead(pr, opts.json) {
+			// Missing page facts need exact REST, with the same freshness and relay policy.
+			delete(request.headers, "x-octopool-public-shape")
+			pr, err = relayPRViewBody(ctx, client, request)
+			if err != nil {
+				return err
+			}
+		}
+		normalizePRViewState(pr)
+		normalizePRViewMergeable(pr)
 	}
-	normalizePRViewState(pr)
-	normalizePRViewMergeable(pr)
 	hydratedHeadSHA := ""
 	collectionsLoaded := false
 	users := map[string]map[string]any{}

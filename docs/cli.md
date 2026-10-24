@@ -617,6 +617,7 @@ The Worker can reuse a projection for at most 60 seconds for explicitly bounded 
 reads; there is no stale fallback. Totals, PR identity, unique IDs and cursor progression
 must remain consistent. Commit hydration also verifies the PR head before and after.
 These checks do not make multiple reads an atomic snapshot.
+Comments-only exports fetch the comment pages directly, without an additional basic PR read.
 
 Comments export native `viewerDidAuthor` using the active local gh GitHub.com account,
 never the Octopool login. Two guarded native REST `/user` reads, before hydration and
