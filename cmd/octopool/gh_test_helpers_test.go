@@ -339,7 +339,7 @@ func (f *runExportFixture) response(t *testing.T, req map[string]any) any {
 		pageText, _ := q["page"].(string)
 		page, err := strconv.Atoi(pageText)
 		if err != nil || page < 1 || page > 10 || q["per_page"] != "100" {
-			t.Errorf("workflow catalogue must use existing complete collector: %v", q)
+			t.Errorf("workflow catalogue must use bounded 100-item pages: %v", q)
 			return nil
 		}
 		start := min((page-1)*100, len(f.workflows))
