@@ -426,7 +426,11 @@ func TestGHMergeDiagnosticsFailures(t *testing.T) {
 			}
 			line := mergeDiagnosticLine(t, stderr.String())
 			if mode == "resolve" || mode == "start" {
-				if !strings.Contains(line, "child_started=false outcome=start_failed") || strings.Contains(line, "exit_code=") {
+				want := "child_started=false outcome=start_failed"
+				if mode == "start" {
+					want = "child_started=false outcome=preparation_failed"
+				}
+				if !strings.Contains(line, want) || strings.Contains(line, "exit_code=") {
 					t.Fatal("launch failure attributed to executed child")
 				}
 				if _, err := os.Stat(capturePath); !os.IsNotExist(err) {

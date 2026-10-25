@@ -64,10 +64,13 @@ const (
 	ghMergeExited
 	ghMergeWaitFailed
 	ghMergeCanceled
+	ghMergeAlreadyMerged
 )
 
 func (outcome ghMergeOutcome) String() string {
 	switch outcome {
+	case ghMergeAlreadyMerged:
+		return "already_merged"
 	case ghMergePreparationFailed:
 		return "preparation_failed"
 	case ghMergeStartFailed:

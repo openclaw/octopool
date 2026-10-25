@@ -272,7 +272,11 @@ func TestReleaseAssetsProcessRejectsUnsafeInputs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			capture := captureRewriteGH(t)
 			temporary := releaseAssetTemp(t)
-			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != errRewriteBlocked {
+			want := errRewriteBlocked
+			if name == "label flag" || name == "unknown flag" {
+				want = errRewriteCommandShape
+			}
+			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != want {
 				t.Fatalf("error=%v", err)
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {

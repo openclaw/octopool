@@ -593,7 +593,7 @@ func prepareProtectedGH(ctx context.Context, args []string, stdin io.Reader) (*r
 	}
 	if err != nil {
 		prepared.cleanup()
-		if errors.Is(err, errRewriteBlocked) || errors.Is(err, errRewritePROption) {
+		if errors.Is(err, errRewriteBlocked) || errors.Is(err, errRewritePROption) || errors.Is(err, errRewriteCommandShape) {
 			return prepared, err
 		}
 		return prepared, rewriteGitError(err)

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -14,6 +16,68 @@ import (
 type rewriteMergeBranchCleanup struct {
 	repo, number string
 	remote       bool
+	pr           *rewriteMergePR
+}
+
+type rewriteMergeRepository struct {
+	FullName      string `json:"full_name"`
+	DefaultBranch string `json:"default_branch"`
+}
+
+type rewriteMergePR struct {
+	State  string `json:"state"`
+	Merged *bool  `json:"merged"`
+	Head   struct {
+		Ref  string                  `json:"ref"`
+		Repo *rewriteMergeRepository `json:"repo"`
+	} `json:"head"`
+	Base struct {
+		Repo *rewriteMergeRepository `json:"repo"`
+	} `json:"base"`
+}
+
+type rewriteMergeState struct{ repo, number string }
+
+func (state *rewriteMergeState) inspect(ctx context.Context, ghPath string, env []string, prepared *rewritePreparation, stderr io.Writer) (bool, error) {
+	path := repoPath(state.repo, "pulls", state.number)
+	if err := prepared.policy.guardRequest(ghAPIRequest{method: http.MethodGet, path: path}); err != nil {
+		return false, err
+	}
+	args := []string{"api", strings.TrimPrefix(path, "/"), "--method=GET", "--hostname=github.com"}
+	for _, arg := range args {
+		if err := prepared.policy.checkStructural(arg); err != nil {
+			return false, err
+		}
+	}
+	child, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(child, ghPath, args...)
+	// This response is machine input even when the caller forces terminal output.
+	cmd.Env = append(envWithGitHubHost(env), "GH_FORCE_TTY=", "NO_COLOR=1")
+	cmd.Stdin = strings.NewReader("")
+	var output rewritePreflightOutput
+	cmd.Stdout = &output
+	journalNativeDelegation(context.WithValue(ctx, nativeJournalCategoryKey{}, "preflight"), args, cmd.Env, "")
+	if err := cmd.Run(); err != nil {
+		return false, errors.New("could not inspect GitHub pull request merge state")
+	}
+	var pr rewriteMergePR
+	if json.Unmarshal(output.data.Bytes(), &pr) != nil {
+		return false, errors.New("invalid GitHub pull request merge state")
+	}
+	if pr.Merged == nil || (pr.State != "open" && pr.State != "closed") || (*pr.Merged && pr.State != "closed") {
+		return false, errors.New("invalid GitHub pull request merge state")
+	}
+	if *pr.Merged {
+		// Native gh warns even without --delete-branch and skips remote deletion
+		// for an already-merged PR. No publication or cleanup child is needed.
+		fmt.Fprintf(stderr, "! Pull request %s#%s was already merged\n", state.repo, state.number)
+		return true, nil
+	}
+	if cleanup := prepared.mergeBranchCleanup; cleanup != nil {
+		cleanup.pr = &pr
+	}
+	return false, nil
 }
 
 func (cleanup *rewriteMergeBranchCleanup) execute(ctx context.Context, ghPath string, env []string, policy stringRewritePolicy, stderr io.Writer) error {
@@ -39,21 +103,12 @@ func (cleanup *rewriteMergeBranchCleanup) run(ctx context.Context, ghPath string
 		Timeout:       30 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	type repository struct {
-		FullName      string `json:"full_name"`
-		DefaultBranch string `json:"default_branch"`
-	}
-	var pr struct {
-		Head struct {
-			Ref  string      `json:"ref"`
-			Repo *repository `json:"repo"`
-		} `json:"head"`
-		Base struct {
-			Repo *repository `json:"repo"`
-		} `json:"base"`
-	}
-	if _, err := restPRRequest(ctx, client, token, policy, http.MethodGet, repoPath(cleanup.repo, "pulls", cleanup.number), nil, http.StatusOK, &pr); err != nil {
-		return err
+	pr := cleanup.pr
+	if pr == nil {
+		pr = &rewriteMergePR{}
+		if _, err := restPRRequest(ctx, client, token, policy, http.MethodGet, repoPath(cleanup.repo, "pulls", cleanup.number), nil, http.StatusOK, pr); err != nil {
+			return err
+		}
 	}
 	if !validRewriteBaseBranch(pr.Head.Ref) {
 		return errors.New("invalid GitHub pull request head branch")

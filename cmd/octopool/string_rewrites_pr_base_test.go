@@ -164,7 +164,11 @@ func TestStringRewritePRBaseEditRejectsAmbiguousInputs(t *testing.T) {
 		{"api", "repos/acme/repo/pulls/3486", "--method=PATCH", "--raw-field=base=main", "--field=maintainer_can_modify=true"},
 	} {
 		capturePath := captureRewriteGH(t)
-		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); !errors.Is(err, errRewriteBlocked) {
+		want := errRewriteBlocked
+		if slices.Contains(args, "--editor") {
+			want = errRewriteCommandShape
+		}
+		if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); !errors.Is(err, want) {
 			t.Fatalf("ambiguous edit accepted: %v: %v", args, err)
 		}
 		if _, err := os.Stat(capturePath); !os.IsNotExist(err) {

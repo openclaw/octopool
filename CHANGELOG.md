@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Warn when a protected immediate PR merge targets an already-merged PR, matching native gh's successful stderr warning and skipped remote deletion without repeating the merge PUT.
+- Distinguish unmodeled protected content command shapes from unsafe-input blocks with a fixed diagnostic pointing to native `ghx`, preserving policy failures and existing delegation.
+
 ## 0.9.10 - 2026-10-24
 
 **Highlights:** `gh pr merge --delete-branch`/`-d` now works under string rewrite protection instead of failing with a misleading policy block, CLI binaries build with Go 1.26.10 so TLS verification rejects the compromised eMudhra keys, and `gh api --cache` reads relay through the pool while several PR-view and run exports make fewer or overlapping GitHub reads.

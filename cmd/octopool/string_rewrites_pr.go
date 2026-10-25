@@ -118,6 +118,7 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 		if flags.values["--delete-branch"] == "true" {
 			prepared.mergeBranchCleanup = &rewriteMergeBranchCleanup{repo: flags.values["--repo"], number: selector, remote: true}
 		}
+		prepared.mergeState = &rewriteMergeState{repo: flags.values["--repo"], number: selector}
 		return nil
 	}
 	prepared.args = []string{"pr", args[1], flags.positionals[0], "--repo=" + flags.values["--repo"]}

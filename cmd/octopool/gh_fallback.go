@@ -159,6 +159,21 @@ func execRealGHWithStdinAndEnv(
 	if err != nil {
 		return err
 	}
+	if state := prepared.mergeState; state != nil {
+		if diagnostic != nil {
+			diagnostic.outcome = ghMergePreparationFailed
+		}
+		merged, err := state.inspect(ctx, path, env, prepared, stderr)
+		if err != nil || merged {
+			if diagnostic != nil && merged {
+				diagnostic.outcome = ghMergeAlreadyMerged
+			}
+			return err
+		}
+		if diagnostic != nil {
+			diagnostic.outcome = ghMergeStartFailed
+		}
+	}
 	if handled, err := execRESTPRWrite(ctx, path, args, prepared, env, stdout, stderr); handled {
 		return err
 	}
