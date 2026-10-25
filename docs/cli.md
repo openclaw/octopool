@@ -1594,9 +1594,16 @@ are literal text: a leading `@` never reads a file or stdin. The child receives 
 checked JSON snapshot, not the original subject, body path, or live stdin. Omitting the
 subject leaves `commit_title` absent.
 
+Before a protected immediate merge, the shim reads the PR directly using the caller's
+native credentials. An already-merged PR prints `! Pull request owner/repo#123 was already merged`
+to stderr and exits successfully without a merge PUT. As in native gh, even
+`--delete-branch` does not delete a remote branch on an already-merged PR, whether the
+branch still exists or is already gone. A closed, unmerged PR still attempts the merge
+and preserves GitHub's failure; open PRs retain the full `--match-head-commit` guarantee.
+
 Protected immediate merges accept `--delete-branch`/`-d`, including
-`--delete-branch=true|false`. After a successful merge PUT, the shim reads the PR using
-the caller's native credentials and deletes its remote head ref only for a same-repository
+`--delete-branch=true|false`. After a successful merge PUT, the shim uses the PR metadata
+from that read and deletes its remote head ref only for a same-repository
 head that is not the repository's default branch. Fork heads are skipped with a notice.
 A 422 or 404 with `Reference does not exist` counts as already deleted; other cleanup
 failures return nonzero with `merge succeeded but branch deletion failed`, so callers
@@ -1629,8 +1636,21 @@ reconciling the PR. The immediate REST path never silently opts into that lifecy
 
 Other editor/web/template/fill modes, unmodeled uploads, aliases/extensions, raw
 GraphQL, and newly introduced native commands/flags use best-effort filtering and retain
-native behavior. A denial reports only the generic unsafe-input boundary and never echoes the
-rejected text.
+native behavior. Policy/content denials report `string rewrite protection blocked unsafe input`
+without echoing rejected text. Positively identified unmodeled shapes on strict content
+paths (for example `release edit --draft=false --latest` without title/notes, or an unknown
+option on a modeled write) stay blocked with this fixed, actionable message:
+
+```text
+octopool: string rewrite protection does not model this gh command shape; run it with ghx (the native gh CLI) if it publishes no protected text, or see docs/cli.md
+```
+
+`ghx` is the native-gh escape hatch used by [the release workflow](releasing.md).
+Use it only after checking that the command publishes no protected text. The diagnostic
+never includes arbitrary command names, arguments, values, or paths. Ambiguous parsing,
+invalid structural input, and other refusals that cannot be classified confidently keep
+the existing unsafe-input message. Unknown subcommands that already receive best-effort
+filtering retain that delegation; this distinction changes refusal messages only.
 
 Unmodeled `pr merge` and `pr ready` options or command shapes instead report a fixed
 `octopool: string rewrite protection does not support this gh pr ... option or command shape`

@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"regexp"
 	"strings"
 )
+
+var errRewriteCommandShape = errors.New("octopool: string rewrite protection does not model this gh command shape; run it with ghx (the native gh CLI) if it publishes no protected text, or see docs/cli.md")
 
 type rewriteFlag struct {
 	name    string
@@ -22,6 +25,10 @@ type rewriteFlags struct {
 // Parse only a command-specific vocabulary. Short value flags support -tVALUE
 // and -t=VALUE; boolean clusters and repeated/conflicting aliases are refused.
 func parseRewriteFlags(args []string, values, booleans map[string]string) (rewriteFlags, error) {
+	return parseRewriteFlagsWithShapeError(args, values, booleans, errRewriteBlocked)
+}
+
+func parseRewriteFlagsWithShapeError(args []string, values, booleans map[string]string, shapeError error) (rewriteFlags, error) {
 	out := rewriteFlags{values: map[string]string{}}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -47,7 +54,10 @@ func parseRewriteFlags(args []string, values, booleans map[string]string) (rewri
 			var ok bool
 			canonical, ok = values[name]
 			if !ok {
-				return out, errRewriteBlocked
+				if name == "--" || name == "-" {
+					return out, errRewriteBlocked
+				}
+				return out, shapeError
 			}
 			if !equals {
 				i++
@@ -93,6 +103,7 @@ type rewritePreparation struct {
 	snapshots          map[string]bool
 	mergeDiagnostics   *ghMergePreparation
 	mergeBranchCleanup *rewriteMergeBranchCleanup
+	mergeState         *rewriteMergeState
 }
 
 func (prepared *rewritePreparation) cleanup() {
@@ -227,7 +238,7 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 			return err
 		}
 	}
-	flags, err := parseRewriteFlags(commandArgs, valueFlags, rewriteFlagNames(booleanSpec))
+	flags, err := parseRewriteFlagsWithShapeError(commandArgs, valueFlags, rewriteFlagNames(booleanSpec), errRewriteCommandShape)
 	if err != nil {
 		return err
 	}
@@ -277,6 +288,9 @@ func prepareRewriteContent(policy stringRewritePolicy, args []string, stdin io.R
 	}
 	metadataEdit := flags.has("--base") || flags.has("--add-assignee") || flags.has("--remove-assignee") || flags.has("--add-label") || flags.has("--remove-label")
 	if args[1] == "edit" && !flags.has("--title") && !hasBody && !metadataEdit {
+		if release && (flags.has("--draft") || flags.has("--prerelease") || flags.has("--latest")) {
+			return errRewriteCommandShape
+		}
 		return errRewriteBlocked
 	}
 	if flags.has("--base") && !validRewriteBaseBranch(flags.values["--base"]) {

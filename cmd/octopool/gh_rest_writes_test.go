@@ -99,6 +99,20 @@ func restWriteFixture(t *testing.T, policy string, handler func(*http.Request) (
 		return handler(r)
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	// Let fake native gh's merge-state GET use this same fake GitHub transport.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Scheme, r.URL.Host = "https", "api.github.com"
+		response, err := http.DefaultTransport.RoundTrip(r)
+		if err != nil {
+			http.Error(w, "synthetic transport failure", 500)
+			return
+		}
+		defer response.Body.Close()
+		w.WriteHeader(response.StatusCode)
+		_, _ = io.Copy(w, response.Body)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("OCTOPOOL_TEST_REWRITE_PR_READ_URL", server.URL)
 	return capture
 }
 

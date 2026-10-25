@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func mergeBranchPR(head, headRepo, baseRepo, defaultBranch string) string {
 	data, _ := json.Marshal(map[string]any{
+		"state": "open", "merged": false,
 		"head": map[string]any{"ref": head, "repo": map[string]string{"full_name": headRepo}},
 		"base": map[string]any{"repo": map[string]string{"full_name": baseRepo, "default_branch": defaultBranch}},
 	})
@@ -46,12 +48,11 @@ func TestProtectedMergeDeleteBranch(t *testing.T) {
 			var requests []string
 			var capture string
 			capture = restWriteFixture(t, rewriteActiveTestPolicy, func(r *http.Request) (*http.Response, error) {
-				if len(requests) == 0 {
+				if r.Method == "DELETE" {
 					child := readRewriteCapture(t, capture)
 					if !slices.Contains(child.Args, "--method=PUT") || !slices.Contains(child.Args, "repos/acme/repo/pulls/7/merge") {
 						t.Fatalf("cleanup ran before merge PUT: %v", child.Args)
 					}
-					requests = append(requests, "PUT /repos/acme/repo/pulls/7/merge")
 				}
 				requests = append(requests, r.Method+" "+r.URL.EscapedPath())
 				if r.Method == "GET" {
@@ -89,10 +90,7 @@ func TestProtectedMergeDeleteBranch(t *testing.T) {
 			if !strings.Contains(stderr.String(), test.notice) {
 				t.Fatalf("missing notice: %s", &stderr)
 			}
-			want := []string{"PUT /repos/acme/repo/pulls/7/merge", "GET /repos/acme/repo/pulls/7"}
-			if test.flag == "--delete-branch=false" {
-				want = nil
-			}
+			want := []string{"GET /repos/acme/repo/pulls/7"}
 			if test.wantDelete {
 				want = append(want, "DELETE /repos/acme/repo/git/refs/heads/topic%2Fmerge-cleanup")
 			}
@@ -108,9 +106,11 @@ func TestProtectedMergeDeleteBranch(t *testing.T) {
 }
 
 func TestProtectedMergeDeleteBranchAfterFailure(t *testing.T) {
-	restWriteFixture(t, rewriteActiveTestPolicy, func(*http.Request) (*http.Response, error) {
-		t.Fatal("cleanup ran after failed merge")
-		return nil, nil
+	restWriteFixture(t, rewriteActiveTestPolicy, func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" {
+			t.Fatal("cleanup ran after failed merge")
+		}
+		return restWriteResponse(200, restWritePRJSON)
 	})
 	t.Setenv("OCTOPOOL_TEST_REWRITE_EXIT", "19")
 	err := execRealGH(t.Context(), append(mergeDiagnosticArgs(), "-d"), io.Discard, io.Discard)
@@ -213,5 +213,126 @@ func TestProtectedPROptionError(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestProtectedMergeAlreadyMerged(t *testing.T) {
+	for _, branch := range []string{"present", "gone"} {
+		for _, deleteBranch := range []bool{false, true} {
+			t.Run(branch+"/delete="+strconv.FormatBool(deleteBranch), func(t *testing.T) {
+				t.Chdir(t.TempDir()) // Explicit --repo must work outside a checkout.
+				calls := 0
+				capture := restWriteFixture(t, rewriteActiveTestPolicy, func(r *http.Request) (*http.Response, error) {
+					calls++
+					if r.Method != "GET" || r.URL.Path != "/repos/acme/repo/pulls/7" {
+						t.Fatalf("already-merged PR must never be written: %s %s", r.Method, r.URL.Path)
+					}
+					pr := strings.Replace(mergeBranchPR("topic/merge-cleanup", "acme/repo", "acme/repo", "main"), `"merged":false`, `"merged":true`, 1)
+					pr = strings.Replace(pr, `"state":"open"`, `"state":"closed"`, 1)
+					if branch == "gone" {
+						pr = strings.Replace(pr, `"ref":"topic/merge-cleanup"`, `"ref":""`, 1)
+					}
+					return restWriteResponse(200, pr)
+				})
+				t.Setenv("OCTOPOOL_DIAGNOSTICS", "1")
+				args := mergeDiagnosticArgs()
+				if deleteBranch {
+					args = append(args, "--delete-branch")
+				}
+				var stdout, stderr bytes.Buffer
+				if err := execRealGH(t.Context(), args, &stdout, &stderr); err != nil {
+					t.Fatal(err)
+				}
+				warning := "! Pull request acme/repo#7 was already merged\n"
+				if stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), warning) || calls != 1 {
+					t.Fatalf("stdout=%q stderr=%q reads=%d", &stdout, &stderr, calls)
+				}
+				line := mergeDiagnosticLine(t, stderr.String())
+				if !strings.Contains(line, "child_started=false outcome=already_merged") || strings.Contains(line, "exit_code=") {
+					t.Fatalf("no merge should be claimed: %s", line)
+				}
+				assertNoRESTWriteChild(t, capture)
+			})
+		}
+	}
+}
+
+func TestProtectedMergeOpenAndClosedUnmerged(t *testing.T) {
+	for _, state := range []string{"open", "closed"} {
+		for _, diagnostics := range []string{"", "1"} {
+			t.Run(state+"/diagnostics="+diagnostics, func(t *testing.T) {
+				calls := 0
+				capture := restWriteFixture(t, rewriteActiveTestPolicy, func(r *http.Request) (*http.Response, error) {
+					calls++
+					if r.Method != "GET" || r.URL.Path != "/repos/acme/repo/pulls/7" {
+						t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+					}
+					return restWriteResponse(200, strings.Replace(restWritePRJSON, `"state":"open"`, `"state":"`+state+`"`, 1))
+				})
+				t.Setenv("OCTOPOOL_DIAGNOSTICS", diagnostics)
+				t.Setenv("OCTOPOOL_TEST_REWRITE_STDOUT", "")
+				t.Setenv("OCTOPOOL_TEST_REWRITE_STDERR", "")
+				if state == "closed" {
+					t.Setenv("OCTOPOOL_TEST_REWRITE_EXIT", "1")
+					t.Setenv("OCTOPOOL_TEST_REWRITE_STDERR", "gh: Pull Request is not mergeable (HTTP 405)\n")
+				}
+				var stdout, stderr bytes.Buffer
+				err := execRealGH(t.Context(), mergeDiagnosticArgs(), &stdout, &stderr)
+				if state == "open" && err != nil {
+					t.Fatal(err)
+				}
+				if state == "closed" {
+					var exit exitCodeError
+					if !errors.As(err, &exit) || exit.Code != 1 || !strings.Contains(stderr.String(), "HTTP 405") {
+						t.Fatalf("merge failure lost: %v %s", err, &stderr)
+					}
+				}
+				if calls != 1 || stdout.Len() != 0 || strings.Contains(stderr.String(), "was already merged") {
+					t.Fatalf("calls=%d stdout=%s stderr=%s", calls, &stdout, &stderr)
+				}
+				child := readRewriteCapture(t, capture)
+				if !slices.Contains(child.Args, "--method=PUT") || !slices.Contains(child.Args, "repos/acme/repo/pulls/7/merge") || len(child.Files) != 1 {
+					t.Fatalf("open/closed-unmerged must retain merge PUT: %+v", child)
+				}
+				for _, content := range child.Files {
+					var payload map[string]string
+					if json.Unmarshal([]byte(content), &payload) != nil || payload["sha"] != strings.Repeat("a", 40) || payload["merge_method"] != "squash" {
+						t.Fatalf("head guarantee changed: %q", content)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestProtectedMergeStateReadFailsClosed(t *testing.T) {
+	for _, body := range []string{`{}`, `{"state":"open","merged":true}`, `{"state":"closed"}`, `{"state":"unknown","merged":false}`} {
+		t.Run(body, func(t *testing.T) {
+			capture := restWriteFixture(t, rewriteActiveTestPolicy, func(*http.Request) (*http.Response, error) {
+				return restWriteResponse(200, body)
+			})
+			if err := execRealGH(t.Context(), mergeDiagnosticArgs(), io.Discard, io.Discard); err == nil {
+				t.Fatal("unverified merge state allowed publication")
+			}
+			assertNoRESTWriteChild(t, capture)
+		})
+	}
+}
+
+func TestProtectedAutoMergeRetainsNativeAlreadyMergedHandling(t *testing.T) {
+	capture := restWriteFixture(t, rewriteActiveTestPolicy, func(*http.Request) (*http.Response, error) {
+		t.Fatal("native auto-merge owns its state read")
+		return nil, nil
+	})
+	t.Setenv("OCTOPOOL_TEST_REWRITE_STDOUT", "")
+	t.Setenv("OCTOPOOL_TEST_REWRITE_STDERR", "! Pull request acme/repo#7 was already merged\n")
+	var stdout, stderr bytes.Buffer
+	args := append(mergeDiagnosticArgs(), "--auto", "--subject=safe", "--body-file=-")
+	if err := execRealGHWithStdin(t.Context(), args, strings.NewReader("safe"), &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	child := readRewriteCapture(t, capture)
+	if !slices.Contains(child.Args, "--auto") || stdout.Len() != 0 || withoutGraphQLNotice(stderr.String()) != "! Pull request acme/repo#7 was already merged\n" {
+		t.Fatalf("native already-merged result changed: %+v %s", child.Args, &stderr)
 	}
 }
