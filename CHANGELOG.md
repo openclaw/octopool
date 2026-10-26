@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.11 - 2026-10-26
 
 ### Performance
 
