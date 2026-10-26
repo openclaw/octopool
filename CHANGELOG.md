@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Performance
+
+- Skip the redundant organization profile lookup when PR views already contain the head owner's type, node ID, and login, preserving user names and incomplete-identity validation.
+
 ### Fixes
 
 - Warn when a protected immediate PR merge targets an already-merged PR, matching native gh's successful stderr warning and skipped remote deletion without repeating the merge PUT.

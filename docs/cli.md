@@ -587,7 +587,10 @@ PR views also relay `headRepository`, `headRepositoryOwner`, `assignees`, and
 `statusCheckRollup` to reduce local GitHub quota usage through shared transports and
 eligible caching, including under active string rewrite protection. Fork metadata
 uses GitHub node IDs; a deleted head repository is `null`. Requested author, merger, owner, and assignee
-names use a shared per-command profile lookup. The rollup preserves native `gh`
+names use a shared per-command profile lookup.
+Organization head owners with a complete REST identity use that ID and login directly;
+native `gh` exports a name only for user owners. Login-only or incomplete organization
+identities still use the validated profile lookup. The rollup preserves native `gh`
 `CheckRun` and `StatusContext` fields and resolves workflow names by check-suite ID
 through head-filtered Actions runs and the complete raw workflow catalogue, including
 inactive workflows. It shares this verified association with `pr checks`, without using

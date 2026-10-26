@@ -509,6 +509,8 @@ func TestRunGHPRViewExportIncompleteShapes(t *testing.T) {
 		{"missing-author", "author", map[string]any{}},
 		{"unknown-author", "author", map[string]any{"user": map[string]any{"login": "other", "node_id": "M_other", "type": "Mannequin"}}},
 		{"unknown-bot-login", "author", map[string]any{"user": map[string]any{"login": "unmapped-bot", "type": "Bot"}}},
+		{"organization-empty-node-id", "headRepositoryOwner", map[string]any{"head": map[string]any{"user": map[string]any{"node_id": "", "login": "org", "type": "Organization"}}}},
+		{"organization-empty-login", "headRepositoryOwner", map[string]any{"head": map[string]any{"user": map[string]any{"node_id": "O_org", "login": "", "type": "Organization"}}}},
 		{"missing-label-id", "labels", map[string]any{"labels": []any{map[string]any{"name": "bug", "description": "", "color": "abc123"}}}},
 		{"null-labels", "labels", map[string]any{"labels": nil}},
 		{"invalid-description", "labels", map[string]any{"labels": []any{map[string]any{"node_id": "LA_bug", "name": "bug", "description": 12, "color": "abc123"}}}},
