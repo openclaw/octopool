@@ -328,6 +328,12 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 				pr[field] = map[string]any{"login": ""}
 				continue
 			}
+			identity, _ := owner.(map[string]any)
+			if firstString(identity, "type") == "Organization" && firstString(identity, "node_id") != "" && firstString(identity, "login") != "" {
+				// gh selects a name only for User owners; REST already has every organization field.
+				pr[field] = map[string]any{"id": identity["node_id"], "login": identity["login"]}
+				continue
+			}
 			profile, err := relayPRUser(ctx, client, owner, users)
 			if err != nil {
 				return err
