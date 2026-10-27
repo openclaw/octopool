@@ -27,7 +27,9 @@ describe("Worker scheduled session maintenance", () => {
         .results,
     ).toEqual([{ session_hash: "future" }, { session_hash: "future-old-activity" }]);
     expect((await env.DB.prepare("SELECT * FROM callers").all()).results).toEqual(callers.results);
-    expect((await env.DB.prepare("SELECT * FROM audit_events").all()).results).toEqual(audits.results);
+    expect((await env.DB.prepare("SELECT * FROM audit_events").all()).results).toEqual(
+      audits.results,
+    );
     expect(log).toHaveBeenCalledWith({
       event: "octopool.maintenance",
       table: "web_sessions",
@@ -66,9 +68,9 @@ describe("Worker scheduled session maintenance", () => {
     const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${queries.deleteExpiredWebSessions}`)
       .bind(500)
       .all<{ detail: string }>();
-    expect(
-      plan.results.some(({ detail }) => detail.includes("idx_web_sessions_expires")),
-    ).toBe(true);
+    expect(plan.results.some(({ detail }) => detail.includes("idx_web_sessions_expires"))).toBe(
+      true,
+    );
     expect(plan.results.some(({ detail }) => detail.includes("TEMP B-TREE"))).toBe(false);
 
     const first = await env.DB.prepare(queries.deleteExpiredWebSessions).bind(500).run();
@@ -82,9 +84,9 @@ describe("Worker scheduled session maintenance", () => {
     const drained = await env.DB.prepare(queries.deleteExpiredWebSessions).bind(500).run();
     expect(second.meta.changes).toBe(1);
     expect(drained.meta.changes).toBe(0);
-    expect(
-      (await env.DB.prepare("SELECT session_hash FROM web_sessions").all()).results,
-    ).toEqual([{ session_hash: "future" }]);
+    expect((await env.DB.prepare("SELECT session_hash FROM web_sessions").all()).results).toEqual([
+      { session_hash: "future" },
+    ]);
     expect((await env.DB.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
   });
 });
