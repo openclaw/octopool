@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Prune expired dashboard sessions during scheduled maintenance in indexed batches, preserving unexpired sessions and existing per-table cleanup budgets.
+
 ## 0.9.11 - 2026-10-26
 
 ### Performance
