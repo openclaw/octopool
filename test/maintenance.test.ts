@@ -6,6 +6,7 @@ const TABLES = [
   "github_public_repo_proofs",
   "github_cache_entries",
   "audit_events",
+  "web_sessions",
 ] as const;
 type Table = (typeof TABLES)[number];
 
@@ -18,7 +19,7 @@ describe("scheduled maintenance", () => {
     vi.restoreAllMocks();
   });
 
-  it("prunes expired cache and old audit rows", async () => {
+  it("prunes expired cache, sessions, and old audit rows", async () => {
     const { env, queries } = maintenanceEnv(() => 0);
 
     await runScheduledMaintenance(env);
@@ -28,6 +29,7 @@ describe("scheduled maintenance", () => {
       expect.stringContaining("DELETE FROM github_public_repo_proofs"),
       expect.stringContaining("DELETE FROM github_cache_entries"),
       expect.stringContaining("DELETE FROM audit_events"),
+      expect.stringContaining("DELETE FROM web_sessions"),
     ]);
     expect(console.log).toHaveBeenCalledTimes(TABLES.length);
     for (const table of TABLES) {
@@ -51,7 +53,7 @@ describe("scheduled maintenance", () => {
       await runScheduledMaintenance(env);
 
       expect(calls.filter((table) => table === busyTable)).toHaveLength(20);
-      expect(calls).toHaveLength(23);
+      expect(calls).toHaveLength(24);
       expect(console.log).toHaveBeenCalledWith(
         expect.objectContaining({
           table: busyTable,
@@ -82,25 +84,25 @@ describe("scheduled maintenance", () => {
     );
   });
 
-  it("reports partial progress and preserves fail-fast errors", async () => {
+  it.each(TABLES)("reports partial progress and preserves %s failures", async (failedTable) => {
     const failure = new Error("database unavailable");
-    let proofBatches = 0;
+    let failedTableBatches = 0;
     const { env, calls } = maintenanceEnv((table) => {
-      if (table !== "github_public_repo_proofs") return 0;
-      if (proofBatches++ === 0) return 500;
+      if (table !== failedTable) return 0;
+      if (failedTableBatches++ === 0) return 500;
       throw failure;
     });
 
     await expect(runScheduledMaintenance(env)).rejects.toBe(failure);
 
     expect(calls).toEqual([
-      "cache_publication_owners",
-      "github_public_repo_proofs",
-      "github_public_repo_proofs",
+      ...TABLES.slice(0, TABLES.indexOf(failedTable)),
+      failedTable,
+      failedTable,
     ]);
     expect(console.log).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        table: "github_public_repo_proofs",
+        table: failedTable,
         deleted_rows: 500,
         batches: 1,
         budget_exhausted: false,

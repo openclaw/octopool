@@ -144,6 +144,8 @@ export const queries = {
   insertWebSession:
     "INSERT INTO web_sessions (session_hash, caller_id, expires_at)\nVALUES (?1, ?2, ?3)",
   deleteWebSession: "DELETE FROM web_sessions\nWHERE session_hash = ?1",
+  deleteExpiredWebSessions:
+    "DELETE FROM web_sessions\nWHERE session_hash IN (\n  SELECT session_hash FROM web_sessions\n  WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1\n)",
   getWebSession:
     "SELECT\n  callers.id,\n  callers.name,\n  callers.github_login,\n  callers.github_user_id,\n  callers.org_login,\n  callers.org_identity_verified_at AS org_verified_at,\n  callers.dashboard_role,\n  web_sessions.expires_at\nFROM web_sessions\nJOIN callers ON callers.id = web_sessions.caller_id\nWHERE web_sessions.session_hash = ?1\n  AND web_sessions.expires_at > CURRENT_TIMESTAMP\n  AND callers.status = 'active'\n  AND callers.org_login = ?2 COLLATE NOCASE",
   getCallerPoolGrant:

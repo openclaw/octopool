@@ -439,6 +439,13 @@ VALUES (?1, ?2, ?3);
 DELETE FROM web_sessions
 WHERE session_hash = ?1;
 
+-- name: DeleteExpiredWebSessions :exec
+DELETE FROM web_sessions
+WHERE session_hash IN (
+  SELECT session_hash FROM web_sessions
+  WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1
+);
+
 -- name: GetWebSession :one
 SELECT
   callers.id,
