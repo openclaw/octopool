@@ -58,7 +58,7 @@ type StatsEnvelope = {
   client_routes: (UsageEnvelope & { route_kind: string })[];
   backends: { backend: string; route_kind: string; requests: number }[];
   fallback_reasons: { reason: string; route_kind: string; requests: number }[];
-  cache: { total_entries: number };
+  cache: { total_entries: number; body_bytes: number };
 };
 
 type DashboardEnvelope = {
@@ -73,7 +73,7 @@ type DashboardEnvelope = {
     eligible_cache_hit_rate_24h: number | null;
   };
   route_usage: { route_kind: string; eligible_cache_hit_rate: number | null }[];
-  cache: { total_entries: number };
+  cache: { total_entries: number; body_bytes: number };
   coordinator: CoordinatorSnapshot;
 };
 
@@ -778,7 +778,7 @@ describe("Worker end-to-end read models", () => {
         saved_github_requests: 1,
         backend_requests: 1,
       },
-      cache: { total_entries: 0 },
+      cache: { total_entries: 0, body_bytes: 0 },
     });
     expect(body).not.toHaveProperty("client_filter");
     expect(body.pool_usage.eligible_cache_hit_rate).toBe(0.5);
@@ -882,7 +882,7 @@ describe("Worker end-to-end read models", () => {
           backend_requests: 1,
         },
       ],
-      cache: { total_entries: 0 },
+      cache: { total_entries: 0, body_bytes: 0 },
     });
     expect(body.route_usage).toEqual(
       expect.arrayContaining([
@@ -896,4 +896,75 @@ describe("Worker end-to-end read models", () => {
     );
     expect(body.coordinator).toEqual({ rates: [], cooldowns: [], leases: [] });
   });
+
+  it.each([
+    { label: "ASCII", description: "cached body" },
+    { label: "CJK", description: "缓存" },
+    { label: "emoji", description: "🦊" },
+  ])(
+    "reports UTF-8 cached payload bytes for $label in stats and dashboard",
+    async ({ description }) => {
+      await seedPool();
+      const session = await seedWebSession();
+      const payload = { id: 1, full_name: "openclaw/octopool", private: false, description };
+      vi.stubGlobal("fetch", githubUpstream({ primary: jsonResponse(payload) }));
+
+      const response = await relay("/repos/openclaw/octopool");
+      expect(response.status).toBe(200);
+      expect(await response.json<RelayEnvelope>()).toMatchObject({
+        body: payload,
+        relay: { cache: "miss", cacheable: true },
+      });
+
+      const serialized = JSON.stringify(payload);
+      const payloadBytes = new TextEncoder().encode(serialized).byteLength;
+      await env.DB.prepare(
+        "INSERT INTO pools (id, name, policy_json) VALUES ('foreign', 'Foreign', '{}')",
+      ).run();
+      await env.DB.batch(
+        [POOL, "foreign"].map((pool) =>
+          env.DB.prepare(
+            `INSERT INTO github_cache_entries (
+            cache_key, pool_id, method, path, query_json, headers_json,
+            route_key, route_kind, status, response_headers_json,
+            body_json, body_encoding, created_at, expires_at
+          ) VALUES (?, ?, 'GET', '/repos/openclaw/octopool', '{}', '{}',
+            'repo', 'repo_view', 200, '{}', ?, 'json',
+            datetime('now', '-2 days'), datetime('now', '-1 day'))`,
+          ).bind(`expired-${pool}`, pool, serialized),
+        ),
+      );
+
+      const statsResponse = await callWorker(
+        `/v1/pools/${POOL}/stats?since=1m&client=unused-client`,
+        {
+          headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+        },
+      );
+      expect(statsResponse.status).toBe(200);
+      const stats = await statsResponse.json<StatsEnvelope>();
+      const expectedCache = {
+        total_entries: 2,
+        fresh_entries: 1,
+        expired_entries: 1,
+        body_bytes: 2 * payloadBytes,
+      };
+      expect(stats).toMatchObject({
+        client_filter: "unused-client",
+        client_usage: { requests: 0 },
+        cache: expectedCache,
+      });
+
+      const dashboardResponse = await callWorker(
+        `https://octopool.openclaw.ai/v1/dashboard?pool=${POOL}`,
+        {
+          headers: { cookie: `octopool_session=${session}` },
+        },
+      );
+      expect(dashboardResponse.status).toBe(200);
+      const dashboard = await dashboardResponse.json<DashboardEnvelope>();
+      expect(dashboard.cache).toMatchObject(expectedCache);
+      expect(dashboard.cache.body_bytes).toBe(stats.cache.body_bytes);
+    },
+  );
 });

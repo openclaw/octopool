@@ -182,7 +182,7 @@ SELECT
   COUNT(*) AS total_entries,
   SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
   SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,
-  COALESCE(SUM(length(body_json)), 0) AS body_bytes,
+  COALESCE(SUM(octet_length(body_json)), 0) AS body_bytes,
   MIN(created_at) AS oldest_created_at,
   MAX(created_at) AS newest_created_at
 FROM github_cache_entries
