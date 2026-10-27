@@ -66,9 +66,9 @@ describe("Worker scheduled session maintenance", () => {
     const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${queries.deleteExpiredWebSessions}`)
       .bind(500)
       .all<{ detail: string }>();
-    expect(plan.results.some(({ detail }) => detail.includes("idx_web_sessions_expires"))).toBe(
-      true,
-    );
+    expect(
+      plan.results.some(({ detail }) => detail.includes("idx_web_sessions_expires")),
+    ).toBe(true);
     expect(plan.results.some(({ detail }) => detail.includes("TEMP B-TREE"))).toBe(false);
 
     const first = await env.DB.prepare(queries.deleteExpiredWebSessions).bind(500).run();

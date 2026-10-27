@@ -19,9 +19,7 @@ export async function runScheduledMaintenance(env: Env): Promise<void> {
   await pruneTable("github_cache_entries", () => pruneExpiredGitHubCache(env, BATCH_SIZE));
   await pruneTable("audit_events", () => pruneOldAuditEvents(env, BATCH_SIZE));
   await pruneTable("web_sessions", async () => {
-    const result = await env.DB.prepare(queries.deleteExpiredWebSessions)
-      .bind(BATCH_SIZE)
-      .run();
+    const result = await env.DB.prepare(queries.deleteExpiredWebSessions).bind(BATCH_SIZE).run();
     return result.meta.changes;
   });
 }
