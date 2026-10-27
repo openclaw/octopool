@@ -102,7 +102,7 @@ export const queries = {
   dashboardIdentities:
     "SELECT id, kind, login, installation_id, status, weight, updated_at\nFROM identities\nWHERE pool_id = ?1\nORDER BY status = 'active' DESC, weight DESC, id",
   cacheTotals:
-    "SELECT\n  COUNT(*) AS total_entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,\n  COALESCE(SUM(length(body_json)), 0) AS body_bytes,\n  MIN(created_at) AS oldest_created_at,\n  MAX(created_at) AS newest_created_at\nFROM github_cache_entries\nWHERE pool_id = ?1",
+    "SELECT\n  COUNT(*) AS total_entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,\n  COALESCE(SUM(octet_length(body_json)), 0) AS body_bytes,\n  MIN(created_at) AS oldest_created_at,\n  MAX(created_at) AS newest_created_at\nFROM github_cache_entries\nWHERE pool_id = ?1",
   dashboardCacheRoutes:
     "SELECT\n  route_kind,\n  COUNT(*) AS entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  MAX(created_at) AS latest_created_at\nFROM github_cache_entries\nWHERE pool_id = ?1\nGROUP BY route_kind\nORDER BY entries DESC, route_kind\nLIMIT 12",
   dashboardUsers:
