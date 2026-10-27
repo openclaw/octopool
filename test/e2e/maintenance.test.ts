@@ -1,9 +1,91 @@
+import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { env } from "cloudflare:workers";
+import { applyD1Migrations } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { queries } from "../../src/generated/sql";
-import { runScheduled, seedAudit, seedPool } from "./harness";
+import { restoreD1Baseline } from "./d1-baseline";
+import { callWorker, runScheduled, seedAudit, seedPool, seedWebSession } from "./harness";
 
 describe("Worker scheduled session maintenance", () => {
+  it("upgrades v0.9.10 session data before scheduled cleanup without changing valid access", async () => {
+    const migrations = (env as Env & { TEST_MIGRATIONS: D1Migration[] }).TEST_MIGRATIONS;
+    // v0.9.10 (78b159d4) has the same 25 migration blobs as this branch's base:
+    // tree ed0eb5c7b2d4e75192a812146df86ab7d2d46648. Seed before applying 0026.
+    const stable = migrations.filter(({ name }) => name < "0026_web_session_retention.sql");
+    const retention = migrations.filter(({ name }) => name === "0026_web_session_retention.sql");
+    expect(stable).toHaveLength(25);
+    expect(stable.at(-1)?.name).toBe("0025_audit_timings.sql");
+    expect(retention).toHaveLength(1);
+    await restoreD1Baseline(env.DB, []);
+    await applyD1Migrations(env.DB, stable);
+    await seedPool();
+    const session = await seedWebSession();
+    await seedAudit("retained-upgrade-audit", "caller", "repo_view", "miss", 200);
+    await env.DB.prepare(
+      `INSERT INTO web_sessions (session_hash, caller_id, expires_at)
+       VALUES ('expired-before-upgrade', 'caller', datetime('now', '-1 day'))`,
+    ).run();
+    await env.DB.prepare("UPDATE string_rewrite_policy SET revision = 7 WHERE id = 1").run();
+    const protectedTables = [
+      "callers",
+      "caller_pools",
+      "caller_tokens",
+      "pools",
+      "identities",
+      "identity_scopes",
+      "string_rewrite_policy",
+      "audit_events",
+    ];
+    const protectedRows = () =>
+      Promise.all(
+        protectedTables.map(
+          async (table) => (await env.DB.prepare(`SELECT * FROM ${table}`).all()).results,
+        ),
+      );
+    const before = await protectedRows();
+    const sessions = (
+      await env.DB.prepare("SELECT * FROM web_sessions ORDER BY session_hash").all()
+    ).results;
+    expect(
+      await env.DB.prepare(
+        "SELECT name FROM sqlite_schema WHERE name = 'idx_web_sessions_expires'",
+      ).first(),
+    ).toBeNull();
+
+    await applyD1Migrations(env.DB, retention);
+
+    expect(
+      (await env.DB.prepare("SELECT * FROM web_sessions ORDER BY session_hash").all()).results,
+    ).toEqual(sessions);
+    expect(await protectedRows()).toEqual(before);
+    expect(
+      await env.DB.prepare(
+        "SELECT name FROM sqlite_schema WHERE name = 'idx_web_sessions_expires'",
+      ).first(),
+    ).toEqual({ name: "idx_web_sessions_expires" });
+    vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await runScheduled();
+
+    const valid = sessions.filter(({ session_hash }) => session_hash !== "expired-before-upgrade");
+    expect(
+      (await env.DB.prepare("SELECT * FROM web_sessions ORDER BY session_hash").all()).results,
+    ).toEqual(valid);
+    expect(await protectedRows()).toEqual(before);
+    expect((await env.DB.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
+    const response = await callWorker("https://octopool.openclaw.ai/v1/me", {
+      headers: { cookie: `octopool_session=${session}` },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      caller: { id: "caller" },
+      expires_at: valid[0]?.expires_at,
+    });
+    expect(await env.DB.prepare("SELECT expires_at FROM web_sessions").first()).toEqual({
+      expires_at: valid[0]?.expires_at,
+    });
+  });
+
   it("removes expired sessions without treating activity as renewed expiry", async () => {
     await seedPool();
     await seedAudit("retained-audit", "caller", "repo_view", "miss", 200);
