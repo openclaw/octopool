@@ -77,7 +77,6 @@ describe("Worker end-to-end PR-state cache", () => {
     "reverifies after scheduled proof expiry with a fresh hinted body: %s",
     async (verification) => {
       await seedPool();
-      vi.spyOn(console, "log").mockImplementation(() => {});
       vi.stubGlobal(
         "fetch",
         filesUpstream(
@@ -101,12 +100,13 @@ describe("Worker end-to-end PR-state cache", () => {
       await env.DB.prepare(
         "UPDATE github_pr_state_proofs SET expires_at = CURRENT_TIMESTAMP",
       ).run();
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
       await runScheduled();
 
       expect(await proofRows()).toEqual([]);
       expect(await fileCacheRows()).toEqual(bodies);
-      expect(console.log).toHaveBeenCalledWith(
+      expect(log).toHaveBeenCalledWith(
         expect.objectContaining({
           table: "github_pr_state_proofs",
           deleted_rows: 1,
