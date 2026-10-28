@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { deleteEdgeJSON } from "../../src/edge-cache";
-import { jsonResponse, relay, seedPool } from "./harness";
+import { queries } from "../../src/generated/sql";
+import { jsonResponse, relay, runScheduled, seedPool } from "./harness";
 import { requestWithEnv } from "./identity-routing-support";
 import {
   matchingPRMetadata,
@@ -21,6 +22,138 @@ type RelayEnvelope = {
 };
 
 describe("Worker end-to-end PR-state cache", () => {
+  it("prunes at most 500 expired composite proof keys and preserves fresh or renewed proofs", async () => {
+    await env.DB.prepare(
+      `WITH RECURSIVE expired(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM expired WHERE n < 501)
+       INSERT INTO github_pr_state_proofs (owner, repo, number, state_hint, expires_at)
+       SELECT 'openclaw', 'octopool', n, 'pr-state:closed', datetime('2000-01-01', printf('+%d seconds', n))
+       FROM expired`,
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO github_pr_state_proofs (owner, repo, number, state_hint, expires_at) VALUES
+       ('openclaw', 'octopool', 502, 'pr-state:closed', CURRENT_TIMESTAMP),
+       ('other', 'octopool', 1, 'pr-state:closed', datetime('now', '+1 hour')),
+       ('OpenClaw', 'octopool', 1, 'pr-state:closed', datetime('now', '+1 hour')),
+       ('openclaw', 'other', 1, 'pr-state:closed', datetime('now', '+1 hour')),
+       ('openclaw', 'octopool', 1, 'pr-head:${HEAD}', datetime('now', '+1 hour')),
+       ('openclaw', 'octopool', 503, 'pr-state:closed', datetime('now', '+1 hour'))`,
+    ).run();
+    await env.DB.prepare(queries.upsertPRStateProof)
+      .bind("openclaw", "octopool", "1", "pr-state:closed", "+300 seconds")
+      .run();
+    const fresh = (
+      await env.DB.prepare(
+        "SELECT * FROM github_pr_state_proofs WHERE expires_at > CURRENT_TIMESTAMP ORDER BY owner, repo, number, state_hint",
+      ).all()
+    ).results;
+    expect(fresh).toHaveLength(6);
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${queries.deleteExpiredPRStateProofs}`)
+      .bind(500)
+      .all<{ detail: string }>();
+    expect(
+      plan.results.some(({ detail }) => detail.includes("idx_github_pr_state_proofs_expires")),
+    ).toBe(true);
+    expect(plan.results.some(({ detail }) => detail.includes("TEMP B-TREE"))).toBe(false);
+
+    const first = await env.DB.prepare(queries.deleteExpiredPRStateProofs).bind(500).run();
+    expect(first.meta.changes).toBe(500);
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM github_pr_state_proofs").first(),
+    ).toEqual({ count: 7 });
+    const second = await env.DB.prepare(queries.deleteExpiredPRStateProofs).bind(500).run();
+    expect(second.meta.changes).toBe(1);
+    const drained = await env.DB.prepare(queries.deleteExpiredPRStateProofs).bind(500).run();
+    expect(drained.meta.changes).toBe(0);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT * FROM github_pr_state_proofs ORDER BY owner, repo, number, state_hint",
+        ).all()
+      ).results,
+    ).toEqual(fresh);
+  });
+
+  it.each(["matching", "mismatch", "unavailable"] as const)(
+    "reverifies after scheduled proof expiry with a fresh hinted body: %s",
+    async (verification) => {
+      await seedPool();
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.stubGlobal(
+        "fetch",
+        filesUpstream(
+          () => jsonResponse({ head: { sha: HEAD } }),
+          () => jsonResponse([{ filename: "old-hinted.ts" }]),
+        ),
+      );
+      const primed = await hintedRelay({ pr_head_sha: HEAD });
+      expect(await primed.json<RelayEnvelope>()).toMatchObject({
+        body: [{ filename: "old-hinted.ts" }],
+        relay: { cache: "miss" },
+      });
+      const bodies = await fileCacheRows();
+      expect(bodies).toHaveLength(1);
+      expect(
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM github_cache_entries WHERE expires_at > CURRENT_TIMESTAMP",
+        ).first(),
+      ).toEqual({ count: 1 });
+      // Expire only the proof: cleanup must not authorize the still-fresh hinted body.
+      await env.DB.prepare(
+        "UPDATE github_pr_state_proofs SET expires_at = CURRENT_TIMESTAMP",
+      ).run();
+
+      await runScheduled();
+
+      expect(await proofRows()).toEqual([]);
+      expect(await fileCacheRows()).toEqual(bodies);
+      expect(console.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          table: "github_pr_state_proofs",
+          deleted_rows: 1,
+          batches: 1,
+          failed: false,
+        }),
+      );
+      const upstream = filesUpstream(() =>
+        verification === "unavailable"
+          ? jsonResponse({ message: "metadata unavailable" }, 503)
+          : jsonResponse({ head: { sha: verification === "matching" ? HEAD : FORGED_HEAD } }),
+      );
+      vi.stubGlobal("fetch", upstream);
+
+      const response = await hintedRelay({ pr_head_sha: HEAD });
+
+      expect(response.status).toBe(200);
+      expect(await response.json<RelayEnvelope>()).toMatchObject({
+        body: [{ filename: verification === "matching" ? "old-hinted.ts" : "safe-unhinted.ts" }],
+        relay: { cache: verification === "matching" ? "hit" : "miss" },
+      });
+      expect(outgoingCalls(upstream)).toEqual([
+        { path: "/repos/openclaw/octopool/pulls/42", authorization: null },
+        ...(verification === "matching" ? [] : [{ path: FILES_PATH, authorization: null }]),
+      ]);
+      const proofs = await proofRows();
+      if (verification === "matching") {
+        expect(proofs).toEqual([expect.objectContaining({ state_hint: `pr-head:${HEAD}` })]);
+        expect(
+          await env.DB.prepare(
+            "SELECT unixepoch(expires_at) - unixepoch(checked_at) AS ttl FROM github_pr_state_proofs",
+          ).first(),
+        ).toEqual({ ttl: 300 });
+        expect(await fileCacheRows()).toEqual(bodies);
+      } else {
+        expect(proofs).toEqual([]);
+        expect(await fileCacheRows()).toContainEqual(bodies[0]);
+        const unhinted = await relay(FILES_PATH);
+        expect(await unhinted.json<RelayEnvelope>()).toMatchObject({
+          body: [{ filename: "safe-unhinted.ts" }],
+          relay: { cache: "hit" },
+        });
+        expect(upstream).toHaveBeenCalledTimes(2);
+      }
+    },
+  );
+
   describe.each(["proof miss", "forced live"])("bounded metadata: %s", (mode) => {
     it.each(oversizedPRMetadata)(
       "rejects $name and uses the unhinted files cache",

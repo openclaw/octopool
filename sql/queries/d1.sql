@@ -522,6 +522,16 @@ WHERE (protocol_epoch, owner, repo) IN (
   WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1
 );
 
+-- name: DeleteExpiredPRStateProofs :exec
+DELETE FROM github_pr_state_proofs
+WHERE (owner, repo, number, state_hint) IN (
+  SELECT owner, repo, number, state_hint
+  FROM github_pr_state_proofs
+  WHERE expires_at <= CURRENT_TIMESTAMP
+  ORDER BY expires_at
+  LIMIT ?1
+);
+
 -- name: FreshPRStateProof :one
 SELECT 1
 FROM github_pr_state_proofs

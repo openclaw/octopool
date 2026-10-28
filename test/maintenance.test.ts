@@ -7,6 +7,7 @@ const TABLES = [
   "github_cache_entries",
   "audit_events",
   "web_sessions",
+  "github_pr_state_proofs",
 ] as const;
 type Table = (typeof TABLES)[number];
 
@@ -19,7 +20,7 @@ describe("scheduled maintenance", () => {
     vi.restoreAllMocks();
   });
 
-  it("prunes expired cache, sessions, and old audit rows", async () => {
+  it("prunes expired cache, proofs, sessions, and old audit rows", async () => {
     const { env, queries } = maintenanceEnv(() => 0);
 
     await runScheduledMaintenance(env);
@@ -30,6 +31,7 @@ describe("scheduled maintenance", () => {
       expect.stringContaining("DELETE FROM github_cache_entries"),
       expect.stringContaining("DELETE FROM audit_events"),
       expect.stringContaining("DELETE FROM web_sessions"),
+      expect.stringContaining("DELETE FROM github_pr_state_proofs"),
     ]);
     expect(console.log).toHaveBeenCalledTimes(TABLES.length);
     for (const table of TABLES) {
@@ -53,7 +55,7 @@ describe("scheduled maintenance", () => {
       await runScheduledMaintenance(env);
 
       expect(calls.filter((table) => table === busyTable)).toHaveLength(20);
-      expect(calls).toHaveLength(24);
+      expect(calls).toHaveLength(20 + TABLES.length - 1);
       expect(console.log).toHaveBeenCalledWith(
         expect.objectContaining({
           table: busyTable,

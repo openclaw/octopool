@@ -124,7 +124,7 @@ describe("Worker scheduled session maintenance", () => {
 
     await runScheduled();
 
-    expect(log).toHaveBeenLastCalledWith({
+    expect(log).toHaveBeenCalledWith({
       event: "octopool.maintenance",
       table: "web_sessions",
       deleted_rows: 0,
