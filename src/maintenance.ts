@@ -22,6 +22,10 @@ export async function runScheduledMaintenance(env: Env): Promise<void> {
     const result = await env.DB.prepare(queries.deleteExpiredWebSessions).bind(BATCH_SIZE).run();
     return result.meta.changes;
   });
+  await pruneTable("github_pr_state_proofs", async () => {
+    const result = await env.DB.prepare(queries.deleteExpiredPRStateProofs).bind(BATCH_SIZE).run();
+    return result.meta.changes;
+  });
 }
 
 async function pruneTable(table: string, prune: () => Promise<number>): Promise<void> {

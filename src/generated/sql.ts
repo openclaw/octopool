@@ -162,6 +162,8 @@ export const queries = {
     "SELECT protocol_epoch, checked_at, expires_at, is_public, publication_id, publication_token\nFROM github_public_repo_proofs\nWHERE protocol_epoch = ?3 AND owner = ?1 AND repo = ?2\n  AND is_public = 0\n  AND expires_at > CURRENT_TIMESTAMP",
   deleteExpiredPublicRepoProofs:
     "DELETE FROM github_public_repo_proofs\nWHERE (protocol_epoch, owner, repo) IN (\n  SELECT protocol_epoch, owner, repo FROM github_public_repo_proofs\n  WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1\n)",
+  deleteExpiredPRStateProofs:
+    "DELETE FROM github_pr_state_proofs\nWHERE (owner, repo, number, state_hint) IN (\n  SELECT owner, repo, number, state_hint\n  FROM github_pr_state_proofs\n  WHERE expires_at <= CURRENT_TIMESTAMP\n  ORDER BY expires_at\n  LIMIT ?1\n)",
   freshPRStateProof:
     "SELECT 1\nFROM github_pr_state_proofs\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND number = ?3\n  AND state_hint = ?4\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   upsertPRStateProof:
