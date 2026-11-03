@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Batch main CodeQL analysis weekly while preserving PR and manual scans.
+
 ### Fixes
 
 - Prune expired PR-state verification proofs during scheduled maintenance without removing fresh proofs or their cached responses, using the existing per-table cleanup budget.
