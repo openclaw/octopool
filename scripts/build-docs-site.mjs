@@ -576,12 +576,7 @@ function layout({ page, html, toc, prev, next, sectionName }) {
 }
 
 function pageCanonicalUrl(page) {
-  if (!siteBase) return page.outRel;
-  if (page.outRel === "index.html") return `${siteBase}/`;
-  const rel = page.outRel.endsWith("/index.html")
-    ? page.outRel.slice(0, -"index.html".length)
-    : page.outRel;
-  return `${siteBase}/${rel}`;
+  return siteBase ? pageUrl(siteBase, page.outRel) : page.outRel;
 }
 
 function tagHtml([tag, k1, v1, k2, v2]) {
@@ -718,25 +713,16 @@ function highlightShell(code) {
 }
 
 function highlightShellLine(line) {
-  const stash = [];
-  const stashAdd = (match, cls) => {
-    const idx = stash.length;
-    stash.push(`<span class="${cls}">${escapeHtml(match)}</span>`);
-    return stashToken(idx);
-  };
-  let working = line;
-  working = working.replace(/(?:'[^']*'|"[^"]*")/g, (m) => stashAdd(m, "hl-s"));
-  working = working.replace(/\s#.*$/g, (m) => stashAdd(m, "hl-c"));
-  working = working.replace(
-    /(^|\s)(--?[A-Za-z][A-Za-z0-9-]*)/g,
-    (_, lead, flag) => `${escapeHtml(lead)}${stashAdd(flag, "hl-f")}`,
-  );
-  working = working.replace(
-    /\b(octopool|gh|brew|go|git|make|sudo|cd|export|cat|curl|jq|ls|mv|cp|rm|mkdir|wrangler|pnpm|npm|node|dig)\b/g,
-    (m) => stashAdd(m, "hl-cmd"),
-  );
-  working = working.replace(/\b(\d+(?:\.\d+)?)\b/g, (m) => stashAdd(m, "hl-n"));
-  return restoreStashTokens(escapeHtml(working), stash);
+  return withStash(line, [
+    [/(?:'[^']*'|"[^"]*")/g, "hl-s"],
+    [/\s#.*$/g, "hl-c"],
+    [/(?<!\S)--?[A-Za-z][A-Za-z0-9-]*/g, "hl-f"],
+    [
+      /\b(octopool|gh|brew|go|git|make|sudo|cd|export|cat|curl|jq|ls|mv|cp|rm|mkdir|wrangler|pnpm|npm|node|dig)\b/g,
+      "hl-cmd",
+    ],
+    [/\b(\d+(?:\.\d+)?)\b/g, "hl-n"],
+  ]);
 }
 
 function highlightJson(code) {
