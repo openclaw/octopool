@@ -63,11 +63,10 @@ func TestRunGHPRDetailExportNativeBoundary(t *testing.T) {
 						policy = rewriteActiveTestPolicy
 					}
 					var paths []string
-					checks := newPRChecksFixture()
 					_, policies := rewriteTestServer(t, policy, func(w http.ResponseWriter, r *http.Request) {
 						req := decodeCLIRequest(t, w, r)
 						paths = append(paths, req["path"].(string))
-						writeCLIEnvelope(t, w, prDetailExportResponse(t, checks, req))
+						http.Error(w, "unexpected relay request", http.StatusInternalServerError)
 					})
 					t.Setenv("OCTOPOOL_NO_FALLBACK", "")
 					if noFallback {
