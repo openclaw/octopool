@@ -263,16 +263,14 @@ describe("raw run jobs latest-attempt equivalence", () => {
     await env.DB.prepare(
       "UPDATE github_cache_entries SET expires_at = '2999-01-01 00:00:00'",
     ).run();
-    await env.DB.prepare(
-      "UPDATE github_cache_entries SET expires_at = datetime('now', '+1 minute') WHERE path = ?",
-    )
-      .bind(runPath)
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    await env.DB.prepare("UPDATE github_cache_entries SET expires_at = ? WHERE path = ?")
+      .bind(new Date(now + 1_000).toISOString().slice(0, 19).replace("T", " "), runPath)
       .run();
     const key = await env.DB.prepare("SELECT cache_key FROM github_cache_entries WHERE path = ?")
       .bind(plain)
       .first("cache_key");
-    let now = Date.now();
-    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
     let sourceReached = false;
     upstream.mockClear();
     const original = upstream.getMockImplementation()!;
@@ -288,8 +286,8 @@ describe("raw run jobs latest-attempt equivalence", () => {
     const db = observePublicationD1(env.DB, {
       before: async (sql, values) => {
         if (sql === queries.readGitHubCache && values[0] === key) {
+          if (!sourceReached) now += 3_000;
           sourceReached = true;
-          now += 120_000;
         }
       },
     });
