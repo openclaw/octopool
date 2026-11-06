@@ -28,7 +28,7 @@ func handleGHIssue(ctx context.Context, command string, opts ghTopOptions, stdou
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) {
+		if !ok {
 			return ghDelegated()
 		}
 		if nativeHumanFormat(opts) {

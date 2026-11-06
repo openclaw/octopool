@@ -12,7 +12,7 @@ import (
 func handleGHRepo(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
 	switch command {
 	case "view":
-		if hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) {
 			return ghDelegated()
 		}
 		if opts.repo == "" && len(opts.positionals) == 1 {
@@ -94,7 +94,7 @@ func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, std
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseViewFields) {
+		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseViewFields) {
 			return ghDelegated()
 		}
 		path := repoPath(repo, "releases", "latest")
@@ -127,12 +127,12 @@ func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, st
 	}
 	switch command {
 	case "list":
-		if len(opts.positionals) != 0 || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || limitOverOnePage(opts) {
+		if len(opts.positionals) != 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayWorkflowList(ctx, stdout, repo, opts))
 	case "view":
-		if len(opts.positionals) != 1 || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
+		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
@@ -146,7 +146,7 @@ func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, st
 }
 
 func handleGHLabel(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
-	if command != "list" || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
+	if command != "list" || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
 		return ghDelegated()
 	}
 	repo, ok, err := repoOnly(opts)
@@ -169,7 +169,7 @@ func handleGHGist(ctx context.Context, command string, opts ghTopOptions, stdout
 	case "list":
 		return ghDelegated()
 	case "view":
-		if len(opts.positionals) != 1 || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedGistFields) || !isHex(opts.positionals[0]) {
+		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts, supportedGistFields) || !isHex(opts.positionals[0]) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: "/gists/" + opts.positionals[0]}, opts, fieldMapGist))

@@ -15,7 +15,7 @@ var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 func handleGHSearch(ctx context.Context, kind string, opts ghTopOptions, stdout io.Writer) ghResult {
 	if kind == "repos" {
-		if opts.repo != "" || opts.repoCount > 0 || opts.state != "" || opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		query, ok := plainSearchQuery(opts.positionals)
@@ -29,10 +29,7 @@ func handleGHSearch(ctx context.Context, kind string, opts ghTopOptions, stdout 
 	if err != nil {
 		return ghFailed(err)
 	}
-	if !ok || repo == "" || opts.repoCount > 1 || !machineReadable(opts) || limitOverOnePage(opts) {
-		return ghDelegated()
-	}
-	if opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" {
+	if !ok || repo == "" || !machineReadable(opts) || limitOverOnePage(opts) {
 		return ghDelegated()
 	}
 	if opts.state != "" && opts.state != "open" && opts.state != "closed" {

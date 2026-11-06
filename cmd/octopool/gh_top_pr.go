@@ -40,7 +40,7 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) {
+		if !ok {
 			return ghDelegated()
 		}
 		if nativeHumanFormat(opts) {
@@ -58,7 +58,7 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || !supportedPRListState(opts.state) || limitOverOnePage(opts) || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
+		if !ok || !supportedPRListState(opts.state) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		query := listQuery(opts)
@@ -86,7 +86,7 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiersExceptPatch(opts) || machineReadable(opts) || opts.jq != "" {
+		if !ok {
 			return ghDelegated()
 		}
 		accept := "application/vnd.github.v3.diff"
@@ -108,7 +108,7 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) {
+		if !ok {
 			return ghDelegated()
 		}
 		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedCheckRunFields)) {
