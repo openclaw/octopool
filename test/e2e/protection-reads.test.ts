@@ -111,7 +111,7 @@ describe("Worker native protection reads", () => {
     expect(upstream).not.toHaveBeenCalled();
     expect(
       await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
-    ).toEqual({ count: 13 });
+    ).toEqual({ count: nativeReads.length });
   });
 
   it("checks fresh authoritative policy before granting native fallback", async () => {

@@ -369,12 +369,31 @@ describe("CI stale-while-revalidate", () => {
         await deleteEdgeJSON(PUBLIC_PROOF_EDGE_NAMESPACE, "openclaw/swr-fixture");
         upstream.mockImplementation(async () => jsonResponse({ private: true }));
       }
+      upstream.mockClear();
       const response = await relay(
         path,
         undefined,
         invalid === "variant" ? { headers: { "x-github-api-version": "2099-01-01" } } : {},
       );
-      expect((await response.json<Partial<Envelope>>()).relay?.cache).not.toBe("stale");
+      const result = await response.json();
+      if (invalid === "private") {
+        expect(response.status).toBe(424);
+        expect(result).toMatchObject({
+          error: { code: "fallback_local", details: { reason: "repo_not_public" } },
+        });
+      } else {
+        expect(response.status).toBe(200);
+        expect(result).toMatchObject({
+          body: { id: 42, status: "in_progress" },
+          relay: { cache: "miss" },
+        });
+      }
+      const expectedPath = invalid === "private" ? repo : path;
+      expect(
+        upstream.mock.calls.some(
+          ([input, init]) => new URL(new Request(input, init).url).pathname === expectedPath,
+        ),
+      ).toBe(true);
     },
   );
 

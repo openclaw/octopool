@@ -1,6 +1,6 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import { evictDurableObject } from "cloudflare:test";
 import { policyCoordinatorStub } from "../../src/policy-coordinator";
 import { describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readEdgeGitHubCache } from "../../src/cache";
@@ -9,7 +9,12 @@ import { deleteEdgeJSON } from "../../src/edge-cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { bearer, jsonResponse, POOL, seedPool } from "./harness";
-import { appIdentity, PATH, requestWithEnv } from "./identity-routing-support";
+import {
+  appIdentity,
+  PATH,
+  requestWithEnv,
+  expectNoPublicationWork,
+} from "./identity-routing-support";
 import { ownedWork } from "./owned-work";
 
 const DIFF = "/repos/openclaw/octopool/pulls/42";
@@ -39,13 +44,6 @@ async function warmExpiredDiff() {
   await env.DB.prepare(
     "UPDATE github_cache_entries SET expires_at = datetime('now', '-61 seconds')",
   ).run();
-}
-async function expectNoFills() {
-  expect(
-    await runInDurableObject(coordinator(), (_instance, state) =>
-      state.storage.sql.exec("SELECT * FROM cache_fills").toArray(),
-    ),
-  ).toEqual([]);
 }
 
 describe("identity selection phase ownership", () => {
@@ -77,7 +75,7 @@ describe("identity selection phase ownership", () => {
         "SELECT COUNT(*) AS count FROM github_cache_entries WHERE expires_at > datetime('now')",
       ).first(),
     ).toEqual({ count: 1 });
-    await expectNoFills();
+    await expectNoPublicationWork();
   });
 
   it("F1 reuses the successful canonical run-list PAT for the exact filtered continuation", async () => {
@@ -130,7 +128,7 @@ describe("identity selection phase ownership", () => {
       ],
     });
     expect((await coordinator().snapshot()).cooldowns).toEqual([]);
-    await expectNoFills();
+    await expectNoPublicationWork();
   });
 
   it("F2 serves late eligible same-colo edge-only B while A fails and B is cooling", async () => {
@@ -190,7 +188,7 @@ describe("identity selection phase ownership", () => {
         upstream.mock.calls.filter(([input, init]) => bearer(input, init) === "test-primary-token"),
       ).toHaveLength(1);
       expect((await coordinator().snapshot()).cooldowns).toHaveLength(2);
-      await expectNoFills();
+      await expectNoPublicationWork();
     } finally {
       release.release();
       await pending;
@@ -250,7 +248,7 @@ describe("identity selection phase ownership", () => {
         });
         expect(calls).toHaveLength(kind === "config" ? 0 : 1);
       }
-      await expectNoFills();
+      await expectNoPublicationWork();
     },
   );
 
@@ -432,7 +430,7 @@ describe("identity selection phase ownership", () => {
           "SELECT COUNT(*) AS count FROM github_cache_entries WHERE route_kind = 'run_jobs'",
         ).first(),
       ).toEqual({ count: 0 });
-      await expectNoFills();
+      await expectNoPublicationWork();
       clock.mockRestore();
     },
   );
