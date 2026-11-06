@@ -223,7 +223,7 @@ describe("Worker end-to-end web sessions", () => {
       const request = new Request(input, init);
       const url = new URL(request.url);
       if (url.hostname === "github.com" && url.pathname === "/login/oauth/access_token") {
-        exchangeHadSignal = request.signal instanceof AbortSignal;
+        exchangeHadSignal = init?.signal instanceof AbortSignal;
         throw new DOMException("The operation was aborted.", "AbortError");
       }
       return jsonResponse({ message: "unexpected OAuth request" }, 500);
