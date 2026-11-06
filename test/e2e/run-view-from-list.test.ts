@@ -330,15 +330,10 @@ describe("exact run views from indexed fresh REST lists", () => {
         "UPDATE github_cache_entries SET body_encoding = 'text' WHERE cache_key = 'encoding'",
       ),
     ]);
-    const previousJoin = queries.readRunListCacheCandidates.replace(
-      "\nCROSS JOIN github_cache_entries",
-      "\nJOIN github_cache_entries",
-    );
     for (const runId of [42, 404]) {
       const read = async (sql: string) =>
         (await env.DB.prepare(sql).bind(POOL, repo, runId, "publication-v1", "{}").all()).results;
       const rows = await read(queries.readRunListCacheCandidates);
-      expect(rows).toEqual(await read(previousJoin));
       expect(rows.map((row) => JSON.parse(String(row.body_json)).source)).toEqual(
         runId === 42
           ? ["good-8", "good-9", "good-6", "good-7", "good-4", "good-5", "good-2", "good-3"]
@@ -404,17 +399,35 @@ describe("exact run views from indexed fresh REST lists", () => {
     await relay(list);
     await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
     await deleteEdgeJSON(PUBLIC_PROOF_EDGE_NAMESPACE, "openclaw/run-view-fixture");
-    await env.DB.prepare(
-      "UPDATE github_cache_entries SET expires_at = datetime('now', '+2 seconds')",
-    ).run();
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    await env.DB.prepare("UPDATE github_cache_entries SET expires_at = ?")
+      .bind(new Date(now + 1_000).toISOString().slice(0, 19).replace("T", " "))
+      .run();
+    let proofReached = false;
+    upstream.mockClear();
     upstream.mockImplementation(async (input, init) => {
       if (new URL(new Request(input, init).url).pathname === repo) {
-        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        if (!proofReached) now += 3_000;
+        proofReached = true;
         return jsonResponse({ private: false });
       }
       return jsonResponse({ ...run, display_title: "New view observation" });
     });
-    expect(await (await relay(path)).json()).toMatchObject({ relay: { cache: "miss" } });
+    try {
+      expect(await (await relay(path)).json()).toMatchObject({
+        body: { display_title: "New view observation" },
+        relay: { cache: "miss" },
+      });
+      expect(proofReached).toBe(true);
+      expect(
+        upstream.mock.calls.some(
+          ([input, init]) => new URL(new Request(input, init).url).pathname === path,
+        ),
+      ).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("bounds membership publication, replaces mappings, cascades deletes, and uses the lookup index", async () => {

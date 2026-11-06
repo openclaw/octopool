@@ -256,27 +256,55 @@ describe("raw run jobs latest-attempt equivalence", () => {
   });
 
   it("rechecks latest-attempt proof expiry after a delayed source lookup", async () => {
-    await setup();
+    const upstream = await setup();
     await relay(runPath);
     await relay(plain);
     await evictEdges();
     await env.DB.prepare(
-      "UPDATE github_cache_entries SET expires_at = datetime('now', '+2 seconds') WHERE path = ?",
-    )
-      .bind(runPath)
+      "UPDATE github_cache_entries SET expires_at = '2999-01-01 00:00:00'",
+    ).run();
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    await env.DB.prepare("UPDATE github_cache_entries SET expires_at = ? WHERE path = ?")
+      .bind(new Date(now + 1_000).toISOString().slice(0, 19).replace("T", " "), runPath)
       .run();
     const key = await env.DB.prepare("SELECT cache_key FROM github_cache_entries WHERE path = ?")
       .bind(plain)
       .first("cache_key");
+    let sourceReached = false;
+    upstream.mockClear();
+    const original = upstream.getMockImplementation()!;
+    upstream.mockImplementation(async (input, init) => {
+      if (new URL(new Request(input, init).url).pathname === pinned) {
+        return jsonResponse({
+          total_count: 1,
+          jobs: [{ ...jobs[0], name: "New jobs observation" }],
+        });
+      }
+      return original(input, init);
+    });
     const db = observePublicationD1(env.DB, {
       before: async (sql, values) => {
-        if (sql === queries.readGitHubCache && values[0] === key)
-          await new Promise((resolve) => setTimeout(resolve, 2100));
+        if (sql === queries.readGitHubCache && values[0] === key) {
+          if (!sourceReached) now += 3_000;
+          sourceReached = true;
+        }
       },
     });
-    expect(await (await requestWithEnv({ DB: db }, pinned, {})).json()).toMatchObject({
-      relay: { cache: "miss" },
-    });
+    try {
+      expect(await (await requestWithEnv({ DB: db }, pinned, {})).json()).toMatchObject({
+        body: { jobs: [{ name: "New jobs observation" }] },
+        relay: { cache: "miss" },
+      });
+      expect(sourceReached).toBe(true);
+      expect(
+        upstream.mock.calls.some(
+          ([input, init]) => new URL(new Request(input, init).url).pathname === pinned,
+        ),
+      ).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it.each(

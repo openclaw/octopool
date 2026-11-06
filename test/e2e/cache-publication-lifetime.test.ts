@@ -321,7 +321,18 @@ it("measures a real renewable fill through DO RPC and native SQL", async () => {
     }),
   };
   try {
-    await new Promise((resolve) => setTimeout(resolve, 3_200));
+    await vi.waitFor(
+      async () => {
+        const costs = await runInDurableObject(
+          stub,
+          (instance) => (instance as unknown as ObservedDO).publicationCosts,
+        );
+        expect(
+          costs.filter(({ query }) => query === "renewPublicationOwner").length,
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 5_000 },
+    );
     expect(
       await acquired.owner.publish(() =>
         writeGitHubCache(traced, key, request, route, response, acquired.owner.capability),
