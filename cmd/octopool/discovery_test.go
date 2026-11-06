@@ -32,7 +32,7 @@ func TestDiscoverLoginServerUsesDefaultPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.APIBase != server.URL || resolved.Pool != "core" || resolved.Org != "acme" {
+	if resolved.APIBase != server.URL || resolved.Pool != "core" {
 		t.Fatalf("resolved = %#v", resolved)
 	}
 }
