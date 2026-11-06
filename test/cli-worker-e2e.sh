@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-port="${OCTOPOOL_CLI_WORKER_E2E_PORT:-18787}"
+port="${OCTOPOOL_CLI_WORKER_E2E_PORT:-$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')}"
 state_dir="$(mktemp -d "${TMPDIR:-/tmp}/octopool-cli-worker.XXXXXX")"
 worker_log="$state_dir/wrangler.log"
 migration_log="$state_dir/migrations.log"
@@ -16,8 +16,11 @@ cleanup() {
     kill "$worker_pid" 2>/dev/null || true
     wait "$worker_pid" 2>/dev/null || true
   fi
+  rm -rf "$state_dir"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if ! pnpm exec wrangler d1 migrations apply DB \
   --local --persist-to "$state_dir" >"$migration_log" 2>&1 </dev/null; then
@@ -29,9 +32,38 @@ seed_sql="INSERT INTO pools (id, name, policy_json) VALUES ('maintainers', 'main
 pnpm exec wrangler d1 execute DB \
   --local --persist-to "$state_dir" --command "$seed_sql" --json >/dev/null
 
-pnpm exec wrangler dev --local --port "$port" --persist-to "$state_dir" \
+python3 - pnpm exec wrangler dev --local --port "$port" --persist-to "$state_dir" \
   --local-upstream localhost --upstream-protocol http \
-  --show-interactive-dev-session=false >"$worker_log" 2>&1 &
+  --show-interactive-dev-session=false >"$worker_log" 2>&1 <<'PYTHON' &
+import os
+import signal
+import subprocess
+import sys
+import time
+
+# Own the complete Wrangler/Workerd process group, including pnpm descendants.
+child = subprocess.Popen(sys.argv[1:], stdin=subprocess.DEVNULL, start_new_session=True)
+def interrupted(number, _frame):
+    raise SystemExit(128 + number)
+signal.signal(signal.SIGINT, interrupted)
+signal.signal(signal.SIGTERM, interrupted)
+try:
+    raise SystemExit(child.wait())
+finally:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    try:
+        os.killpg(child.pid, signal.SIGTERM)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            child.poll()
+            os.killpg(child.pid, 0)
+            time.sleep(0.05)
+        os.killpg(child.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    child.wait()
+PYTHON
 worker_pid=$!
 
 attempt=0
@@ -48,6 +80,14 @@ done
 go build -o "$binary" ./cmd/octopool
 
 run_cli() {
+    XDG_CONFIG_HOME="$state_dir/config" \
+    APPDATA="$state_dir/config" \
+    LOCALAPPDATA="$state_dir/cache" \
+    OCTOPOOL_STRING_REWRITE_FILE='' \
+    OCTOPOOL_FRESH='' \
+    OCTOPOOL_NO_FALLBACK=1 \
+    OCTOPOOL_RELAY_CONCURRENCY=0 \
+    OCTOPOOL_GH_PATH="$state_dir/must-not-run-gh" \
     OCTOPOOL_TOKEN="$caller_token" \
     OCTOPOOL_URL="$base_url" \
     OCTOPOOL_POOL=maintainers \
@@ -56,6 +96,7 @@ run_cli() {
 
 first="$(run_cli)"
 second="$(run_cli)"
+# shellcheck disable=SC2016
 printf "%s\n%s" "$first" "$second" | node -e '
 const fs = require("node:fs");
 const results = fs.readFileSync(0, "utf8").split("\n").map(JSON.parse);
@@ -65,6 +106,7 @@ if (results.length !== 2 || results.some((result) => result.name !== "octopool")
 '
 
 proof_matches() {
+  # shellcheck disable=SC2016
   printf "%s" "$1" | node -e '
 const fs = require("node:fs");
 const rows = JSON.parse(fs.readFileSync(0, "utf8"));
