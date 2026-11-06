@@ -25,6 +25,7 @@ type ghResult struct {
 	err    error
 }
 
+// Handlers receive only options admitted by their command-specific read specs.
 type ghTopHandler func(context.Context, string, ghTopOptions, io.Writer) ghResult
 
 var ghTopHandlers = map[string]ghTopHandler{

@@ -62,7 +62,7 @@ func handleGHRun(ctx context.Context, command string, opts ghTopOptions, stdout 
 		request.headers = nil
 		return ghCompleted(relayMachineRunList(ctx, stdout, request, repo, opts))
 	case "view":
-		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasRunViewModifiers(opts) {
+		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) {
 			return ghDelegated()
 		}
 		repo, ok, err := repoFromOptionOrCurrent(opts.repo)
