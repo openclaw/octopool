@@ -109,16 +109,8 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var issue map[string]any
-	if err := json.Unmarshal(body, &issue); err != nil {
+	if err := client.readJSON(ctx, request, &issue); err != nil {
 		return err
 	}
 	// Native gh reports PRs as MERGED/CLOSED with PR-only fields; REST only says "closed".
@@ -198,16 +190,8 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 		paged.query = cloneQuery(request.query)
 		paged.query["per_page"] = strconv.Itoa(relayPageSize)
 		paged.query["page"] = strconv.Itoa(page)
-		envelope, err := client.do(ctx, paged)
-		if err != nil {
-			return err
-		}
-		body, err := envelopeBodyBytes(envelope)
-		if err != nil {
-			return err
-		}
 		var items []map[string]any
-		if err := json.Unmarshal(body, &items); err != nil {
+		if err := client.readJSON(ctx, paged, &items); err != nil {
 			return err
 		}
 		for _, item := range items {

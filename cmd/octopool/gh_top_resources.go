@@ -50,16 +50,8 @@ func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTo
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var repository map[string]any
-	if err := json.Unmarshal(body, &repository); err != nil {
+	if err := client.readJSON(ctx, request, &repository); err != nil {
 		return err
 	}
 	if hasJSONField(opts.json, "id") {
@@ -229,21 +221,13 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 	limit := desiredLimitDefault(opts, 50)
 	items := make([]any, 0, limit)
 	// Native gh fetches one page at --limit, then drops disabled workflows without backfilling.
-	envelope, err := client.do(ctx, ghAPIRequest{
+	var response map[string]any
+	if err := client.readJSON(ctx, ghAPIRequest{
 		method:  "GET",
 		path:    repoPath(repo, "actions", "workflows"),
 		query:   map[string]any{"per_page": strconv.Itoa(limit), "page": "1"},
 		headers: map[string]string{"x-octopool-public-shape": publicShapeWorkflowList},
-	})
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
-	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
+	}, &response); err != nil {
 		return err
 	}
 	workflows, ok := response["workflows"].([]any)
