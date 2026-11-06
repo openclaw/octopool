@@ -163,25 +163,27 @@ func validPRDetailCursor(cursor string) bool {
 	return true
 }
 
+type prDetailReactionGroup struct {
+	Content string `json:"content"`
+	Users   struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"users"`
+}
+
 type prDetailComment struct {
 	ID     string `json:"id"`
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	AuthorAssociation   string    `json:"authorAssociation"`
-	Body                string    `json:"body"`
-	CreatedAt           time.Time `json:"createdAt"`
-	IncludesCreatedEdit bool      `json:"includesCreatedEdit"`
-	IsMinimized         bool      `json:"isMinimized"`
-	MinimizedReason     string    `json:"minimizedReason"`
-	ReactionGroups      []struct {
-		Content string `json:"content"`
-		Users   struct {
-			TotalCount int `json:"totalCount"`
-		} `json:"users"`
-	} `json:"reactionGroups"`
-	URL             string `json:"url,omitempty"`
-	ViewerDidAuthor bool   `json:"viewerDidAuthor"`
+	AuthorAssociation   string                  `json:"authorAssociation"`
+	Body                string                  `json:"body"`
+	CreatedAt           time.Time               `json:"createdAt"`
+	IncludesCreatedEdit bool                    `json:"includesCreatedEdit"`
+	IsMinimized         bool                    `json:"isMinimized"`
+	MinimizedReason     string                  `json:"minimizedReason"`
+	ReactionGroups      []prDetailReactionGroup `json:"reactionGroups"`
+	URL                 string                  `json:"url,omitempty"`
+	ViewerDidAuthor     bool                    `json:"viewerDidAuthor"`
 }
 
 func mapPRDetail(raw json.RawMessage, field, viewer string) (any, string, error) {
@@ -204,12 +206,7 @@ func mapPRDetail(raw json.RawMessage, field, viewer string) (any, string, error)
 			}
 		}
 		if groups == nil {
-			groups = make([]struct {
-				Content string `json:"content"`
-				Users   struct {
-					TotalCount int `json:"totalCount"`
-				} `json:"users"`
-			}, 0)
+			groups = make([]prDetailReactionGroup, 0)
 		}
 		comment.ReactionGroups = groups
 		return comment, comment.ID, nil
