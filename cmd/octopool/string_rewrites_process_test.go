@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 type rewriteCapture struct {
@@ -1926,29 +1925,18 @@ func TestStringRewriteBestEffortFallback(t *testing.T) {
 		}
 	})
 
-	t.Run("field dispatch does not read idle pipe", func(t *testing.T) {
-		reader, writer, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer reader.Close()
-		defer writer.Close()
+	t.Run("field dispatch does not read stdin", func(t *testing.T) {
+		reader := &declaredInputReader{Reader: strings.NewReader("unused stdin")}
 		policy, err := parseStringRewritePolicy([]byte(rewriteActiveTestPolicy), true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		done := make(chan error, 1)
-		go func() {
-			prepared := &rewritePreparation{}
-			done <- prepareRewriteBestEffort(policy, []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "-f", "message=safe"}, reader, prepared)
-		}()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(250 * time.Millisecond):
-			t.Fatal("field dispatch attempted to read idle stdin")
+		prepared := &rewritePreparation{}
+		if err := prepareRewriteBestEffort(policy, []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "-f", "message=safe"}, reader, prepared); err != nil {
+			t.Fatal(err)
+		}
+		if reader.reads != 0 {
+			t.Fatalf("field dispatch read stdin %d times", reader.reads)
 		}
 	})
 
