@@ -22,8 +22,8 @@ func TestRunGHPRViewMaintainerCanModify(t *testing.T) {
 				return map[string]any{"maintainer_can_modify": value}
 			})
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{
-				"view", "7", "--repo", "openclaw/octopool", "--json", "maintainerCanModify",
+			result := runGHTopLevel(t.Context(), []string{
+				"pr", "view", "7", "--repo", "openclaw/octopool", "--json", "maintainerCanModify",
 			}, &out)
 			want := fmt.Sprintf("{\"maintainerCanModify\":%t}\n", value)
 			if result.err != nil || result.action != ghComplete || calls != 1 || out.String() != want {

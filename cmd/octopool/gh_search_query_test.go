@@ -79,7 +79,7 @@ func TestTopSearchQualifiedQueryAndNativeExport(t *testing.T) {
 				return map[string]any{"items": []any{map[string]any{"number": 1, "title": "Worker", "user": map[string]any{"node_id": "U_1", "login": "alice", "type": "User", "html_url": "https://github.com/alice", "id": 123}, "closed_at": nil}}}
 			})
 			var out bytes.Buffer
-			result := handleGHSearch(t.Context(), []string{kind, "--repo", "openclaw/octopool", "--json", "number,title,author,closedAt", "--", "updated:>=2026-10-01", "worker", "Cache Hit", "-label:bug", "in:title,body"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"search", kind, "--repo", "openclaw/octopool", "--json", "number,title,author,closedAt", "--", "updated:>=2026-10-01", "worker", "Cache Hit", "-label:bug", "in:title,body"}, &out)
 			want := `[{"author":{"id":"U_1","is_bot":false,"login":"alice","type":"User","url":"https://github.com/alice"},"closedAt":"0001-01-01T00:00:00Z","number":1,"title":"Worker"}]` + "\n"
 			if result.err != nil || result.action != ghComplete || out.String() != want {
 				t.Fatalf("result=%+v out=%s", result, out.String())
@@ -106,7 +106,7 @@ func TestListSearchHumanAndIncompleteFallback(t *testing.T) {
 	} {
 		relayTestServer(t, func(map[string]any) any { return body })
 		var out bytes.Buffer
-		result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--search", "cache", "--json", "number,state"}, &out)
+		result := runGHTopLevel(t.Context(), []string{"pr", "list", "-R", "openclaw/octopool", "--search", "cache", "--json", "number,state"}, &out)
 		if !isLocalFallback(result.err) || out.Len() != 0 {
 			t.Fatalf("result=%+v out=%s", result, out.String())
 		}
@@ -167,7 +167,7 @@ func TestPRListSearchCreatedAtStaysNative(t *testing.T) {
 	// while the search issue's created_at is 22:28:13Z on 2026-09-28.
 	relayTestServer(t, func(body map[string]any) any { t.Fatalf("unexpected relay: %v", body); return nil })
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--search", "cache", "--json", "number,createdAt"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "list", "-R", "openclaw/octopool", "--search", "cache", "--json", "number,createdAt"}, &out)
 	if result.action != ghDelegate || out.Len() != 0 {
 		t.Fatalf("result=%+v output=%q", result, out.String())
 	}

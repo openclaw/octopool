@@ -13,18 +13,7 @@ import (
 
 var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
-func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) < 2 {
-		return ghDelegated()
-	}
-	kind := args[0]
-	if kind != "issues" && kind != "prs" && kind != "repos" {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("search "+args[0], args[1:])
-	if !ok {
-		return early
-	}
+func handleGHSearch(ctx context.Context, kind string, opts ghTopOptions, stdout io.Writer) ghResult {
 	if kind == "repos" {
 		if opts.repo != "" || opts.repoCount > 0 || opts.state != "" || opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
 			return ghDelegated()

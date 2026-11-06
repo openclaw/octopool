@@ -8,18 +8,8 @@ import (
 	"strconv"
 )
 
-func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	if args[0] == "watch" {
-		return handleGHRunWatch(ctx, args[1:], stdout)
-	}
-	opts, early, ok := prepareGHTopOptions("run "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHRun(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "list":
 		if (opts.read.has("--commit") || opts.read.has("--event") || opts.read.has("--created")) && !machineReadable(opts) {
 			return ghDelegated()

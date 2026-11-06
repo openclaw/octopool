@@ -48,7 +48,7 @@ func TestRunOwnershipFreshAndHistoricalHead(t *testing.T) {
 					return map[string]any{"id": numericID, "workflow_id": 9, "head_sha": head, "head_branch": "fixture-branch", "event": "pull_request", "name": "historical label", "run_attempt": 1, "pull_requests": []any{map[string]any{"head": map[string]any{"sha": "9999999999999999999999999999999999999999"}}}}
 				})
 				var out bytes.Buffer
-				result := handleGHRun(t.Context(), []string{"view", id, "-R", "openclaw/Peekaboo", "--json", "databaseId,headSha,headBranch,event,workflowName,jobs"}, &out)
+				result := runGHTopLevel(t.Context(), []string{"run", "view", id, "-R", "openclaw/Peekaboo", "--json", "databaseId,headSha,headBranch,event,workflowName,jobs"}, &out)
 				if result.err != nil || result.action != ghComplete {
 					t.Fatalf("result=%+v", result)
 				}

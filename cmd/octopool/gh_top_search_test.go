@@ -30,8 +30,8 @@ func TestRunGHSearchIssuesUsesScopedSearchRoute(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"-R", "openclaw/octopool",
 		"cache",
 		"regression",
@@ -56,8 +56,8 @@ func TestRunGHSearchUsesTokenFreeShapeForExactRESTFields(t *testing.T) {
 		return map[string]any{"items": []map[string]any{}}
 	})
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"cache",
 		"-R", "openclaw/octopool",
 		"--json", "number,title,body",
@@ -85,8 +85,8 @@ func TestRunGHSearchReposUsesRepositorySearchRoute(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"repos",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "repos",
 		"octopool",
 		"relay",
 		"--json", "name,nameWithOwner,url",
@@ -102,8 +102,8 @@ func TestRunGHSearchReposUsesRepositorySearchRoute(t *testing.T) {
 
 func TestRunGHSearchReposRejectsOperators(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"repos",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "repos",
 		"octopool",
 		"NOT",
 		"relay",
@@ -123,8 +123,8 @@ func TestRunGHSearchUsesExplicitStateOnly(t *testing.T) {
 		return map[string]any{"items": []map[string]any{}}
 	})
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"cache",
 		"-R", "openclaw/octopool",
 		"--state", "open",
@@ -137,8 +137,8 @@ func TestRunGHSearchUsesExplicitStateOnly(t *testing.T) {
 
 func TestRunGHSearchFallsBackForInvalidStateAll(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"cache",
 		"-R", "openclaw/octopool",
 		"--state", "all",
@@ -151,8 +151,8 @@ func TestRunGHSearchFallsBackForInvalidStateAll(t *testing.T) {
 
 func TestRunGHSearchFallsBackForUnimplementedSort(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"cache",
 		"-R", "openclaw/octopool",
 		"--sort", "created",
@@ -171,8 +171,8 @@ func TestRunGHSearchRelaysQualifiedQuery(t *testing.T) {
 		return map[string]any{"items": []any{}}
 	})
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"author:alice",
 		"cache",
 		"-R", "openclaw/octopool",
@@ -189,8 +189,8 @@ func TestRunGHSearchFallsBackForUnsupportedTerm(t *testing.T) {
 		return map[string]any{"items": []any{}}
 	})
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"C++",
 		"-R", "openclaw/octopool",
 		"--json", "number,title,url",
@@ -209,8 +209,8 @@ func TestRunGHSearchRelaysPhraseArgument(t *testing.T) {
 		return map[string]any{"items": []any{}}
 	})
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"cache regression",
 		"-R", "openclaw/octopool",
 		"--json", "number,title,url",
@@ -222,8 +222,8 @@ func TestRunGHSearchRelaysPhraseArgument(t *testing.T) {
 
 func TestRunGHSearchPRsFallsBackForUnavailableFields(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"prs",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "prs",
 		"cache",
 		"-R", "openclaw/octopool",
 		"--json", "number,headRefName,isDraft",
@@ -235,8 +235,8 @@ func TestRunGHSearchPRsFallsBackForUnavailableFields(t *testing.T) {
 
 func TestRunGHSearchFallsBackForMultipleRepos(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"issues",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "issues",
 		"cache",
 		"-R", "openclaw/octopool",
 		"-R", "openclaw/openclaw",
@@ -249,8 +249,8 @@ func TestRunGHSearchFallsBackForMultipleRepos(t *testing.T) {
 
 func TestRunGHSearchFallsBackForNonSearchModifiers(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHSearch(t.Context(), []string{
-		"prs",
+	result := runGHTopLevel(t.Context(), []string{
+		"search", "prs",
 		"cache",
 		"-R", "openclaw/octopool",
 		"--branch", "feature",

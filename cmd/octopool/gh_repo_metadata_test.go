@@ -16,7 +16,7 @@ func TestRepoViewMetadata(t *testing.T) {
 				return repoMetadataFixture(visibility)
 			})
 			var out bytes.Buffer
-			result := handleGHRepo(t.Context(), []string{"view", "acme/repo", "--json", "owner,visibility,nameWithOwner"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"repo", "view", "acme/repo", "--json", "owner,visibility,nameWithOwner"}, &out)
 			want := map[string]any{
 				"owner":         map[string]any{"id": "O_owner", "login": "acme"},
 				"visibility":    strings.ToUpper(visibility),
@@ -98,7 +98,7 @@ func TestRepoViewIncompleteMetadata(t *testing.T) {
 					fields += "," + test.field
 				}
 				var out bytes.Buffer
-				result := handleGHRepo(t.Context(), []string{"view", "acme/repo", "--json", fields}, &out)
+				result := runGHTopLevel(t.Context(), []string{"repo", "view", "acme/repo", "--json", fields}, &out)
 				if selected {
 					if result.action != ghFail || !isLocalFallback(result.err) || out.Len() != 0 {
 						t.Fatalf("expected typed fallback without partial output: action=%v err=%v out=%q", result.action, result.err, out.String())

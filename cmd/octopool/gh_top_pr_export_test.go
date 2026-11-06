@@ -41,7 +41,7 @@ func TestPRDetailExportTypedBeforeClient(t *testing.T) {
 			isolateTestConfig(t)
 			t.Setenv("OCTOPOOL_TOKEN", "")
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{"view", "7", "-R", "acme/repo", "--json", field}, &out)
+			result := runGHTopLevel(t.Context(), []string{"pr", "view", "7", "-R", "acme/repo", "--json", field}, &out)
 			var fallback localFallbackError
 			if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "unsupported_pr_detail_export" || fallback.Relay != nil || out.Len() != 0 {
 				t.Fatalf("detail must remain accepted and fail typed before relay client/auth: action=%v err=%v out=%q", result.action, result.err, out.String())
@@ -208,7 +208,7 @@ func TestRunGHPRDetailExportDirectDelegationControls(t *testing.T) {
 			args := append([]string{"pr", "view", test.selector, "-R", "acme/repo"}, test.flags...)
 			original := append([]string(nil), args...)
 			var out, stderr bytes.Buffer
-			result := handleGHPR(t.Context(), args[1:], &out)
+			result := runGHTopLevel(t.Context(), append([]string{"pr"}, args[1:]...), &out)
 			if result.action != ghDelegate || result.err != nil || out.Len() != 0 || data.Load() != 0 || policies.Load() != 0 {
 				t.Fatalf("unmodeled shape must stay direct delegation: %+v out=%q", result, out.String())
 			}

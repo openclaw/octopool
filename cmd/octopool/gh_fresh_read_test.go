@@ -31,8 +31,8 @@ func TestPRViewGateFieldsRequestLiveRead(t *testing.T) {
 				}
 			})
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{
-				"view", "7", "-R", "openclaw/octopool", "--json", "number," + field,
+			result := runGHTopLevel(t.Context(), []string{
+				"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number," + field,
 			}, &out)
 			if result.err != nil || result.action != ghComplete {
 				t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -58,8 +58,8 @@ func TestPRViewStableFieldsStayCached(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"view", "7", "-R", "openclaw/octopool", "--json", "number,title",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number,title",
 	}, &out)
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)

@@ -38,7 +38,7 @@ func TestRunGHRepoViewNodeID(t *testing.T) {
 				return repository
 			})
 			var out bytes.Buffer
-			result := handleGHRepo(t.Context(), []string{"view", "acme/repo", "--json", test.fields}, &out)
+			result := runGHTopLevel(t.Context(), []string{"repo", "view", "acme/repo", "--json", test.fields}, &out)
 			if test.want == "" {
 				if result.action != ghFail || !isLocalFallback(result.err) || out.Len() != 0 {
 					t.Fatalf("expected typed fallback without output: action=%v err=%v out=%q", result.action, result.err, out.String())
@@ -55,7 +55,7 @@ func TestRunGHRepoViewNodeID(t *testing.T) {
 func TestRunGHRepoViewUnsupportedFieldsDelegate(t *testing.T) {
 	emptyRewriteTestServer(t)
 	var out bytes.Buffer
-	result := handleGHRepo(t.Context(), []string{"view", "acme/repo", "--json", "id,diskUsage"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"repo", "view", "acme/repo", "--json", "id,diskUsage"}, &out)
 	if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
 		t.Fatalf("action=%v err=%v out=%q", result.action, result.err, out.String())
 	}
@@ -120,8 +120,8 @@ func TestRunGHReleaseListRelays(t *testing.T) {
 		}}
 	})
 	var out bytes.Buffer
-	result := handleGHRelease(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"release", "list",
 		"-R", "openclaw/octopool",
 		"--limit", "10",
 		"--json", "tagName,name,url",
@@ -139,8 +139,8 @@ func TestRunGHReleaseListKeepsIDSupport(t *testing.T) {
 		return []map[string]any{{"id": 123}}
 	})
 	var out bytes.Buffer
-	result := handleGHRelease(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"release", "list",
 		"-R", "openclaw/octopool",
 		"--json", "id",
 	}, &out)
@@ -167,8 +167,8 @@ func TestRunGHReleaseViewRelaysTag(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRelease(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"release", "view",
 		"v0.2.5",
 		"-R", "openclaw/octopool",
 		"--json", "tagName,name",
@@ -206,7 +206,7 @@ func TestRunGHReleaseViewPreservesRawBody(t *testing.T) {
 						args = append(args, projection)
 					}
 					var out bytes.Buffer
-					result := handleGHRelease(t.Context(), args, &out)
+					result := runGHTopLevel(t.Context(), append([]string{"release"}, args...), &out)
 					if result.err != nil || result.action != ghComplete {
 						t.Fatalf("action=%v err=%v", result.action, result.err)
 					}
@@ -238,8 +238,8 @@ func TestRunGHReleaseViewPreservesRawBody(t *testing.T) {
 
 func TestRunGHReleaseViewIDStaysLocal(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHRelease(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"release", "view",
 		"v0.2.5",
 		"-R", "openclaw/octopool",
 		"--json", "id",
@@ -257,8 +257,8 @@ func TestRunGHReleaseViewKeepsNumericTags(t *testing.T) {
 		return map[string]any{"tag_name": "20240530"}
 	})
 	var out bytes.Buffer
-	result := handleGHRelease(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"release", "view",
 		"20240530",
 		"-R", "openclaw/octopool",
 		"--json", "tagName",
@@ -279,8 +279,8 @@ func TestRunGHReleaseViewEscapesSlashTagsOnce(t *testing.T) {
 		return map[string]any{"tag_name": "release/1.0"}
 	})
 	var out bytes.Buffer
-	result := handleGHRelease(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"release", "view",
 		"release/1.0",
 		"-R", "openclaw/octopool",
 		"--json", "tagName",
@@ -322,8 +322,8 @@ func TestRunGHWorkflowListRelays(t *testing.T) {
 		}}
 	})
 	var out bytes.Buffer
-	result := handleGHWorkflow(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"workflow", "list",
 		"-R", "openclaw/octopool",
 		"--json", "id,name,path,state",
 	}, &out)
@@ -355,8 +355,8 @@ func TestRunGHWorkflowViewUsesPublicShape(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHWorkflow(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"workflow", "view",
 		"ci.yml",
 		"-R", "openclaw/octopool",
 		"--json", "id,name,path,state",
@@ -378,8 +378,8 @@ func TestRunGHLabelListRelays(t *testing.T) {
 		return []map[string]any{{"name": "bug", "color": "d73a4a", "description": "Bug"}}
 	})
 	var out bytes.Buffer
-	result := handleGHLabel(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"label", "list",
 		"-R", "openclaw/octopool",
 		"--json", "name,color,description",
 	}, &out)
@@ -399,8 +399,8 @@ func TestRunGHGistViewRelaysPublicGist(t *testing.T) {
 		return map[string]any{"id": "abc123", "html_url": "https://gist.github.com/abc123", "public": true}
 	})
 	var out bytes.Buffer
-	result := handleGHGist(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"gist", "view",
 		"abc123",
 		"--json", "id,url,isPublic",
 	}, &out)

@@ -21,15 +21,8 @@ func cloneQuery(input map[string]any) map[string]any {
 	return out
 }
 
-func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("issue "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHIssue(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "view":
 		repo, number, ok, err := repoNumber(opts)
 		if err != nil {
