@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -294,12 +293,8 @@ func relayWatchRun(ctx context.Context, client ghRelayClient, repo string, id st
 	if err != nil {
 		return nil, relayMeta{}, err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, relayMeta{}, err
-	}
 	var run map[string]any
-	if err := json.Unmarshal(body, &run); err != nil {
+	if err := decodeRelayJSON(envelope, &run); err != nil {
 		return nil, relayMeta{}, err
 	}
 	return run, envelope.Relay, nil

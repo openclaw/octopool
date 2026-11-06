@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"net/url"
@@ -287,15 +286,6 @@ func rewritePRReadConfig(policy stringRewritePolicy, key string) (string, error)
 		return "", rewriteGitError(err)
 	}
 	return value, nil
-}
-
-type prReadGitOutput struct{ data bytes.Buffer }
-
-func (out *prReadGitOutput) Write(data []byte) (int, error) {
-	if out.data.Len()+len(data) > rewriteMaxContent {
-		return 0, errRewriteBlocked
-	}
-	return out.data.Write(data)
 }
 
 func rewritePRReadGit(args ...string) (string, error) {

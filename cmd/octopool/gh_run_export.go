@@ -125,15 +125,11 @@ func relayMachineRunList(ctx context.Context, stdout io.Writer, request ghAPIReq
 	if err != nil {
 		return err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var response struct {
 		TotalCount int             `json:"total_count"`
 		Runs       json.RawMessage `json:"workflow_runs"`
 	}
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return err
 	}
 	raw := bytes.TrimSpace(response.Runs)
@@ -241,15 +237,11 @@ func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string,
 }
 
 func machineRunJobsPage(envelope relayEnvelope, run machineRun, seen map[int64]bool) ([]machineJobExport, int, error) {
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, 0, err
-	}
 	var response struct {
 		Total json.RawMessage `json:"total_count"`
 		Jobs  json.RawMessage `json:"jobs"`
 	}
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return nil, 0, err
 	}
 	var total int64

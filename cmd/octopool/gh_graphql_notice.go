@@ -115,7 +115,7 @@ func githubQuotaRepo(repo string) bool {
 func readPersonalGraphQLQuota(ctx context.Context, path string, env []string, policy stringRewritePolicy) *ghGraphQLQuota {
 	child, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	var output prReadGitOutput
+	var output rewritePreflightOutput
 	args := []string{"api", "rate_limit", "--hostname=github.com", "--cache=60s"}
 	for _, arg := range append(append([]string(nil), args...), "https://api.github.com/rate_limit") {
 		if policy.checkStructural(arg) != nil {

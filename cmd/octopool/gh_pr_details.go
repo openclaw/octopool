@@ -37,7 +37,7 @@ func localPRCommentViewer(ctx context.Context, client ghRelayClient) (string, er
 	}
 	child, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	var output prReadGitOutput
+	var output rewritePreflightOutput
 	cmd := exec.CommandContext(child, path, args...)
 	cmd.Stdout = &output
 	cmd.WaitDelay = 100 * time.Millisecond
