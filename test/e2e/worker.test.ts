@@ -18,6 +18,7 @@ import {
   seedCaller,
   seedPool,
   seedWebSession,
+  waitForPublicationFollower,
 } from "./harness";
 import { ownedWork } from "./owned-work";
 
@@ -412,7 +413,7 @@ describe("Worker end-to-end relay", () => {
       await started;
       const secondPromise = relay("/repos/openclaw/octopool");
       requests.push(secondPromise);
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await waitForPublicationFollower(secondPromise);
       releasePrimary();
       const envelopes = await Promise.all(
         [firstPromise, secondPromise].map(async (responsePromise) => {
@@ -422,9 +423,8 @@ describe("Worker end-to-end relay", () => {
         }),
       );
 
-      expect(envelopes.map(({ relay: result }) => result.cache).sort()).toEqual(["hit", "miss"]);
-      // Miniflare may not schedule the follower until the leader has published the cache entry.
-      const coalesced = envelopes.some(({ relay: result }) => result.coalesced === true);
+      expect(envelopes.map(({ relay: result }) => result.cache)).toEqual(["miss", "hit"]);
+      expect(envelopes[1]?.relay.coalesced).toBe(true);
       expect(
         upstream.mock.calls.filter(
           ([request, init]) => bearer(request, init) === "test-primary-token",
@@ -434,7 +434,7 @@ describe("Worker end-to-end relay", () => {
         "SELECT cache_status, coalesced FROM audit_events ORDER BY cache_status",
       ).all<{ cache_status: string; coalesced: number }>();
       expect(audits.results).toEqual([
-        { cache_status: "hit", coalesced: coalesced ? 1 : 0 },
+        { cache_status: "hit", coalesced: 1 },
         { cache_status: "miss", coalesced: 0 },
       ]);
     } finally {
