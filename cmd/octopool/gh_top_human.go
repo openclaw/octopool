@@ -202,7 +202,7 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 		display = firstString(run, "display_title")
 	}
 	if _, err := fmt.Fprintf(stdout, "\n%s %s · %s\nTriggered via %s %s\n",
-		runGlyph(run),
+		workflowStatusGlyph(run),
 		watchSafeText(display),
 		watchSafeText(id),
 		watchSafeText(firstString(run, "event")),
@@ -242,7 +242,7 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 			inDuration = " in " + duration
 		}
 		if _, err := fmt.Fprintf(stdout, "%s %s%s (ID %s)\n",
-			jobGlyph(job),
+			workflowStatusGlyph(job),
 			watchSafeText(firstString(job, "name")),
 			inDuration,
 			watchSafeText(jobID),
@@ -543,12 +543,8 @@ func plural(count int, unit string) string {
 	return unit + "s"
 }
 
-func runGlyph(run map[string]any) string {
+func workflowStatusGlyph(run map[string]any) string {
 	return statusGlyph(firstString(run, "status"), firstString(run, "conclusion"))
-}
-
-func jobGlyph(job map[string]any) string {
-	return statusGlyph(firstString(job, "status"), firstString(job, "conclusion"))
 }
 
 // statusGlyph mirrors gh's completed-conclusion mapping: tick only for
