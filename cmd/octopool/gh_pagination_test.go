@@ -700,6 +700,7 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	checkRuns := make([]map[string]any, relayPageSize)
 	for index := range checkRuns {
 		checkRuns[index] = map[string]any{
+			"id":         index + 1,
 			"name":       "check-" + strconv.Itoa(index),
 			"status":     "completed",
 			"conclusion": "success",
@@ -721,7 +722,8 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	result := handleGHPR(t.Context(), []string{
 		"checks", "7", "-R", "openclaw/octopool", "--json", "name,state",
 	}, &out)
-	if result.action != ghFail || !isLocalFallback(result.err) {
+	var fallback localFallbackError
+	if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "pagination_exhausted" || fallback.Relay != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 	if checkCalls != 1 || out.Len() != 0 {

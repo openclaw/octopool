@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -183,7 +184,10 @@ func TestRunGHSearchRelaysQualifiedQuery(t *testing.T) {
 }
 
 func TestRunGHSearchFallsBackForUnsupportedTerm(t *testing.T) {
-	isolateTestConfig(t)
+	relayTestServer(t, func(body map[string]any) any {
+		t.Errorf("unsupported search reached relay: %#v", body)
+		return map[string]any{"items": []any{}}
+	})
 	var out bytes.Buffer
 	result := handleGHSearch(t.Context(), []string{
 		"issues",
@@ -191,7 +195,8 @@ func TestRunGHSearchFallsBackForUnsupportedTerm(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "number,title,url",
 	}, &out)
-	if result.action != ghFail || !isLocalFallback(result.err) {
+	var fallback localFallbackError
+	if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "unsupported_search_query" || out.Len() != 0 {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 }

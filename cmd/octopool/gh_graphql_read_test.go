@@ -24,6 +24,7 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 	t.Setenv("OCTOPOOL_FRESH", "")
 	for _, query := range []string{
 		repositoryReadQuery,
+		`{repository(owner:"openclaw",name:"octopool"){` + strings.Repeat("id ", 3900) + `}}`,
 		`query { r:repository(owner:"openclaw",name:"octopool") { name } __typename }`,
 		`query { p1:repository(owner:"OpenClaw",name:"Octopool") { name } p2:repository(owner:$owner,name:$name) { name } }`,
 		`{repository(owner:"openclaw",name:"octopool") @include(if:true) {name}}`,
@@ -59,7 +60,7 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 		{"pagination", repositoryReadQuery, []string{"--paginate"}},
 		{"pagination-false", repositoryReadQuery, []string{"--paginate=false"}},
 		{"slurp", repositoryReadQuery, []string{"--slurp"}},
-		{"tokens", `{viewer{login} repository(owner:"openclaw",name:"octopool"){` + strings.Repeat("id ", 4000) + `}}`, nil},
+		{"tokens", `{repository(owner:"openclaw",name:"octopool"){` + strings.Repeat("id ", 4000) + `}}`, nil},
 		{"template", repositoryReadQuery, []string{"--template", "{{.data}}"}},
 		{"include", repositoryReadQuery, []string{"--include"}},
 		{"conditional", repositoryReadQuery, []string{"-H", "If-None-Match: old"}},
