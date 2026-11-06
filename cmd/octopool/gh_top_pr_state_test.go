@@ -100,6 +100,10 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 						"isDraft", "headRefOid", "headRefOid,isDraft",
 						"state,headRefOid,files", "state,headRefOid,isDraft,files",
 					} {
+						// updatedAt requires REST, so other sources repeat the same case.
+						if transport != "rest" && strings.Contains(fields, "updatedAt") {
+							continue
+						}
 						t.Run(fields, func(t *testing.T) {
 							// REST may also serve a public shape after a page parser misses.
 							wantShape := !strings.Contains(fields, "updatedAt")
