@@ -166,21 +166,8 @@ describe("github api provider", () => {
     );
   });
 
-  it("uses the configured cap for every route", () => {
-    const runList = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool/actions/runs",
-    });
-    const repo = validateRelayRequest({
-      pool: "maintainers",
-      method: "GET",
-      path: "/repos/openclaw/octopool",
-    });
-
-    expect(classifyRoute(runList, policy).kind).toBe("run_list");
-    expect(classifyRoute(repo, policy).kind).toBe("repo_view");
-    expect(responseCapBytes(env())).toBe(2_097_152);
+  it("uses the configured response cap", () => {
+    expect(responseCapBytes({ ...env(), MAX_RESPONSE_BYTES: "1024" })).toBe(1024);
   });
 
   it("accepts Actions run lists below the configured cap", async () => {

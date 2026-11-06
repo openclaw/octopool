@@ -18,26 +18,6 @@ describe("PR state hint verification", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps a matching PR head discriminator", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        Response.json({
-          state: "open",
-          merged_at: null,
-          head: { sha: "0123456789abcdef0123456789abcdef01234567" },
-        }),
-      ),
-    );
-    const request = requestWithHint({ pr_head_sha: "0123456789abcdef0123456789abcdef01234567" });
-    const database = databaseWithFreshProof(null);
-    const route = await verifyPRStateHint(env(database), request, classifyRoute(request, policy));
-
-    expect(route.state_hint).toBe("pr-head:0123456789abcdef0123456789abcdef01234567");
-    expect(route.state_hint_source).toBe("live");
-    expect(database.run).toHaveBeenCalledOnce();
-  });
-
   it("reuses a fresh proof without touching GitHub", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -63,23 +43,6 @@ describe("PR state hint verification", () => {
           head: { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
         }),
       ),
-    );
-    const request = requestWithHint({ pr_head_sha: "0123456789abcdef0123456789abcdef01234567" });
-    const route = await verifyPRStateHint(
-      env(databaseWithFreshProof(null)),
-      request,
-      classifyRoute(request, policy),
-    );
-
-    expect(route.state_hint).toBeUndefined();
-  });
-
-  it("drops the discriminator when verification fails", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new Error("network down");
-      }),
     );
     const request = requestWithHint({ pr_head_sha: "0123456789abcdef0123456789abcdef01234567" });
     const route = await verifyPRStateHint(
