@@ -204,15 +204,13 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 			items = append(items, item)
 		}
 	}
-	raw, err := json.Marshal(items)
+	var output any = items
+	if len(opts.json) > 0 {
+		output = filterJSONValue(items, opts.json, nil)
+	}
+	raw, err := json.Marshal(output)
 	if err != nil {
 		return err
-	}
-	if len(opts.json) > 0 {
-		raw, err = filterJSONFields(raw, opts.json, nil)
-		if err != nil {
-			return err
-		}
 	}
 	return writeBytes(ctx, stdout, raw, opts.jq)
 }
