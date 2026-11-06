@@ -27,7 +27,7 @@ func TestRunGHPRViewMergeStateStatus(t *testing.T) {
 				return map[string]any{"head": map[string]any{"sha": prMergeableTestHead}, "mergeable_state": "unstable"}
 			})
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{"view", "7", "-R", "openclaw/octopool", "--json", "mergeStateStatus"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"pr", "view", "7", "-R", "openclaw/octopool", "--json", "mergeStateStatus"}, &out)
 			if result.err != nil || result.action != ghComplete || calls != 3 || out.String() != `{"mergeStateStatus":"`+state+`"}`+"\n" {
 				t.Fatalf("result=%v calls=%d out=%s", result, calls, out.String())
 			}
@@ -123,8 +123,8 @@ func TestRunGHPRViewUnselectedMergeFields(t *testing.T) {
 		return map[string]any{"mergeable": false, "mergeable_state": "future_state", "auto_merge": map[string]any{}}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"view", "7", "--repo", "openclaw/octopool", "--json", "mergeable",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "view", "7", "--repo", "openclaw/octopool", "--json", "mergeable",
 	}, &out)
 	if result.err != nil || result.action != ghComplete || out.String() != "{\"mergeable\":\"CONFLICTING\"}\n" {
 		t.Fatalf("action=%v err=%v output=%q", result.action, result.err, out.String())
@@ -136,7 +136,7 @@ func TestRunGHSearchPRMergeFieldsDelegate(t *testing.T) {
 		t.Run(fields, func(t *testing.T) {
 			emptyRewriteTestServer(t)
 			var out bytes.Buffer
-			result := handleGHSearch(t.Context(), []string{"prs", "--repo", "openclaw/octopool", "--json", fields}, &out)
+			result := runGHTopLevel(t.Context(), []string{"search", "prs", "--repo", "openclaw/octopool", "--json", fields}, &out)
 			if result.err != nil || result.action != ghDelegate || out.Len() != 0 {
 				t.Fatalf("action=%v err=%v output=%q", result.action, result.err, out.String())
 			}

@@ -65,7 +65,7 @@ func TestRunGHIssueViewStateProjection(t *testing.T) {
 							return fixture
 						})
 						var out bytes.Buffer
-						result := handleGHIssue(t.Context(), []string{"view", "5", "-R", "openclaw/octopool", "--json", fields}, &out)
+						result := runGHTopLevel(t.Context(), []string{"issue", "view", "5", "-R", "openclaw/octopool", "--json", fields}, &out)
 						if result.action != ghComplete || result.err != nil {
 							t.Fatalf("action=%v err=%v", result.action, result.err)
 						}
@@ -121,7 +121,7 @@ func TestRunGHIssueStateProjectionBeforeJQ(t *testing.T) {
 					}
 					args = append(args, "-R", "openclaw/octopool", "--json", fields, "--jq", prefix+expr)
 					var out bytes.Buffer
-					result := handleGHIssue(t.Context(), args, &out)
+					result := runGHTopLevel(t.Context(), append([]string{"issue"}, args...), &out)
 					if result.action != ghComplete || result.err != nil || out.String() != "true\n" {
 						t.Errorf("fields=%s action=%v err=%v jq=%q", fields, result.action, result.err, out.String())
 					}
@@ -144,7 +144,7 @@ func TestRunGHIssueListStateProjection(t *testing.T) {
 				return items
 			})
 			var out bytes.Buffer
-			result := handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/octopool", "--state", "all", "--limit", "2", "--json", fields}, &out)
+			result := runGHTopLevel(t.Context(), []string{"issue", "list", "-R", "openclaw/octopool", "--state", "all", "--limit", "2", "--json", fields}, &out)
 			if result.action != ghComplete || result.err != nil {
 				t.Fatalf("action=%v err=%v", result.action, result.err)
 			}
@@ -175,7 +175,7 @@ func TestRunGHIssueStateUnsupportedFieldsDelegate(t *testing.T) {
 			}
 			args = append(args, "-R", "openclaw/octopool", "--json", fields, "--jq", "{number,state,closedAt}")
 			var out bytes.Buffer
-			result := handleGHIssue(t.Context(), args, &out)
+			result := runGHTopLevel(t.Context(), append([]string{"issue"}, args...), &out)
 			if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
 				t.Errorf("args=%v action=%v err=%v out=%q", args, result.action, result.err, out.String())
 			}
@@ -205,7 +205,7 @@ func TestRunGHIssueStatePreservesRESTAndSearch(t *testing.T) {
 				t.Errorf("REST = %#v, want %#v", got, fixture)
 			}
 			out.Reset()
-			result := handleGHSearch(t.Context(), []string{"issues", "cache", "-R", "openclaw/octopool", "--json", "state"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"search", "issues", "cache", "-R", "openclaw/octopool", "--json", "state"}, &out)
 			if result.action != ghComplete || result.err != nil || out.String() != "[{\"state\":\""+state+"\"}]\n" {
 				t.Errorf("search action=%v err=%v output=%q", result.action, result.err, out.String())
 			}

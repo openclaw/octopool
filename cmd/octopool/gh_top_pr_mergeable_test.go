@@ -90,8 +90,8 @@ func TestRunGHPRViewMergeableProjection(t *testing.T) {
 					return prMergeableFixture(test.value, test.present)
 				})
 				var out bytes.Buffer
-				result := handleGHPR(t.Context(), []string{
-					"view", "7", "--repo", "openclaw/octopool", "--json", fields,
+				result := runGHTopLevel(t.Context(), []string{
+					"pr", "view", "7", "--repo", "openclaw/octopool", "--json", fields,
 				}, &out)
 				if result.err != nil || result.action != ghComplete {
 					t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -146,7 +146,7 @@ func TestRunGHPRMergeableUnsupportedFieldsDelegate(t *testing.T) {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			emptyRewriteTestServer(t)
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), args[1:], &out)
+			result := runGHTopLevel(t.Context(), append([]string{"pr"}, args[1:]...), &out)
 			if result.err != nil || result.action != ghDelegate || out.Len() != 0 {
 				t.Fatalf("action=%v err=%v output=%q", result.action, result.err, out.String())
 			}

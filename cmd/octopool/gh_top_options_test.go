@@ -92,6 +92,27 @@ func TestTopLevelHostQualifiedRepoReads(t *testing.T) {
 	}
 }
 
+func TestGHTopDispatchPreparseBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want ghAction
+	}{
+		{nil, ghDelegate},
+		{[]string{"search", "repos"}, ghDelegate},
+		{[]string{"unknown", "view", "--json", `"unterminated`}, ghDelegate},
+		{[]string{"search", "code", "--json", `"unterminated`}, ghDelegate},
+		{[]string{"search", "repos", "--json", `"unterminated`}, ghFail},
+		{[]string{"pr", "checks", "7", "--watch", "--json", `"unterminated`}, ghFail},
+		{[]string{"pr", "checks", "7", "--json", `"unterminated`}, ghFail},
+	} {
+		var out bytes.Buffer
+		result := runGHTopLevel(t.Context(), test.args, &out)
+		if result.action != test.want || (result.err != nil) != (test.want == ghFail) || out.Len() != 0 {
+			t.Fatalf("args=%q: action=%v err=%v output=%q", test.args, result.action, result.err, out.String())
+		}
+	}
+}
+
 func TestGHTopReadOptionDispatch(t *testing.T) {
 	for _, test := range []struct {
 		name string

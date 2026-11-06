@@ -50,8 +50,8 @@ func TestRunGHPRViewHydratesFiles(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "view",
 		"7",
 		"-R", "openclaw/octopool",
 		"--json", "number,files",
@@ -273,8 +273,8 @@ func TestRunGHPRViewFilesFallsBackWhenHeadMoves(t *testing.T) {
 		}
 	})
 
-	result := handleGHPR(t.Context(), []string{
-		"view", "7", "-R", "openclaw/octopool", "--json", "number,files",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number,files",
 	}, &bytes.Buffer{})
 	if result.action != ghFail || !isLocalFallback(result.err) {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -314,8 +314,8 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"checks",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "checks",
 		"7",
 		"-R", "openclaw/octopool",
 		"--json", "name,state",
@@ -372,7 +372,7 @@ func TestRunGHPRChecksFreshUsesCurrentHead(t *testing.T) {
 				args = append(args, "--json", "name,state,bucket,workflow")
 			}
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), args, &out)
+			result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out)
 			if format == "human" {
 				assertExitCode(t, result.err, 8)
 			} else if result.action != ghComplete || result.err != nil || out.String() != "[{\"bucket\":\"pending\",\"name\":\"unit\",\"state\":\"QUEUED\",\"workflow\":\"CI\"}]\n" {
@@ -433,7 +433,7 @@ func TestPRChecksEligibilityControls(t *testing.T) {
 				t.Setenv("PATH", t.TempDir())
 			}
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), row.args, &out)
+			result := runGHTopLevel(t.Context(), append([]string{"pr"}, row.args...), &out)
 			if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
 				t.Fatalf("eligibility widened: result=%+v output=%q", result, out.String())
 			}
@@ -444,7 +444,7 @@ func TestPRChecksEligibilityControls(t *testing.T) {
 			f := newPRChecksFixture()
 			relayTestServer(t, func(r map[string]any) any { return f.response(t, r) })
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{"checks", selector, "-R", "acme/repo", "--json", "name"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"pr", "checks", selector, "-R", "acme/repo", "--json", "name"}, &out)
 			if result.action != ghComplete || result.err != nil || out.String() != "[{\"name\":\"unit\"}]\n" {
 				t.Fatalf("selector changed: %+v output=%q", result, out.String())
 			}

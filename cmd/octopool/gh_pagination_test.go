@@ -719,8 +719,8 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"checks", "7", "-R", "openclaw/octopool", "--json", "name,state",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "checks", "7", "-R", "openclaw/octopool", "--json", "name,state",
 	}, &out)
 	var fallback localFallbackError
 	if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "pagination_exhausted" || fallback.Relay != nil {
@@ -762,8 +762,8 @@ func TestRunGHPRViewFallsBackWhenFilePaginationIsExhausted(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"view", "7", "-R", "openclaw/octopool", "--json", "number,files",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number,files",
 	}, &out)
 	var fallback localFallbackError
 	if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "pagination_exhausted" || fallback.Relay != nil {
@@ -785,8 +785,8 @@ func TestRunGHIssueListFallsBackWhenFilteringExhaustsPagination(t *testing.T) {
 	relayTestServer(t, func(map[string]any) any { return items })
 
 	var out bytes.Buffer
-	result := handleGHIssue(t.Context(), []string{
-		"list", "-R", "openclaw/octopool", "--limit", "1", "--json", "number",
+	result := runGHTopLevel(t.Context(), []string{
+		"issue", "list", "-R", "openclaw/octopool", "--limit", "1", "--json", "number",
 	}, &out)
 	if result.action != ghFail || !isLocalFallback(result.err) {
 		t.Fatalf("action=%v err=%v", result.action, result.err)

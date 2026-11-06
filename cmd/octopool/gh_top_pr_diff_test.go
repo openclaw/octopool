@@ -143,7 +143,7 @@ func TestPRDiffNameOnlyUnsupportedModifiersDelegate(t *testing.T) {
 				args := append([]string{"diff", "233", "--repo", "acme/repo"}, names...)
 				args = append(args, flags...)
 				var out bytes.Buffer
-				result := handleGHPR(t.Context(), args, &out)
+				result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out)
 				if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
 					t.Fatalf("args=%q action=%v err=%v output=%q", args, result.action, result.err, out.String())
 				}

@@ -115,8 +115,8 @@ func TestRunGHRunViewComposesJobs(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "view",
 		"27398328238",
 		"-R", "openclaw/octopool",
 		"--json", "databaseId,status,conclusion,headSha,jobs",
@@ -156,8 +156,8 @@ func TestRunGHRunViewUsesRequestedAttempt(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"view", "27398328238", "--attempt", "1", "-R", "openclaw/octopool", "--json", "attempt,jobs",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "view", "27398328238", "--attempt", "1", "-R", "openclaw/octopool", "--json", "attempt,jobs",
 	}, &out)
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -175,8 +175,8 @@ func TestRunGHRunViewUsesRequestedAttempt(t *testing.T) {
 
 func TestRunGHRunListDoesNotAcceptJobs(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "list",
 		"-R", "openclaw/octopool",
 		"--json", "jobs",
 	}, &out)
@@ -187,8 +187,8 @@ func TestRunGHRunListDoesNotAcceptJobs(t *testing.T) {
 
 func TestRunGHRunListDoesNotAcceptID(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "list",
 		"-R", "openclaw/octopool",
 		"--json", "id",
 	}, &out)
@@ -206,8 +206,8 @@ func TestRunGHRunListMapsDisplayTitle(t *testing.T) {
 		}}}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "list",
 		"-R", "openclaw/octopool",
 		"--json", "databaseId,displayTitle,number",
 	}, &out)
@@ -293,7 +293,7 @@ func TestHumanRunViewRejectsContradictoryJobs(t *testing.T) {
 				return map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "owned"}
 			})
 			var out bytes.Buffer
-			result := handleGHRun(t.Context(), []string{"view", "42", "-R", "acme/repo"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"run", "view", "42", "-R", "acme/repo"}, &out)
 			if !isLocalFallback(result.err) || out.Len() != 0 {
 				t.Fatalf("human view must fail before output with ordinary fallback available: err=%v stdout=%q", result.err, out.String())
 			}

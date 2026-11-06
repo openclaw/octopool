@@ -54,7 +54,7 @@ func TestIssueReasonNativeFixtures(t *testing.T) {
 					args = append(args, "--jq", jq)
 				}
 				var out bytes.Buffer
-				result := handleGHIssue(t.Context(), args, &out)
+				result := runGHTopLevel(t.Context(), append([]string{"issue"}, args...), &out)
 				kind := "native"
 				if jq != "" {
 					kind = "jq"
@@ -75,7 +75,7 @@ func TestIssueReasonUnsupported(t *testing.T) {
 	}
 	emptyRewriteTestServer(t)
 	var out bytes.Buffer
-	result := handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/octopool", "--json", "stateReason"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"issue", "list", "-R", "openclaw/octopool", "--json", "stateReason"}, &out)
 	if result.action != ghDelegate {
 		t.Fatalf("list action=%v", result.action)
 	}
@@ -134,7 +134,7 @@ func TestPRMergeStateNativeBundle(t *testing.T) {
 				args = append(args, "--jq", jq)
 			}
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), args, &out)
+			result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out)
 			kind := "native"
 			if jq != "" {
 				kind = "jq"
@@ -174,7 +174,7 @@ func TestPRMergeStateRefusesUnprovenSnapshot(t *testing.T) {
 				return map[string]any{"head": map[string]any{"sha": head}}
 			})
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{"view", "7", "-R", "openclaw/octopool", "--json", "mergeStateStatus"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"pr", "view", "7", "-R", "openclaw/octopool", "--json", "mergeStateStatus"}, &out)
 			if !isLocalFallback(result.err) || out.Len() != 0 {
 				t.Fatalf("err=%v out=%s", result.err, out.String())
 			}

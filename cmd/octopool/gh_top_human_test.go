@@ -51,7 +51,7 @@ func TestHumanPRViewExactOutputAndLatestReviewWins(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"view", "25", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "view", "25", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	want := "title:\tfeat: authoritative Link-header pagination for relay-backed gh api\n" +
 		"state:\tMERGED\n" +
@@ -84,7 +84,7 @@ func TestHumanPRListExactOutput(t *testing.T) {
 		}}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--state", "all"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "list", "-R", "openclaw/octopool", "--state", "all"}, &out)
 	assertGHComplete(t, result)
 	want := "25\tfeat: authoritative Link-header pagination for relay-backed gh api\tfeat/link-pagination\tMERGED\t2026-07-17T21:15:50Z\n"
 	if got := out.String(); got != want {
@@ -102,7 +102,7 @@ func TestHumanPRListMarksDrafts(t *testing.T) {
 		}}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "list", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	if want := "30\twip\twip-branch\tDRAFT\t2026-07-17T22:15:50Z\n"; out.String() != want {
 		t.Fatalf("output = %q, want %q", out.String(), want)
@@ -148,7 +148,7 @@ func TestHumanPRChecksExactOutputAndSanitizesName(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "25", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	want := "Check[31m\tpass\t3m12s\thttps://github.com/openclaw/octopool/actions/runs/29614118703/job/87995297404\t\n"
 	if got := out.String(); got != want {
@@ -168,7 +168,7 @@ func TestHumanRunListExactOutput(t *testing.T) {
 		}}}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"list", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "list", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	want := "completed\tsuccess\tchore: open 0.4.8 development\tCI\tmain\tpush\t29614557506\t3m19s\t2026-07-17T21:23:36Z\n"
 	if got := out.String(); got != want {
@@ -199,7 +199,7 @@ func TestHumanRunViewExactOutput(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"view", "29614434370", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "view", "29614434370", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	want := "\n✓ v0.4.7 release · 29614434370\n" +
 		"Triggered via push about 7 hours ago\n\n" +
@@ -223,7 +223,7 @@ func TestHumanIssueViewExactOutput(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHIssue(t.Context(), []string{"view", "110411", "-R", "openclaw/openclaw"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"issue", "view", "110411", "-R", "openclaw/openclaw"}, &out)
 	assertGHComplete(t, result)
 	want := "title:\tcron.update: converting a recurring job\n" +
 		"state:\tOPEN\n" +
@@ -257,7 +257,7 @@ func TestHumanIssueListExactOutput(t *testing.T) {
 		}}
 	})
 	var out bytes.Buffer
-	result := handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/openclaw"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"issue", "list", "-R", "openclaw/openclaw"}, &out)
 	assertGHComplete(t, result)
 	want := "110411\tOPEN\tcron.update: converting a recurring job...\tmaintainer, P2, bug\t2026-07-18T04:46:30Z\n"
 	if got := out.String(); got != want {
@@ -278,25 +278,25 @@ func TestHumanReadsDelegateWhenStdoutIsTTY(t *testing.T) {
 		run  func(*bytes.Buffer) ghResult
 	}{
 		{"pr view", func(out *bytes.Buffer) ghResult {
-			return handleGHPR(t.Context(), []string{"view", "25", "-R", "openclaw/octopool"}, out)
+			return runGHTopLevel(t.Context(), []string{"pr", "view", "25", "-R", "openclaw/octopool"}, out)
 		}},
 		{"pr checks", func(out *bytes.Buffer) ghResult {
-			return handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool"}, out)
+			return runGHTopLevel(t.Context(), []string{"pr", "checks", "25", "-R", "openclaw/octopool"}, out)
 		}},
 		{"pr list", func(out *bytes.Buffer) ghResult {
-			return handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool"}, out)
+			return runGHTopLevel(t.Context(), []string{"pr", "list", "-R", "openclaw/octopool"}, out)
 		}},
 		{"run view", func(out *bytes.Buffer) ghResult {
-			return handleGHRun(t.Context(), []string{"view", "29614434370", "-R", "openclaw/octopool"}, out)
+			return runGHTopLevel(t.Context(), []string{"run", "view", "29614434370", "-R", "openclaw/octopool"}, out)
 		}},
 		{"run list", func(out *bytes.Buffer) ghResult {
-			return handleGHRun(t.Context(), []string{"list", "-R", "openclaw/octopool"}, out)
+			return runGHTopLevel(t.Context(), []string{"run", "list", "-R", "openclaw/octopool"}, out)
 		}},
 		{"issue view", func(out *bytes.Buffer) ghResult {
-			return handleGHIssue(t.Context(), []string{"view", "110411", "-R", "openclaw/openclaw"}, out)
+			return runGHTopLevel(t.Context(), []string{"issue", "view", "110411", "-R", "openclaw/openclaw"}, out)
 		}},
 		{"issue list", func(out *bytes.Buffer) ghResult {
-			return handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/openclaw"}, out)
+			return runGHTopLevel(t.Context(), []string{"issue", "list", "-R", "openclaw/openclaw"}, out)
 		}},
 	}
 	for _, test := range tests {
@@ -317,25 +317,25 @@ func TestHumanReadsDelegateUnsupportedFlags(t *testing.T) {
 		run  func(*bytes.Buffer) ghResult
 	}{
 		{"pr view", func(out *bytes.Buffer) ghResult {
-			return handleGHPR(t.Context(), []string{"view", "25", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+			return runGHTopLevel(t.Context(), []string{"pr", "view", "25", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
 		}},
 		{"pr checks", func(out *bytes.Buffer) ghResult {
-			return handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+			return runGHTopLevel(t.Context(), []string{"pr", "checks", "25", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
 		}},
 		{"pr list", func(out *bytes.Buffer) ghResult {
-			return handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+			return runGHTopLevel(t.Context(), []string{"pr", "list", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
 		}},
 		{"run view", func(out *bytes.Buffer) ghResult {
-			return handleGHRun(t.Context(), []string{"view", "29614434370", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+			return runGHTopLevel(t.Context(), []string{"run", "view", "29614434370", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
 		}},
 		{"run list", func(out *bytes.Buffer) ghResult {
-			return handleGHRun(t.Context(), []string{"list", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
+			return runGHTopLevel(t.Context(), []string{"run", "list", "-R", "openclaw/octopool", "--template", "{{.}}"}, out)
 		}},
 		{"issue view", func(out *bytes.Buffer) ghResult {
-			return handleGHIssue(t.Context(), []string{"view", "110411", "-R", "openclaw/openclaw", "--template", "{{.}}"}, out)
+			return runGHTopLevel(t.Context(), []string{"issue", "view", "110411", "-R", "openclaw/openclaw", "--template", "{{.}}"}, out)
 		}},
 		{"issue list", func(out *bytes.Buffer) ghResult {
-			return handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/openclaw", "--template", "{{.}}"}, out)
+			return runGHTopLevel(t.Context(), []string{"issue", "list", "-R", "openclaw/openclaw", "--template", "{{.}}"}, out)
 		}},
 	}
 	for _, test := range tests {
@@ -367,7 +367,7 @@ func TestHumanPRChecksPendingExitsEight(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "25", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "25", "-R", "openclaw/octopool"}, &out)
 	var exitErr exitCodeError
 	if result.action != ghFail || !errors.As(result.err, &exitErr) || exitErr.Code != 8 {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -393,7 +393,7 @@ func TestHumanRunViewActiveJobOmitsDuration(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"view", "42", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "view", "42", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	if !strings.Contains(out.String(), "* build (ID 9)\n") || strings.Contains(out.String(), "in  (") {
 		t.Fatalf("active job must omit the duration phrase, got %q", out.String())
@@ -412,10 +412,10 @@ func TestHumanListWebFlagDelegates(t *testing.T) {
 		{"list", "-R", "openclaw/octopool", "--web"},
 		{"view", "25", "-R", "openclaw/octopool", "--web"},
 	} {
-		if result := handleGHPR(t.Context(), args, &out); result.action != ghDelegate {
+		if result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out); result.action != ghDelegate {
 			t.Fatalf("pr %v must delegate, got %v", args, result.action)
 		}
-		if result := handleGHIssue(t.Context(), args, &out); result.action != ghDelegate {
+		if result := runGHTopLevel(t.Context(), append([]string{"issue"}, args...), &out); result.action != ghDelegate {
 			t.Fatalf("issue %v must delegate, got %v", args, result.action)
 		}
 	}
@@ -444,7 +444,7 @@ func TestHumanRunViewRendersFailedSteps(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"view", "42", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "view", "42", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	if !strings.Contains(out.String(), "  X Unit tests\n") || strings.Contains(out.String(), "Build") {
 		t.Fatalf("failed steps only must render, got %q", out.String())
@@ -464,7 +464,7 @@ func TestHumanRunViewZeroJobFailureDiagnostic(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"view", "42", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "view", "42", "-R", "openclaw/octopool"}, &out)
 	assertGHComplete(t, result)
 	if !strings.Contains(out.String(), "workflow file issue") || strings.Contains(out.String(), "JOBS") {
 		t.Fatalf("zero-job failure must show the workflow-file diagnostic, got %q", out.String())
@@ -512,7 +512,7 @@ func TestHumanReadLeavesJSONBehaviorUnchanged(t *testing.T) {
 		return []map[string]any{{"number": 25, "title": "JSON remains JSON"}}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"list", "-R", "openclaw/octopool", "--json", "number,title"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "list", "-R", "openclaw/octopool", "--json", "number,title"}, &out)
 	assertGHComplete(t, result)
 	if got, want := out.String(), "[{\"number\":25,\"title\":\"JSON remains JSON\"}]\n"; got != want {
 		t.Fatalf("output = %q, want %q", got, want)

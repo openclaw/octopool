@@ -233,7 +233,7 @@ func TestGHPRChecksWatchRejectsRepeatedCollectionIDs(t *testing.T) {
 		return map[string]any{"total_count": 101, "check_runs": items}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "1", "-R", "acme/repo", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "1", "-R", "acme/repo", "--watch"}, &out)
 	if result.action != ghFail || !isLocalFallback(result.err) || out.Len() != 0 || calls != 2 {
 		t.Fatalf("watch accepted incomplete snapshot: result=%+v output=%q calls=%d", result, out.String(), calls)
 	}
@@ -363,7 +363,7 @@ func TestPRChecksLogicalDedupAcrossPages(t *testing.T) {
 			if mode == "watch" {
 				args = append(args, "--watch")
 			}
-			result := handleGHPR(t.Context(), args, &out)
+			result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out)
 			if result.err != nil || result.action != ghComplete {
 				t.Errorf("obsolete failure survived logical dedup: action=%v err=%v", result.action, result.err)
 			}
