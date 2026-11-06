@@ -701,20 +701,20 @@ function freshTTLSeconds(
     case "issue":
       return closedIssue(response) ? 3_600 : 300;
     case "run":
-      if (!completedRun(response)) return 60;
+      if (!completedResponse(response)) return 60;
       return route.run_attempt !== undefined
         ? TERMINAL_CI_TTL_SECONDS
         : ageScaledTTLSeconds(response, 60, 600);
     case "run_list":
-      return completedRunList(response) ? 120 : 60;
+      return completedCollection(response, "workflow_runs") ? 120 : 60;
     case "jobs":
-      return route.run_attempt_completed === true && completedJobs(response)
+      return route.run_attempt_completed === true && completedCollection(response, "jobs")
         ? TERMINAL_CI_TTL_SECONDS
         : 60;
     case "mutable_ci":
       return settledCITTLSeconds(route, response);
     case "job":
-      return completedJob(response) ? TERMINAL_CI_TTL_SECONDS : 60;
+      return completedResponse(response) ? TERMINAL_CI_TTL_SECONDS : 60;
     case "pr_state":
       return stateAwarePRSubresource(route, response) ? 300 : 60;
   }
@@ -860,19 +860,7 @@ function closedIssue(response?: GitHubRelayResponse): boolean {
   );
 }
 
-function completedRun(response?: GitHubRelayResponse): boolean {
-  return isRecord(response?.body) && response.body.status === "completed";
-}
-
-function completedRunList(response?: GitHubRelayResponse): boolean {
-  return completedCollection(response, "workflow_runs");
-}
-
-function completedJobs(response?: GitHubRelayResponse): boolean {
-  return completedCollection(response, "jobs");
-}
-
-function completedJob(response?: GitHubRelayResponse): boolean {
+function completedResponse(response?: GitHubRelayResponse): boolean {
   return isRecord(response?.body) && response.body.status === "completed";
 }
 
