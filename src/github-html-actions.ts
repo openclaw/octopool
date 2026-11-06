@@ -148,13 +148,7 @@ export function parseActionsRunHTML(
     ),
   );
   const header = onlyElement(elements.filter((element) => element.tagName === "page-header"));
-  const navigation = onlyElement(
-    elements.filter(
-      (element) =>
-        element.tagName === "react-partial" &&
-        attribute(element, "partial-name") === "actions-run-jobs-list",
-    ),
-  );
+  const navigation = onlyElement(jobsNavigation(elements));
   if (
     !Number.isSafeInteger(id) ||
     id <= 0 ||
@@ -452,14 +446,7 @@ export function actionsJobHTMLProvesCompleted(
   const document = actionsDocument(html);
   if (document === undefined) return false;
   const pageElements = actionsElements(document);
-  const region = onlyElement(
-    pageElements.filter(
-      (element) =>
-        element.tagName === "section" &&
-        attribute(element, "aria-label") === "Check run summary" &&
-        hasClass(element, "js-selected-check-run"),
-    ),
-  );
+  const region = selectedJobRegion(pageElements);
   // Annotations are not job-state evidence. Their valid tables omit <tbody>,
   // which parse5 inserts without source locations; retain the container boundary.
   const elements =
@@ -470,11 +457,7 @@ export function actionsJobHTMLProvesCompleted(
           return parent !== null && "tagName" in parent && parent.tagName === "job-annotations";
         });
   if (elements === undefined) return false;
-  const navigation = pageElements.filter(
-    (element) =>
-      element.tagName === "react-partial" &&
-      attribute(element, "partial-name") === "actions-run-jobs-list",
-  );
+  const navigation = jobsNavigation(pageElements);
   if (navigation.length > 0) {
     const props = navigation.length === 1 ? actionsNavigationProps(navigation[0]!) : undefined;
     if (
@@ -535,22 +518,9 @@ export function parseActionsJobHTML(
   const document = actionsDocument(html);
   if (document === undefined) return undefined;
   const pageElements = actionsElements(document);
-  const navigation = onlyElement(
-    pageElements.filter(
-      (element) =>
-        element.tagName === "react-partial" &&
-        attribute(element, "partial-name") === "actions-run-jobs-list",
-    ),
-  );
+  const navigation = onlyElement(jobsNavigation(pageElements));
   const props = navigation === undefined ? undefined : actionsNavigationProps(navigation);
-  const region = onlyElement(
-    pageElements.filter(
-      (element) =>
-        element.tagName === "section" &&
-        attribute(element, "aria-label") === "Check run summary" &&
-        hasClass(element, "js-selected-check-run"),
-    ),
-  );
+  const region = selectedJobRegion(pageElements);
   const elements = region === undefined ? undefined : ownedElements(region);
   if (
     props === undefined ||
@@ -845,6 +815,25 @@ function hasClass(element: ActionsElement, name: string): boolean {
     attribute(element, "class")
       ?.split(/[\t\n\f\r ]+/)
       .includes(name) ?? false
+  );
+}
+
+function jobsNavigation(elements: ActionsElement[]): ActionsElement[] {
+  return elements.filter(
+    (element) =>
+      element.tagName === "react-partial" &&
+      attribute(element, "partial-name") === "actions-run-jobs-list",
+  );
+}
+
+function selectedJobRegion(elements: ActionsElement[]): ActionsElement | undefined {
+  return onlyElement(
+    elements.filter(
+      (element) =>
+        element.tagName === "section" &&
+        attribute(element, "aria-label") === "Check run summary" &&
+        hasClass(element, "js-selected-check-run"),
+    ),
   );
 }
 
