@@ -721,6 +721,10 @@ describe("github web provider", () => {
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
     ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/actions/runs?per_page=10&branch=main&branch=release",
+      expect.any(Object),
+    );
   });
 
   it("falls back to exact anonymous Actions JSON when the public parser misses", async () => {
@@ -1788,6 +1792,10 @@ describe("github web provider", () => {
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
     ).resolves.toMatchObject({ body: { name: "README.md" } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/contents/README.md?ref=..%2F..%2Fsteipete%2FReleaseBar%2Fmain",
+      expect.any(Object),
+    );
   });
 
   it.each([

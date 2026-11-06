@@ -72,18 +72,27 @@ describe("GitHub identity credentials", () => {
     vi.stubGlobal("fetch", fetchMock);
     const env = { ALLOWED_GITHUB_ORG: "openclaw", REQUEST_TIMEOUT_MS: "1234" } as unknown as Env;
 
-    await expect(githubUserFromToken(env, "user-token")).resolves.toMatchObject({ login: "octo" });
-    await expect(githubUserByLogin(env, "octo")).resolves.toMatchObject({ id: 42 });
-    await expect(
-      verifyGitHubOrgMember(
-        { ...env, OCTOPOOL_GITHUB_ORG_TOKEN: "org-token" } as unknown as Env,
-        "octo",
-        42,
-      ),
-    ).resolves.toEqual(expect.any(String));
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await expect(githubUserFromToken(env, "user-token")).resolves.toMatchObject({
+        login: "octo",
+      });
+      await expect(githubUserByLogin(env, "octo")).resolves.toMatchObject({ id: 42 });
+      await expect(
+        verifyGitHubOrgMember(
+          { ...env, OCTOPOOL_GITHUB_ORG_TOKEN: "org-token" } as unknown as Env,
+          "octo",
+          42,
+        ),
+      ).resolves.toEqual(expect.any(String));
 
-    for (const [, init] of fetchMock.mock.calls) {
-      expect(init).toMatchObject({ signal: expect.any(AbortSignal) });
+      expect(timeout.mock.calls).toEqual([[1234], [1234], [1234]]);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      for (const [index, [, init]] of fetchMock.mock.calls.entries()) {
+        expect(init?.signal).toBe(timeout.mock.results[index]!.value);
+      }
+    } finally {
+      timeout.mockRestore();
     }
   });
 

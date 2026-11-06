@@ -354,6 +354,7 @@ describe("Actions list hydration", () => {
   });
 
   it("honors a shorter configured timeout", async () => {
+    fakeTimeouts();
     const upstream = vi.fn(
       (_url: string, init: RequestInit) =>
         new Promise<Response>((_resolve, reject) =>
@@ -361,9 +362,10 @@ describe("Actions list hydration", () => {
         ),
     );
     vi.stubGlobal("fetch", upstream);
-    const timeout = vi.spyOn(AbortSignal, "timeout");
-    expect(await readList({ timeout: 20 })).toBeUndefined();
-    expect(timeout).toHaveBeenCalledWith(20);
+    const result = readList({ timeout: 20 });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await result).toBeUndefined();
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(20);
   });
 
   it("honors a shorter configured per-page timeout during hydration", async () => {
