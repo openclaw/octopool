@@ -138,16 +138,8 @@ func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, op
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var items []map[string]any
-	if err := json.Unmarshal(body, &items); err != nil {
+	if err := client.readJSON(ctx, request, &items); err != nil {
 		return err
 	}
 	for _, pr := range items {
@@ -435,16 +427,8 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 }
 
 func relayPRViewBody(ctx context.Context, client ghRelayClient, request ghAPIRequest) (map[string]any, error) {
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, err
-	}
 	var pr map[string]any
-	if err := json.Unmarshal(body, &pr); err != nil {
+	if err := client.readJSON(ctx, request, &pr); err != nil {
 		return nil, err
 	}
 	return pr, nil
@@ -535,22 +519,14 @@ func relayPagedArrayWithHeaders(
 	items := []any{}
 	complete := false
 	for page := 1; page <= maxRelayPages; page++ {
-		envelope, err := client.do(ctx, ghAPIRequest{
+		var pageItems []any
+		if err := client.readJSON(ctx, ghAPIRequest{
 			method:    "GET",
 			path:      path,
 			query:     map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
 			headers:   headers,
 			routeHint: routeHint,
-		})
-		if err != nil {
-			return nil, err
-		}
-		body, err := envelopeBodyBytes(envelope)
-		if err != nil {
-			return nil, err
-		}
-		var pageItems []any
-		if err := json.Unmarshal(body, &pageItems); err != nil {
+		}, &pageItems); err != nil {
 			return nil, err
 		}
 		items = append(items, pageItems...)

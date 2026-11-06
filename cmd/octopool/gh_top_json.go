@@ -110,6 +110,18 @@ func publicShapeHeaders(opts ghTopOptions, supported map[string]bool, shape stri
 	return headers
 }
 
+func (client ghRelayClient) readJSON(ctx context.Context, request ghAPIRequest, target any) error {
+	envelope, err := client.do(ctx, request)
+	if err != nil {
+		return err
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, target)
+}
+
 func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
 	body, err := decodeRelayBody(envelope)
 	if err == nil && envelope.Status >= 400 {

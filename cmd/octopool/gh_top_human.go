@@ -34,16 +34,8 @@ func relayHumanPRView(ctx context.Context, stdout io.Writer, repo string, number
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, ghAPIRequest{method: "GET", path: repoPath(repo, "pulls", number)})
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var pr map[string]any
-	if err := json.Unmarshal(body, &pr); err != nil {
+	if err := client.readJSON(ctx, ghAPIRequest{method: "GET", path: repoPath(repo, "pulls", number)}, &pr); err != nil {
 		return err
 	}
 	reviews, err := relayPagedArray(ctx, client, repoPath(repo, "pulls", number, "reviews"), nil)
@@ -173,16 +165,8 @@ func relayHumanRunList(ctx context.Context, stdout io.Writer, request ghAPIReque
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := client.readJSON(ctx, request, &response); err != nil {
 		return err
 	}
 	rawItems, ok := response["workflow_runs"].([]any)
@@ -299,16 +283,8 @@ func relayHumanIssueView(ctx context.Context, stdout io.Writer, repo string, num
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, ghAPIRequest{method: "GET", path: repoPath(repo, "issues", number)})
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var issue map[string]any
-	if err := json.Unmarshal(body, &issue); err != nil {
+	if err := client.readJSON(ctx, ghAPIRequest{method: "GET", path: repoPath(repo, "issues", number)}, &issue); err != nil {
 		return err
 	}
 	// REST /issues/{n} also returns pull requests; real gh refuses those, so
@@ -359,16 +335,8 @@ func relayArray(ctx context.Context, request ghAPIRequest) ([]map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, err
-	}
 	var items []map[string]any
-	if err := json.Unmarshal(body, &items); err != nil {
+	if err := client.readJSON(ctx, request, &items); err != nil {
 		return nil, err
 	}
 	return items, nil
