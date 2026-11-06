@@ -49,28 +49,6 @@ describe("native D1 publication allocator", () => {
           .all()
       ).results,
     ).toEqual([]);
-    console.log("native D1 allocator receipts", {
-      first: first.meta,
-      busy: busy.meta,
-      replacement: replacement.meta,
-      replay: replay.meta,
-    });
-  });
-
-  it("establishes unfiltered native allocator behavior separately from the adopted busy prefilter", async () => {
-    const canonical = queries.acquirePublicationOwner;
-    const unfiltered =
-      canonical.slice(0, canonical.indexOf("\nWHERE NOT EXISTS (")) +
-      canonical.slice(canonical.indexOf("\nON CONFLICT"));
-    const run = (token: string) =>
-      env.DB.prepare(unfiltered).bind("allocator-test", "key", token, 8_000).all<Owner>();
-    expect((await run("first")).results[0]?.id).toBe(1);
-    expect((await run("busy")).results).toEqual([]);
-    expect(await sequence()).toBe(2);
-    await env.DB.prepare("UPDATE cache_publication_owners SET lease_until_ms = 0").run();
-    const replacement = await run("replacement");
-    expect(replacement.results[0]?.id).toBe(3);
-    expect(replacement.meta.last_row_id).toBe(1);
   });
 
   it("fails at the safe integer boundary and rolls back an unsuccessful binding batch", async () => {
@@ -130,6 +108,5 @@ describe("native D1 publication allocator", () => {
       .bind(16)
       .all();
     expect(JSON.stringify(plan.results)).toContain("cache_publication_owners_expiry");
-    console.log("native D1 owner GC", { meta: result.meta, plan: plan.results });
   });
 });

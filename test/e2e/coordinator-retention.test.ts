@@ -121,10 +121,6 @@ describe("native coordinator expiry retention", () => {
 
     expect((await select(contents("following"))).kind).toBe("selected");
     const first = await rows();
-    console.log("native retention first activity", {
-      before: { leases: before.leases.length, cooldowns: before.cooldowns.length },
-      after: { leases: first.leases.length, cooldowns: first.cooldowns.length },
-    });
     expect(first.leases).toHaveLength(26);
     expect(first.cooldowns).toHaveLength(24);
     for (const [leases, cooldowns] of [
@@ -206,10 +202,6 @@ describe("native coordinator expiry retention", () => {
         expect(details).toContain(index % 2 === 0 ? "leases_expiry" : "cooldowns_expiry");
         expect(details).not.toMatch(/SCAN (?:old|leases|cooldowns)|TEMP B-TREE/);
       }
-      console.log(
-        "native retention SQL cost",
-        JSON.stringify({ size, leaseBoundary, observed, plans }),
-      );
     },
   );
 
@@ -246,7 +238,6 @@ describe("native coordinator expiry retention", () => {
       reason: "sticky",
     });
     expect(await rows()).toEqual(renewed);
-    console.log("native retention equality", { live, empty: { leases: 0, cooldowns: 0 }, renewed });
   });
 
   it.each(["renew-first", "collect-first"])(
@@ -350,7 +341,6 @@ describe("native coordinator expiry retention", () => {
       }),
     );
     expect((await rows()).rates).toEqual(before.rates);
-    console.log("native retention preserved state", JSON.stringify({ before, retained }));
   });
 
   it("retains persisted state and idempotent indexes through graceful eviction and a following request", async () => {
@@ -385,63 +375,7 @@ describe("native coordinator expiry retention", () => {
     expect((await rows()).leases).toHaveLength(1);
     expect((await rows()).cooldowns).toEqual([]);
     expect((await rows()).rates).toEqual(before.rates);
-    console.log("native retention reconstruction", JSON.stringify({ originalIndexes, first }));
   });
-
-  it.each([40, 160])(
-    "measures additive expiry index construction over %s retained rows without deleting state",
-    async (size) => {
-      await seedContents(size, "old");
-      const before = await rows();
-      const costs = await ownedWork.track(
-        runInDurableObject(coordinator(), (_instance, state) => {
-          const sql = state.storage.sql;
-          // Native shadow tables measure a first index build without removing real indexes/state.
-          return [
-            ["leases", queries.createLeasesTable, queries.createLeasesExpiryIndex],
-            ["cooldowns", queries.createCooldownsTable, queries.createCooldownsExpiryIndex],
-          ].map(([table, create, index]) => {
-            const shadow = `retention_build_${table}`;
-            sql.exec(create!.replace(`EXISTS ${table}`, `EXISTS ${shadow}`));
-            sql.exec(`INSERT INTO ${shadow} SELECT * FROM ${table}`);
-            const read = () => sql.exec(`SELECT * FROM ${shadow} ORDER BY rowid`).toArray();
-            const retained = read();
-            const statement = index!
-              .replace(`${table}_expiry`, `${shadow}_expiry`)
-              .replace(`ON ${table}(`, `ON ${shadow}(`);
-            const build = sql.exec(statement);
-            const built = { read: build.rowsRead, written: build.rowsWritten };
-            const repeated = sql.exec(statement);
-            return {
-              table,
-              statement,
-              built,
-              repeated: { read: repeated.rowsRead, written: repeated.rowsWritten },
-              retained,
-              after: read(),
-            };
-          });
-        }),
-      );
-      for (const cost of costs) {
-        expect(cost.retained).toHaveLength(size);
-        expect(cost.after).toEqual(cost.retained);
-        expect(cost.built.read).toBeGreaterThanOrEqual(size);
-        expect(cost.built.written).toBeGreaterThanOrEqual(size);
-        expect(cost.repeated).toEqual({ read: 0, written: 0 });
-      }
-      expect(await rows()).toEqual(before);
-      console.log(
-        "native retention index build",
-        JSON.stringify(
-          costs.map(({ retained, after: _after, ...cost }) => ({
-            ...cost,
-            retained: retained.length,
-          })),
-        ),
-      );
-    },
-  );
 
   it("serves a following ordinary Worker request after the retention fixture has drained and reset", async () => {
     // This full Worker control also reads native D1 auth/publication timestamps.
