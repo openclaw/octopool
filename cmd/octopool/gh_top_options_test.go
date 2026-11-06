@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"math"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -105,11 +108,21 @@ func TestGHTopDispatchPreparseBoundaries(t *testing.T) {
 		{[]string{"pr", "checks", "7", "--watch", "--json", `"unterminated`}, ghFail},
 		{[]string{"pr", "checks", "7", "--json", `"unterminated`}, ghFail},
 	} {
-		var out bytes.Buffer
-		result := runGHTopLevel(t.Context(), test.args, &out)
-		if result.action != test.want || (result.err != nil) != (test.want == ghFail) || out.Len() != 0 {
-			t.Fatalf("args=%q: action=%v err=%v output=%q", test.args, result.action, result.err, out.String())
-		}
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			var requests atomic.Int32
+			relayTestServer(t, func(map[string]any) any {
+				requests.Add(1)
+				return map[string]any{}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), test.args, &out)
+			if result.action != test.want || (result.err != nil) != (test.want == ghFail) || out.Len() != 0 || requests.Load() != 0 {
+				t.Fatalf("args=%q: action=%v err=%v output=%q requests=%d", test.args, result.action, result.err, out.String(), requests.Load())
+			}
+			if test.want == ghFail && !errors.Is(result.err, csv.ErrQuote) {
+				t.Fatalf("malformed CSV must fail during parsing: %v", result.err)
+			}
+		})
 	}
 }
 
