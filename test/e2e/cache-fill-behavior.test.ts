@@ -1,8 +1,5 @@
-import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { bearer, jsonResponse, POOL, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, relay, seedPool, waitForPublicationFollower } from "./harness";
 import { ownedWork } from "./owned-work";
 
 const PATH = "/repos/openclaw/octopool/pulls/42";
@@ -49,7 +46,7 @@ describe("Worker end-to-end cache-fill outcomes", () => {
       await upstream.started;
       const follower = relay(PATH, undefined, OPTIONS);
       requests.push(follower);
-      await waitForFollower(follower);
+      await waitForPublicationFollower(follower);
       upstream.release();
       const followerResponse = await Promise.race([
         follower,
@@ -81,7 +78,7 @@ describe("Worker end-to-end cache-fill outcomes", () => {
       await upstream.started;
       const follower = relay(PATH, undefined, OPTIONS);
       requests.push(follower);
-      await waitForFollower(follower);
+      await waitForPublicationFollower(follower);
       await new Promise((resolve) => setTimeout(resolve, 8_500));
 
       expect(upstream.calls()).toBe(1);
@@ -110,34 +107,13 @@ async function concurrentFill(body: string, githubEntriesVisible: boolean) {
     await upstream.started;
     const follower = relay(PATH, undefined, OPTIONS);
     requests.push(follower);
-    await waitForFollower(follower);
+    await waitForPublicationFollower(follower);
     upstream.release();
     return { responses: await Promise.all(requests), upstream };
   } finally {
     upstream.release();
     await Promise.allSettled(requests);
   }
-}
-
-async function waitForFollower(follower: Promise<Response>): Promise<void> {
-  await Promise.race([
-    // Cache reads precede identity-key acquisition; they do not prove a waiter exists.
-    vi.waitFor(
-      async () => {
-        const waiting = await runInDurableObject(
-          poolCoordinatorStub(env, POOL),
-          (instance) =>
-            (instance as unknown as { publicationWaiters: Map<string, unknown> }).publicationWaiters
-              .size,
-        );
-        expect(waiting).toBe(1);
-      },
-      { timeout: 5_000 },
-    ),
-    follower.then(() => {
-      throw new Error("Follower completed before coordinator waiting");
-    }),
-  ]);
 }
 
 function gatedDiffUpstream(body: string, options: { failFirst?: boolean } = {}) {

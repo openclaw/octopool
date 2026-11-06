@@ -10,6 +10,7 @@ import {
   rateHeaders,
   relay,
   seedPool,
+  waitForPublicationFollower,
 } from "./harness";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { githubCacheKey } from "../../src/cache";
@@ -1104,9 +1105,7 @@ describe("Worker end-to-end cache revalidation", () => {
       await expireCacheEntry("run_list");
 
       const revalidationEntered = ownedWork.gate();
-      const secondPastFreshScan = ownedWork.gate();
       const revalidation = ownedWork.gate();
-      let publicChecks = 0;
       let conditionalCalls = 0;
       let exactCalls = 0;
       const exactBody = {
@@ -1124,7 +1123,6 @@ describe("Worker end-to-end cache revalidation", () => {
           const request = new Request(input, init);
           const url = new URL(request.url);
           if (bearer(request) === "test-org-token") {
-            if (++publicChecks === 2) secondPastFreshScan.release();
             return jsonResponse({ private: false });
           }
           expect(bearer(request)).toBe("test-primary-token");
@@ -1147,8 +1145,7 @@ describe("Worker end-to-end cache revalidation", () => {
       try {
         await revalidationEntered.promise;
         requests.push(relay(path, undefined, options));
-        // The second request has missed fresh identity cache and entered revalidation.
-        await secondPastFreshScan.promise;
+        await waitForPublicationFollower(requests[1]!);
         revalidation.release();
         const responses = await Promise.all(
           requests.map(async (request) => (await request).json()),
@@ -1269,9 +1266,7 @@ describe("Worker end-to-end cache revalidation", () => {
       await started;
       const follower = relay(RUN_PATH);
       requests.push(follower);
-      // Outlast the first 4s coalescing wait while the leader still owns its 8s fill lease.
-      // A follower must wait/claim again instead of starting another conditional request.
-      await new Promise((resolve) => setTimeout(resolve, 4_250));
+      await waitForPublicationFollower(follower);
       const conditionalCallsBeforePublish = conditionalCalls;
       releaseRevalidation();
       const envelopes = await Promise.all(

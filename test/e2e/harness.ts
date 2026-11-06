@@ -1,6 +1,11 @@
 import { env } from "cloudflare:workers";
-import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { vi } from "vitest";
+import {
+  createExecutionContext,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
+import { expect, vi } from "vitest";
+import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import worker from "../../src/index";
 import { hashToken } from "../../src/auth";
 import { clearConfigCache } from "../../src/config-cache";
@@ -9,6 +14,46 @@ import { ownedWork } from "./owned-work";
 
 export const CALLER_TOKEN = "caller-token";
 export const POOL = "maintainers";
+
+export function waitForPublicationFollower(follower: Promise<unknown>, pool = POOL): Promise<void> {
+  return ownedWork.track(
+    (async () => {
+      let stopped = false;
+      let reading: Promise<number> | undefined;
+      const polling = vi.waitFor(
+        async () => {
+          if (stopped) return;
+          const current = (reading ??= runInDurableObject(
+            poolCoordinatorStub(env, pool),
+            (instance) =>
+              (instance as unknown as { publicationWaiters: Map<string, unknown> })
+                .publicationWaiters.size,
+          ));
+          let waiting: number;
+          try {
+            waiting = await current;
+          } finally {
+            if (reading === current) reading = undefined;
+          }
+          if (!stopped) expect(waiting).toBe(1);
+        },
+        { timeout: 5_000 },
+      );
+      try {
+        await Promise.race([
+          polling,
+          follower.then(() => {
+            throw new Error("Follower completed before coordinator waiting");
+          }),
+        ]);
+      } finally {
+        stopped = true;
+        await polling.catch(() => {});
+        await reading?.catch(() => {});
+      }
+    })(),
+  );
+}
 
 export async function relay(
   path: string,
