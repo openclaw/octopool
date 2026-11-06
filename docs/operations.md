@@ -307,13 +307,14 @@ legacy positive proofs, purge bodies, alter identity feedback, or apply itself r
 The server-owned `publication-v1` epoch composes with every existing representation
 generation. New readers refuse old bodies/proofs, including stale and 304 candidates.
 Warm-up therefore costs fresh upstream observations; no global purge is necessary.
-Old Workers still in flight can call the retained legacy cache-fill RPCs and publish
-only to their old key/proof namespaces. Each new acquisition also drains at most 16
-expired `cache_fills` rows in its contacted DO using a local expiry index; live fills,
-identity leases, cooldowns and rate feedback remain intact. Dormant old DOs retain their
-rows until contacted. Remove the legacy RPC/table surface only after old Worker routing
-and in-flight requests are demonstrably drained. Rolling back to old readers restores
-the old publication defect, regardless of the new schema.
+Before deploying a Worker without the legacy cache-fill RPCs, verify that old Worker
+routing and in-flight requests have drained. Pre-epoch Workers require those RPCs;
+removing them during a mixed deployment is unsupported. The new coordinator no longer
+creates or reads the retired `cache_fills` table or its expiry index. Existing tables
+and rows are left intact; this code retirement does not perform a destructive storage
+migration or reclaim disk space. Identity leases, cooldowns and rate feedback remain
+active. Rolling back to pre-epoch readers restores the old publication defect,
+regardless of the new schema.
 
 Never reset, drop/recreate, or restore `cache_publication_owners.sqlite_sequence` behind
 issued capabilities within the same epoch. Backup/export must retain its high-water mark.
@@ -777,7 +778,7 @@ The DO constructor adds `leases_expiry (expires_at, route_key)` and
 bound expiry batch selection without scanning or sorting the whole history; snapshots
 also use expiry indexes. This is additive DO schema initialization, not a D1 migration.
 The first activation builds each index over retained rows, and subsequent writes maintain
-it. Existing rows and legacy RPC/table contracts survive reconstruction. A Worker rollback
+it. Existing identity coordination rows survive reconstruction. A Worker rollback
 can leave the harmless indexes in place; older code simply stops this cleanup.
 
 The per-call budget does not bound absolute storage during arbitrary bursts or guarantee
