@@ -167,7 +167,7 @@ describe("github api provider", () => {
   });
 
   it("uses the configured response cap", () => {
-    expect(responseCapBytes({ ...env(), MAX_RESPONSE_BYTES: "1024" })).toBe(1024);
+    expect(responseCapBytes({ ...env(), MAX_RESPONSE_BYTES: "1024" } as unknown as Env)).toBe(1024);
   });
 
   it("accepts Actions run lists below the configured cap", async () => {
