@@ -19,6 +19,9 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   Follow-up: dispatch boundary cases added in
   [#299](https://github.com/openclaw/octopool/pull/299) now require the CSV error
   and no relay requests; unrelated-error and premature-request mutations are caught.
+  Modifier cases from [#302](https://github.com/openclaw/octopool/pull/302) now
+  pair working relay controls with each rejection. Two duplicate PR-diff cases
+  were removed; workflow-option and duplicate-repository mutations are caught.
 - **Unit tests:** isolated parser rejection conditions, removed duplicate PR-state
   and release cases plus unused HTML, replaced cosmetic assertions with contracts,
   checked outbound queries/signals/cache writes, used fake time and isolated docs
