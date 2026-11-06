@@ -2062,7 +2062,12 @@ describe("github web provider", () => {
     );
   });
 
-  it("returns empty successful public API responses without falling through", async () => {
+  it.each([
+    ["contributors", { status: 204, body: null, body_encoding: "text", backend: "github" }],
+    ["releases", undefined],
+    ["releases/latest", undefined],
+    ["releases/tags/v1.0.0", undefined],
+  ])("handles empty public API responses for %s", async (path, expected) => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(null, { status: 204 })),
@@ -2070,17 +2075,12 @@ describe("github web provider", () => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/repos/openclaw/octopool/contributors",
+      path: `/repos/openclaw/octopool/${path}`,
     });
 
-    await expect(
-      callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({
-      status: 204,
-      body: null,
-      body_encoding: "text",
-      backend: "github",
-    });
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+    if (expected === undefined) expect(response).toBeUndefined();
+    else expect(response).toMatchObject(expected);
   });
 
   it("falls through on oversized web bodies while streaming", async () => {

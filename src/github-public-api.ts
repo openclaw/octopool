@@ -19,42 +19,19 @@ export function clearPublicAPIRateSnapshots(): void {
   rateSnapshots = new WeakMap();
 }
 
-export function releaseAPIRequest(
-  env: Env,
-  request: RelayRequest,
-  route: RouteInfo,
-): WebRequest | undefined {
-  if (!releaseRoute(route) || !defaultGitHubJSONAccept(request.headers?.accept)) {
-    return undefined;
-  }
-  const url = new URL(`https://api.github.com${request.path}`);
-  appendRelayQuery(url, request.query);
-  if (scalarQuery(request.query, "ref") !== undefined) {
-    return undefined;
-  }
-  return {
-    url: url.toString(),
-    headers: publicAPIHeaders(request),
-    capBytes: responseCapBytes(env),
-    usesApiQuota: true,
-    payload: (body, headers, status) => {
-      const parsed = parsePublicReleaseBody(body, route);
-      return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed, "json");
-    },
-  };
-}
-
 export function publicAPIRequest(
   env: Env,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
+  const release = releaseRoute(route);
   if (
-    request.method !== "GET" ||
-    isLandingGraphQLRoute(route) ||
-    releaseRoute(route) ||
-    !capabilitiesForRouteKind(route.kind).publicApi ||
-    !defaultGitHubJSONAccept(request.headers?.accept)
+    !defaultGitHubJSONAccept(request.headers?.accept) ||
+    (release
+      ? scalarQuery(request.query, "ref") !== undefined
+      : request.method !== "GET" ||
+        isLandingGraphQLRoute(route) ||
+        !capabilitiesForRouteKind(route.kind).publicApi)
   ) {
     return undefined;
   }
@@ -66,6 +43,10 @@ export function publicAPIRequest(
     capBytes: responseCapBytes(env),
     usesApiQuota: true,
     payload: (body, headers, status) => {
+      if (release) {
+        const parsed = parsePublicReleaseBody(body, route);
+        return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed);
+      }
       if (body.byteLength === 0) {
         return publicJSONResponse(headers, status, null, "text");
       }
