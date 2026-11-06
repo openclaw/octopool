@@ -8,7 +8,7 @@ export function parseIssueHTML(
   repo: string,
   number: number,
 ): Record<string, unknown> | undefined {
-  const issue = preloadedRepositoryValue(html, "IssueViewerViewQuery", "issue");
+  const issue = recordValue(preloadedRepository(html, "IssueViewerViewQuery")?.issue);
   if (
     issue === undefined ||
     issue.__typename === "PullRequest" ||
@@ -241,14 +241,6 @@ function preloadedRepository(html: string, queryName: string): Record<string, un
     return data === undefined ? undefined : recordValue(data.repository);
   }
   return undefined;
-}
-
-function preloadedRepositoryValue(
-  html: string,
-  queryName: string,
-  key: string,
-): Record<string, unknown> | undefined {
-  return recordValue(preloadedRepository(html, queryName)?.[key]);
 }
 
 function embeddedAppJSON(html: string): Record<string, unknown> | undefined {
