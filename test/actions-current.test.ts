@@ -252,42 +252,37 @@ describe("current GitHub Actions markup", () => {
     });
   });
 
-  it("requires selected-job ownership even for queued and in-progress jobs", () => {
+  it.each(["queued", "in_progress"])("requires selected-job ownership for %s jobs", (status) => {
     const job = {
-      id: 106220362714,
+      id: 106229081199,
       name: "preflight",
-      status: "in_progress",
+      status,
       conclusion: null,
-      href: "/openclaw/openclaw/actions/runs/35563377671/job/106220362714",
+      href: "/openclaw/openclaw/actions/runs/35566435541/job/106229081199",
     };
-    const html = fixture("completed-job.html.txt");
-    expect(
-      parseActionsJobHTML(
-        html.replace(/"selectedJobId":\s*106220362714/, '"selectedJobId":1'),
-        job,
-        "openclaw",
-        "openclaw",
-      ),
-    ).toBeUndefined();
-    expect(
-      parseActionsJobHTML(
-        html.replace(
-          /"summaryHref":\s*"[^"]+"/,
-          '"summaryHref":"/openclaw/openclaw/actions/runs/1"',
-        ),
-        job,
-        "openclaw",
-        "openclaw",
-      ),
-    ).toBeUndefined();
-    expect(
-      parseActionsJobHTML(
-        "<div>Queued</div>",
-        { ...job, status: "queued" },
-        "openclaw",
-        "openclaw",
-      ),
-    ).toBeUndefined();
+    const active = fixture("active-job.html.txt");
+    const navigation = /<react-partial[\s\S]*?<\/react-partial>/.exec(active)![0];
+    const html =
+      status === "in_progress"
+        ? active
+        : `${navigation}
+      <section aria-label="Check run summary" class="js-selected-check-run">
+        <check-steps data-job-status="queued"></check-steps>
+      </section>`;
+    expect(parseActionsJobHTML(html, job, "openclaw", "openclaw")).toMatchObject({
+      id: job.id,
+      status,
+      conclusion: null,
+      ...(status === "queued" ? { steps: [] } : {}),
+    });
+    for (const corrupted of [
+      html.replace(/"selectedJobId":\s*106229081199/, '"selectedJobId":1'),
+      html.replace(/"summaryHref":\s*"[^"]+"/, '"summaryHref":"/openclaw/openclaw/actions/runs/1"'),
+      html.replace(navigation, ""),
+    ]) {
+      expect(corrupted).not.toBe(html);
+      expect(parseActionsJobHTML(corrupted, job, "openclaw", "openclaw")).toBeUndefined();
+    }
   });
 
   it("refuses skipped placeholders with conflicting owned timing evidence", () => {

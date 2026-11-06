@@ -1290,14 +1290,33 @@ describe("github web provider", () => {
   });
 
   it.each([
-    ["missing", undefined],
-    ["malformed", { hasNextPage: "false" }],
-    ["incomplete", { hasNextPage: true }],
-  ])("rejects %s embedded connection pageInfo and uses the exact API", async (_name, pageInfo) => {
+    ["complete", { hasNextPage: false }, false],
+    ["missing", undefined, true],
+    ["malformed", { hasNextPage: "false" }, true],
+    ["incomplete", { hasNextPage: true }, true],
+  ])("handles %s embedded connection pageInfo", async (_name, pageInfo, fallback) => {
+    const node = {
+      __typename: "Issue",
+      number: 5,
+      titleHtml: "Embedded issue",
+      state: "OPEN",
+      createdAt: "2026-05-27T23:17:12Z",
+      updatedAt: "2026-05-27T23:17:12Z",
+      closedAt: null,
+      author: actor("fixture-user", "Fixture User"),
+      labels: connection([]),
+    };
+    const html = embeddedPage("IssueIndexPageQuery", {
+      search: {
+        edges: [{ node }],
+        issueCount: 1,
+        ...(pageInfo === undefined ? {} : { pageInfo }),
+      },
+    });
     const exact = [{ id: 99, number: 99, title: "Exact API result" }];
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(issueListPage([{}], pageInfo)))
+      .mockResolvedValueOnce(new Response(html))
       .mockResolvedValueOnce(Response.json(exact));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
@@ -1306,12 +1325,15 @@ describe("github web provider", () => {
       path: "/repos/openclaw/octopool/issues",
       headers: { "x-octopool-public-shape": "issue-list-v1" },
     });
-
-    await expect(
-      callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({ body: exact, backend: "github" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(new URL(fetchMock.mock.calls[1]![0] as string).hostname).toBe("api.github.com");
+    const result = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+    if (fallback) {
+      expect(result).toMatchObject({ body: exact, backend: "github" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(new URL(fetchMock.mock.calls[1]![0] as string).hostname).toBe("api.github.com");
+    } else {
+      expect(result?.body).toMatchObject([{ number: 5, title: "Embedded issue" }]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("prefers embedded labels with GraphQL IDs and URLs", async () => {
