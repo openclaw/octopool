@@ -9,17 +9,42 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("docs site generator", () => {
   it("keeps wrapped markdown list items in one list item", () => {
-    execFileSync("node", ["scripts/build-docs-site.mjs"], { cwd: root, stdio: "pipe" });
-
-    const index = readFileSync(path.join(root, "dist/docs-site/index.html"), "utf8");
-    expect(index).toContain(
-      '<li><a href="relay.html">GitHub read relay</a> — the <code>POST /v1/github/request</code> endpoint, supported routes, response envelope, policy gates, and safety limits.</li>',
-    );
-    expect(index).toContain(
-      '<li><a href="identities.html">Pooled identities &amp; routing</a> — PAT and GitHub App identities, scopes, and the pool coordinator&#39;s selection, leases, and cooldowns.</li>',
-    );
-    expect(index).not.toContain("</ul>\n<p>routes,");
-    expect(index).not.toContain("</ul>\n<p>and the pool coordinator");
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "octopool-docs-"));
+    try {
+      mkdirSync(path.join(tmp, "docs", "assets"), { recursive: true });
+      writeFileSync(path.join(tmp, "docs", "CNAME"), "docs.example.test\n");
+      for (const name of ["favicon-32.png", "favicon.ico", "apple-touch-icon.png"]) {
+        writeFileSync(path.join(tmp, "docs", "assets", name), "");
+      }
+      writeFileSync(path.join(tmp, "docs", "cli.md"), "# CLI\n");
+      writeFileSync(
+        path.join(tmp, "docs", "index.md"),
+        [
+          "# Fixture",
+          "",
+          "- [CLI](cli.md) — first",
+          "  wrapped line with `code`.",
+          "- Second & third",
+          "  continuation.",
+          "",
+        ].join("\n"),
+      );
+      execFileSync("node", [path.join(root, "scripts/build-docs-site.mjs")], {
+        cwd: tmp,
+        stdio: "pipe",
+      });
+      const index = readFileSync(path.join(tmp, "dist/docs-site/index.html"), "utf8");
+      expect(index).toContain(
+        [
+          "<ul>",
+          '<li><a href="cli.html">CLI</a> — first wrapped line with <code>code</code>.</li>',
+          "<li>Second &amp; third continuation.</li>",
+          "</ul>",
+        ].join("\n"),
+      );
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("escapes frontmatter metadata in social meta attributes", () => {

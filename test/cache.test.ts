@@ -1251,10 +1251,11 @@ describe("github cache policy", () => {
 
   it("does not start an edge write when D1 authority is unknown", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const put = vi.fn(async () => undefined);
     vi.stubGlobal("caches", {
       default: {
         match: vi.fn(async () => undefined),
-        put: vi.fn(async () => undefined),
+        put,
         delete: vi.fn(async () => true),
       },
     });
@@ -1279,6 +1280,7 @@ describe("github cache policy", () => {
     await expect(
       writeGitHubCache(env, "cache-key", request, route, response({ number: 42 }), fixtureOwner()),
     ).resolves.toBe("unknown");
+    expect(put).not.toHaveBeenCalled();
     expect(consoleError).not.toHaveBeenCalled();
   });
 
