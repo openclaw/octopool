@@ -207,15 +207,11 @@ func formatLoginFailure(status int, body []byte, ghPath string, serverURL string
 		return fmt.Errorf("login failed: GitHub rejected the local gh token while Octopool verified it (%s).\nRefresh GitHub CLI auth: %s auth login\nThen retry: octopool login --gh-path %s%s", message, resolvedGHPath, resolvedGHPath, requestID)
 	}
 	if response.Error.Code == "caller_not_provisioned" {
-		quotedServerURL := shellQuoteArg(serverURL)
-		quotedPool := shellQuoteArg(pool)
+		quotedServerURL := shellSingleQuote(serverURL)
+		quotedPool := shellSingleQuote(pool)
 		return fmt.Errorf("login failed: your GitHub account is not provisioned for Octopool pool %q.\nAsk an Octopool admin to grant access with:\nOCTOPOOL_ADMIN_TOKEN=... octopool admin caller --url %s --pool %s --github-login your-github-login\nThen retry: octopool login %s%s", pool, quotedServerURL, quotedPool, quotedServerURL, requestID)
 	}
 	return fmt.Errorf("login failed: %s: %s%s", response.Error.Code, message, requestID)
-}
-
-func shellQuoteArg(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func isRateLimitedLoginFailure(message string, response apiErrorResponse) bool {

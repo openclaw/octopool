@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"regexp"
 	"time"
@@ -95,8 +94,7 @@ func rewritePolicyTransportClass(err error) rewritePolicyClass {
 	if errors.Is(err, context.Canceled) {
 		return rewritePolicyCanceled
 	}
-	var network net.Error
-	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) && network.Timeout() {
+	if relayTimeout(err) {
 		return rewritePolicyTimeoutClass
 	}
 	return rewritePolicyTransport
