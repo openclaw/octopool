@@ -150,6 +150,9 @@ func TestRelaySlotCrossProcessConcurrency(t *testing.T) {
 			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 			t.Setenv("OCTOPOOL_RELAY_RETRIES", "0")
 			t.Setenv("OCTOPOOL_STRING_REWRITE_FILE", "")
+			overlap := make(chan struct{})
+			barrierContext, cancelBarrier := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancelBarrier()
 			var active, peak, relayActive, relayPeak, policies, reads atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				current := active.Add(1)
@@ -161,11 +164,24 @@ func TestRelaySlotCrossProcessConcurrency(t *testing.T) {
 					time.Sleep(100 * time.Millisecond)
 					_, _ = io.WriteString(w, rewriteEmptyTestPolicy)
 				case "/v1/github/request":
-					reads.Add(1)
+					readNumber := reads.Add(1)
 					current := relayActive.Add(1)
 					defer relayActive.Add(-1)
 					updateRelaySlotPeak(&relayPeak, current)
-					time.Sleep(200 * time.Millisecond)
+					if concurrency == "0" {
+						if readNumber == 5 {
+							close(overlap)
+						}
+						select {
+						case <-overlap:
+						case <-barrierContext.Done():
+							t.Error("disabled limiter did not admit five overlapping requests")
+							http.Error(w, "overlap barrier timed out", http.StatusServiceUnavailable)
+							return
+						}
+					} else {
+						time.Sleep(200 * time.Millisecond)
+					}
 					writeCLIEnvelope(t, w, map[string]any{"ok": true})
 				default:
 					t.Error("unexpected request", r.URL.Path)

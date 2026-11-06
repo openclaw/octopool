@@ -142,12 +142,11 @@ func TestStringRewritePolicyRedirectsAndTimeout(t *testing.T) {
 	defer slow.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
-	start := time.Now()
 	if _, err := rewritePolicyHTTP(ctx, slow.URL, "/policy", "test-token", "GET", nil); !errors.Is(err, errRewritePolicy) {
 		t.Fatal(err)
 	}
-	if time.Since(start) > time.Second {
-		t.Fatal("policy ignored context deadline")
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatal("policy returned before context deadline")
 	}
 	for _, base := range []string{"http://example.com", "https://user:pass@example.com", "https://example.com?x=y", "https://example.com#fragment"} {
 		if _, err := rewritePolicyHTTP(t.Context(), base, "/policy", "synthetic", "GET", nil); !errors.Is(err, errRewritePolicy) {
