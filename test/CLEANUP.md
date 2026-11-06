@@ -16,6 +16,9 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   overlap and removed unused fixture setup. Seven mutations caught; constrained
   CPU repetitions passed.
   [#285](https://github.com/openclaw/octopool/pull/285), [#287](https://github.com/openclaw/octopool/pull/287), [#290](https://github.com/openclaw/octopool/pull/290).
+  Follow-up: dispatch boundary cases added in
+  [#299](https://github.com/openclaw/octopool/pull/299) now require the CSV error
+  and no relay requests; unrelated-error and premature-request mutations are caught.
 - **Unit tests:** isolated parser rejection conditions, removed duplicate PR-state
   and release cases plus unused HTML, replaced cosmetic assertions with contracts,
   checked outbound queries/signals/cache writes, used fake time and isolated docs
