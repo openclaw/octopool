@@ -1,4 +1,7 @@
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
+import { expect } from "vitest";
+import { poolCoordinatorStub, publicProofCoordinatorStub } from "../../src/pool-coordinator";
 import { clearConfigCache } from "../../src/config-cache";
 import worker from "../../src/index";
 import type { RelayRequest } from "../../src/types";
@@ -40,4 +43,21 @@ export async function appIdentity(installation: number | null = 91001): Promise<
   )
     .bind(installation)
     .run();
+}
+
+export async function expectNoPublicationWork(): Promise<void> {
+  const owners = await env.DB.prepare(
+    "SELECT protocol_epoch, resource_key FROM cache_publication_owners ORDER BY protocol_epoch, resource_key",
+  ).all();
+  expect(owners.results).toEqual([]);
+  for (const stub of [poolCoordinatorStub(env, POOL), publicProofCoordinatorStub(env)]) {
+    expect(
+      await runInDurableObject(
+        stub,
+        (instance) =>
+          (instance as unknown as { publicationWaiters: Map<string, unknown> }).publicationWaiters
+            .size,
+      ),
+    ).toBe(0);
+  }
 }
