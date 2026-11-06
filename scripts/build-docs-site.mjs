@@ -669,29 +669,12 @@ function escapeAttr(value) {
 
 function highlightCode(code, lang) {
   const language = (lang || "text").toLowerCase();
-  if (
-    language === "bash" ||
-    language === "sh" ||
-    language === "shell" ||
-    language === "zsh" ||
-    language === "console"
-  ) {
-    return highlightShell(code);
-  }
-  if (language === "json" || language === "json5" || language === "jsonc")
-    return highlightJson(code);
-  if (
-    language === "ts" ||
-    language === "typescript" ||
-    language === "js" ||
-    language === "javascript" ||
-    language === "tsx" ||
-    language === "jsx"
-  ) {
+  if (["bash", "sh", "shell", "zsh", "console"].includes(language)) return highlightShell(code);
+  if (["json", "json5", "jsonc"].includes(language)) return highlightJson(code);
+  if (["ts", "typescript", "js", "javascript", "tsx", "jsx"].includes(language))
     return highlightJs(code);
-  }
-  if (language === "go" || language === "golang") return highlightGo(code);
-  if (language === "yaml" || language === "yml") return highlightYaml(code);
+  if (["go", "golang"].includes(language)) return highlightGo(code);
+  if (["yaml", "yml"].includes(language)) return highlightYaml(code);
   return escapeHtml(code);
 }
 
