@@ -62,7 +62,10 @@ func TestCLIEndToEndRelayProtocol(t *testing.T) {
 				}))
 				t.Cleanup(server.Close)
 				capture := captureRewriteGH(t)
-				result := runCLI(t, bin, server.URL, nil, append([]string{"gh"}, test.args...)...)
+				result := runCLI(t, bin, server.URL, map[string]string{
+					"OCTOPOOL_GH_PATH":              os.Getenv("OCTOPOOL_GH_PATH"),
+					"OCTOPOOL_TEST_REWRITE_CAPTURE": capture,
+				}, append([]string{"gh"}, test.args...)...)
 				_, childErr := os.Stat(capture)
 				if test.mode == "reject" {
 					if result.err == nil || result.stdout != "" || data != 0 || !os.IsNotExist(childErr) {
@@ -394,6 +397,8 @@ func TestGHShimProtocolRewritePolicyDiagnostics(t *testing.T) {
 				extra["OCTOPOOL_STRING_REWRITE_FILE"] = path
 			}
 			capture := captureRewriteGH(t)
+			extra["OCTOPOOL_GH_PATH"] = os.Getenv("OCTOPOOL_GH_PATH")
+			extra["OCTOPOOL_TEST_REWRITE_CAPTURE"] = capture
 			started := time.Now()
 			result := runCLI(t, wrapper, server.URL, extra, "pr", "view", "7", "-R", "acme/repo", "--json=number")
 			var exit *exec.ExitError
@@ -443,6 +448,7 @@ func TestCLIMergeDiagnosticsProtocol(t *testing.T) {
 			calls := filepath.Join(t.TempDir(), "child-calls")
 			frame := mergeHeaderFrame(403, 4958)
 			result := runCLI(t, bin, server.URL, map[string]string{
+				"OCTOPOOL_GH_PATH": os.Getenv("OCTOPOOL_GH_PATH"), "OCTOPOOL_TEST_REWRITE_CAPTURE": capturePath,
 				"OCTOPOOL_DIAGNOSTICS": enabled, "OCTOPOOL_TEST_REWRITE_STDOUT": frame,
 				"OCTOPOOL_TEST_REWRITE_EXIT": "17", "OCTOPOOL_TEST_REWRITE_CALLS": calls,
 			}, append([]string{"gh"}, mergeDiagnosticArgs()...)...)

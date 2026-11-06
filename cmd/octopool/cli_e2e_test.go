@@ -283,9 +283,18 @@ func runCLI(t *testing.T, bin string, serverURL string, extra map[string]string,
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
-	env := append(os.Environ(), testConfigEnv(t.TempDir())...)
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		key = strings.ToUpper(key)
+		if !strings.HasPrefix(key, "OCTOPOOL_") && !strings.HasPrefix(key, "GH_") && !strings.HasPrefix(key, "GITHUB_") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, testConfigEnv(t.TempDir())...)
 	env = append(env,
 		"OCTOPOOL_STRING_REWRITE_FILE=",
+		"OCTOPOOL_RELAY_CONCURRENCY=0",
 		"OCTOPOOL_TOKEN=test-token",
 		"OCTOPOOL_POOL=maintainers",
 		"OCTOPOOL_URL="+serverURL,
