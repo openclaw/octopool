@@ -38,6 +38,7 @@ func TestHumanPRViewExactOutputAndLatestReviewWins(t *testing.T) {
 			}
 		case "/repos/openclaw/octopool/pulls/25/reviews":
 			return []map[string]any{
+				{"user": map[string]any{"login": "chatgpt-codex-connector"}, "state": "CHANGES_REQUESTED"},
 				{"user": map[string]any{"login": "chatgpt-codex-connector"}, "state": "COMMENTED"},
 				{"user": map[string]any{"login": "steipete"}, "state": "COMMENTED"},
 				{"user": map[string]any{"login": "bob"}, "state": "PENDING"},
