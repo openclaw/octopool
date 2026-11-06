@@ -242,7 +242,7 @@ The Worker is TypeScript on Cloudflare Workers; the CLI is Go.
 pnpm install
 pnpm check        # format + lint + vitest + types + go test + go vet
 pnpm test         # vitest only
-pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub
+pnpm test:e2e:cli-worker # compiled CLI → local Workerd/D1/DO → public GitHub (Python 3 required)
 pnpm run deploy                 # both OpenClaw Services-account Workers
 pnpm run deploy:public-proxy    # octopool.dev proxy Worker only
 pnpm e2e                        # smoke-test the live deployment
@@ -250,6 +250,19 @@ pnpm docs:site    # build the docs site into dist/docs-site
 pnpm sql:generate # regenerate Worker query constants
 pnpm sql:compile  # validate migrations and query types with sqlc
 go build ./cmd/octopool
+```
+
+The CLI-to-Worker smoke uses a temporary database and an available local port,
+and removes its state and Worker descendants on exit. Set
+`OCTOPOOL_CLI_WORKER_E2E_PORT` to select a specific port. It reaches public GitHub,
+so it remains an explicit live smoke check.
+
+To verify native GitHub CLI merge-header behavior against local HTTP fixtures,
+select an installed native binary explicitly (no GitHub credentials are needed):
+
+```sh
+OCTOPOOL_TEST_NATIVE_GH=/absolute/path/to/native/gh \
+  go test ./cmd/octopool -run '^TestNativeGHMergeHeaderProtocol$' -count=1
 ```
 
 The docs site is a dependency-free static generator (`scripts/build-docs-site.mjs`) that renders `docs/*.md` into an octopus-themed site, deployed to [docs.octopool.dev](https://docs.octopool.dev) via GitHub Actions on every push to `docs/`.
