@@ -42,21 +42,6 @@ var fieldMapRelease = map[string][]string{
 	"publishedAt":  {"published_at"},
 }
 
-var fieldMapCheckRun = map[string][]string{
-	"databaseId":  {"id"},
-	"detailsUrl":  {"details_url"},
-	"startedAt":   {"started_at"},
-	"completedAt": {"completed_at"},
-}
-
-var fieldMapWorkflow = map[string][]string{
-	"url":       {"html_url"},
-	"createdAt": {"created_at"},
-	"updatedAt": {"updated_at"},
-}
-
-var fieldMapLabel = map[string][]string{}
-
 var fieldMapGist = map[string][]string{
 	"url":       {"html_url"},
 	"isPublic":  {"public"},
