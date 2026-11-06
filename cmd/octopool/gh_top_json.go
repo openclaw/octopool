@@ -115,6 +115,10 @@ func (client ghRelayClient) readJSON(ctx context.Context, request ghAPIRequest, 
 	if err != nil {
 		return err
 	}
+	return decodeRelayJSON(envelope, target)
+}
+
+func decodeRelayJSON(envelope relayEnvelope, target any) error {
 	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
 		return err

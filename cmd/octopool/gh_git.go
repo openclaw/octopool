@@ -39,7 +39,7 @@ func gitProbeContext(ctx context.Context, args ...string) (string, error) {
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.WaitDelay = 100 * time.Millisecond
-	var out prReadGitOutput
+	var out rewritePreflightOutput
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, errRewriteBlocked) {

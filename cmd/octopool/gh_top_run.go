@@ -112,11 +112,7 @@ func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id st
 	if err != nil {
 		return err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, &run); err != nil {
+	if err := decodeRelayJSON(envelope, &run); err != nil {
 		return err
 	}
 	attempt, ok := positiveJSONInt(run["run_attempt"])
@@ -162,15 +158,11 @@ func relayHumanRunJobsWithMeta(ctx context.Context, client ghRelayClient, repo s
 }
 
 func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool) ([]any, int, error) {
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, 0, err
-	}
 	var response struct {
 		Total any               `json:"total_count"`
 		Jobs  []json.RawMessage `json:"jobs"`
 	}
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return nil, 0, err
 	}
 	if response.Jobs == nil {

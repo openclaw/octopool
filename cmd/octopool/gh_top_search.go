@@ -101,12 +101,8 @@ func relaySearchRepos(ctx context.Context, stdout io.Writer, rawQuery string, op
 	if err != nil {
 		return err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return err
 	}
 	items, _ := response["items"].([]any)
@@ -152,12 +148,8 @@ func relayGitHubSearch(
 	if searchRateLimited(envelope) {
 		return localFallbackError{Reason: "github_rate_limited"}
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return err
 	}
 	items, ok := response["items"].([]any)
