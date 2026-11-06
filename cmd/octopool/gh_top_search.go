@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -92,15 +91,13 @@ func relaySearchRepos(ctx context.Context, stdout io.Writer, rawQuery string, op
 		return err
 	}
 	items, _ := response["items"].([]any)
-	raw, err := json.Marshal(items)
+	var output any = items
+	if len(opts.json) > 0 && items != nil {
+		output = filterJSONValue(items, opts.json, fieldMapRepo)
+	}
+	raw, err := json.Marshal(output)
 	if err != nil {
 		return err
-	}
-	if len(opts.json) > 0 {
-		raw, err = filterJSONFields(raw, opts.json, fieldMapRepo)
-		if err != nil {
-			return err
-		}
 	}
 	return writeBytes(ctx, stdout, raw, opts.jq)
 }
@@ -161,13 +158,7 @@ func relayGitHubSearch(
 			return err
 		}
 	}
-	var output bytes.Buffer
-	encoder := json.NewEncoder(&output)
-	encoder.SetEscapeHTML(false) // Match native gh's JSON exporter, including titles/bodies.
-	if err := encoder.Encode(filterJSONValue(items, opts.json, fieldMap)); err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, output.Bytes(), opts.jq)
+	return writeGHJSON(ctx, stdout, filterJSONValue(items, opts.json, fieldMap), opts.jq)
 }
 
 func searchTerms(raw string) ([]string, bool) {

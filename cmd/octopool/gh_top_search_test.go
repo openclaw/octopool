@@ -100,6 +100,27 @@ func TestRunGHSearchReposUsesRepositorySearchRoute(t *testing.T) {
 	}
 }
 
+func TestRunGHSearchReposEmptyItems(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{"missing", map[string]any{}, "null\n"},
+		{"null", map[string]any{"items": nil}, "null\n"},
+		{"empty", map[string]any{"items": []any{}}, "[]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			relayTestServer(t, func(map[string]any) any { return tc.body })
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"search", "repos", "octopool", "--json", "name"}, &out)
+			if result.err != nil || result.action != ghComplete || out.String() != tc.want {
+				t.Fatalf("action=%v err=%v output=%q, want %q", result.action, result.err, out.String(), tc.want)
+			}
+		})
+	}
+}
+
 func TestRunGHSearchReposRejectsOperators(t *testing.T) {
 	var out bytes.Buffer
 	result := runGHTopLevel(t.Context(), []string{

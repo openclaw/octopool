@@ -223,3 +223,13 @@ func nestedStringValue(item map[string]any, path ...string) string {
 	text, _ := value.(string)
 	return text
 }
+
+func writeGHJSON(ctx context.Context, stdout io.Writer, value any, jq string) error {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, buffer.Bytes(), jq)
+}

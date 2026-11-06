@@ -157,7 +157,7 @@ func relayMachineRunList(ctx context.Context, stdout io.Writer, request ghAPIReq
 	for _, run := range runs {
 		result = append(result, run.export(opts.json))
 	}
-	return writeRunExport(ctx, stdout, result, opts.jq)
+	return writeGHJSON(ctx, stdout, result, opts.jq)
 }
 
 func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string, opts ghTopOptions) error {
@@ -233,7 +233,7 @@ func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string,
 		return err
 	}
 	run.jobs, run.workflowName = jobs, workflowName
-	return writeRunExport(ctx, stdout, run.export(opts.json), opts.jq)
+	return writeGHJSON(ctx, stdout, run.export(opts.json), opts.jq)
 }
 
 func machineRunJobsPage(envelope relayEnvelope, run machineRun, seen map[int64]bool) ([]machineJobExport, int, error) {
@@ -335,14 +335,4 @@ func (run machineRun) export(fields []string) map[string]any {
 		}
 	}
 	return result
-}
-
-func writeRunExport(ctx context.Context, stdout io.Writer, value any, jq string) error {
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, buffer.Bytes(), jq)
 }
