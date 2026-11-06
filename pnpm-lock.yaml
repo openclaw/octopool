@@ -26,10 +26,10 @@ importers:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.22.0
-        version: 0.22.0(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)))
+        version: 0.22.0(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@26.6.6)(vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2)))
       '@types/node':
-        specifier: ^26.6.4
-        version: 26.6.4
+        specifier: ^26.6.6
+        version: 26.6.6
       oxfmt:
         specifier: ^0.71.0
         version: 0.71.0
@@ -41,10 +41,10 @@ importers:
         version: 7.0.2
       vitest:
         specifier: ^4.1.11
-        version: 4.1.11(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2))
+        version: 4.1.11(@types/node@26.6.6)(vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2))
       wrangler:
         specifier: ^4.147.0
-        version: 4.147.0(@types/node@26.6.4)
+        version: 4.147.0(@types/node@26.6.6)
 
 packages:
 
@@ -974,8 +974,8 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
-  '@types/node@26.6.4':
-    resolution: {integrity: sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg==}
+  '@types/node@26.6.6':
+    resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -1575,14 +1575,14 @@ snapshots:
     optionalDependencies:
       workerd: 1.20261021.1
 
-  '@cloudflare/vitest-pool-workers@0.22.0(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)))':
+  '@cloudflare/vitest-pool-workers@0.22.0(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@26.6.6)(vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2)))':
     dependencies:
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
       cjs-module-lexer: 1.2.3
       esbuild: 0.28.2
       miniflare: 5.20260815.0-alpha
-      vitest: 4.1.11(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2))
+      vitest: 4.1.11(@types/node@26.6.6)(vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2))
       wrangler: 4.124.0
       zod: 4.4.3
     transitivePeerDependencies:
@@ -2101,7 +2101,7 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
-  '@types/node@26.6.4':
+  '@types/node@26.6.6':
     dependencies:
       undici-types: 8.9.0
 
@@ -2174,13 +2174,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.11(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2))':
+  '@vitest/mocker@4.1.11(vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.3.2(@types/node@26.6.4)(esbuild@0.28.2)
+      vite: 8.3.2(@types/node@26.6.6)(esbuild@0.28.2)
 
   '@vitest/pretty-format@4.1.11':
     dependencies:
@@ -2337,10 +2337,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  miniflare@5.20261001.0-alpha(@types/node@26.6.4):
+  miniflare@5.20261001.0-alpha(@types/node@26.6.6):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
-      sharp: 0.35.4(@types/node@26.6.4)
+      sharp: 0.35.4(@types/node@26.6.6)
       undici: 7.29.1
       workerd: 1.20261021.1
       ws: 8.21.0
@@ -2477,7 +2477,7 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.2
       '@img/sharp-win32-x64': 0.35.2
 
-  sharp@0.35.4(@types/node@26.6.4):
+  sharp@0.35.4(@types/node@26.6.6):
     dependencies:
       '@img/colour': 1.1.0
       detect-libc: 2.1.2
@@ -2508,7 +2508,7 @@ snapshots:
       '@img/sharp-win32-arm64': 0.35.4
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
-      '@types/node': 26.6.4
+      '@types/node': 26.6.6
 
   siginfo@2.0.0: {}
 
@@ -2569,7 +2569,7 @@ snapshots:
     dependencies:
       pathe: 2.0.3
 
-  vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2):
+  vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -2577,14 +2577,14 @@ snapshots:
       rolldown: 1.2.12
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 26.6.4
+      '@types/node': 26.6.6
       esbuild: 0.28.2
       fsevents: 2.3.3
 
-  vitest@4.1.11(@types/node@26.6.4)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)):
+  vitest@4.1.11(@types/node@26.6.6)(vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2))
+      '@vitest/mocker': 4.1.11(vite@8.3.2(@types/node@26.6.6)(esbuild@0.28.2))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -2601,10 +2601,10 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 8.3.2(@types/node@26.6.4)(esbuild@0.28.2)
+      vite: 8.3.2(@types/node@26.6.6)(esbuild@0.28.2)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 26.6.4
+      '@types/node': 26.6.6
     transitivePeerDependencies:
       - msw
 
@@ -2637,13 +2637,13 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  wrangler@4.147.0(@types/node@26.6.4):
+  wrangler@4.147.0(@types/node@26.6.6):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.5.0
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261021.1)
       blake3-wasm: 2.1.5
       esbuild: 0.28.2
-      miniflare: 5.20261001.0-alpha(@types/node@26.6.4)
+      miniflare: 5.20261001.0-alpha(@types/node@26.6.6)
       path-to-regexp: 6.3.0
       unenv: 2.0.0-rc.24
       workerd: 1.20261021.1
