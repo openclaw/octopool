@@ -32,6 +32,10 @@ func TestRunGHIssueViewStateProjection(t *testing.T) {
 					"state", "state,closedAt", "number,title,state,url,author",
 					"number,title,state,closedAt,url,author", "title,closedAt",
 				} {
+					// closedAt requires REST, so other sources repeat the same case.
+					if source != "rest" && strings.Contains(fields, "closedAt") {
+						continue
+					}
 					t.Run(fields, func(t *testing.T) {
 						wantShape := "issue-summary-v1"
 						if strings.Contains(fields, "closedAt") {
