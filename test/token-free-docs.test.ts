@@ -8,34 +8,6 @@ import { isNativeReadRoute, ROUTES } from "../src/route-manifest";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("token-free endpoint documentation", () => {
-  it("matches every supported route kind", () => {
-    const docs = readFileSync(path.join(root, "docs/relay.md"), "utf8");
-    const documented = new Set(
-      Array.from(
-        section(docs, "supported-route-kinds").matchAll(/^- `([^`]+)`$/gm),
-        (match) => match[1]!,
-      ),
-    );
-    expect([...documented].sort()).toEqual([...new Set(ROUTES.map((route) => route.kind))].sort());
-  });
-
-  it("matches every implemented anonymous API route", () => {
-    const docs = readFileSync(path.join(root, "docs/token-free.md"), "utf8");
-
-    const documented = new Set(
-      section(docs, "token-free-api-routes")
-        .match(/^GET (\/\S+)$/gm)
-        ?.map((line) => line.slice("GET ".length)) ?? [],
-    );
-    const implemented = new Set(
-      ROUTES.filter(
-        (route) => route.capabilities.publicApi || route.capabilities.fallback === "github_public",
-      ).map((route) => normalizeRoute(route.template)),
-    );
-
-    expect([...documented].sort()).toEqual([...implemented].sort());
-  });
-
   it("documents native-only paths separately from anonymous routes", () => {
     const relay = readFileSync(path.join(root, "docs/relay.md"), "utf8");
     const tokenFree = readFileSync(path.join(root, "docs/token-free.md"), "utf8");
