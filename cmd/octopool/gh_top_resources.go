@@ -139,7 +139,7 @@ func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, st
 			method:  "GET",
 			path:    repoPath(repo, "actions", "workflows", opts.positionals[0]),
 			headers: map[string]string{"x-octopool-public-shape": publicShapeWorkflowView},
-		}, opts, fieldMapWorkflow))
+		}, opts, nil))
 	default:
 		return ghDelegated()
 	}
@@ -161,7 +161,7 @@ func handleGHLabel(ctx context.Context, command string, opts ghTopOptions, stdou
 		path:    repoPath(repo, "labels"),
 		query:   listQuery(opts),
 		headers: map[string]string{"x-octopool-public-shape": publicShapeLabelList},
-	}, opts, fieldMapLabel))
+	}, opts, nil))
 }
 
 func handleGHGist(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
@@ -209,7 +209,7 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 		return err
 	}
 	if len(opts.json) > 0 {
-		raw, err = filterJSONFields(raw, opts.json, fieldMapWorkflow)
+		raw, err = filterJSONFields(raw, opts.json, nil)
 		if err != nil {
 			return err
 		}
