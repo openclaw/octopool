@@ -810,24 +810,16 @@ function highlightYaml(code) {
 }
 
 function highlightYamlValue(rest) {
-  if (!rest.trim()) return escapeHtml(rest);
   const trimmed = rest.trim();
-  if (/^["'].*["']$/.test(trimmed)) {
-    return (
-      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-s">${escapeHtml(trimmed)}</span>`
-    );
-  }
-  if (/^(true|false|null|~)$/i.test(trimmed)) {
-    return (
-      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-m">${escapeHtml(trimmed)}</span>`
-    );
-  }
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return (
-      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-n">${escapeHtml(trimmed)}</span>`
-    );
-  }
-  return escapeHtml(rest);
+  let className;
+  if (/^["'].*["']$/.test(trimmed)) className = "hl-s";
+  else if (/^(true|false|null|~)$/i.test(trimmed)) className = "hl-m";
+  else if (/^-?\d+(\.\d+)?$/.test(trimmed)) className = "hl-n";
+  else return escapeHtml(rest);
+  return (
+    escapeHtml(rest.replace(trimmed, "")) +
+    `<span class="${className}">${escapeHtml(trimmed)}</span>`
+  );
 }
 
 function validateLinks(outputDir) {
