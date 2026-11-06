@@ -5,7 +5,7 @@ import {
   hasNoQuotaGitHubWebRequest,
 } from "../src/github-web";
 import { fetchPublicPage } from "../src/github-web-transport";
-import { releaseHTML, releaseMarkdown } from "./fixtures/release-summary";
+import { releaseMarkdown } from "./fixtures/release-summary";
 import { contentsKinds, contentsLinks } from "./fixtures/contents-links";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
@@ -979,26 +979,12 @@ describe("github web provider", () => {
 
   describe.each(["tags/v0.8.0", "latest"])("release %s raw Markdown", (suffix) => {
     it.each([
-      ["rendered body", releaseHTML, releaseMarkdown],
-      [
-        "missing rendered body",
-        releaseHTML.replace(/<div data-test-selector=[\s\S]*$/, ""),
-        releaseMarkdown,
-      ],
-      ["empty source", releaseHTML.replace(/<div data-test-selector=[\s\S]*$/, ""), ""],
-    ])("preserves exact anonymous API source with %s", async (_, html, body) => {
+      ["nonempty source", releaseMarkdown],
+      ["empty source", ""],
+    ])("preserves exact anonymous API source with %s", async (_, body) => {
       const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
         const upstream = new Request(input, init);
         expect(upstream.headers.has("authorization")).toBe(false);
-        if (new URL(upstream.url).hostname === "github.com") {
-          if (upstream.url.endsWith("/latest")) {
-            return new Response(null, {
-              status: 302,
-              headers: { location: "/openclaw/octopool/releases/tag/v0.8.0" },
-            });
-          }
-          return new Response(html);
-        }
         return Response.json({ tag_name: "v0.8.0", draft: false, body });
       });
       vi.stubGlobal("fetch", fetchMock);
@@ -1021,10 +1007,8 @@ describe("github web provider", () => {
     });
 
     it("returns no reconstructed body when the anonymous API is unavailable", async () => {
-      const fetchMock = vi.fn<typeof fetch>(async (input) =>
-        new URL(String(input)).hostname === "github.com"
-          ? new Response(releaseHTML)
-          : new Response("rate limited", { status: 403 }),
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response("rate limited", { status: 403 }),
       );
       vi.stubGlobal("fetch", fetchMock);
       const request = validateRelayRequest({
