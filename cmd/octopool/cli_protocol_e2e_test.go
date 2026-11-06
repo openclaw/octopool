@@ -62,7 +62,10 @@ func TestCLIEndToEndRelayProtocol(t *testing.T) {
 				}))
 				t.Cleanup(server.Close)
 				capture := captureRewriteGH(t)
-				result := runCLI(t, bin, server.URL, nil, append([]string{"gh"}, test.args...)...)
+				result := runCLI(t, bin, server.URL, map[string]string{
+					"OCTOPOOL_GH_PATH":              os.Getenv("OCTOPOOL_GH_PATH"),
+					"OCTOPOOL_TEST_REWRITE_CAPTURE": capture,
+				}, append([]string{"gh"}, test.args...)...)
 				_, childErr := os.Stat(capture)
 				if test.mode == "reject" {
 					if result.err == nil || result.stdout != "" || data != 0 || !os.IsNotExist(childErr) {

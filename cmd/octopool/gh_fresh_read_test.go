@@ -47,6 +47,7 @@ func TestPRViewGateFieldsRequestLiveRead(t *testing.T) {
 // Fields that describe the PR itself rather than its current gate state stay on
 // the shared cache; that is the whole point of the relay.
 func TestPRViewStableFieldsStayCached(t *testing.T) {
+	t.Setenv("OCTOPOOL_FRESH", "")
 	var seen map[string]any
 	relayTestServer(t, func(body map[string]any) any {
 		seen, _ = body["headers"].(map[string]any)
