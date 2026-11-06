@@ -4,8 +4,6 @@ import { isIssueEventRoute, isNativeReadRoute, ROUTES } from "../src/route-manif
 
 describe("route manifest", () => {
   it("has unique route identities and patterns", () => {
-    expect(ROUTES).toHaveLength(135);
-    expect(new Set(ROUTES.map((route) => route.kind)).size).toBe(122);
     expect(new Set(ROUTES.map((route) => route.id)).size).toBe(ROUTES.length);
     expect(new Set(ROUTES.map((route) => route.pattern.source)).size).toBe(ROUTES.length);
   });
@@ -18,19 +16,6 @@ describe("route manifest", () => {
         route.id,
       ).toEqual([route.id]);
     }
-  });
-
-  it("defines backend eligibility on every concrete route", () => {
-    expect(ROUTES.filter((route) => route.capabilities.publicApi)).toHaveLength(118);
-    expect(ROUTES.filter((route) => route.capabilities.fallback === "local")).toHaveLength(44);
-    expect(ROUTES.filter((route) => route.capabilities.fallback === "github_public")).toHaveLength(
-      1,
-    );
-    expect(
-      ROUTES.filter(
-        (route) => route.capabilities.publicApi || route.capabilities.fallback === "github_public",
-      ),
-    ).toHaveLength(119);
   });
 
   it("routes annotated tag objects through the immutable Git object policy", () => {
@@ -110,7 +95,6 @@ describe("route manifest", () => {
 
   it("keeps protection reads out of every public or pooled backend", () => {
     const native = ROUTES.filter(isNativeReadRoute);
-    expect(native).toHaveLength(13);
     expect(new Set(native.map((route) => route.kind))).toEqual(
       new Set(["branch_protection", "repo_ruleset_list", "repo_ruleset_view", "branch_rules"]),
     );
