@@ -34,7 +34,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.6",
     "oxfmt": "^0.71.0",
     "oxlint": "^1.86.0",
     "typescript": "^7.0.2",
