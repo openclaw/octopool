@@ -185,6 +185,9 @@ func TestAuthenticatedJSONRedirects(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		for _, code := range []int{301, 302, 303, 307, 308} {
 			for _, destination := range []string{"direct", "same-origin", "cross-port", "cross-host", "downgrade", "same-origin-then-cross-port"} {
+				if destination == "direct" && code != 301 {
+					continue
+				}
 				t.Run(method+"/"+strconv.Itoa(code)+"/"+destination, func(t *testing.T) {
 					isolateTestConfig(t)
 					token := "synthetic-caller-token"

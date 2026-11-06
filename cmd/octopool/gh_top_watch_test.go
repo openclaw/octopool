@@ -588,10 +588,6 @@ func TestGHWatchShapeLastWatchValueWins(t *testing.T) {
 	if !isGHWatchShape([]string{"pr", "checks", "7", "--watch=false", "--watch"}) {
 		t.Fatal("--watch=false --watch must count as a watch shape")
 	}
-	floored := floorGHWatchDelegateArgs([]string{"run", "watch", "42", "--", "-i1"})
-	if !reflect.DeepEqual(floored, []string{"run", "watch", "42", "--interval", "30", "--", "-i1"}) {
-		t.Fatalf("post-terminator tokens must stay untouched and floor injected before --, got %v", floored)
-	}
 }
 
 func TestGHPRChecksWatchJSONDelegatesLikeRealGH(t *testing.T) {

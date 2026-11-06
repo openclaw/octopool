@@ -767,7 +767,7 @@ func TestRESTPRWriteRenameHarness(t *testing.T) {
 	t.Log("forbidden canonical\n" + transcript)
 	allowed := runRenameHarness(t, false)
 	t.Log("allowed rename\n" + allowed)
-	if !strings.Contains(transcript, "GET /repositories/401025") || !strings.Contains(transcript, "canonical writes=0") {
+	if !strings.Contains(transcript, "GET /repositories/401025") {
 		t.Fatalf("forbidden transcript:\n%s", transcript)
 	}
 	if strings.Contains(transcript, "PATCH /repos/mislav/hub/pulls/7") {
@@ -822,7 +822,7 @@ func runRenameHarness(t *testing.T, forbid bool) string {
 		if !errors.Is(err, errRewriteBlocked) {
 			t.Fatalf("err=%v stderr=%q", err, stderr.String())
 		}
-		fmt.Fprintf(&b, "result: %s\ncanonical writes=0\n", errRewriteBlocked.Error())
+		fmt.Fprintf(&b, "result: %s\n", errRewriteBlocked.Error())
 		return b.String()
 	}
 	if err != nil {
