@@ -2,7 +2,7 @@ import { relayPhase } from "./relay-timing";
 import { requestTimeoutMs } from "./github-limits";
 import { isLandingGraphQLRoute } from "./github-landing";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
-import { publicAPIRequest, releaseAPIRequest, storePublicAPIRate } from "./github-public-api";
+import { publicAPIRequest, storePublicAPIRate } from "./github-public-api";
 import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
@@ -160,16 +160,12 @@ function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteIn
     return mediaRequest === undefined ? [] : [mediaRequest];
   }
   const out: WebRequest[] = [];
-  const release = releaseAPIRequest(env, request, route);
-  if (release !== undefined) {
-    out.push(release);
-  }
-  const releaseMetadata = releaseMetadataPageRequest(env, request, route);
-  if (releaseMetadata !== undefined) out.push(releaseMetadata);
   const publicApi = publicAPIRequest(env, request, route);
   if (publicApi !== undefined) {
     out.push(publicApi);
   }
+  const releaseMetadata = releaseMetadataPageRequest(env, request, route);
+  if (releaseMetadata !== undefined) out.push(releaseMetadata);
   const gitRef = gitRefRequest(env, request, route);
   if (gitRef !== undefined) {
     out.push(gitRef);

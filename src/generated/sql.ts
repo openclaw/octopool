@@ -102,7 +102,7 @@ export const queries = {
   dashboardIdentities:
     "SELECT id, kind, login, installation_id, status, weight, updated_at\nFROM identities\nWHERE pool_id = ?1\nORDER BY status = 'active' DESC, weight DESC, id",
   cacheTotals:
-    "SELECT\n  COUNT(*) AS total_entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,\n  COALESCE(SUM(length(body_json)), 0) AS body_bytes,\n  MIN(created_at) AS oldest_created_at,\n  MAX(created_at) AS newest_created_at\nFROM github_cache_entries\nWHERE pool_id = ?1",
+    "SELECT\n  COUNT(*) AS total_entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,\n  COALESCE(SUM(octet_length(body_json)), 0) AS body_bytes,\n  MIN(created_at) AS oldest_created_at,\n  MAX(created_at) AS newest_created_at\nFROM github_cache_entries\nWHERE pool_id = ?1",
   dashboardCacheRoutes:
     "SELECT\n  route_kind,\n  COUNT(*) AS entries,\n  SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,\n  MAX(created_at) AS latest_created_at\nFROM github_cache_entries\nWHERE pool_id = ?1\nGROUP BY route_kind\nORDER BY entries DESC, route_kind\nLIMIT 12",
   dashboardUsers:
@@ -144,6 +144,8 @@ export const queries = {
   insertWebSession:
     "INSERT INTO web_sessions (session_hash, caller_id, expires_at)\nVALUES (?1, ?2, ?3)",
   deleteWebSession: "DELETE FROM web_sessions\nWHERE session_hash = ?1",
+  deleteExpiredWebSessions:
+    "DELETE FROM web_sessions\nWHERE session_hash IN (\n  SELECT session_hash FROM web_sessions\n  WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1\n)",
   getWebSession:
     "SELECT\n  callers.id,\n  callers.name,\n  callers.github_login,\n  callers.github_user_id,\n  callers.org_login,\n  callers.org_identity_verified_at AS org_verified_at,\n  callers.dashboard_role,\n  web_sessions.expires_at\nFROM web_sessions\nJOIN callers ON callers.id = web_sessions.caller_id\nWHERE web_sessions.session_hash = ?1\n  AND web_sessions.expires_at > CURRENT_TIMESTAMP\n  AND callers.status = 'active'\n  AND callers.org_login = ?2 COLLATE NOCASE",
   getCallerPoolGrant:
@@ -160,6 +162,8 @@ export const queries = {
     "SELECT protocol_epoch, checked_at, expires_at, is_public, publication_id, publication_token\nFROM github_public_repo_proofs\nWHERE protocol_epoch = ?3 AND owner = ?1 AND repo = ?2\n  AND is_public = 0\n  AND expires_at > CURRENT_TIMESTAMP",
   deleteExpiredPublicRepoProofs:
     "DELETE FROM github_public_repo_proofs\nWHERE (protocol_epoch, owner, repo) IN (\n  SELECT protocol_epoch, owner, repo FROM github_public_repo_proofs\n  WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1\n)",
+  deleteExpiredPRStateProofs:
+    "DELETE FROM github_pr_state_proofs\nWHERE (owner, repo, number, state_hint) IN (\n  SELECT owner, repo, number, state_hint\n  FROM github_pr_state_proofs\n  WHERE expires_at <= CURRENT_TIMESTAMP\n  ORDER BY expires_at\n  LIMIT ?1\n)",
   freshPRStateProof:
     "SELECT 1\nFROM github_pr_state_proofs\nWHERE lower(owner) = ?1\n  AND lower(repo) = ?2\n  AND number = ?3\n  AND state_hint = ?4\n  AND expires_at > CURRENT_TIMESTAMP\nLIMIT 1",
   upsertPRStateProof:

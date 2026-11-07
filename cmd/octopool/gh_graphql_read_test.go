@@ -24,11 +24,13 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 	t.Setenv("OCTOPOOL_FRESH", "")
 	for _, query := range []string{
 		repositoryReadQuery,
+		`{repository(owner:"openclaw",name:"octopool"){` + strings.Repeat("id ", 3900) + `}}`,
 		`query { r:repository(owner:"openclaw",name:"octopool") { name } __typename }`,
 		`query { p1:repository(owner:"OpenClaw",name:"Octopool") { name } p2:repository(owner:$owner,name:$name) { name } }`,
 		`{repository(owner:"openclaw",name:"octopool") @include(if:true) {name}}`,
 		`query Q($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){...Fields}} fragment Fields on Repository { name }`,
 		"# header\n" + repositoryReadQuery,
+		`{repository(owner:"openclaw",name:"octopool"){object(expression:"mergeStateStatus"){id}}}`,
 	} {
 		t.Run(query, func(t *testing.T) {
 			request, ok := parseRepositoryGraphQL(repositoryReadArgs(query)[1:])
@@ -58,7 +60,7 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 		{"pagination", repositoryReadQuery, []string{"--paginate"}},
 		{"pagination-false", repositoryReadQuery, []string{"--paginate=false"}},
 		{"slurp", repositoryReadQuery, []string{"--slurp"}},
-		{"tokens", `{viewer{login} repository(owner:"openclaw",name:"octopool"){` + strings.Repeat("id ", 4000) + `}}`, nil},
+		{"tokens", `{repository(owner:"openclaw",name:"octopool"){` + strings.Repeat("id ", 4000) + `}}`, nil},
 		{"template", repositoryReadQuery, []string{"--template", "{{.data}}"}},
 		{"include", repositoryReadQuery, []string{"--include"}},
 		{"conditional", repositoryReadQuery, []string{"-H", "If-None-Match: old"}},
@@ -86,6 +88,33 @@ func TestRepositoryGraphQLGrammar(t *testing.T) {
 	// The existing exact landing projections have their original routing.
 	if _, ok := parseLandingGraphQL(landingGraphQLArgs(githubLandingQueryPullRequestCISummary, "pr")[1:]); !ok {
 		t.Fatal("kill switch changed exact landing path")
+	}
+}
+
+func TestRepositoryGraphQLMergeStateNative(t *testing.T) {
+	for _, query := range []string{
+		strings.Replace(repositoryReadQuery, "state", "mergeStateStatus", 1),
+		strings.Replace(repositoryReadQuery, "state", "status: mergeStateStatus", 1),
+		`{repository(owner:"openclaw",name:"octopool"){pullRequest(number:42){...Merge}}} fragment Merge on PullRequest {mergeStateStatus}`,
+		`{repository(owner:"openclaw",name:"octopool"){pullRequest(number:42){... on PullRequest {mergeStateStatus}}}}`,
+		`{safe:repository(owner:"openclaw",name:"octopool"){name} guarded:repository(owner:"openclaw",name:"octopool"){pullRequest(number:42){mergeStateStatus}}}`,
+		codexGraphQLBatch(t),
+	} {
+		t.Run(query, func(t *testing.T) {
+			rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
+			configureGraphQLViewer(t)
+			args := append(repositoryReadArgs(query), "--jq", ".data")
+			if _, ok := parseRepositoryGraphQL(args[1:]); ok {
+				t.Fatal("scoped App merge state admitted")
+			}
+			capture := captureRewriteGH(t)
+			if err := runGH(t.Context(), args, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(readRewriteCapture(t, capture).Args, args) {
+				t.Fatal("native arguments changed")
+			}
+		})
 	}
 }
 
@@ -142,6 +171,7 @@ func TestRepositoryGraphQLFallback(t *testing.T) {
 		body string
 	}{
 		{424, `{"error":{"code":"fallback_local","details":{"reason":"github_app_repo_token_unavailable"}}}`},
+		{424, `{"error":{"code":"fallback_local","details":{"reason":"route_denied"}}}`},
 		{403, `{"error":{"code":"method_denied","message":"Only GET routes are enabled"}}`},
 		{503, `{"error":{"code":"internal_error"}}`},
 	} {

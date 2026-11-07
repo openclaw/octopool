@@ -213,7 +213,9 @@ func repositoryGraphQLRead(read *graphQLReadRequest) bool {
 		}
 	}
 	for index, token := range tokens {
-		if (index < viewerStart || index >= viewerEnd) && strings.HasPrefix(token, "viewer") {
+		// The scoped App can report a different merge state than the caller.
+		// Fixed landing snapshots have their own credential and routing contract.
+		if token == "mergeStateStatus" || ((index < viewerStart || index >= viewerEnd) && strings.HasPrefix(token, "viewer")) {
 			return false
 		}
 	}

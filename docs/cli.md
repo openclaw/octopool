@@ -594,7 +594,10 @@ PR views also relay `headRepository`, `headRepositoryOwner`, `assignees`, and
 `statusCheckRollup` to reduce local GitHub quota usage through shared transports and
 eligible caching, including under active string rewrite protection. Fork metadata
 uses GitHub node IDs; a deleted head repository is `null`. Requested author, merger, owner, and assignee
-names use a shared per-command profile lookup. The rollup preserves native `gh`
+names use a shared per-command profile lookup.
+Organization head owners with a complete REST identity use that ID and login directly;
+native `gh` exports a name only for user owners. Login-only or incomplete organization
+identities still use the validated profile lookup. The rollup preserves native `gh`
 `CheckRun` and `StatusContext` fields and resolves workflow names by check-suite ID
 through head-filtered Actions runs and the complete raw workflow catalogue, including
 inactive workflows. It shares this verified association with `pr checks`, without using
@@ -624,6 +627,7 @@ The Worker can reuse a projection for at most 60 seconds for explicitly bounded 
 reads; there is no stale fallback. Totals, PR identity, unique IDs and cursor progression
 must remain consistent. Commit hydration also verifies the PR head before and after.
 These checks do not make multiple reads an atomic snapshot.
+Comments-only exports fetch the comment pages directly, without an additional basic PR read.
 
 Comments export native `viewerDidAuthor` using the active local gh GitHub.com account,
 never the Octopool login. Two guarded native REST `/user` reads, before hydration and
@@ -653,6 +657,9 @@ Files export only `path`, `additions`, `deletions`, and `changeType`, including 
 File change types use native enums; REST `removed` becomes `DELETED`. Unsupported or
 missing statuses, including REST `unchanged` with no native enum, follow guarded
 fallback before any JSON is printed.
+When both `files` and `statusCheckRollup` are selected, their reads overlap after
+the initial PR lookup. Both collections finish before the final live head check
+and JSON output; a terminal policy or authentication failure cancels the sibling read.
 Upgrade note: PR-view scripts using numeric author/label IDs, REST-only nested keys,
 lowercase file statuses, or `originalPath` must use these native projections instead.
 Upgrade note: scripts relying on earlier Octopool boolean/null output must use explicit
@@ -685,10 +692,15 @@ identity evidence: an attempt-qualified response may include successful jobs reu
 older attempts after rerunning failed jobs. Historical run identity/head evidence is checked
 without fetching today's branch head.
 
+When a view selects both `jobs` and `workflowName`, their reads overlap after the run is
+validated. Jobs still paginate in order, and both reads must settle successfully before
+JSON or jq output. A terminal policy or authentication failure cancels the sibling read.
+
 Only selected `workflowName` triggers metadata. View uses one verified workflow-ID lookup;
-filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists use
-the existing complete catalogue (at most 10 pages of 100), then one memoized direct lookup
-per missing workflow ID. Only a genuine upstream 404 on that last list-specific lookup
+filtered lists use one verified numeric/YAML-selector lookup. Nonempty unfiltered lists read
+the workflow catalogue (at most 10 pages of 100), stopping after a fully validated page
+resolves every requested workflow ID. If the catalogue ends with IDs still missing, they
+use one memoized direct lookup per missing ID. Only a genuine upstream 404 on that list-specific lookup
 produces an empty name. Disabled workflows remain valid. Empty lists and unselected names
 do not fetch metadata. Logical data-operation bounds are 1 for scalar view, 2 with name,
 12 with jobs and name, 2 for filtered list with name, and 111 for unfiltered list with name.
@@ -1592,6 +1604,24 @@ are literal text: a leading `@` never reads a file or stdin. The child receives 
 checked JSON snapshot, not the original subject, body path, or live stdin. Omitting the
 subject leaves `commit_title` absent.
 
+Before a protected immediate merge, the shim reads the PR directly using the caller's
+native credentials. An already-merged PR prints `! Pull request owner/repo#123 was already merged`
+to stderr and exits successfully without a merge PUT. As in native gh, even
+`--delete-branch` does not delete a remote branch on an already-merged PR, whether the
+branch still exists or is already gone. A closed, unmerged PR still attempts the merge
+and preserves GitHub's failure; open PRs retain the full `--match-head-commit` guarantee.
+
+Protected immediate merges accept `--delete-branch`/`-d`, including
+`--delete-branch=true|false`. After a successful merge PUT, the shim uses the PR metadata
+from that read and deletes its remote head ref only for a same-repository
+head that is not the repository's default branch. Fork heads are skipped with a notice.
+A 422 or 404 with `Reference does not exist` counts as already deleted; other cleanup
+failures return nonzero with `merge succeeded but branch deletion failed`, so callers
+can retry cleanup without repeating the merge. This follows native gh's nonzero cleanup
+failure behavior, but tolerates missing refs only when the response identifies that case.
+The shim never switches or deletes local branches; if the head branch exists locally,
+it prints a one-line notice that it was kept.
+
 Explicit `pr merge --auto --squash --match-head-commit FULL_SHA` also accepts a numeric
 selector, but requires both a nonempty `--subject`/`-t` and an explicit `--body-file`/`-F`.
 The subject and body pass through the same bounded text rewriting; a subject that becomes
@@ -1599,7 +1629,12 @@ empty or whitespace is rejected so native gh cannot generate an uninspected head
 An explicit empty body is allowed. Native gh receives the sanitized subject value and
 private body snapshot, an explicit repository, the full head SHA, and empty stdin.
 Original body files are never modified or reopened by the child. `--auto=false` retains
-the immediate REST path. Admin privileges, other merge methods, disabling auto-merge,
+the immediate REST path. `--auto --delete-branch` is accepted by native gh and is forwarded
+with the explicit repository pin, which disables native local branch deletion. Native gh
+owns remote cleanup: it deletes after an immediate merge, skips deletion when only
+enabling auto-merge, and rejects deletion on merge-queue branches. The shim checks for a
+local head branch after successful native execution and reports that it was kept.
+Admin privileges, other merge methods, disabling auto-merge,
 inline-body flags, URL selectors, and unpinned merges remain blocked on this strict path.
 
 The auto path preserves native gh semantics: it can merge immediately when requirements
@@ -1611,8 +1646,27 @@ reconciling the PR. The immediate REST path never silently opts into that lifecy
 
 Other editor/web/template/fill modes, unmodeled uploads, aliases/extensions, raw
 GraphQL, and newly introduced native commands/flags use best-effort filtering and retain
-native behavior. A denial reports only the generic unsafe-input boundary and never echoes the
-rejected text.
+native behavior. Policy/content denials report `string rewrite protection blocked unsafe input`
+without echoing rejected text. Positively identified unmodeled shapes on strict content
+paths (for example `release edit --draft=false --latest` without title/notes, or an unknown
+option on a modeled write) stay blocked with this fixed, actionable message:
+
+```text
+octopool: string rewrite protection does not model this gh command shape; run it with ghx (the native gh CLI) if it publishes no protected text, or see docs/cli.md
+```
+
+`ghx` is the native-gh escape hatch used by [the release workflow](releasing.md).
+Use it only after checking that the command publishes no protected text. The diagnostic
+never includes arbitrary command names, arguments, values, or paths. Ambiguous parsing,
+invalid structural input, and other refusals that cannot be classified confidently keep
+the existing unsafe-input message. Unknown subcommands that already receive best-effort
+filtering retain that delegation; this distinction changes refusal messages only.
+
+Unmodeled `pr merge` and `pr ready` options or command shapes instead report a fixed
+`octopool: string rewrite protection does not support this gh pr ... option or command shape`
+error with the supported options. These commands stay on the protected path and never
+fall through to best-effort native execution. The error does not echo rejected arguments;
+genuine policy/content denials retain `string rewrite protection blocked unsafe input`.
 
 An empty final policy retains native `gh pr merge`; the final policy decision can differ
 from an earlier check. Neither route changes the local writer's authentication.

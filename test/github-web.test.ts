@@ -5,7 +5,7 @@ import {
   hasNoQuotaGitHubWebRequest,
 } from "../src/github-web";
 import { fetchPublicPage } from "../src/github-web-transport";
-import { releaseHTML, releaseMarkdown } from "./fixtures/release-summary";
+import { releaseMarkdown } from "./fixtures/release-summary";
 import { contentsKinds, contentsLinks } from "./fixtures/contents-links";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
@@ -721,6 +721,10 @@ describe("github web provider", () => {
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
     ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/actions/runs?per_page=10&branch=main&branch=release",
+      expect.any(Object),
+    );
   });
 
   it("falls back to exact anonymous Actions JSON when the public parser misses", async () => {
@@ -975,26 +979,12 @@ describe("github web provider", () => {
 
   describe.each(["tags/v0.8.0", "latest"])("release %s raw Markdown", (suffix) => {
     it.each([
-      ["rendered body", releaseHTML, releaseMarkdown],
-      [
-        "missing rendered body",
-        releaseHTML.replace(/<div data-test-selector=[\s\S]*$/, ""),
-        releaseMarkdown,
-      ],
-      ["empty source", releaseHTML.replace(/<div data-test-selector=[\s\S]*$/, ""), ""],
-    ])("preserves exact anonymous API source with %s", async (_, html, body) => {
+      ["nonempty source", releaseMarkdown],
+      ["empty source", ""],
+    ])("preserves exact anonymous API source with %s", async (_, body) => {
       const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
         const upstream = new Request(input, init);
         expect(upstream.headers.has("authorization")).toBe(false);
-        if (new URL(upstream.url).hostname === "github.com") {
-          if (upstream.url.endsWith("/latest")) {
-            return new Response(null, {
-              status: 302,
-              headers: { location: "/openclaw/octopool/releases/tag/v0.8.0" },
-            });
-          }
-          return new Response(html);
-        }
         return Response.json({ tag_name: "v0.8.0", draft: false, body });
       });
       vi.stubGlobal("fetch", fetchMock);
@@ -1017,10 +1007,8 @@ describe("github web provider", () => {
     });
 
     it("returns no reconstructed body when the anonymous API is unavailable", async () => {
-      const fetchMock = vi.fn<typeof fetch>(async (input) =>
-        new URL(String(input)).hostname === "github.com"
-          ? new Response(releaseHTML)
-          : new Response("rate limited", { status: 403 }),
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response("rate limited", { status: 403 }),
       );
       vi.stubGlobal("fetch", fetchMock);
       const request = validateRelayRequest({
@@ -1290,14 +1278,33 @@ describe("github web provider", () => {
   });
 
   it.each([
-    ["missing", undefined],
-    ["malformed", { hasNextPage: "false" }],
-    ["incomplete", { hasNextPage: true }],
-  ])("rejects %s embedded connection pageInfo and uses the exact API", async (_name, pageInfo) => {
+    ["complete", { hasNextPage: false }, false],
+    ["missing", undefined, true],
+    ["malformed", { hasNextPage: "false" }, true],
+    ["incomplete", { hasNextPage: true }, true],
+  ])("handles %s embedded connection pageInfo", async (_name, pageInfo, fallback) => {
+    const node = {
+      __typename: "Issue",
+      number: 5,
+      titleHtml: "Embedded issue",
+      state: "OPEN",
+      createdAt: "2026-05-27T23:17:12Z",
+      updatedAt: "2026-05-27T23:17:12Z",
+      closedAt: null,
+      author: actor("fixture-user", "Fixture User"),
+      labels: connection([]),
+    };
+    const html = embeddedPage("IssueIndexPageQuery", {
+      search: {
+        edges: [{ node }],
+        issueCount: 1,
+        ...(pageInfo === undefined ? {} : { pageInfo }),
+      },
+    });
     const exact = [{ id: 99, number: 99, title: "Exact API result" }];
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(new Response(issueListPage([{}], pageInfo)))
+      .mockResolvedValueOnce(new Response(html))
       .mockResolvedValueOnce(Response.json(exact));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
@@ -1306,12 +1313,15 @@ describe("github web provider", () => {
       path: "/repos/openclaw/octopool/issues",
       headers: { "x-octopool-public-shape": "issue-list-v1" },
     });
-
-    await expect(
-      callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({ body: exact, backend: "github" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(new URL(fetchMock.mock.calls[1]![0] as string).hostname).toBe("api.github.com");
+    const result = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+    if (fallback) {
+      expect(result).toMatchObject({ body: exact, backend: "github" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(new URL(fetchMock.mock.calls[1]![0] as string).hostname).toBe("api.github.com");
+    } else {
+      expect(result?.body).toMatchObject([{ number: 5, title: "Embedded issue" }]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("prefers embedded labels with GraphQL IDs and URLs", async () => {
@@ -1766,6 +1776,10 @@ describe("github web provider", () => {
       callGitHubWeb(env(), request, classifyRoute(request, policy)),
     ).resolves.toMatchObject({ body: { name: "README.md" } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/repos/openclaw/octopool/contents/README.md?ref=..%2F..%2Fsteipete%2FReleaseBar%2Fmain",
+      expect.any(Object),
+    );
   });
 
   it.each([
@@ -2040,7 +2054,12 @@ describe("github web provider", () => {
     );
   });
 
-  it("returns empty successful public API responses without falling through", async () => {
+  it.each([
+    ["contributors", { status: 204, body: null, body_encoding: "text", backend: "github" }],
+    ["releases", undefined],
+    ["releases/latest", undefined],
+    ["releases/tags/v1.0.0", undefined],
+  ])("handles empty public API responses for %s", async (path, expected) => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(null, { status: 204 })),
@@ -2048,17 +2067,12 @@ describe("github web provider", () => {
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
-      path: "/repos/openclaw/octopool/contributors",
+      path: `/repos/openclaw/octopool/${path}`,
     });
 
-    await expect(
-      callGitHubWeb(env(), request, classifyRoute(request, policy)),
-    ).resolves.toMatchObject({
-      status: 204,
-      body: null,
-      body_encoding: "text",
-      backend: "github",
-    });
+    const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+    if (expected === undefined) expect(response).toBeUndefined();
+    else expect(response).toMatchObject(expected);
   });
 
   it("falls through on oversized web bodies while streaming", async () => {

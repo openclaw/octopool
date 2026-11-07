@@ -110,37 +110,28 @@ func publicShapeHeaders(opts ghTopOptions, supported map[string]bool, shape stri
 	return headers
 }
 
+func (client ghRelayClient) readJSON(ctx context.Context, request ghAPIRequest, target any) error {
+	envelope, err := client.do(ctx, request)
+	if err != nil {
+		return err
+	}
+	return decodeRelayJSON(envelope, target)
+}
+
+func decodeRelayJSON(envelope relayEnvelope, target any) error {
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, target)
+}
+
 func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
 	body, err := decodeRelayBody(envelope)
 	if err == nil && envelope.Status >= 400 {
 		err = fmt.Errorf("github returned status %d", envelope.Status)
 	}
 	return bytes.TrimSpace(body), err
-}
-
-func envelopeCollectionPage(envelope relayEnvelope, key string) ([]any, int, error) {
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, 0, err
-	}
-	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, 0, err
-	}
-	items, ok := response[key].([]any)
-	if !ok {
-		labels := map[string]string{
-			"check_runs": "check-runs",
-			"statuses":   "status",
-			"jobs":       "workflow jobs",
-		}
-		return nil, 0, fmt.Errorf("%s response did not include %s", labels[key], key)
-	}
-	total := len(items)
-	if value, ok := response["total_count"].(float64); ok {
-		total = int(value)
-	}
-	return items, total, nil
 }
 
 func filterJSONFields(raw []byte, fields []string, fieldMap map[string][]string) ([]byte, error) {
@@ -233,11 +224,12 @@ func nestedStringValue(item map[string]any, path ...string) string {
 	return text
 }
 
-func nestedString(input map[string]any, path ...string) (string, bool) {
-	value, ok := valueAtPath(input, path...)
-	if !ok {
-		return "", false
+func writeGHJSON(ctx context.Context, stdout io.Writer, value any, jq string) error {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return err
 	}
-	text, ok := value.(string)
-	return text, ok
+	return writeBytes(ctx, stdout, buffer.Bytes(), jq)
 }

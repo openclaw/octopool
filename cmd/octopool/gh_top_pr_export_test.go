@@ -41,7 +41,7 @@ func TestPRDetailExportTypedBeforeClient(t *testing.T) {
 			isolateTestConfig(t)
 			t.Setenv("OCTOPOOL_TOKEN", "")
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{"view", "7", "-R", "acme/repo", "--json", field}, &out)
+			result := runGHTopLevel(t.Context(), []string{"pr", "view", "7", "-R", "acme/repo", "--json", field}, &out)
 			var fallback localFallbackError
 			if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "unsupported_pr_detail_export" || fallback.Relay != nil || out.Len() != 0 {
 				t.Fatalf("detail must remain accepted and fail typed before relay client/auth: action=%v err=%v out=%q", result.action, result.err, out.String())
@@ -63,11 +63,10 @@ func TestRunGHPRDetailExportNativeBoundary(t *testing.T) {
 						policy = rewriteActiveTestPolicy
 					}
 					var paths []string
-					checks := newPRChecksFixture()
 					_, policies := rewriteTestServer(t, policy, func(w http.ResponseWriter, r *http.Request) {
 						req := decodeCLIRequest(t, w, r)
 						paths = append(paths, req["path"].(string))
-						writeCLIEnvelope(t, w, prDetailExportResponse(t, checks, req))
+						http.Error(w, "unexpected relay request", http.StatusInternalServerError)
 					})
 					t.Setenv("OCTOPOOL_NO_FALLBACK", "")
 					if noFallback {
@@ -209,7 +208,7 @@ func TestRunGHPRDetailExportDirectDelegationControls(t *testing.T) {
 			args := append([]string{"pr", "view", test.selector, "-R", "acme/repo"}, test.flags...)
 			original := append([]string(nil), args...)
 			var out, stderr bytes.Buffer
-			result := handleGHPR(t.Context(), args[1:], &out)
+			result := runGHTopLevel(t.Context(), append([]string{"pr"}, args[1:]...), &out)
 			if result.action != ghDelegate || result.err != nil || out.Len() != 0 || data.Load() != 0 || policies.Load() != 0 {
 				t.Fatalf("unmodeled shape must stay direct delegation: %+v out=%q", result, out.String())
 			}
@@ -509,6 +508,8 @@ func TestRunGHPRViewExportIncompleteShapes(t *testing.T) {
 		{"missing-author", "author", map[string]any{}},
 		{"unknown-author", "author", map[string]any{"user": map[string]any{"login": "other", "node_id": "M_other", "type": "Mannequin"}}},
 		{"unknown-bot-login", "author", map[string]any{"user": map[string]any{"login": "unmapped-bot", "type": "Bot"}}},
+		{"organization-empty-node-id", "headRepositoryOwner", map[string]any{"head": map[string]any{"user": map[string]any{"node_id": "", "login": "org", "type": "Organization"}}}},
+		{"organization-empty-login", "headRepositoryOwner", map[string]any{"head": map[string]any{"user": map[string]any{"node_id": "O_org", "login": "", "type": "Organization"}}}},
 		{"missing-label-id", "labels", map[string]any{"labels": []any{map[string]any{"name": "bug", "description": "", "color": "abc123"}}}},
 		{"null-labels", "labels", map[string]any{"labels": nil}},
 		{"invalid-description", "labels", map[string]any{"labels": []any{map[string]any{"node_id": "LA_bug", "name": "bug", "description": 12, "color": "abc123"}}}},

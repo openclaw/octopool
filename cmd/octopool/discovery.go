@@ -25,12 +25,8 @@ type serverDiscovery struct {
 }
 
 type resolvedLoginServer struct {
-	InputURL  string
-	APIBase   string
-	AppBase   string
-	Pool      string
-	Org       string
-	Discovery serverDiscovery
+	APIBase string
+	Pool    string
 }
 
 func discoverLoginServer(
@@ -60,15 +56,10 @@ func discoverLoginServer(
 	if !trustRedirect && !sameURLHost(inputURL, apiBase) {
 		return resolvedLoginServer{}, fmt.Errorf("discovery api_base host %q differs from login host %q; rerun with --trust-discovery-redirect if you trust this server", mustURLHostPort(apiBase), mustURLHostPort(inputURL))
 	}
-	appBase := strings.TrimRight(firstNonEmpty(discovery.AppBase, apiBase), "/")
 	pool := firstNonEmpty(poolOverride, envDefault("OCTOPOOL_POOL", ""), discovery.DefaultPool, "maintainers")
 	return resolvedLoginServer{
-		InputURL:  inputURL,
-		APIBase:   apiBase,
-		AppBase:   appBase,
-		Pool:      pool,
-		Org:       discovery.AllowedOrg,
-		Discovery: discovery,
+		APIBase: apiBase,
+		Pool:    pool,
 	}, nil
 }
 

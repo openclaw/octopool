@@ -31,8 +31,8 @@ func TestPRViewGateFieldsRequestLiveRead(t *testing.T) {
 				}
 			})
 			var out bytes.Buffer
-			result := handleGHPR(t.Context(), []string{
-				"view", "7", "-R", "openclaw/octopool", "--json", "number," + field,
+			result := runGHTopLevel(t.Context(), []string{
+				"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number," + field,
 			}, &out)
 			if result.err != nil || result.action != ghComplete {
 				t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -47,6 +47,7 @@ func TestPRViewGateFieldsRequestLiveRead(t *testing.T) {
 // Fields that describe the PR itself rather than its current gate state stay on
 // the shared cache; that is the whole point of the relay.
 func TestPRViewStableFieldsStayCached(t *testing.T) {
+	t.Setenv("OCTOPOOL_FRESH", "")
 	var seen map[string]any
 	relayTestServer(t, func(body map[string]any) any {
 		seen, _ = body["headers"].(map[string]any)
@@ -57,8 +58,8 @@ func TestPRViewStableFieldsStayCached(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"view", "7", "-R", "openclaw/octopool", "--json", "number,title",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number,title",
 	}, &out)
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)

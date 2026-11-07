@@ -11,6 +11,7 @@ const codexBatch = readFileSync(
   new URL("../cmd/octopool/testdata/graphql-read/codex-batch.txt", import.meta.url),
   "utf8",
 );
+const publicBatch = codexBatch.replaceAll("mergeStateStatus", "");
 const envelope = (query: string, variables: unknown = {}) =>
   validateRelayRequest({
     pool: "maintainers",
@@ -31,6 +32,7 @@ describe("repository GraphQL AST boundary", () => {
     '{ r: repository(owner:"openclaw", name:"octopool") @include(if:true) { name @skip(if:false) } __typename }',
     'query Q { ...Root } fragment Root on Query { repository(owner:"openclaw",name:"octopool") { ...Names } } fragment Names on Repository { name }',
     root("owner { repositories(first:10) { nodes { name } } }"),
+    root('object(expression:"mergeStateStatus") { id }'),
     '{ a:repository(owner:"OpenClaw",name:"Octopool"){name} b:repository(owner:"openclaw",name:"octopool"){id} __typename }',
     'query { ...Roots } fragment Roots on Query { a:repository(owner:"openclaw",name:"octopool"){name} ... on Query { b:repository(owner:"OPENCLAW",name:"OCTOPOOL"){id} } }',
   ])("accepts a bounded public repository read: %s", (query) => {
@@ -43,6 +45,12 @@ describe("repository GraphQL AST boundary", () => {
     "{ viewer { login } }",
     root("viewerPermission"),
     root("safe: viewerCanAdminister"),
+    root("pullRequest(number:42) { mergeStateStatus }"),
+    root("pullRequest(number:42) { status: mergeStateStatus }"),
+    `${root("pullRequest(number:42) { ...Merge }")} fragment Merge on PullRequest { mergeStateStatus }`,
+    root("pullRequest(number:42) { ... on PullRequest { mergeStateStatus } }"),
+    `${root("name")} fragment Hidden on PullRequest { mergeStateStatus }`,
+    '{ a:repository(owner:"openclaw",name:"octopool"){name} b:repository(owner:"openclaw",name:"octopool"){pullRequest(number:42){mergeStateStatus}} }',
     root("__schema { types { name } }"),
     root('__type(name:"User") { name }'),
     ...[
@@ -117,8 +125,12 @@ describe("repository GraphQL AST boundary", () => {
     ).toThrow();
   });
 
-  it("accepts the exact captured Codex batch only after the CLI removes viewer", () => {
-    const query = codexBatch.replace("viewer { login }", "");
+  it("keeps captured merge-state batches native after removing viewer", () => {
+    expect(() => parseGraphQLRead({ query: codexBatch.replace("viewer { login }", "") })).toThrow();
+  });
+
+  it("accepts public batches after the CLI removes viewer", () => {
+    const query = publicBatch.replace("viewer { login }", "");
     expect(parseGraphQLRead({ query })).toMatchObject({ owner: "openclaw", repo: "openclaw" });
     expect(() =>
       parseGraphQLRead({
@@ -167,7 +179,7 @@ describe("repository GraphQL AST boundary", () => {
   });
 
   it("partitions batched pages and PRs by the full query and variable values", async () => {
-    const query = codexBatch.replace("viewer { login }", "");
+    const query = publicBatch.replace("viewer { login }", "");
     const request = envelope(query);
     const route = classifyRoute(request, defaultPolicy("openclaw"));
     const key = await githubCacheKey(request.pool, request, route);

@@ -12,6 +12,15 @@ type RelayEnvelope = {
 describe("Worker end-to-end GitHub App identity", () => {
   it("exchanges a signed app JWT and reuses the installation token", async () => {
     await seedGitHubApp("TEST_APP_KEY", 123);
+    const publicPEM = (env as unknown as { TEST_APP_PUBLIC_KEY: string }).TEST_APP_PUBLIC_KEY;
+    const publicKey = await crypto.subtle.importKey(
+      "spki",
+      decodeBase64(publicPEM.replace(/-----[^-]+-----|\s/g, "")),
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const started = Math.floor(Date.now() / 1000);
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
@@ -24,7 +33,20 @@ describe("Worker end-to-end GitHub App identity", () => {
         const jwt = bearer(request);
         expect(jwt).toMatch(/^[^.]+\.[^.]+\.[^.]+$/);
         expect(decodeJWTPart(jwt!.split(".")[0]!)).toEqual({ alg: "RS256", typ: "JWT" });
-        expect(decodeJWTPart(jwt!.split(".")[1]!)).toMatchObject({ iss: "777" });
+        const [header, payload, signature] = jwt!.split(".") as [string, string, string];
+        const claims = decodeJWTPart(payload) as { iss: string; iat: number; exp: number };
+        expect(claims.iss).toBe("777");
+        expect(claims.iat).toBeGreaterThanOrEqual(started - 60);
+        expect(claims.iat).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) - 60);
+        expect(claims.exp - claims.iat).toBe(600);
+        expect(
+          await crypto.subtle.verify(
+            "RSASSA-PKCS1-v1_5",
+            publicKey,
+            decodeBase64(signature),
+            new TextEncoder().encode(`${header}.${payload}`),
+          ),
+        ).toBe(true);
         return jsonResponse({
           token: "installation-token",
           expires_at: new Date(Date.now() + 3_600_000).toISOString(),
@@ -61,7 +83,7 @@ describe("Worker end-to-end GitHub App identity", () => {
   });
 
   it("surfaces and audits installation-token exchange failure", async () => {
-    await seedGitHubApp("TEST_APP_KEY_FAILURE", 456);
+    await seedGitHubApp("TEST_APP_KEY", 456);
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
       const url = new URL(request.url);
@@ -107,4 +129,10 @@ async function seedGitHubApp(secretRef: string, installationId: number): Promise
 function decodeJWTPart(value: string): unknown {
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
   return JSON.parse(atob(base64)) as unknown;
+}
+
+function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), (char) =>
+    char.charCodeAt(0),
+  );
 }

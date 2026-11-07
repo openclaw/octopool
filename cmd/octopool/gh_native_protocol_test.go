@@ -25,7 +25,7 @@ func TestNativeGHMergeHeaderProtocol(t *testing.T) {
 	if !filepath.IsAbs(bin) {
 		t.Fatal("native test binary must be absolute")
 	}
-	for _, code := range []int{200, 403} {
+	for _, code := range []int{200, 403, 405} {
 		for _, color := range []bool{false, true} {
 			t.Run(fmt.Sprintf("status_%d_color_%t", code, color), func(t *testing.T) {
 				const body = `{"message":"synthetic response"}`
@@ -86,7 +86,7 @@ func TestNativeGHMergeHeaderProtocol(t *testing.T) {
 				plainOut, plainErr, plainExit := run(false)
 				includedOut, includedErr, includedExit := run(true)
 				wantExit := 0
-				if code == 403 {
+				if code >= 400 {
 					wantExit = 1
 				}
 				if plainOut != "" || plainErr != includedErr || plainExit != wantExit || includedExit != wantExit {

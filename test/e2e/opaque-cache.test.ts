@@ -122,22 +122,30 @@ describe("opaque cache retirement at the Worker", () => {
     const { request } = await seedOld();
     await expire(fixture.shared);
     await expire(fixture.identity);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) =>
-        new URL(new Request(input, init).url).pathname === "/repos/openclaw/octopool"
-          ? jsonResponse({ private: false })
-          : jsonResponse(
-              { message: "rate limited" },
-              429,
-              rateHeaders({ remaining: 0, retryAfter: 60 }),
-            ),
-      ),
+    const upstream = vi.fn<typeof fetch>(async (input, init) =>
+      new URL(new Request(input, init).url).pathname === "/repos/openclaw/octopool"
+        ? jsonResponse({ private: false })
+        : jsonResponse(
+            { message: "rate limited" },
+            429,
+            rateHeaders({ remaining: 0, retryAfter: 60 }),
+          ),
     );
+    vi.stubGlobal("fetch", upstream);
     const response = await relay(request.path, undefined, request);
-    const text = await response.text();
-    expect.soft(text).not.toContain("�A");
-    expect.soft(text).not.toContain('"cache":"stale"');
+    expect(response.status).toBe(424);
+    const result = await response.json();
+    expect(result).toMatchObject({
+      error: { code: "fallback_local", details: { reason: "github_rate_limited" } },
+    });
+    expect(result).not.toHaveProperty("body");
+    expect(result).not.toHaveProperty("relay");
+    const resourceCalls = upstream.mock.calls
+      .map(([input, init]) => new Request(input, init))
+      .filter((request) => new URL(request.url).pathname === fixture.request.path);
+    expect(resourceCalls).toHaveLength(1);
+    expect(bearer(resourceCalls[0]!)).toBe("test-primary-token");
+    expect(resourceCalls[0]!.headers.get("if-none-match")).toBeNull();
   });
 
   it("keeps a frozen default JSON body warm", async () => {

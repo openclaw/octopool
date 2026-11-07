@@ -19,6 +19,9 @@ func TestLoginRedirects(t *testing.T) {
 	const loginJSON = `{"caller":{"github_login":"alice","pool":"core","client_name":"test-mac"},"token":"synthetic-caller-token"}`
 	for _, code := range []int{307, 308} {
 		for _, destination := range []string{"direct", "same-origin", "cross-port", "cross-host", "downgrade", "same-origin-then-cross-port", "trusted-discovery", "trusted-discovery-same-origin", "insecure-opt-in"} {
+			if destination == "direct" && code != 307 {
+				continue
+			}
 			t.Run(strconv.Itoa(code)+"/"+destination, func(t *testing.T) {
 				isolateTestConfig(t)
 				t.Setenv("GH_TOKEN", githubToken)

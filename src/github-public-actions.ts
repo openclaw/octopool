@@ -133,9 +133,6 @@ function actionsRunListRequest(
       ...(workflow === undefined ? [] : ["workflows", decodeURIComponentSafe(workflow)]),
     ])}`,
   );
-  if (query.search !== "") {
-    url.searchParams.set("query", query.search);
-  }
   return htmlWebRequest(env, url.toString(), async (body, headers, status) => {
     const html = new TextDecoder().decode(body);
     const parsed = parseActionsRunListHTML(html, route.owner!, route.repo!);
@@ -362,7 +359,7 @@ function actionsRunJobsRequest(
 
 function actionsListQuery(
   query: Record<string, string | string[]> | undefined,
-): { perPage: number; search: string } | undefined {
+): { perPage: number } | undefined {
   const allowed = new Set(["per_page", "page", "branch", "status"]);
   if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
     return undefined;
@@ -374,7 +371,7 @@ function actionsListQuery(
   if (scalarQuery(query, "branch") !== undefined || scalarQuery(query, "status") !== undefined) {
     return undefined;
   }
-  return { perPage, search: "" };
+  return { perPage };
 }
 
 function actionsJobsQuery(

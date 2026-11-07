@@ -92,14 +92,10 @@ func relayPRHead(ctx context.Context, client ghRelayClient, repo, number string,
 	if err != nil {
 		return prCheckHead{}, err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return prCheckHead{}, err
-	}
 	var pr struct {
 		Head map[string]json.RawMessage `json:"head"`
 	}
-	if err := json.Unmarshal(body, &pr); err != nil {
+	if err := decodeRelayJSON(envelope, &pr); err != nil {
 		return prCheckHead{}, err
 	}
 	var head prCheckHead

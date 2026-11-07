@@ -21,21 +21,14 @@ func cloneQuery(input map[string]any) map[string]any {
 	return out
 }
 
-func handleGHIssue(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("issue "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHIssue(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "view":
 		repo, number, ok, err := repoNumber(opts)
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) {
+		if !ok {
 			return ghDelegated()
 		}
 		if nativeHumanFormat(opts) {
@@ -109,16 +102,8 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var issue map[string]any
-	if err := json.Unmarshal(body, &issue); err != nil {
+	if err := client.readJSON(ctx, request, &issue); err != nil {
 		return err
 	}
 	// Native gh reports PRs as MERGED/CLOSED with PR-only fields; REST only says "closed".
@@ -198,16 +183,8 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 		paged.query = cloneQuery(request.query)
 		paged.query["per_page"] = strconv.Itoa(relayPageSize)
 		paged.query["page"] = strconv.Itoa(page)
-		envelope, err := client.do(ctx, paged)
-		if err != nil {
-			return err
-		}
-		body, err := envelopeBodyBytes(envelope)
-		if err != nil {
-			return err
-		}
 		var items []map[string]any
-		if err := json.Unmarshal(body, &items); err != nil {
+		if err := client.readJSON(ctx, paged, &items); err != nil {
 			return err
 		}
 		for _, item := range items {

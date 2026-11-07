@@ -3,6 +3,7 @@ allowBuilds:
   sharp: false
   workerd: true
 overrides:
+  workerd: 1.20261021.1
   esbuild: 0.28.2
   nanoid@<3.3.17: 3.3.19
   vite: 8.3.2

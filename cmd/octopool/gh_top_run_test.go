@@ -115,8 +115,8 @@ func TestRunGHRunViewComposesJobs(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"view",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "view",
 		"27398328238",
 		"-R", "openclaw/octopool",
 		"--json", "databaseId,status,conclusion,headSha,jobs",
@@ -156,8 +156,8 @@ func TestRunGHRunViewUsesRequestedAttempt(t *testing.T) {
 		}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"view", "27398328238", "--attempt", "1", "-R", "openclaw/octopool", "--json", "attempt,jobs",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "view", "27398328238", "--attempt", "1", "-R", "openclaw/octopool", "--json", "attempt,jobs",
 	}, &out)
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -175,8 +175,8 @@ func TestRunGHRunViewUsesRequestedAttempt(t *testing.T) {
 
 func TestRunGHRunListDoesNotAcceptJobs(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "list",
 		"-R", "openclaw/octopool",
 		"--json", "jobs",
 	}, &out)
@@ -187,8 +187,8 @@ func TestRunGHRunListDoesNotAcceptJobs(t *testing.T) {
 
 func TestRunGHRunListDoesNotAcceptID(t *testing.T) {
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "list",
 		"-R", "openclaw/octopool",
 		"--json", "id",
 	}, &out)
@@ -206,8 +206,8 @@ func TestRunGHRunListMapsDisplayTitle(t *testing.T) {
 		}}}
 	})
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"run", "list",
 		"-R", "openclaw/octopool",
 		"--json", "databaseId,displayTitle,number",
 	}, &out)
@@ -293,7 +293,7 @@ func TestHumanRunViewRejectsContradictoryJobs(t *testing.T) {
 				return map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "owned"}
 			})
 			var out bytes.Buffer
-			result := handleGHRun(t.Context(), []string{"view", "42", "-R", "acme/repo"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"run", "view", "42", "-R", "acme/repo"}, &out)
 			if !isLocalFallback(result.err) || out.Len() != 0 {
 				t.Fatalf("human view must fail before output with ordinary fallback available: err=%v stdout=%q", result.err, out.String())
 			}
@@ -826,6 +826,67 @@ func TestRunExportWorkflowMetadata(t *testing.T) {
 				}
 			}
 			assertRunExportJSON(t, out, want)
+		})
+	}
+}
+
+func TestRunExportWorkflowCatalogueStopsWhenResolved(t *testing.T) {
+	for _, workflowID := range []int{9, 109} {
+		t.Run(strconv.Itoa(workflowID), func(t *testing.T) {
+			f := newRunExportFixture()
+			f.workflows = nil
+			for i := 1; i <= 1000; i++ {
+				f.workflows = append(f.workflows, map[string]any{"id": i, "name": fmt.Sprintf("Workflow %d", i)})
+			}
+			second := maps.Clone(f.run)
+			second["id"], second["workflow_id"] = 43, workflowID
+			f.runs = []any{f.run, second}
+			out, err := runExportCommand(t, f, runExportArgs("list", "databaseId,workflowName"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertRunExportJSON(t, out, fmt.Sprintf(`[{"databaseId":42,"workflowName":"Workflow 9"},{"databaseId":43,"workflowName":"Workflow %d"}]`, workflowID))
+			wantCalls := 1 + (workflowID+99)/100
+			if len(f.requests) != wantCalls {
+				t.Errorf("resolved workflow names must stop catalogue reads: got %d requests, want %d; paths=%v", len(f.requests), wantCalls, f.paths())
+			}
+		})
+	}
+}
+
+func TestRunExportWorkflowCatalogueValidatesResolvedPage(t *testing.T) {
+	for _, test := range []struct{ name, reason string }{
+		{"duplicate_id", "pagination_identity_invalid"},
+		{"malformed_name", "terminal"},
+		{"unsafe_id", "unsupported_run_export"},
+		{"short_page", "pagination_incomplete"},
+		{"over_bound", "pagination_exhausted"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newRunExportFixture()
+			items := make([]any, 100)
+			for i := range items {
+				items[i] = map[string]any{"id": i + 1, "name": "CI"}
+			}
+			total := 200
+			switch test.name {
+			case "duplicate_id":
+				items[99].(map[string]any)["id"] = 9
+			case "malformed_name":
+				items[99].(map[string]any)["name"] = true
+			case "unsafe_id":
+				items[99].(map[string]any)["id"] = int64(1 << 53)
+			case "short_page":
+				items = items[:99]
+			case "over_bound":
+				total = 1001
+			}
+			f.catalogue = map[string]any{"total_count": total, "workflows": items}
+			out, err := runExportCommand(t, f, runExportArgs("list", "workflowName"))
+			assertRunExportFailure(t, out, err, test.reason)
+			if len(f.requests) != 2 {
+				t.Errorf("invalid resolved page must fail before further reads: %v", f.paths())
+			}
 		})
 	}
 }

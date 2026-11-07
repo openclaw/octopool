@@ -75,13 +75,7 @@ function sanitizeRepoView(input: Record<string, unknown>): Record<string, unknow
     "subscribers_count",
     "organization",
   ]);
-  const body: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (allowed.has(key)) {
-      body[key] = stripTokenScopedGitHubFields(value);
-    }
-  }
-  return body;
+  return projectPublicFields(input, allowed);
 }
 
 function sanitizeUserView(input: Record<string, unknown>): Record<string, unknown> {
@@ -119,6 +113,13 @@ function sanitizeUserView(input: Record<string, unknown>): Record<string, unknow
     "created_at",
     "updated_at",
   ]);
+  return projectPublicFields(input, allowed);
+}
+
+function projectPublicFields(
+  input: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
     if (allowed.has(key)) {

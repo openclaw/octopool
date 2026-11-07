@@ -8,7 +8,7 @@ export function parseIssueHTML(
   repo: string,
   number: number,
 ): Record<string, unknown> | undefined {
-  const issue = preloadedRepositoryValue(html, "IssueViewerViewQuery", "issue");
+  const issue = recordValue(preloadedRepository(html, "IssueViewerViewQuery")?.issue);
   if (
     issue === undefined ||
     issue.__typename === "PullRequest" ||
@@ -80,54 +80,32 @@ export function parseIssueListHTML(
         : typeof node.titleHtml === "string"
           ? node.titleHtml
           : undefined;
+    const state = kind === "pr" ? node.pullRequestState : node.state;
     if (
       author === undefined ||
       labels === undefined ||
       titleHTML === undefined ||
       typeof node.createdAt !== "string" ||
-      typeof node.updatedAt !== "string"
+      typeof node.updatedAt !== "string" ||
+      typeof state !== "string" ||
+      (typeof node.closedAt !== "string" && node.closedAt !== null) ||
+      (kind === "pr" && typeof node.isDraft !== "boolean")
     ) {
       return undefined;
     }
     const number = node.number as number;
-    if (kind === "pr") {
-      if (
-        typeof node.pullRequestState !== "string" ||
-        typeof node.isDraft !== "boolean" ||
-        (typeof node.closedAt !== "string" && node.closedAt !== null)
-      ) {
-        return undefined;
-      }
-      items.push({
-        number,
-        title: plainHTML(titleHTML),
-        state: node.pullRequestState,
-        html_url: `https://github.com/${owner}/${repo}/pull/${number}`,
-        user: author,
-        created_at: node.createdAt,
-        updated_at: node.updatedAt,
-        closed_at: node.closedAt,
-        merged_at: node.pullRequestState === "MERGED" ? node.closedAt : null,
-        draft: node.isDraft,
-        labels,
-      });
-      continue;
-    }
-    if (
-      typeof node.state !== "string" ||
-      (typeof node.closedAt !== "string" && node.closedAt !== null)
-    ) {
-      return undefined;
-    }
     items.push({
       number,
       title: plainHTML(titleHTML),
-      state: node.state,
-      html_url: `https://github.com/${owner}/${repo}/issues/${number}`,
+      state,
+      html_url: `https://github.com/${owner}/${repo}/${kind === "pr" ? "pull" : "issues"}/${number}`,
       user: author,
       created_at: node.createdAt,
       updated_at: node.updatedAt,
       closed_at: node.closedAt,
+      ...(kind === "pr"
+        ? { merged_at: state === "MERGED" ? node.closedAt : null, draft: node.isDraft }
+        : {}),
       labels,
     });
   }
@@ -234,21 +212,12 @@ export function parseLabelListHTML(
   }
   const items: Record<string, unknown>[] = [];
   for (const edge of edges) {
-    const label = recordValue(recordValue(edge)?.node);
-    if (
-      label === undefined ||
-      typeof label.id !== "string" ||
-      typeof label.name !== "string" ||
-      typeof label.color !== "string" ||
-      (typeof label.description !== "string" && label.description !== null)
-    ) {
+    const label = labelJSON(recordValue(edge)?.node);
+    if (label === undefined) {
       return undefined;
     }
     items.push({
-      id: label.id,
-      name: label.name,
-      description: label.description,
-      color: label.color,
+      ...label,
       url: `https://github.com/${owner}/${repo}/labels/${encodeURIComponent(label.name)}`,
     });
   }
@@ -272,14 +241,6 @@ function preloadedRepository(html: string, queryName: string): Record<string, un
     return data === undefined ? undefined : recordValue(data.repository);
   }
   return undefined;
-}
-
-function preloadedRepositoryValue(
-  html: string,
-  queryName: string,
-  key: string,
-): Record<string, unknown> | undefined {
-  return recordValue(preloadedRepository(html, queryName)?.[key]);
 }
 
 function embeddedAppJSON(html: string): Record<string, unknown> | undefined {
@@ -317,24 +278,32 @@ function labelConnectionJSON(value: unknown): Record<string, unknown>[] | undefi
   }
   const labels: Record<string, unknown>[] = [];
   for (const raw of nodes) {
-    const label = recordValue(raw);
-    if (
-      label === undefined ||
-      typeof label.id !== "string" ||
-      typeof label.name !== "string" ||
-      typeof label.color !== "string" ||
-      (typeof label.description !== "string" && label.description !== null)
-    ) {
+    const label = labelJSON(raw);
+    if (label === undefined) {
       return undefined;
     }
-    labels.push({
-      id: label.id,
-      name: label.name,
-      description: label.description,
-      color: label.color,
-    });
+    labels.push(label);
   }
   return sortByNodeID(labels);
+}
+
+function labelJSON(value: unknown) {
+  const label = recordValue(value);
+  if (
+    label === undefined ||
+    typeof label.id !== "string" ||
+    typeof label.name !== "string" ||
+    typeof label.color !== "string" ||
+    (typeof label.description !== "string" && label.description !== null)
+  ) {
+    return undefined;
+  }
+  return {
+    id: label.id,
+    name: label.name,
+    description: label.description,
+    color: label.color,
+  };
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {

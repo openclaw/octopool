@@ -44,7 +44,7 @@ const buildExcludes = [];
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
-const allPages = allMarkdown(docsDir).map((file) => {
+const allPages = filesWithExtension(docsDir, ".md").map((file) => {
   const rel = path.relative(docsDir, file).replaceAll(path.sep, "/");
   const raw = fs.readFileSync(file, "utf8");
   const { frontmatter, body } = parseFrontmatter(raw);
@@ -181,13 +181,13 @@ function normalizePermalink(value) {
   return v;
 }
 
-function allMarkdown(dir) {
+function filesWithExtension(dir, extension) {
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .flatMap((entry) => {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) return allMarkdown(full);
-      return entry.name.endsWith(".md") ? [full] : [];
+      if (entry.isDirectory()) return filesWithExtension(full, extension);
+      return entry.name.endsWith(extension) ? [full] : [];
     })
     .sort();
 }
@@ -576,12 +576,7 @@ function layout({ page, html, toc, prev, next, sectionName }) {
 }
 
 function pageCanonicalUrl(page) {
-  if (!siteBase) return page.outRel;
-  if (page.outRel === "index.html") return `${siteBase}/`;
-  const rel = page.outRel.endsWith("/index.html")
-    ? page.outRel.slice(0, -"index.html".length)
-    : page.outRel;
-  return `${siteBase}/${rel}`;
+  return siteBase ? pageUrl(siteBase, page.outRel) : page.outRel;
 }
 
 function tagHtml([tag, k1, v1, k2, v2]) {
@@ -669,29 +664,12 @@ function escapeAttr(value) {
 
 function highlightCode(code, lang) {
   const language = (lang || "text").toLowerCase();
-  if (
-    language === "bash" ||
-    language === "sh" ||
-    language === "shell" ||
-    language === "zsh" ||
-    language === "console"
-  ) {
-    return highlightShell(code);
-  }
-  if (language === "json" || language === "json5" || language === "jsonc")
-    return highlightJson(code);
-  if (
-    language === "ts" ||
-    language === "typescript" ||
-    language === "js" ||
-    language === "javascript" ||
-    language === "tsx" ||
-    language === "jsx"
-  ) {
+  if (["bash", "sh", "shell", "zsh", "console"].includes(language)) return highlightShell(code);
+  if (["json", "json5", "jsonc"].includes(language)) return highlightJson(code);
+  if (["ts", "typescript", "js", "javascript", "tsx", "jsx"].includes(language))
     return highlightJs(code);
-  }
-  if (language === "go" || language === "golang") return highlightGo(code);
-  if (language === "yaml" || language === "yml") return highlightYaml(code);
+  if (["go", "golang"].includes(language)) return highlightGo(code);
+  if (["yaml", "yml"].includes(language)) return highlightYaml(code);
   return escapeHtml(code);
 }
 
@@ -735,25 +713,16 @@ function highlightShell(code) {
 }
 
 function highlightShellLine(line) {
-  const stash = [];
-  const stashAdd = (match, cls) => {
-    const idx = stash.length;
-    stash.push(`<span class="${cls}">${escapeHtml(match)}</span>`);
-    return stashToken(idx);
-  };
-  let working = line;
-  working = working.replace(/(?:'[^']*'|"[^"]*")/g, (m) => stashAdd(m, "hl-s"));
-  working = working.replace(/\s#.*$/g, (m) => stashAdd(m, "hl-c"));
-  working = working.replace(
-    /(^|\s)(--?[A-Za-z][A-Za-z0-9-]*)/g,
-    (_, lead, flag) => `${escapeHtml(lead)}${stashAdd(flag, "hl-f")}`,
-  );
-  working = working.replace(
-    /\b(octopool|gh|brew|go|git|make|sudo|cd|export|cat|curl|jq|ls|mv|cp|rm|mkdir|wrangler|pnpm|npm|node|dig)\b/g,
-    (m) => stashAdd(m, "hl-cmd"),
-  );
-  working = working.replace(/\b(\d+(?:\.\d+)?)\b/g, (m) => stashAdd(m, "hl-n"));
-  return restoreStashTokens(escapeHtml(working), stash);
+  return withStash(line, [
+    [/(?:'[^']*'|"[^"]*")/g, "hl-s"],
+    [/\s#.*$/g, "hl-c"],
+    [/(?<!\S)--?[A-Za-z][A-Za-z0-9-]*/g, "hl-f"],
+    [
+      /\b(octopool|gh|brew|go|git|make|sudo|cd|export|cat|curl|jq|ls|mv|cp|rm|mkdir|wrangler|pnpm|npm|node|dig)\b/g,
+      "hl-cmd",
+    ],
+    [/\b(\d+(?:\.\d+)?)\b/g, "hl-n"],
+  ]);
 }
 
 function highlightJson(code) {
@@ -810,29 +779,21 @@ function highlightYaml(code) {
 }
 
 function highlightYamlValue(rest) {
-  if (!rest.trim()) return escapeHtml(rest);
   const trimmed = rest.trim();
-  if (/^["'].*["']$/.test(trimmed)) {
-    return (
-      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-s">${escapeHtml(trimmed)}</span>`
-    );
-  }
-  if (/^(true|false|null|~)$/i.test(trimmed)) {
-    return (
-      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-m">${escapeHtml(trimmed)}</span>`
-    );
-  }
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return (
-      escapeHtml(rest.replace(trimmed, "")) + `<span class="hl-n">${escapeHtml(trimmed)}</span>`
-    );
-  }
-  return escapeHtml(rest);
+  let className;
+  if (/^["'].*["']$/.test(trimmed)) className = "hl-s";
+  else if (/^(true|false|null|~)$/i.test(trimmed)) className = "hl-m";
+  else if (/^-?\d+(\.\d+)?$/.test(trimmed)) className = "hl-n";
+  else return escapeHtml(rest);
+  return (
+    escapeHtml(rest.replace(trimmed, "")) +
+    `<span class="${className}">${escapeHtml(trimmed)}</span>`
+  );
 }
 
 function validateLinks(outputDir) {
   const failures = [];
-  for (const file of allHtml(outputDir)) {
+  for (const file of filesWithExtension(outputDir, ".html")) {
     const html = fs.readFileSync(file, "utf8");
     for (const match of html.matchAll(/href="([^"]+)"/g)) {
       const href = match[1];
@@ -860,15 +821,4 @@ function validateLinks(outputDir) {
   if (failures.length) {
     throw new Error(`broken docs links:\n${failures.join("\n")}`);
   }
-}
-
-function allHtml(dir) {
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .flatMap((entry) => {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) return allHtml(full);
-      return entry.name.endsWith(".html") ? [full] : [];
-    })
-    .sort();
 }

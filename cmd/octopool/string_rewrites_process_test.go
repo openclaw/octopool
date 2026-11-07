@@ -19,7 +19,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 type rewriteCapture struct {
@@ -43,6 +42,27 @@ func TestRewriteCaptureProcess(t *testing.T) {
 			args = args[i+1:]
 			break
 		}
+	}
+	if len(args) == 4 && args[0] == "api" && strings.HasPrefix(args[1], "repos/") && strings.Contains(args[1], "/pulls/") && strings.Count(args[1], "/") == 4 && args[2] == "--method=GET" && args[3] == "--hostname=github.com" {
+		if server := os.Getenv("OCTOPOOL_TEST_REWRITE_PR_READ_URL"); server != "" {
+			req, _ := http.NewRequest("GET", server+"/"+args[1], nil)
+			req.Header.Set("Authorization", "Bearer "+os.Getenv("GH_TOKEN"))
+			req.Header.Set("Accept", "application/vnd.github+json")
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				os.Exit(86)
+			}
+			defer resp.Body.Close()
+			_, _ = io.Copy(os.Stdout, resp.Body)
+			if resp.StatusCode != 200 {
+				os.Exit(1)
+			}
+		} else {
+			fmt.Fprintln(os.Stdout, `{"state":"open","merged":false}`)
+		}
+		os.Exit(0)
 	}
 	if len(args) > 1 && args[0] == "api" && args[1] == "rate_limit" && slices.Contains(args, "--cache=60s") {
 		if path := os.Getenv("OCTOPOOL_TEST_GRAPHQL_PROBE"); path != "" {
@@ -1092,7 +1112,11 @@ func TestStringRewriteIssueAttachmentStrictBlocks(t *testing.T) {
 						args = append(args, "--attach", image)
 					}
 					args = append(args, test.args...)
-					if err := execRealGHWithStdinAndEnv(t.Context(), args, strings.NewReader(test.body), io.Discard, io.Discard, os.Environ()); err != errRewriteBlocked {
+					want := errRewriteBlocked
+					if test.name == "unknown flag" || action == "edit" && (test.name == "duplicate boolean" || test.name == "invalid boolean") {
+						want = errRewriteCommandShape // --edit-last is not modeled for issue edit.
+					}
+					if err := execRealGHWithStdinAndEnv(t.Context(), args, strings.NewReader(test.body), io.Discard, io.Discard, os.Environ()); err != want {
 						t.Fatalf("expected strict block, got %v", err)
 					}
 					if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
@@ -1204,7 +1228,11 @@ func TestStringRewriteAttachmentBlocks(t *testing.T) {
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					capturePath := captureRewriteGH(t)
-					if err := execRealGH(t.Context(), test.args, io.Discard, io.Discard); err != errRewriteBlocked {
+					want := errRewriteBlocked
+					if test.name == "delete last with attachment" || command[1] == "edit" && test.name == "edit last without body" {
+						want = errRewriteCommandShape
+					}
+					if err := execRealGH(t.Context(), test.args, io.Discard, io.Discard); err != want {
 						t.Fatalf("error=%v", err)
 					}
 					if _, err := os.Stat(capturePath); !os.IsNotExist(err) {
@@ -1897,29 +1925,18 @@ func TestStringRewriteBestEffortFallback(t *testing.T) {
 		}
 	})
 
-	t.Run("field dispatch does not read idle pipe", func(t *testing.T) {
-		reader, writer, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer reader.Close()
-		defer writer.Close()
+	t.Run("field dispatch does not read stdin", func(t *testing.T) {
+		reader := &declaredInputReader{Reader: strings.NewReader("unused stdin")}
 		policy, err := parseStringRewritePolicy([]byte(rewriteActiveTestPolicy), true)
 		if err != nil {
 			t.Fatal(err)
 		}
-		done := make(chan error, 1)
-		go func() {
-			prepared := &rewritePreparation{}
-			done <- prepareRewriteBestEffort(policy, []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "-f", "message=safe"}, reader, prepared)
-		}()
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(250 * time.Millisecond):
-			t.Fatal("field dispatch attempted to read idle stdin")
+		prepared := &rewritePreparation{}
+		if err := prepareRewriteBestEffort(policy, []string{"workflow", "run", "deploy.yml", "--repo", "acme/repo", "-f", "message=safe"}, reader, prepared); err != nil {
+			t.Fatal(err)
+		}
+		if reader.reads != 0 {
+			t.Fatalf("field dispatch read stdin %d times", reader.reads)
 		}
 	})
 
@@ -2242,7 +2259,7 @@ func TestStringRewriteProcessBlocks(t *testing.T) {
 		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
 			capture := captureRewriteGH(t)
 			err := execRealGHWithStdin(t.Context(), args, strings.NewReader(`{"body":"safe"}`), io.Discard, io.Discard)
-			if !errors.Is(err, errRewriteBlocked) {
+			if !errors.Is(err, errRewriteBlocked) && !errors.Is(err, errRewritePROption) {
 				t.Fatalf("expected block, got %v for %v", err, args)
 			}
 			if strings.Contains(err.Error(), "internal-model") {

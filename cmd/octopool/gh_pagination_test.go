@@ -700,6 +700,7 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	checkRuns := make([]map[string]any, relayPageSize)
 	for index := range checkRuns {
 		checkRuns[index] = map[string]any{
+			"id":         index + 1,
 			"name":       "check-" + strconv.Itoa(index),
 			"status":     "completed",
 			"conclusion": "success",
@@ -718,10 +719,11 @@ func TestRunGHPRChecksFallsBackWhenPaginationIsExhausted(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"checks", "7", "-R", "openclaw/octopool", "--json", "name,state",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "checks", "7", "-R", "openclaw/octopool", "--json", "name,state",
 	}, &out)
-	if result.action != ghFail || !isLocalFallback(result.err) {
+	var fallback localFallbackError
+	if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "pagination_exhausted" || fallback.Relay != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
 	if checkCalls != 1 || out.Len() != 0 {
@@ -760,8 +762,8 @@ func TestRunGHPRViewFallsBackWhenFilePaginationIsExhausted(t *testing.T) {
 	})
 
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{
-		"view", "7", "-R", "openclaw/octopool", "--json", "number,files",
+	result := runGHTopLevel(t.Context(), []string{
+		"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number,files",
 	}, &out)
 	var fallback localFallbackError
 	if result.action != ghFail || !errors.As(result.err, &fallback) || fallback.Reason != "pagination_exhausted" || fallback.Relay != nil {
@@ -783,8 +785,8 @@ func TestRunGHIssueListFallsBackWhenFilteringExhaustsPagination(t *testing.T) {
 	relayTestServer(t, func(map[string]any) any { return items })
 
 	var out bytes.Buffer
-	result := handleGHIssue(t.Context(), []string{
-		"list", "-R", "openclaw/octopool", "--limit", "1", "--json", "number",
+	result := runGHTopLevel(t.Context(), []string{
+		"issue", "list", "-R", "openclaw/octopool", "--limit", "1", "--json", "number",
 	}, &out)
 	if result.action != ghFail || !isLocalFallback(result.err) {
 		t.Fatalf("action=%v err=%v", result.action, result.err)

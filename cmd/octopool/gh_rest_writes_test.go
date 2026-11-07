@@ -99,6 +99,20 @@ func restWriteFixture(t *testing.T, policy string, handler func(*http.Request) (
 		return handler(r)
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	// Let fake native gh's merge-state GET use this same fake GitHub transport.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Scheme, r.URL.Host = "https", "api.github.com"
+		response, err := http.DefaultTransport.RoundTrip(r)
+		if err != nil {
+			http.Error(w, "synthetic transport failure", 500)
+			return
+		}
+		defer response.Body.Close()
+		w.WriteHeader(response.StatusCode)
+		_, _ = io.Copy(w, response.Body)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("OCTOPOOL_TEST_REWRITE_PR_READ_URL", server.URL)
 	return capture
 }
 
@@ -753,7 +767,7 @@ func TestRESTPRWriteRenameHarness(t *testing.T) {
 	t.Log("forbidden canonical\n" + transcript)
 	allowed := runRenameHarness(t, false)
 	t.Log("allowed rename\n" + allowed)
-	if !strings.Contains(transcript, "GET /repositories/401025") || !strings.Contains(transcript, "canonical writes=0") {
+	if !strings.Contains(transcript, "GET /repositories/401025") {
 		t.Fatalf("forbidden transcript:\n%s", transcript)
 	}
 	if strings.Contains(transcript, "PATCH /repos/mislav/hub/pulls/7") {
@@ -808,7 +822,7 @@ func runRenameHarness(t *testing.T, forbid bool) string {
 		if !errors.Is(err, errRewriteBlocked) {
 			t.Fatalf("err=%v stderr=%q", err, stderr.String())
 		}
-		fmt.Fprintf(&b, "result: %s\ncanonical writes=0\n", errRewriteBlocked.Error())
+		fmt.Fprintf(&b, "result: %s\n", errRewriteBlocked.Error())
 		return b.String()
 	}
 	if err != nil {

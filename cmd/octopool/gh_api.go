@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ghAPIRequest struct {
@@ -50,6 +51,8 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	}
 	hostname := "github.com"
 	hostnameExplicit := false
+	cacheValue := ""
+	cacheSet := false
 	request := ghAPIRequest{
 		method:  "GET",
 		query:   map[string]any{},
@@ -58,6 +61,12 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		switch arg {
+		case "--cache":
+			index++
+			if index >= len(args) {
+				return request, true, nil
+			}
+			cacheValue, cacheSet = args[index], true
 		case "--hostname":
 			index++
 			if index >= len(args) {
@@ -97,6 +106,10 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 		case "-f", "-F", "--field", "--raw-field":
 			return request, true, nil
 		default:
+			if value, ok := strings.CutPrefix(arg, "--cache="); ok {
+				cacheValue, cacheSet = value, true
+				continue
+			}
 			if name, value, ok := strings.Cut(arg, "="); ok && (name == "--paginate" || name == "--slurp") {
 				enabled, err := strconv.ParseBool(value)
 				if err != nil {
@@ -167,6 +180,15 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	}
 	if !strings.HasPrefix(request.path, "/") {
 		request.path = "/" + request.path
+	}
+	if cacheSet {
+		duration, err := time.ParseDuration(cacheValue)
+		if err != nil || duration <= 0 || request.method != "GET" || request.path == "/rate_limit" {
+			return request, true, nil
+		}
+		if _, explicitCache := request.headers["cache-control"]; !explicitCache {
+			request.headers["cache-control"] = "max-age=" + strconv.FormatInt(int64(duration/time.Second), 10)
+		}
 	}
 	// Explicit-host reads previously went directly to GitHub, including landing
 	// confirmations. Keep them live unless the caller supplies a cache policy.

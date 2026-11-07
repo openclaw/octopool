@@ -8,18 +8,8 @@ import (
 	"strconv"
 )
 
-func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	if args[0] == "watch" {
-		return handleGHRunWatch(ctx, args[1:], stdout)
-	}
-	opts, early, ok := prepareGHTopOptions("run "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHRun(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "list":
 		if (opts.read.has("--commit") || opts.read.has("--event") || opts.read.has("--created")) && !machineReadable(opts) {
 			return ghDelegated()
@@ -72,7 +62,7 @@ func handleGHRun(ctx context.Context, args []string, stdout io.Writer) ghResult 
 		request.headers = nil
 		return ghCompleted(relayMachineRunList(ctx, stdout, request, repo, opts))
 	case "view":
-		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) || hasRunViewModifiers(opts) {
+		if len(opts.positionals) != 1 || !isDigits(opts.positionals[0]) {
 			return ghDelegated()
 		}
 		repo, ok, err := repoFromOptionOrCurrent(opts.repo)
@@ -112,11 +102,7 @@ func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id st
 	if err != nil {
 		return err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, &run); err != nil {
+	if err := decodeRelayJSON(envelope, &run); err != nil {
 		return err
 	}
 	attempt, ok := positiveJSONInt(run["run_attempt"])
@@ -162,15 +148,11 @@ func relayHumanRunJobsWithMeta(ctx context.Context, client ghRelayClient, repo s
 }
 
 func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool) ([]any, int, error) {
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, 0, err
-	}
 	var response struct {
 		Total any               `json:"total_count"`
 		Jobs  []json.RawMessage `json:"jobs"`
 	}
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return nil, 0, err
 	}
 	if response.Jobs == nil {

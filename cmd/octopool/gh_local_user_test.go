@@ -10,6 +10,8 @@ import (
 )
 
 func TestWriteLocalUserLogin(t *testing.T) {
+	t.Setenv("OCTOPOOL_TOKEN", "")
+	t.Setenv("OCTOPOOL_URL", "")
 	isolateTestConfig(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/pools/maintainers/health" || request.Header.Get("authorization") != "Bearer op_token" {

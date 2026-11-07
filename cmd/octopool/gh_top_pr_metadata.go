@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/url"
 	"strings"
 	"time"
@@ -27,15 +26,7 @@ func relayPRUser(ctx context.Context, client ghRelayClient, raw any, users map[s
 		if !safeRelayRequest(request) {
 			return nil, localFallbackError{Reason: "unsupported pull request user lookup"}
 		}
-		envelope, err := client.do(ctx, request)
-		if err != nil {
-			return nil, err
-		}
-		body, err := envelopeBodyBytes(envelope)
-		if err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(body, &profile); err != nil {
+		if err := client.readJSON(ctx, request, &profile); err != nil {
 			return nil, err
 		}
 		users[key] = profile

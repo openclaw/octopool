@@ -29,7 +29,7 @@ func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
 		{"list", "-R", "openclaw/octopool", "--json", "number,body"},
 	} {
 		var out bytes.Buffer
-		result := handleGHPR(t.Context(), args, &out)
+		result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out)
 		if result.err != nil || result.action != ghComplete {
 			t.Fatalf("pr action=%v err=%v", result.action, result.err)
 		}
@@ -39,7 +39,7 @@ func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
 		{"view", "11", "-R", "openclaw/octopool", "--json", "number,body"},
 	} {
 		var out bytes.Buffer
-		result := handleGHPR(t.Context(), args, &out)
+		result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out)
 		if result.err != nil || result.action != ghComplete {
 			t.Fatalf("pr view action=%v err=%v", result.action, result.err)
 		}
@@ -49,14 +49,14 @@ func TestRunGHPublicSummaryShapesFollowRequestedFields(t *testing.T) {
 		{"view", "5", "-R", "openclaw/octopool", "--json", "number,closedAt"},
 	} {
 		var out bytes.Buffer
-		result := handleGHIssue(t.Context(), args, &out)
+		result := runGHTopLevel(t.Context(), append([]string{"issue"}, args...), &out)
 		if result.err != nil || result.action != ghComplete {
 			t.Fatalf("issue view action=%v err=%v", result.action, result.err)
 		}
 	}
 	var out bytes.Buffer
-	result := handleGHIssue(t.Context(), []string{
-		"list",
+	result := runGHTopLevel(t.Context(), []string{
+		"issue", "list",
 		"-R", "openclaw/octopool",
 		"--json", "number,closedAt",
 	}, &out)

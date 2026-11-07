@@ -19,6 +19,11 @@ func must(err error) {
 }
 
 func main() {
+	args := os.Args[1:]
+	if len(args) == 4 && args[0] == "api" && strings.HasPrefix(args[1], "repos/") && strings.Contains(args[1], "/pulls/") && strings.Count(args[1], "/") == 4 && args[2] == "--method=GET" && args[3] == "--hostname=github.com" {
+		fmt.Fprintln(os.Stdout, `{"state":"open","merged":false}`)
+		return
+	}
 	capture := struct {
 		Args           []string
 		Stdin          string

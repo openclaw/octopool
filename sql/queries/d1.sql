@@ -182,7 +182,7 @@ SELECT
   COUNT(*) AS total_entries,
   SUM(CASE WHEN expires_at > CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS fresh_entries,
   SUM(CASE WHEN expires_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS expired_entries,
-  COALESCE(SUM(length(body_json)), 0) AS body_bytes,
+  COALESCE(SUM(octet_length(body_json)), 0) AS body_bytes,
   MIN(created_at) AS oldest_created_at,
   MAX(created_at) AS newest_created_at
 FROM github_cache_entries
@@ -439,6 +439,13 @@ VALUES (?1, ?2, ?3);
 DELETE FROM web_sessions
 WHERE session_hash = ?1;
 
+-- name: DeleteExpiredWebSessions :exec
+DELETE FROM web_sessions
+WHERE session_hash IN (
+  SELECT session_hash FROM web_sessions
+  WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1
+);
+
 -- name: GetWebSession :one
 SELECT
   callers.id,
@@ -513,6 +520,16 @@ DELETE FROM github_public_repo_proofs
 WHERE (protocol_epoch, owner, repo) IN (
   SELECT protocol_epoch, owner, repo FROM github_public_repo_proofs
   WHERE expires_at <= CURRENT_TIMESTAMP ORDER BY expires_at LIMIT ?1
+);
+
+-- name: DeleteExpiredPRStateProofs :exec
+DELETE FROM github_pr_state_proofs
+WHERE (owner, repo, number, state_hint) IN (
+  SELECT owner, repo, number, state_hint
+  FROM github_pr_state_proofs
+  WHERE expires_at <= CURRENT_TIMESTAMP
+  ORDER BY expires_at
+  LIMIT ?1
 );
 
 -- name: FreshPRStateProof :one

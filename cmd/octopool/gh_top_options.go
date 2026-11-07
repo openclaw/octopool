@@ -11,7 +11,6 @@ import (
 type ghTopOptions struct {
 	read        readOptions
 	repo        string
-	repoCount   int
 	json        []string
 	jq          string
 	patch       bool
@@ -99,14 +98,15 @@ func parseGHTopOptions(args []string, specs map[string]readOptionSpec) (ghTopOpt
 	}
 	opts.positionals = parsed.positionals
 	opts.repo = parsed.values["--repo"].raw
+	repoCount := 0
 	for _, occurrence := range parsed.ordered {
 		if occurrence.name == "--repo" {
-			opts.repoCount++
+			repoCount++
 		}
 	}
 	if spec, ok := specs["--repo"]; ok && spec.kind == readSlice && parsed.has("--repo") {
 		repos := parsed.values["--repo"].strings
-		if opts.repoCount > 1 || len(repos) != 1 {
+		if repoCount > 1 || len(repos) != 1 {
 			return opts, true, nil
 		}
 		opts.repo = repos[0]
@@ -173,30 +173,6 @@ func topJQFallback(opts ghTopOptions) bool {
 
 func machineReadable(opts ghTopOptions) bool {
 	return len(opts.json) > 0
-}
-
-func hasTopModifiers(opts ghTopOptions) bool {
-	return opts.patch ||
-		opts.limitSet ||
-		opts.state != "" ||
-		opts.branch != "" ||
-		opts.workflow != "" ||
-		opts.status != "" ||
-		opts.attemptSet ||
-		opts.author != "" ||
-		opts.assignee != "" ||
-		len(opts.labels) > 0
-}
-
-func hasRunViewModifiers(opts ghTopOptions) bool {
-	opts.attempt = 0
-	opts.attemptSet = false
-	return hasTopModifiers(opts)
-}
-
-func hasTopModifiersExceptPatch(opts ghTopOptions) bool {
-	opts.patch = false
-	return hasTopModifiers(opts)
 }
 
 func supportedWorkflowRef(ref string) bool {

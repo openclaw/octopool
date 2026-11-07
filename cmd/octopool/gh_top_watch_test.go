@@ -53,7 +53,7 @@ func TestGHRunWatchPrintsTransitionsAndValidatesTerminalJobs(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -94,7 +94,7 @@ func TestGHRunWatchRequestedIntervalStartsAt45Seconds(t *testing.T) {
 		return map[string]any{"status": status, "conclusion": conclusion, "run_attempt": 1}
 	})
 	sleeps := recordWatchSleeps(t)
-	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "-i", "45"}, &bytes.Buffer{})
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool", "-i", "45"}, &bytes.Buffer{})
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -144,7 +144,7 @@ func TestGHRunWatchRefreshesStaleProgressOnNextPoll(t *testing.T) {
 			})
 			sleeps := recordWatchSleeps(t)
 			var out bytes.Buffer
-			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo"}, &out)
 			if result.action != ghComplete || result.err != nil || !strings.Contains(out.String(), "Run 42 completed with 'success'") {
 				t.Fatalf("action=%v err=%v output=%q", result.action, result.err, out.String())
 			}
@@ -217,7 +217,7 @@ func TestGHRunWatchCompletionProof(t *testing.T) {
 				}
 			})
 			sleeps := recordWatchSleeps(t)
-			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo"}, &bytes.Buffer{})
+			result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo"}, &bytes.Buffer{})
 			wantPolls := 1
 			if test.prior {
 				wantPolls++
@@ -311,7 +311,7 @@ func TestGHRunWatchJobsCompletionProof(t *testing.T) {
 				t.Setenv("OCTOPOOL_FRESH", "1")
 			}
 			recordWatchSleeps(t)
-			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo"}, &bytes.Buffer{})
+			result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo"}, &bytes.Buffer{})
 			wantHeaders := []any{nil}
 			if test.secondPage {
 				wantHeaders = append(wantHeaders, nil)
@@ -363,7 +363,7 @@ func TestGHRunWatchFloorsRequestedInterval(t *testing.T) {
 		return map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 1}
 	})
 	sleeps := recordWatchSleeps(t)
-	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "-i", "5"}, &bytes.Buffer{})
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool", "-i", "5"}, &bytes.Buffer{})
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -380,7 +380,7 @@ func TestGHRunWatchExitStatusFailure(t *testing.T) {
 		return map[string]any{"status": "completed", "conclusion": "failure", "run_attempt": 1}
 	})
 	recordWatchSleeps(t)
-	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "--exit-status"}, &bytes.Buffer{})
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool", "--exit-status"}, &bytes.Buffer{})
 	assertExitCode(t, result.err, 1)
 }
 
@@ -414,7 +414,7 @@ func TestGHPRChecksWatchPendingToDone(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -453,7 +453,7 @@ func TestGHPRChecksWatchFailFast(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--fail-fast"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch", "--fail-fast"}, &out)
 	assertExitCode(t, result.err, 1)
 	// One polling read plus the fresh terminal confirmation sweep.
 	if checkCalls != 2 || len(*sleeps) != 0 {
@@ -490,7 +490,7 @@ func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch", "--fail-fast"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch", "--fail-fast"}, &out)
 	// Cancelled is terminal but not failed: the watch must keep polling the
 	// pending check instead of fail-fasting, and cancelled-only results exit 0
 	// exactly like real gh (Failed then Pending counts decide the exit code).
@@ -518,7 +518,7 @@ func TestGHPRChecksWatchErrorsOnNoChecks(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
 	if result.err == nil || !strings.Contains(result.err.Error(), "no checks reported") {
 		t.Fatalf("zero checks must not read as green: err=%v", result.err)
 	}
@@ -545,7 +545,7 @@ func TestGHPRChecksWatchCachedEmptyRevalidatesFresh(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("cached emptiness must revalidate fresh and continue: action=%v err=%v", result.action, result.err)
 	}
@@ -575,7 +575,7 @@ func TestGHPRChecksWatchFreshEmptyTerminalIsNotGreen(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
 	if result.err == nil || !strings.Contains(result.err.Error(), "no checks reported") {
 		t.Fatalf("fresh-empty terminal must not confirm green: err=%v", result.err)
 	}
@@ -588,10 +588,6 @@ func TestGHWatchShapeLastWatchValueWins(t *testing.T) {
 	if !isGHWatchShape([]string{"pr", "checks", "7", "--watch=false", "--watch"}) {
 		t.Fatal("--watch=false --watch must count as a watch shape")
 	}
-	floored := floorGHWatchDelegateArgs([]string{"run", "watch", "42", "--", "-i1"})
-	if !reflect.DeepEqual(floored, []string{"run", "watch", "42", "--interval", "30", "--", "-i1"}) {
-		t.Fatalf("post-terminator tokens must stay untouched and floor injected before --, got %v", floored)
-	}
 }
 
 func TestGHPRChecksWatchJSONDelegatesLikeRealGH(t *testing.T) {
@@ -602,7 +598,7 @@ func TestGHPRChecksWatchJSONDelegatesLikeRealGH(t *testing.T) {
 		{"checks", "7", "-R", "openclaw/octopool", "--watch", "--json", "name,bucket"},
 		{"checks", "7", "-R", "openclaw/octopool", "--watch", "--jq", ".x"},
 	} {
-		if result := handleGHPR(t.Context(), args, &out); result.action != ghDelegate {
+		if result := runGHTopLevel(t.Context(), append([]string{"pr"}, args...), &out); result.action != ghDelegate {
 			t.Fatalf("args %v must delegate, got action=%v", args, result.action)
 		}
 	}
@@ -624,7 +620,7 @@ func TestGHPRChecksWatchEqualsTrueSpelling(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch=true"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch=true"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("--watch=true must use the native watch path: action=%v err=%v", result.action, result.err)
 	}
@@ -843,7 +839,7 @@ func TestGHRunWatchNativeIntervalSleep(t *testing.T) {
 				return map[string]any{"status": "completed", "conclusion": "success", "run_attempt": 3}
 			})
 			sleeps := recordWatchSleeps(t)
-			result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo", "--interval", raw}, &bytes.Buffer{})
+			result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo", "--interval", raw}, &bytes.Buffer{})
 			if result.action != ghComplete || result.err != nil || !reflect.DeepEqual(*sleeps, []time.Duration{32 * time.Second}) {
 				t.Fatalf("action=%v err=%v sleeps=%v", result.action, result.err, *sleeps)
 			}
@@ -878,7 +874,7 @@ func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -918,7 +914,7 @@ func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool", "--exit-status"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool", "--exit-status"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -974,7 +970,7 @@ func TestGHRunWatchRejectsCachedPriorAttemptAfterRerun(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "acme/repo", "--exit-status"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo", "--exit-status"}, &out)
 	if result.action != ghComplete || result.err != nil || jobCalls != 1 {
 		t.Fatalf("action=%v err=%v jobs=%d out=%q", result.action, result.err, jobCalls, out.String())
 	}
@@ -1013,7 +1009,7 @@ func TestGHPRChecksWatchConfirmsRerunSameHead(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -1061,7 +1057,7 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 	})
 	recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHRun(t.Context(), []string{"watch", "42", "-R", "openclaw/octopool"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &out)
 	if result.action != ghComplete || result.err != nil {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
@@ -1671,7 +1667,7 @@ func TestPRChecksWatchStaleRemainsPending(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
-	result := handleGHPR(t.Context(), []string{"checks", "7", "-R", "acme/repo", "--watch"}, &out)
+	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "acme/repo", "--watch"}, &out)
 	if result.err != nil || result.action != ghComplete || !reflect.DeepEqual(*sleeps, []time.Duration{30 * time.Second}) || !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 0 fail, 0 cancel") || !strings.Contains(out.String(), "unit\tpass\tSUCCESS") {
 		t.Fatalf("stale must remain pending until next completion: result=%+v sleeps=%v out=%q", result, *sleeps, out.String())
 	}

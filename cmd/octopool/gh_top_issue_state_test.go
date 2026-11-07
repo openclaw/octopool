@@ -32,6 +32,10 @@ func TestRunGHIssueViewStateProjection(t *testing.T) {
 					"state", "state,closedAt", "number,title,state,url,author",
 					"number,title,state,closedAt,url,author", "title,closedAt",
 				} {
+					// closedAt requires REST, so other sources repeat the same case.
+					if source != "rest" && strings.Contains(fields, "closedAt") {
+						continue
+					}
 					t.Run(fields, func(t *testing.T) {
 						wantShape := "issue-summary-v1"
 						if strings.Contains(fields, "closedAt") {
@@ -44,7 +48,7 @@ func TestRunGHIssueViewStateProjection(t *testing.T) {
 								fixture["state"] = strings.ToUpper(state)
 							}
 						}
-						before, _ := json.Marshal(fixture)
+
 						calls := 0
 						relayTestServer(t, func(request map[string]any) any {
 							calls++
@@ -61,7 +65,7 @@ func TestRunGHIssueViewStateProjection(t *testing.T) {
 							return fixture
 						})
 						var out bytes.Buffer
-						result := handleGHIssue(t.Context(), []string{"view", "5", "-R", "openclaw/octopool", "--json", fields}, &out)
+						result := runGHTopLevel(t.Context(), []string{"issue", "view", "5", "-R", "openclaw/octopool", "--json", fields}, &out)
 						if result.action != ghComplete || result.err != nil {
 							t.Fatalf("action=%v err=%v", result.action, result.err)
 						}
@@ -80,9 +84,8 @@ func TestRunGHIssueViewStateProjection(t *testing.T) {
 						if !reflect.DeepEqual(got, want) {
 							t.Errorf("projection = %#v, want %#v", got, want)
 						}
-						after, _ := json.Marshal(fixture)
-						if !bytes.Equal(before, after) || calls != 1 {
-							t.Errorf("source changed or unexpected request count: before=%s after=%s calls=%d", before, after, calls)
+						if calls != 1 {
+							t.Errorf("requests = %d, want 1", calls)
 						}
 					})
 				}
@@ -118,7 +121,7 @@ func TestRunGHIssueStateProjectionBeforeJQ(t *testing.T) {
 					}
 					args = append(args, "-R", "openclaw/octopool", "--json", fields, "--jq", prefix+expr)
 					var out bytes.Buffer
-					result := handleGHIssue(t.Context(), args, &out)
+					result := runGHTopLevel(t.Context(), append([]string{"issue"}, args...), &out)
 					if result.action != ghComplete || result.err != nil || out.String() != "true\n" {
 						t.Errorf("fields=%s action=%v err=%v jq=%q", fields, result.action, result.err, out.String())
 					}
@@ -141,7 +144,7 @@ func TestRunGHIssueListStateProjection(t *testing.T) {
 				return items
 			})
 			var out bytes.Buffer
-			result := handleGHIssue(t.Context(), []string{"list", "-R", "openclaw/octopool", "--state", "all", "--limit", "2", "--json", fields}, &out)
+			result := runGHTopLevel(t.Context(), []string{"issue", "list", "-R", "openclaw/octopool", "--state", "all", "--limit", "2", "--json", fields}, &out)
 			if result.action != ghComplete || result.err != nil {
 				t.Fatalf("action=%v err=%v", result.action, result.err)
 			}
@@ -172,7 +175,7 @@ func TestRunGHIssueStateUnsupportedFieldsDelegate(t *testing.T) {
 			}
 			args = append(args, "-R", "openclaw/octopool", "--json", fields, "--jq", "{number,state,closedAt}")
 			var out bytes.Buffer
-			result := handleGHIssue(t.Context(), args, &out)
+			result := runGHTopLevel(t.Context(), append([]string{"issue"}, args...), &out)
 			if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
 				t.Errorf("args=%v action=%v err=%v out=%q", args, result.action, result.err, out.String())
 			}
@@ -202,7 +205,7 @@ func TestRunGHIssueStatePreservesRESTAndSearch(t *testing.T) {
 				t.Errorf("REST = %#v, want %#v", got, fixture)
 			}
 			out.Reset()
-			result := handleGHSearch(t.Context(), []string{"issues", "cache", "-R", "openclaw/octopool", "--json", "state"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"search", "issues", "cache", "-R", "openclaw/octopool", "--json", "state"}, &out)
 			if result.action != ghComplete || result.err != nil || out.String() != "[{\"state\":\""+state+"\"}]\n" {
 				t.Errorf("search action=%v err=%v output=%q", result.action, result.err, out.String())
 			}

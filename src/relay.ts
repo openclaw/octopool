@@ -79,6 +79,7 @@ import {
   type RunListSupersetView,
 } from "./run-list-superset";
 import {
+  cachedRunJobsPageView,
   completeRawRunJobsPage,
   completeRunJobsSuperset,
   cachedLatestRunAttempt,
@@ -380,11 +381,7 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
         recordCacheMiss(state, terminalLogNeedsRevalidation(cached) ? "expired" : "caller_max_age");
         state.terminalLogCached = cached;
       } else {
-        return serveCachedGitHubResponse(
-          state.env,
-          state.ctx,
-          cachedResponseParams(state, cached, "hit"),
-        );
+        return serveCachedGitHubResponse(state, cached, "hit");
       }
     }
   }
@@ -398,8 +395,8 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   if (largerPage !== undefined) return serveFreshCachedRelayResponse(state, largerPage);
   const workflow = await readWorkflowCatalogueCache(state);
   if (workflow !== undefined) return serveFreshCachedRelayResponse(state, workflow);
-  const rawJobs = await readRawRunJobsCache(state);
-  if (rawJobs !== undefined) return serveFreshCachedRelayResponse(state, rawJobs);
+  const jobs = await readRunJobsSupersetCache(state);
+  if (jobs !== undefined) return serveFreshCachedRelayResponse(state, jobs);
 
   if (
     state.cacheKey !== undefined &&
@@ -1482,11 +1479,9 @@ async function serveSWRRelayCache(state: ActiveRelay): Promise<Response | undefi
     // Public proof can take time; never let that lookup extend the SWR bound.
     if (!withinSWRWindow(cached.expires_at)) continue;
     if (candidate.exact) await switchToExactRunList(state);
-    const response = await serveCachedGitHubResponse(
-      state.env,
-      state.ctx,
-      cachedResponseParams(state, cached, "stale", { staleReason: "stale_while_revalidate" }),
-    );
+    const response = await serveCachedGitHubResponse(state, cached, "stale", {
+      staleReason: "stale_while_revalidate",
+    });
     deferSWRRefresh(state);
     return response;
   }
@@ -1554,29 +1549,38 @@ async function serveStaleRelayCache(
     if (!state.runListExactFallback && runListSupersetUnderfilled(cached, state.runListSuperset)) {
       continue;
     }
-    return serveCachedGitHubResponse(
-      state.env,
-      state.ctx,
-      cachedResponseParams(state, cached, "stale", { staleReason }),
-    );
+    return serveCachedGitHubResponse(state, cached, "stale", { staleReason });
   }
   return serveExactRunListCache(state, "stale", { staleReason });
 }
 
-async function readRawRunJobsCache(state: ActiveRelay): Promise<CachedGitHubResponse | undefined> {
+async function readRunJobsSupersetCache(
+  state: ActiveRelay,
+): Promise<CachedGitHubResponse | undefined> {
   if (!state.cacheEnabled || state.maxAgeSeconds === 0) return undefined;
-  const view = rawRunJobsSupersetView(state.request, state.route);
+  const page = cachedRunJobsPageView(state.request, state.route);
+  const view = page ?? rawRunJobsSupersetView(state.request, state.route);
   if (view === undefined) return undefined;
   const request = view.cacheRequest;
   const probe = async (identity?: Identity) => {
     const key = await githubCacheKey(request.pool, request, state.route, identity);
     const cached = await readCacheEntry(state, key, identity);
     if (cached === undefined) return undefined;
-    if (!completeRawRunJobsPage(cached, view.limit)) {
+    const complete =
+      page === undefined
+        ? completeRawRunJobsPage(cached, view.limit)
+        : cached.status === 200 &&
+          cached.body_encoding === "json" &&
+          isRecord(cached.body) &&
+          Array.isArray(cached.body.jobs) &&
+          !runJobsSupersetIncomplete(cached, view);
+    if (!complete || !cachedResponseStillFresh(cached, state.maxAgeSeconds)) {
       recordCacheMiss(state, "unusable");
       return undefined;
     }
-    return { ...cached, headers: transformedGitHubHeaders(cached.headers) };
+    return page === undefined
+      ? { ...cached, headers: transformedGitHubHeaders(cached.headers) }
+      : { ...cached, ...filterRunJobsSuperset(cached, page, page.offset) };
   };
   return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
 }
@@ -1668,15 +1672,11 @@ async function serveEquivalentRunJobsCache(state: ActiveRelay): Promise<Response
         state.deferredCacheRefresh = undefined;
         continue;
       }
-      return serveCachedGitHubResponse(
-        state.env,
-        state.ctx,
-        cachedResponseParams(state, cached, cacheStatus, {
-          fallbackReason: "run_jobs_superset",
-          source: proof,
-          ...(cacheStatus === "stale" ? { staleReason: "stale_while_revalidate" } : {}),
-        }),
-      );
+      return serveCachedGitHubResponse(state, cached, cacheStatus, {
+        fallbackReason: "run_jobs_superset",
+        source: proof,
+        ...(cacheStatus === "stale" ? { staleReason: "stale_while_revalidate" } : {}),
+      });
     }
   }
   return undefined;
@@ -1882,11 +1882,7 @@ async function serveExactRunListCache(
   await switchToExactRunList(state);
   state.identity = candidate.identity;
   await switchRelayCacheKey(state, candidate.key);
-  return serveCachedGitHubResponse(
-    state.env,
-    state.ctx,
-    cachedResponseParams(state, candidate.cached, cacheStatus, extras),
-  );
+  return serveCachedGitHubResponse(state, candidate.cached, cacheStatus, extras);
 }
 
 function staleCacheCandidates(
@@ -1930,48 +1926,6 @@ function pushStaleCacheCandidate(
   }
 }
 
-function cachedResponseParams(
-  state: ActiveRelay,
-  cached: CachedGitHubResponse,
-  cacheStatus: "hit" | "stale",
-  extras: {
-    staleReason?: string;
-    coalesced?: boolean;
-    fallbackReason?: "run_list_superset" | "run_jobs_superset";
-    source?: CachedGitHubResponse;
-  } = {},
-): Parameters<typeof serveCachedGitHubResponse>[2] {
-  rejectIncompleteRunJobs(state, cached);
-  const clientResponse = filterRunJobsSuperset(
-    filterRunListSuperset(cached, state.runListView, {
-      preserveTotalCount: state.runListExactFallback,
-    }),
-    state.runJobsSuperset,
-  );
-  return {
-    requestId: state.requestId,
-    callerId: state.callerId,
-    callerTokenId: state.callerTokenId,
-    clientName: state.clientName,
-    pool: state.request.pool,
-    route: state.route,
-    cached: { ...cached, ...clientResponse },
-    cacheCreatedAt: cachedGitHubCreatedAt(cached, ...(extras.source ? [extras.source] : [])),
-    started: state.started,
-    maxAgeSeconds: state.maxAgeSeconds,
-    cacheStatus,
-    background: state.background,
-    ...(state.maxAgeSeconds === 0 &&
-    cacheStatus === "hit" &&
-    immutableCacheRoute(state.cacheRequest, state.route)
-      ? { fallbackReason: "immutable_live" as const }
-      : {}),
-    ...(extras.staleReason === undefined ? {} : { staleReason: extras.staleReason }),
-    ...(extras.coalesced === undefined ? {} : { coalesced: extras.coalesced }),
-    ...(extras.fallbackReason === undefined ? {} : { fallbackReason: extras.fallbackReason }),
-  };
-}
-
 function auditError(error: unknown): { status: number; code: string } {
   if (error instanceof HttpError) {
     return { status: error.status, code: error.code };
@@ -2000,76 +1954,76 @@ function auditBackend(result: RelaySuccess): AuditBackend | undefined {
 }
 
 async function serveCachedGitHubResponse(
-  env: Env,
-  ctx: ExecutionContext,
-  params: {
-    requestId: string;
-    callerId: string;
-    callerTokenId: string;
-    clientName: string;
-    pool: string;
-    route: RouteInfo;
-    cached: GitHubRelayResponse & {
-      identity?: Pick<Identity, "id" | "kind">;
-      created_at: string;
-      expires_at?: string;
-    };
-    started: number;
-    cacheStatus: "hit" | "stale";
-    cacheCreatedAt: string | undefined;
-    maxAgeSeconds: number | undefined;
+  state: ActiveRelay,
+  cached: CachedGitHubResponse,
+  cacheStatus: "hit" | "stale",
+  extras: {
     staleReason?: string;
     coalesced?: boolean;
-    background?: boolean;
-    fallbackReason?: "run_list_superset" | "run_jobs_superset" | "immutable_live";
-  },
+    fallbackReason?: "run_list_superset" | "run_jobs_superset";
+    source?: CachedGitHubResponse;
+  } = {},
 ): Promise<Response> {
+  rejectIncompleteRunJobs(state, cached);
+  const clientResponse = filterRunJobsSuperset(
+    filterRunListSuperset(cached, state.runListView, {
+      preserveTotalCount: state.runListExactFallback,
+    }),
+    state.runJobsSuperset,
+  );
+  const cacheCreatedAt = cachedGitHubCreatedAt(cached, ...(extras.source ? [extras.source] : []));
+  cached = { ...cached, ...clientResponse };
+  const fallbackReason =
+    extras.fallbackReason ??
+    (state.maxAgeSeconds === 0 &&
+    cacheStatus === "hit" &&
+    immutableCacheRoute(state.cacheRequest, state.route)
+      ? "immutable_live"
+      : undefined);
   assertBackendWorkActive();
-  const sanitizedCached = sanitizeGitHubResponse(params.route, params.cached);
-  if (params.background !== true)
-    scheduleRelayAudit(env, ctx, {
-      requestId: params.requestId,
-      callerId: params.callerId,
-      callerTokenId: params.callerTokenId,
-      clientName: params.clientName,
-      pool: params.pool,
-      routeKey: params.route.routeKey,
-      routeKind: params.route.kind,
-      status: params.cached.status,
-      durationMs: Date.now() - params.started,
-      ...(params.cached.identity === undefined ? {} : { identityId: params.cached.identity.id }),
-      cacheStatus: params.cacheStatus,
+  const sanitizedCached = sanitizeGitHubResponse(state.route, cached);
+  if (state.background !== true)
+    scheduleRelayAudit(state.env, state.ctx, {
+      requestId: state.requestId,
+      callerId: state.callerId,
+      callerTokenId: state.callerTokenId,
+      clientName: state.clientName,
+      pool: state.request.pool,
+      routeKey: state.route.routeKey,
+      routeKind: state.route.kind,
+      status: cached.status,
+      durationMs: Date.now() - state.started,
+      ...(cached.identity === undefined ? {} : { identityId: cached.identity.id }),
+      cacheStatus,
       cacheable: true,
-      requestedMaxAge: params.maxAgeSeconds ?? null,
-      ...(params.staleReason === "stale_while_revalidate"
-        ? { fallbackReason: params.staleReason }
+      requestedMaxAge: state.maxAgeSeconds ?? null,
+      ...(extras.staleReason === "stale_while_revalidate"
+        ? { fallbackReason: extras.staleReason }
         : {}),
-      ...(params.fallbackReason === undefined ? {} : { fallbackReason: params.fallbackReason }),
-      ...(params.coalesced === undefined ? {} : { coalesced: params.coalesced }),
+      ...(fallbackReason === undefined ? {} : { fallbackReason }),
+      ...(extras.coalesced === undefined ? {} : { coalesced: extras.coalesced }),
     });
   return jsonResponse({
     status: sanitizedCached.status,
     headers: sanitizedCached.headers,
     body: sanitizedCached.body,
     body_encoding: sanitizedCached.body_encoding,
-    identity: params.cached.identity,
+    identity: cached.identity,
     relay: {
-      pool: params.pool,
-      request_id: params.requestId,
-      cacheable: params.route.cacheable,
-      cache: params.cacheStatus,
-      stale_ok: params.cacheStatus === "stale",
-      ...(params.staleReason === undefined ? {} : { stale_reason: params.staleReason }),
-      ...(params.coalesced === true ? { coalesced: true } : {}),
-      ...(params.cacheCreatedAt === undefined ? {} : { cache_created_at: params.cacheCreatedAt }),
-      ...(params.cached.expires_at === undefined
-        ? {}
-        : { cache_expires_at: params.cached.expires_at }),
-      route_kind: params.route.kind,
-      ...(params.cached.identity === undefined && !params.route.logs
+      pool: state.request.pool,
+      request_id: state.requestId,
+      cacheable: state.route.cacheable,
+      cache: cacheStatus,
+      stale_ok: cacheStatus === "stale",
+      ...(extras.staleReason === undefined ? {} : { stale_reason: extras.staleReason }),
+      ...(extras.coalesced === true ? { coalesced: true } : {}),
+      ...(cacheCreatedAt === undefined ? {} : { cache_created_at: cacheCreatedAt }),
+      ...(cached.expires_at === undefined ? {} : { cache_expires_at: cached.expires_at }),
+      route_kind: state.route.kind,
+      ...(cached.identity === undefined && !state.route.logs
         ? {
             backend:
-              capabilitiesForRouteKind(params.route.kind).fallback === "github_public"
+              capabilitiesForRouteKind(state.route.kind).fallback === "github_public"
                 ? "github_public"
                 : "web",
           }
@@ -2206,11 +2160,7 @@ async function revalidateCachedTerminalLog(
   if (probe.kind === "exists") {
     await publishTerminalLogCache(state.env, key, cached);
     recordBackgroundResult(state, coordinatorResult(state, identity, probe));
-    return serveCachedGitHubResponse(
-      state.env,
-      state.ctx,
-      cachedResponseParams(state, cached, "hit"),
-    );
+    return serveCachedGitHubResponse(state, cached, "hit");
   }
   const github = sanitizeGitHubResponse(state.route, probe.response);
   if (probe.kind === "deleted") {
@@ -2245,11 +2195,7 @@ async function serveFreshCachedRelayResponse(
     await switchToExactRunList(state);
     return executeRelay(state);
   }
-  return serveCachedGitHubResponse(
-    state.env,
-    state.ctx,
-    cachedResponseParams(state, cached, "hit", extras),
-  );
+  return serveCachedGitHubResponse(state, cached, "hit", extras);
 }
 
 function rejectIncompleteRunJobs(state: ActiveRelay, response: GitHubRelayResponse): void {

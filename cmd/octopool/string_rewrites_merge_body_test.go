@@ -270,7 +270,7 @@ func TestStringRewritePinnedMergeBodyRejectsUnsafeRequests(t *testing.T) {
 		{"missing short subject value", sha, []string{"-t"}},
 		{"unknown title alias", sha, []string{"--title", "safe"}},
 		{"unknown subject abbreviation", sha, []string{"--subj=safe"}},
-		{"unknown flag with subject", sha, []string{"--subject=safe", "--delete-branch"}},
+		{"unknown flag with subject", sha, []string{"--subject=safe", "--future-option"}},
 		{"inline body", sha, []string{"--body", "safe"}},
 		{"duplicate body aliases", sha, []string{"-F", file}},
 		{"conflicting squash", sha, []string{"--squash=false"}},
@@ -288,7 +288,11 @@ func TestStringRewritePinnedMergeBodyRejectsUnsafeRequests(t *testing.T) {
 				args = append(args, "--match-head-commit", test.sha)
 			}
 			args = append(args, test.flags...)
-			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader("unused"), io.Discard, io.Discard); err != errRewriteBlocked {
+			want := errRewritePROption
+			if test.sha != sha {
+				want = errRewriteBlocked
+			}
+			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader("unused"), io.Discard, io.Discard); !errors.Is(err, want) {
 				t.Fatalf("request was not rejected: %v", err)
 			}
 			if _, err := os.Stat(capturePath); !os.IsNotExist(err) {

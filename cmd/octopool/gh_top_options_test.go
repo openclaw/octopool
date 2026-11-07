@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"math"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -87,6 +90,91 @@ func TestTopLevelHostQualifiedRepoReads(t *testing.T) {
 			result := runGHTopLevel(t.Context(), args, &out)
 			if result.action != ghComplete || result.err != nil || !slices.Equal(paths, []string{test.path}) || out.Len() == 0 {
 				t.Fatalf("action=%v err=%v paths=%v output=%q", result.action, result.err, paths, out.String())
+			}
+		})
+	}
+}
+
+func TestGHTopDispatchPreparseBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want ghAction
+	}{
+		{nil, ghDelegate},
+		{[]string{"search", "repos"}, ghDelegate},
+		{[]string{"unknown", "view", "--json", `"unterminated`}, ghDelegate},
+		{[]string{"search", "code", "--json", `"unterminated`}, ghDelegate},
+		{[]string{"search", "repos", "--json", `"unterminated`}, ghFail},
+		{[]string{"pr", "checks", "7", "--watch", "--json", `"unterminated`}, ghFail},
+		{[]string{"pr", "checks", "7", "--json", `"unterminated`}, ghFail},
+	} {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			var requests atomic.Int32
+			relayTestServer(t, func(map[string]any) any {
+				requests.Add(1)
+				return map[string]any{}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), test.args, &out)
+			if result.action != test.want || (result.err != nil) != (test.want == ghFail) || out.Len() != 0 || requests.Load() != 0 {
+				t.Fatalf("args=%q: action=%v err=%v output=%q requests=%d", test.args, result.action, result.err, out.String(), requests.Load())
+			}
+			if test.want == ghFail && !errors.Is(result.err, csv.ErrQuote) {
+				t.Fatalf("malformed CSV must fail during parsing: %v", result.err)
+			}
+		})
+	}
+}
+
+func TestGHTopDispatchRejectedModifiers(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		flag string
+	}{
+		{[]string{"pr", "view", "7", "--repo=acme/repo", "--json=number"}, "--state=open"},
+		{[]string{"issue", "view", "7", "--repo=acme/repo", "--json=number"}, "--label=bug"},
+		{[]string{"repo", "view", "acme/repo", "--json=name"}, "--limit=1"},
+		{[]string{"release", "view", "v1", "--repo=acme/repo", "--json=name"}, "--branch=main"},
+		{[]string{"workflow", "view", "ci.yml", "--repo=acme/repo", "--json=id"}, "--status=completed"},
+		{[]string{"gist", "view", "abc123", "--json=id"}, "--author=alice"},
+		{[]string{"run", "view", "42", "--repo=acme/repo", "--json=databaseId"}, "--workflow=ci.yml"},
+		{[]string{"pr", "checks", "7", "--repo=acme/repo", "--json=name"}, "--assignee=alice"},
+		{[]string{"workflow", "list", "--repo=acme/repo", "--json=id"}, "--patch"},
+		{[]string{"label", "list", "--repo=acme/repo", "--json=name"}, "--state=open"},
+		{[]string{"search", "repos", "bug", "--json=name"}, "--repo=acme/repo"},
+		{[]string{"search", "issues", "bug", "--repo=acme/repo", "--json=number"}, "--branch=main"},
+		{[]string{"search", "prs", "bug", "--repo=acme/repo", "--json=number"}, "--workflow=ci.yml"},
+		{[]string{"pr", "list", "--repo=acme/repo", "--json=number"}, "--author=alice"},
+		{[]string{"search", "issues", "bug", "--repo=acme/repo", "--json=number"}, "--repo=acme/repo"},
+	} {
+		t.Run(strings.Join(test.args[:2], "_")+"/"+test.flag, func(t *testing.T) {
+			response := func(request map[string]any) any {
+				if request["path"] == "/repos/acme/repo/releases/tags/v1" {
+					return map[string]any{"name": "synthetic"}
+				}
+				return nativeOptionsResponse(t, request)
+			}
+			if test.args[0] == "pr" && test.args[1] == "checks" {
+				fixture := newPRChecksFixture()
+				response = func(request map[string]any) any { return fixture.response(t, request) }
+			}
+			var requests atomic.Int32
+			relayTestServer(t, func(request map[string]any) any {
+				requests.Add(1)
+				return response(request)
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), test.args, &out)
+			if result.action != ghComplete || result.err != nil || requests.Load() == 0 || out.Len() == 0 {
+				t.Fatalf("control must relay: action=%v err=%v requests=%d output=%q", result.action, result.err, requests.Load(), out.String())
+			}
+
+			requests.Store(0)
+			out.Reset()
+			args := append(slices.Clone(test.args), test.flag)
+			result = runGHTopLevel(t.Context(), args, &out)
+			if result.action != ghDelegate || result.err != nil || requests.Load() != 0 || out.Len() != 0 {
+				t.Fatalf("modifier must delegate before relay: action=%v err=%v requests=%d output=%q", result.action, result.err, requests.Load(), out.String())
 			}
 		})
 	}

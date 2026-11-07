@@ -86,24 +86,30 @@ func resolveRunListWorkflowNames(ctx context.Context, client ghRelayClient, repo
 		return nil
 	}
 
-	items, err := relayCompleteCollection(ctx, client, ghAPIRequest{
+	names := make(map[int64]string, len(runs))
+	needed := make(map[int64]bool, len(runs))
+	for _, run := range runs {
+		needed[run.WorkflowID] = true
+	}
+	err := relayCollectionPages(ctx, client, ghAPIRequest{
 		method: "GET", path: repoPath(repo, "actions", "workflows"),
-	}, "workflows")
+	}, "workflows", func(items []any) (bool, error) {
+		for _, item := range items {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return false, err
+			}
+			workflow, err := decodeRunWorkflow(raw)
+			if err != nil {
+				return false, err
+			}
+			names[workflow.ID] = workflow.Name
+			delete(needed, workflow.ID)
+		}
+		return len(needed) == 0, nil
+	})
 	if err != nil {
 		return err
-	}
-	names := make(map[int64]string, len(items))
-	for _, item := range items {
-		// The unchanged complete collector retains json.Number, not float64.
-		raw, err := json.Marshal(item)
-		if err != nil {
-			return err
-		}
-		workflow, err := decodeRunWorkflow(raw)
-		if err != nil {
-			return err
-		}
-		names[workflow.ID] = workflow.Name
 	}
 	for i := range runs {
 		id := runs[i].WorkflowID

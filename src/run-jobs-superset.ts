@@ -244,6 +244,22 @@ export function runJobsSupersetView(
   };
 }
 
+// Later pages may read an existing complete aggregate, but keep their own cold fill.
+export function cachedRunJobsPageView(
+  request: RelayRequest,
+  route: RouteInfo,
+): (RunJobsSupersetView & { offset: number }) | undefined {
+  const pageValue = request.query?.page;
+  if (typeof pageValue !== "string" || !/^[1-9][0-9]*$/.test(pageValue)) return undefined;
+  const page = Number(pageValue);
+  if (!Number.isSafeInteger(page) || page <= 1 || !defaultGitHubJSONAccept(request.headers?.accept))
+    return undefined;
+  const view = runJobsSupersetView({ ...request, query: { ...request.query, page: "1" } }, route);
+  if (view === undefined) return undefined;
+  const offset = (page - 1) * view.limit;
+  return Number.isSafeInteger(page * view.limit) ? { ...view, offset } : undefined;
+}
+
 export function runJobsSupersetIncomplete(
   response: GitHubRelayResponse,
   view: RunJobsSupersetView | undefined,
@@ -364,6 +380,7 @@ function hasNextJobsPage(response: GitHubRelayResponse): boolean {
 export function filterRunJobsSuperset(
   response: GitHubRelayResponse,
   view: RunJobsSupersetView | undefined,
+  offset = 0,
 ): GitHubRelayResponse {
   if (view === undefined || !isRecord(response.body) || !Array.isArray(response.body.jobs)) {
     return response;
@@ -373,7 +390,7 @@ export function filterRunJobsSuperset(
     headers: transformedGitHubHeaders(response.headers),
     body: {
       ...response.body,
-      jobs: response.body.jobs.slice(0, view.limit),
+      jobs: response.body.jobs.slice(offset, offset + view.limit),
     },
   };
 }

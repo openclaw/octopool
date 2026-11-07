@@ -250,7 +250,7 @@ func TestReleaseAssetsProcessRejectsUnsafeInputs(t *testing.T) {
 		"duplicate source":   releaseAssetArgs(safe, safe),
 		"duplicate basename": releaseAssetArgs(safe, releaseAssetFile(t, "safe.zip", []byte("different"))),
 		"case collision":     releaseAssetArgs(safe, releaseAssetFile(t, "SAFE.ZIP", []byte("different"))),
-		"fold collision":     releaseAssetArgs(releaseAssetFile(t, "k.zip", []byte("a")), releaseAssetFile(t, "K.zip", []byte("b"))),
+		"unicode basename":   releaseAssetArgs(releaseAssetFile(t, "k.zip", []byte("a")), releaseAssetFile(t, "K.zip", []byte("b"))),
 		"missing file":       releaseAssetArgs(filepath.Join(t.TempDir(), "missing.zip")),
 		"empty file":         releaseAssetArgs(releaseAssetFile(t, "empty.zip", nil)),
 		"directory":          releaseAssetArgs(t.TempDir()),
@@ -261,7 +261,7 @@ func TestReleaseAssetsProcessRejectsUnsafeInputs(t *testing.T) {
 	}
 	tooMany := []string{}
 	for i := 0; i < 17; i++ {
-		tooMany = append(tooMany, safe)
+		tooMany = append(tooMany, releaseAssetFile(t, fmt.Sprintf("asset-%d.zip", i), []byte("data")))
 	}
 	cases["too many files"] = releaseAssetArgs(tooMany...)
 	edit := releaseAssetArgs(safe)
@@ -272,7 +272,11 @@ func TestReleaseAssetsProcessRejectsUnsafeInputs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			capture := captureRewriteGH(t)
 			temporary := releaseAssetTemp(t)
-			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != errRewriteBlocked {
+			want := errRewriteBlocked
+			if name == "label flag" || name == "unknown flag" {
+				want = errRewriteCommandShape
+			}
+			if err := execRealGHWithStdin(t.Context(), args, strings.NewReader(""), io.Discard, io.Discard); err != want {
 				t.Fatalf("error=%v", err)
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {
@@ -320,8 +324,8 @@ func TestReleaseAssetsLimitsAndIdentity(t *testing.T) {
 	if defaultRewriteReleaseLimits != (rewriteReleaseLimits{16, 1 << 30, 4 << 30}) || rewriteSnapshotBuffer != 65536 || rewriteMaxReleaseBasename != 255 || rewriteMaxContent != 1048576 {
 		t.Fatal("resource contract changed")
 	}
-	if !validRewriteReleaseName(strings.Repeat("a", 255)) || validRewriteReleaseName(strings.Repeat("é", 128)) {
-		t.Fatal("basename budget is not bytes")
+	if !validRewriteReleaseName(strings.Repeat("a", 255)) || validRewriteReleaseName(strings.Repeat("a", 256)) {
+		t.Fatal("basename length boundary changed")
 	}
 }
 

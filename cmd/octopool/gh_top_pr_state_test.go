@@ -100,6 +100,10 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 						"isDraft", "headRefOid", "headRefOid,isDraft",
 						"state,headRefOid,files", "state,headRefOid,isDraft,files",
 					} {
+						// updatedAt requires REST, so other sources repeat the same case.
+						if transport != "rest" && strings.Contains(fields, "updatedAt") {
+							continue
+						}
 						t.Run(fields, func(t *testing.T) {
 							// REST may also serve a public shape after a page parser misses.
 							wantShape := !strings.Contains(fields, "updatedAt")
@@ -168,8 +172,8 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 								return pr
 							})
 							var out bytes.Buffer
-							result := handleGHPR(t.Context(), []string{
-								"view", "1025", "--repo", "openclaw/clawsweeper", "--json", fields,
+							result := runGHTopLevel(t.Context(), []string{
+								"pr", "view", "1025", "--repo", "openclaw/clawsweeper", "--json", fields,
 							}, &out)
 							if result.err != nil || result.action != ghComplete {
 								t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -225,8 +229,8 @@ func TestRunGHPRViewLifecycleJQ(t *testing.T) {
 					return map[string]any{"state": "DRAFT", "head": map[string]any{"sha": prStateTestHead}, "merged_at": nil}
 				})
 				var out bytes.Buffer
-				result := handleGHPR(t.Context(), []string{
-					"view", "1025", "--repo", "openclaw/clawsweeper", "--json", fields, "--jq", jq,
+				result := runGHTopLevel(t.Context(), []string{
+					"pr", "view", "1025", "--repo", "openclaw/clawsweeper", "--json", fields, "--jq", jq,
 				}, &out)
 				if result.err != nil || result.action != ghComplete {
 					t.Fatalf("action=%v err=%v", result.action, result.err)
@@ -285,7 +289,7 @@ func TestRunGHPRStatePreservesOtherContracts(t *testing.T) {
 				t.Errorf("raw REST = %#v, want %#v", got, pr)
 			}
 			out.Reset()
-			result := handleGHSearch(t.Context(), []string{"prs", "cache", "-R", "openclaw/clawsweeper", "--json", "state"}, &out)
+			result := runGHTopLevel(t.Context(), []string{"search", "prs", "cache", "-R", "openclaw/clawsweeper", "--json", "state"}, &out)
 			if result.err != nil || result.action != ghComplete {
 				t.Fatalf("action=%v err=%v", result.action, result.err)
 			}

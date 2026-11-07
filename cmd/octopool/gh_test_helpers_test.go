@@ -273,6 +273,7 @@ func prDetailExportResponse(t *testing.T, checks *prChecksFixture, request map[s
 
 // Complete REST data for run export tests, independent of the sparse option-parser fixture.
 type runExportFixture struct {
+	requestMu sync.Mutex
 	run       map[string]any
 	runs      []any
 	jobs      any
@@ -312,7 +313,9 @@ func runExportJob(id int) map[string]any {
 
 func (f *runExportFixture) response(t *testing.T, req map[string]any) any {
 	t.Helper()
+	f.requestMu.Lock()
 	f.requests = append(f.requests, req)
+	f.requestMu.Unlock()
 	path, _ := req["path"].(string)
 	if req["method"] != "GET" {
 		t.Errorf("run export used non-GET request: %v", req["method"])
@@ -336,7 +339,7 @@ func (f *runExportFixture) response(t *testing.T, req map[string]any) any {
 		pageText, _ := q["page"].(string)
 		page, err := strconv.Atoi(pageText)
 		if err != nil || page < 1 || page > 10 || q["per_page"] != "100" {
-			t.Errorf("workflow catalogue must use existing complete collector: %v", q)
+			t.Errorf("workflow catalogue must use bounded 100-item pages: %v", q)
 			return nil
 		}
 		start := min((page-1)*100, len(f.workflows))

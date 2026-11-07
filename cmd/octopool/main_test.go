@@ -77,6 +77,7 @@ func TestVersionLineUsesInjectedMetadata(t *testing.T) {
 }
 
 func TestValidateAuthURLForRequestRejectsSavedTokenToDifferentURL(t *testing.T) {
+	t.Setenv("OCTOPOOL_TOKEN", "")
 	auth := authFile{URL: "https://octopool.dev", Token: "saved"}
 
 	err := validateAuthURLForRequest(auth, "https://example.com", "OCTOPOOL_TOKEN")

@@ -33,24 +33,14 @@ func needsLivePRRead(fields []string) bool {
 	return false
 }
 
-func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	if args[0] == "checks" && hasWatchFlag(args[1:]) {
-		return handleGHPRChecksWatch(ctx, args[1:], stdout)
-	}
-	opts, early, ok := prepareGHTopOptions("pr "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "view":
 		repo, number, ok, err := repoNumber(opts)
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) {
+		if !ok {
 			return ghDelegated()
 		}
 		if nativeHumanFormat(opts) {
@@ -68,7 +58,7 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || !supportedPRListState(opts.state) || limitOverOnePage(opts) || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 {
+		if !ok || !supportedPRListState(opts.state) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		query := listQuery(opts)
@@ -96,7 +86,7 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiersExceptPatch(opts) || machineReadable(opts) || opts.jq != "" {
+		if !ok {
 			return ghDelegated()
 		}
 		accept := "application/vnd.github.v3.diff"
@@ -118,7 +108,7 @@ func handleGHPR(ctx context.Context, args []string, stdout io.Writer) ghResult {
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) {
+		if !ok {
 			return ghDelegated()
 		}
 		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedCheckRunFields)) {
@@ -138,16 +128,8 @@ func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, op
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var items []map[string]any
-	if err := json.Unmarshal(body, &items); err != nil {
+	if err := client.readJSON(ctx, request, &items); err != nil {
 		return err
 	}
 	for _, pr := range items {
@@ -183,34 +165,39 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			return localFallbackError{Reason: "unknown_pr_comment_viewer"}
 		}
 	}
-	headers := prViewHeaders(opts)
-	if hasJSONField(opts.json, "files") || hasJSONField(opts.json, "comments") || hasJSONField(opts.json, "commits") || needsLivePRRead(opts.json) || freshReadRequested() {
-		if headers == nil {
-			headers = map[string]string{}
+	pr := map[string]any{}
+	// Comments carry their own PR identity and need no basic fields or head SHA.
+	if len(opts.json) != 1 || opts.json[0] != "comments" {
+		headers := prViewHeaders(opts)
+		if hasJSONField(opts.json, "files") || hasJSONField(opts.json, "comments") || hasJSONField(opts.json, "commits") || needsLivePRRead(opts.json) || freshReadRequested() {
+			if headers == nil {
+				headers = map[string]string{}
+			}
+			headers["cache-control"] = "max-age=0"
 		}
-		headers["cache-control"] = "max-age=0"
-	}
-	request := ghAPIRequest{
-		method: "GET", path: repoPath(repo, "pulls", number), headers: headers,
-	}
-	if !safeRelayRequest(request) {
-		return errors.New("internal error: top-level gh command built an unsupported relay request")
-	}
-	pr, err := relayPRViewBody(ctx, client, request)
-	if err != nil {
-		return err
-	}
-	if headers["x-octopool-public-shape"] == publicShapePullRequestSummary && prSummaryNeedsExactRead(pr, opts.json) {
-		// Missing page facts need exact REST, with the same freshness and relay policy.
-		delete(request.headers, "x-octopool-public-shape")
+		request := ghAPIRequest{
+			method: "GET", path: repoPath(repo, "pulls", number), headers: headers,
+		}
+		if !safeRelayRequest(request) {
+			return errors.New("internal error: top-level gh command built an unsupported relay request")
+		}
 		pr, err = relayPRViewBody(ctx, client, request)
 		if err != nil {
 			return err
 		}
+		if headers["x-octopool-public-shape"] == publicShapePullRequestSummary && prSummaryNeedsExactRead(pr, opts.json) {
+			// Missing page facts need exact REST, with the same freshness and relay policy.
+			delete(request.headers, "x-octopool-public-shape")
+			pr, err = relayPRViewBody(ctx, client, request)
+			if err != nil {
+				return err
+			}
+		}
+		normalizePRViewState(pr)
+		normalizePRViewMergeable(pr)
 	}
-	normalizePRViewState(pr)
-	normalizePRViewMergeable(pr)
 	hydratedHeadSHA := ""
+	collectionsLoaded := false
 	users := map[string]map[string]any{}
 	for _, field := range opts.json {
 		switch field {
@@ -323,6 +310,12 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 				pr[field] = map[string]any{"login": ""}
 				continue
 			}
+			identity, _ := owner.(map[string]any)
+			if firstString(identity, "type") == "Organization" && firstString(identity, "node_id") != "" && firstString(identity, "login") != "" {
+				// gh selects a name only for User owners; REST already has every organization field.
+				pr[field] = map[string]any{"id": identity["node_id"], "login": identity["login"]}
+				continue
+			}
 			profile, err := relayPRUser(ctx, client, owner, users)
 			if err != nil {
 				return err
@@ -346,38 +339,56 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 				mapped = append(mapped, map[string]any{"id": profile["node_id"], "login": profile["login"], "name": firstString(profile, "name"), "databaseId": profile["id"]})
 			}
 			pr[field] = mapped
-		case "statusCheckRollup":
+		case "statusCheckRollup", "files":
+			if collectionsLoaded {
+				continue
+			}
 			sha := nestedStringValue(pr, "head", "sha")
 			if sha == "" {
-				return errors.New("pull request response did not include head.sha")
-			}
-			rollup, err := relayPRStatusCheckRollup(ctx, client, repo, sha)
-			if err != nil {
-				return err
-			}
-			hydratedHeadSHA = sha
-			pr[field] = rollup
-		case "files":
-			sha := nestedStringValue(pr, "head", "sha")
-			if sha == "" {
+				if field == "statusCheckRollup" {
+					return errors.New("pull request response did not include head.sha")
+				}
 				return localFallbackError{Reason: "pull request response did not include head.sha"}
 			}
-			files, err := relayPagedArrayWithHeaders(
-				ctx,
-				client,
-				repoPath(repo, "pulls", number, "files"),
-				map[string]string{"pr_head_sha": sha},
-				map[string]string{"x-octopool-public-shape": publicShapePullRequestFiles},
-			)
+			needsFiles, needsChecks := hasJSONField(opts.json, "files"), hasJSONField(opts.json, "statusCheckRollup")
+			var files, rollup []any
+			readFiles := func(ctx context.Context) error {
+				items, err := relayPagedArrayWithHeaders(
+					ctx, client, repoPath(repo, "pulls", number, "files"),
+					map[string]string{"pr_head_sha": sha},
+					map[string]string{"x-octopool-public-shape": publicShapePullRequestFiles},
+				)
+				if err != nil {
+					return err
+				}
+				files, err = mapPRFiles(items)
+				return err
+			}
+			readChecks := func(ctx context.Context) error {
+				var err error
+				rollup, err = relayPRStatusCheckRollup(ctx, client, repo, sha)
+				return err
+			}
+			// Join independent collections before mutating the PR or verifying its head.
+			switch {
+			case needsFiles && needsChecks:
+				err = relayReadPair(ctx, readFiles, readChecks)
+			case needsFiles:
+				err = readFiles(ctx)
+			case needsChecks:
+				err = readChecks(ctx)
+			}
 			if err != nil {
 				return err
 			}
-			mapped, err := mapPRFiles(files)
-			if err != nil {
-				return err
+			if needsFiles {
+				pr["files"] = files
+			}
+			if needsChecks {
+				pr["statusCheckRollup"] = rollup
 			}
 			hydratedHeadSHA = sha
-			pr["files"] = mapped
+			collectionsLoaded = true
 		}
 	}
 	if hydratedHeadSHA != "" {
@@ -406,16 +417,8 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 }
 
 func relayPRViewBody(ctx context.Context, client ghRelayClient, request ghAPIRequest) (map[string]any, error) {
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, err
-	}
 	var pr map[string]any
-	if err := json.Unmarshal(body, &pr); err != nil {
+	if err := client.readJSON(ctx, request, &pr); err != nil {
 		return nil, err
 	}
 	return pr, nil
@@ -506,22 +509,14 @@ func relayPagedArrayWithHeaders(
 	items := []any{}
 	complete := false
 	for page := 1; page <= maxRelayPages; page++ {
-		envelope, err := client.do(ctx, ghAPIRequest{
+		var pageItems []any
+		if err := client.readJSON(ctx, ghAPIRequest{
 			method:    "GET",
 			path:      path,
 			query:     map[string]any{"per_page": strconv.Itoa(relayPageSize), "page": strconv.Itoa(page)},
 			headers:   headers,
 			routeHint: routeHint,
-		})
-		if err != nil {
-			return nil, err
-		}
-		body, err := envelopeBodyBytes(envelope)
-		if err != nil {
-			return nil, err
-		}
-		var pageItems []any
-		if err := json.Unmarshal(body, &pageItems); err != nil {
+		}, &pageItems); err != nil {
 			return nil, err
 		}
 		items = append(items, pageItems...)

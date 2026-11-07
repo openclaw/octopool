@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,20 +12,9 @@ import (
 
 var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
-func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) < 2 {
-		return ghDelegated()
-	}
-	kind := args[0]
-	if kind != "issues" && kind != "prs" && kind != "repos" {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("search "+args[0], args[1:])
-	if !ok {
-		return early
-	}
+func handleGHSearch(ctx context.Context, kind string, opts ghTopOptions, stdout io.Writer) ghResult {
 	if kind == "repos" {
-		if opts.repo != "" || opts.repoCount > 0 || opts.state != "" || opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		query, ok := plainSearchQuery(opts.positionals)
@@ -40,10 +28,7 @@ func handleGHSearch(ctx context.Context, args []string, stdout io.Writer) ghResu
 	if err != nil {
 		return ghFailed(err)
 	}
-	if !ok || repo == "" || opts.repoCount > 1 || !machineReadable(opts) || limitOverOnePage(opts) {
-		return ghDelegated()
-	}
-	if opts.patch || opts.branch != "" || opts.workflow != "" || opts.status != "" {
+	if !ok || repo == "" || !machineReadable(opts) || limitOverOnePage(opts) {
 		return ghDelegated()
 	}
 	if opts.state != "" && opts.state != "open" && opts.state != "closed" {
@@ -101,24 +86,18 @@ func relaySearchRepos(ctx context.Context, stdout io.Writer, rawQuery string, op
 	if err != nil {
 		return err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return err
 	}
 	items, _ := response["items"].([]any)
-	raw, err := json.Marshal(items)
+	var output any = items
+	if len(opts.json) > 0 && items != nil {
+		output = filterJSONValue(items, opts.json, fieldMapRepo)
+	}
+	raw, err := json.Marshal(output)
 	if err != nil {
 		return err
-	}
-	if len(opts.json) > 0 {
-		raw, err = filterJSONFields(raw, opts.json, fieldMapRepo)
-		if err != nil {
-			return err
-		}
 	}
 	return writeBytes(ctx, stdout, raw, opts.jq)
 }
@@ -152,12 +131,8 @@ func relayGitHubSearch(
 	if searchRateLimited(envelope) {
 		return localFallbackError{Reason: "github_rate_limited"}
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return err
 	}
 	items, ok := response["items"].([]any)
@@ -183,13 +158,7 @@ func relayGitHubSearch(
 			return err
 		}
 	}
-	var output bytes.Buffer
-	encoder := json.NewEncoder(&output)
-	encoder.SetEscapeHTML(false) // Match native gh's JSON exporter, including titles/bodies.
-	if err := encoder.Encode(filterJSONValue(items, opts.json, fieldMap)); err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, output.Bytes(), opts.jq)
+	return writeGHJSON(ctx, stdout, filterJSONValue(items, opts.json, fieldMap), opts.jq)
 }
 
 func searchTerms(raw string) ([]string, bool) {

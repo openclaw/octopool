@@ -9,17 +9,10 @@ import (
 	"strings"
 )
 
-func handleGHRepo(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("repo "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHRepo(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "view":
-		if hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) {
 			return ghDelegated()
 		}
 		if opts.repo == "" && len(opts.positionals) == 1 {
@@ -50,16 +43,8 @@ func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTo
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var repository map[string]any
-	if err := json.Unmarshal(body, &repository); err != nil {
+	if err := client.readJSON(ctx, request, &repository); err != nil {
 		return err
 	}
 	if hasJSONField(opts.json, "id") {
@@ -93,15 +78,8 @@ func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTo
 	return writeBytes(ctx, stdout, raw, opts.jq)
 }
 
-func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("release "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "list":
 		repo, ok, err := repoOnly(opts)
 		if err != nil {
@@ -116,7 +94,7 @@ func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghRes
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseViewFields) {
+		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseViewFields) {
 			return ghDelegated()
 		}
 		path := repoPath(repo, "releases", "latest")
@@ -139,14 +117,7 @@ func handleGHRelease(ctx context.Context, args []string, stdout io.Writer) ghRes
 	}
 }
 
-func handleGHWorkflow(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("workflow "+args[0], args[1:])
-	if !ok {
-		return early
-	}
+func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
 	repo, ok, err := repoFromOptionOrCurrent(opts.repo)
 	if err != nil {
 		return ghFailed(err)
@@ -154,35 +125,28 @@ func handleGHWorkflow(ctx context.Context, args []string, stdout io.Writer) ghRe
 	if !ok || repo == "" {
 		return ghDelegated()
 	}
-	switch args[0] {
+	switch command {
 	case "list":
-		if len(opts.positionals) != 0 || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || limitOverOnePage(opts) {
+		if len(opts.positionals) != 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayWorkflowList(ctx, stdout, repo, opts))
 	case "view":
-		if len(opts.positionals) != 1 || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
+		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "actions", "workflows", opts.positionals[0]),
 			headers: map[string]string{"x-octopool-public-shape": publicShapeWorkflowView},
-		}, opts, fieldMapWorkflow))
+		}, opts, nil))
 	default:
 		return ghDelegated()
 	}
 }
 
-func handleGHLabel(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("label "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	if args[0] != "list" || opts.patch || opts.state != "" || opts.branch != "" || opts.workflow != "" || opts.status != "" || opts.author != "" || opts.assignee != "" || len(opts.labels) > 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
+func handleGHLabel(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	if command != "list" || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
 		return ghDelegated()
 	}
 	repo, ok, err := repoOnly(opts)
@@ -197,22 +161,15 @@ func handleGHLabel(ctx context.Context, args []string, stdout io.Writer) ghResul
 		path:    repoPath(repo, "labels"),
 		query:   listQuery(opts),
 		headers: map[string]string{"x-octopool-public-shape": publicShapeLabelList},
-	}, opts, fieldMapLabel))
+	}, opts, nil))
 }
 
-func handleGHGist(ctx context.Context, args []string, stdout io.Writer) ghResult {
-	if len(args) == 0 {
-		return ghDelegated()
-	}
-	opts, early, ok := prepareGHTopOptions("gist "+args[0], args[1:])
-	if !ok {
-		return early
-	}
-	switch args[0] {
+func handleGHGist(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
+	switch command {
 	case "list":
 		return ghDelegated()
 	case "view":
-		if len(opts.positionals) != 1 || hasTopModifiers(opts) || !machineReadable(opts) || !supportedJSONFields(opts, supportedGistFields) || !isHex(opts.positionals[0]) {
+		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts, supportedGistFields) || !isHex(opts.positionals[0]) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: "/gists/" + opts.positionals[0]}, opts, fieldMapGist))
@@ -229,21 +186,13 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 	limit := desiredLimitDefault(opts, 50)
 	items := make([]any, 0, limit)
 	// Native gh fetches one page at --limit, then drops disabled workflows without backfilling.
-	envelope, err := client.do(ctx, ghAPIRequest{
+	var response map[string]any
+	if err := client.readJSON(ctx, ghAPIRequest{
 		method:  "GET",
 		path:    repoPath(repo, "actions", "workflows"),
 		query:   map[string]any{"per_page": strconv.Itoa(limit), "page": "1"},
 		headers: map[string]string{"x-octopool-public-shape": publicShapeWorkflowList},
-	})
-	if err != nil {
-		return err
-	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
-	var response map[string]any
-	if err := json.Unmarshal(body, &response); err != nil {
+	}, &response); err != nil {
 		return err
 	}
 	workflows, ok := response["workflows"].([]any)
@@ -255,15 +204,13 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 			items = append(items, item)
 		}
 	}
-	raw, err := json.Marshal(items)
+	var output any = items
+	if len(opts.json) > 0 {
+		output = filterJSONValue(items, opts.json, nil)
+	}
+	raw, err := json.Marshal(output)
 	if err != nil {
 		return err
-	}
-	if len(opts.json) > 0 {
-		raw, err = filterJSONFields(raw, opts.json, fieldMapWorkflow)
-		if err != nil {
-			return err
-		}
 	}
 	return writeBytes(ctx, stdout, raw, opts.jq)
 }

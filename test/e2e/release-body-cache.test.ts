@@ -6,7 +6,9 @@ import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
 import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import { legacyReleaseKey, releaseMarkdown } from "../fixtures/release-summary";
-import { jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { jsonResponse, rateHeaders, relay, seedPool, waitForPublicationFollower } from "./harness";
+
+import { ownedWork } from "./owned-work";
 
 const headers = { "x-octopool-public-shape": "release-summary-v1" };
 const body = { tag_name: "v0.8.0", draft: false, body: releaseMarkdown };
@@ -59,11 +61,8 @@ describe.each(["tags/v0.8.0", "latest"])("release %s body cache", (suffix) => {
     // Even legacy entries carrying an API validator must be ineligible for a 304 revival.
     const { request, route, oldKey } = await seedLegacy(path, true);
     await expire(oldKey);
-    let release!: () => void;
     let started!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const { promise: gate, release } = ownedWork.gate();
     const entered = new Promise<void>((resolve) => {
       started = resolve;
     });
@@ -89,16 +88,28 @@ describe.each(["tags/v0.8.0", "latest"])("release %s body cache", (suffix) => {
       }),
     );
     const leader = relay(path, undefined, request);
-    await entered;
-    const follower = relay(path, undefined, request);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    release();
-    const filled = await Promise.all(
-      [leader, follower].map(async (response) => (await response).json<Envelope>()),
-    );
-    expect(filled.map((item) => item.body)).toEqual([body, body]);
-    expect(filled[1]?.relay.coalesced).toBe(true);
-    expect(conditionals).toEqual([null]);
+    const requests = [leader];
+    try {
+      await Promise.race([
+        entered,
+        leader.then(() => {
+          throw new Error("Leader completed before upstream gate");
+        }),
+      ]);
+      const follower = relay(path, undefined, request);
+      requests.push(follower);
+      await waitForPublicationFollower(follower);
+      release();
+      const filled = await Promise.all(
+        requests.map(async (response) => (await response).json<Envelope>()),
+      );
+      expect(filled.map((item) => item.body)).toEqual([body, body]);
+      expect(filled[1]?.relay.coalesced).toBe(true);
+      expect(conditionals).toEqual([null]);
+    } finally {
+      release();
+      await Promise.allSettled(requests);
+    }
 
     const key = await githubCacheKey(request.pool, request, route);
     await expire(key);

@@ -139,7 +139,8 @@ before output. Commit heads must match the initial and final live PR reads.
 The two projections share the fixed landing-query allowlist and transport, public
 repository guard, GraphQL quota accounting, cursor-separated cache keys, 60-second
 maximum cache lifetime, and no stale fallback. The PR-view CLI requests
-`max-age=0` for every page and its accompanying basic PR read, preserving native
-live-read behavior. GraphQL failures are errors, not an old-Worker fallback.
+`max-age=0` for every page and any accompanying basic PR read, preserving native
+live-read behavior. Comments-only exports use the comment connection directly;
+mixed-field exports retain the basic PR read. GraphQL failures are errors, not an old-Worker fallback.
 Only canonical Worker-owned query text reaches pooled credentials; caller text
 and viewer-specific selections cannot enter these projections.

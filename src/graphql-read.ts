@@ -63,6 +63,8 @@ export function parseGraphQLRead(value: unknown): GraphQLRead {
   visit(document, {
     Field(node) {
       if (
+        // Scoped App merge state is not equivalent to the caller's native read.
+        node.name.value === "mergeStateStatus" ||
         node.name.value.startsWith("viewer") ||
         node.name.value === "__schema" ||
         node.name.value === "__type"

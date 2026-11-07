@@ -126,6 +126,8 @@ func (fixture *bootstrapCLI) run(t *testing.T, args []string, stdin *os.File, ob
 	capturePath := filepath.Join(t.TempDir(), "dispatch.jsonl")
 	env = append(env, "OCTOPOOL_URL="+fixture.url, "OCTOPOOL_TOKEN="+fixture.token,
 		"OCTOPOOL_POOL=maintainers", "OCTOPOOL_STRING_REWRITE_FILE="+fixture.local,
+		// Dispatch fixtures must not compete for the operator's cross-process relay slots.
+		"OCTOPOOL_RELAY_CONCURRENCY=0",
 		"OCTOPOOL_GH_PATH="+fixture.native, "OCTOPOOL_TEST_HELP_CAPTURE="+capturePath,
 		"OCTOPOOL_TEST_HELP_EXIT="+strconv.Itoa(exit), "GH_HOST=other.example.test", "GH_REPO=other.example.test/wrong/repo")
 	if observeInput {
@@ -136,7 +138,7 @@ func (fixture *bootstrapCLI) run(t *testing.T, args []string, stdin *os.File, ob
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		t.Fatalf("CLI exceeded bounded process deadline: %v; stdout=%q stderr=%q", ctx.Err(), stdout.String(), stderr.String())
+		t.Fatalf("CLI exceeded bounded process deadline: %v; policy calls=%d stdout=%q stderr=%q", ctx.Err(), fixture.calls.Load(), stdout.String(), stderr.String())
 	}
 	if strings.Contains(stderr.String(), "fixture:") {
 		t.Fatalf("synthetic child fixture failure: %v; %s", err, stderr.String())

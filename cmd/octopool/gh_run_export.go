@@ -125,15 +125,11 @@ func relayMachineRunList(ctx context.Context, stdout io.Writer, request ghAPIReq
 	if err != nil {
 		return err
 	}
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return err
-	}
 	var response struct {
 		TotalCount int             `json:"total_count"`
 		Runs       json.RawMessage `json:"workflow_runs"`
 	}
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return err
 	}
 	raw := bytes.TrimSpace(response.Runs)
@@ -161,7 +157,7 @@ func relayMachineRunList(ctx context.Context, stdout io.Writer, request ghAPIReq
 	for _, run := range runs {
 		result = append(result, run.export(opts.json))
 	}
-	return writeRunExport(ctx, stdout, result, opts.jq)
+	return writeGHJSON(ctx, stdout, result, opts.jq)
 }
 
 func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string, opts ghTopOptions) error {
@@ -197,21 +193,23 @@ func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string,
 			return err
 		}
 	}
-	if hasJSONField(opts.json, "jobs") {
-		if run.Attempt == 0 {
-			return localFallbackError{Reason: "workflow run response did not include run_attempt"}
-		}
-		run.jobs, err = relayRunJobs(ctx, client, ghAPIRequest{
+	needsJobs, needsName := hasJSONField(opts.json, "jobs"), hasJSONField(opts.json, "workflowName")
+	if needsJobs && run.Attempt == 0 {
+		return localFallbackError{Reason: "workflow run response did not include run_attempt"}
+	}
+	var jobs []machineJobExport
+	var workflowName string
+	readJobs := func(ctx context.Context) error {
+		var err error
+		jobs, err = relayRunJobs(ctx, client, ghAPIRequest{
 			method: "GET",
 			path:   repoPath(repo, "actions", "runs", id, "attempts", strconv.FormatUint(run.Attempt, 10), "jobs"),
 		}, func(envelope relayEnvelope, seen map[int64]bool) ([]machineJobExport, int, error) {
 			return machineRunJobsPage(envelope, run, seen)
 		})
-		if err != nil {
-			return err
-		}
+		return err
 	}
-	if hasJSONField(opts.json, "workflowName") {
+	readName := func(ctx context.Context) error {
 		workflow, _, err := lookupRunWorkflow(ctx, client, repo, strconv.FormatInt(run.WorkflowID, 10), false)
 		if err != nil {
 			return err
@@ -219,21 +217,31 @@ func relayMachineRunView(ctx context.Context, stdout io.Writer, repo, id string,
 		if workflow.ID != run.WorkflowID {
 			return errors.New("workflow metadata did not match run workflow")
 		}
-		run.workflowName = workflow.Name
+		workflowName = workflow.Name
+		return nil
 	}
-	return writeRunExport(ctx, stdout, run.export(opts.json), opts.jq)
+	switch {
+	case needsJobs && needsName:
+		// Both reads depend only on the verified run. Settle both before publishing output.
+		err = relayReadPair(ctx, readJobs, readName)
+	case needsJobs:
+		err = readJobs(ctx)
+	case needsName:
+		err = readName(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	run.jobs, run.workflowName = jobs, workflowName
+	return writeGHJSON(ctx, stdout, run.export(opts.json), opts.jq)
 }
 
 func machineRunJobsPage(envelope relayEnvelope, run machineRun, seen map[int64]bool) ([]machineJobExport, int, error) {
-	body, err := envelopeBodyBytes(envelope)
-	if err != nil {
-		return nil, 0, err
-	}
 	var response struct {
 		Total json.RawMessage `json:"total_count"`
 		Jobs  json.RawMessage `json:"jobs"`
 	}
-	if err := json.Unmarshal(body, &response); err != nil {
+	if err := decodeRelayJSON(envelope, &response); err != nil {
 		return nil, 0, err
 	}
 	var total int64
@@ -327,14 +335,4 @@ func (run machineRun) export(fields []string) map[string]any {
 		}
 	}
 	return result
-}
-
-func writeRunExport(ctx context.Context, stdout io.Writer, value any, jq string) error {
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, buffer.Bytes(), jq)
 }

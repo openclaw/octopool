@@ -227,6 +227,83 @@ func TestPRCommentViewerProtection(t *testing.T) {
 	}
 }
 
+func TestPRCommentsExportReadsOnlySelectedData(t *testing.T) {
+	for _, test := range []struct {
+		name, fields string
+		total        int
+	}{
+		{"one_page", "comments", 1},
+		{"two_pages", "comments", 101},
+		{"empty", "comments", 0},
+		{"repeated_field", "comments,comments", 1},
+		{"basic_field", "number,comments", 1},
+		{"viewer_changed", "comments", 1},
+		{"missing_pr", "comments", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setPRViewer(t, "U_alice")
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			basicReads, pages := 0, 0
+			rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
+				req := decodeCLIRequest(t, w, r)
+				headers, _ := req["headers"].(map[string]any)
+				if headers["cache-control"] != "max-age=0" {
+					t.Error("comment export must use live reads")
+				}
+				if headers["x-octopool-public-shape"] != publicShapePullRequestComments {
+					basicReads++
+					writeCLIEnvelope(t, w, map[string]any{"number": 7})
+					return
+				}
+				start := pages * 100
+				pages++
+				if test.name == "missing_pr" {
+					writeCLIEnvelope(t, w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": nil}}})
+					return
+				}
+				nodes := []any{}
+				for i := start; i < min(start+100, test.total); i++ {
+					nodes = append(nodes, detailComment(i, "alice"))
+				}
+				if test.name == "viewer_changed" {
+					t.Setenv("OCTOPOOL_TEST_VIEWER", "U_bob")
+				}
+				writeCLIEnvelope(t, w, detailResponse("comments", nodes, test.total, start+100 < test.total, "page-1"))
+			})
+			var output bytes.Buffer
+			err := runGH(t.Context(), []string{"pr", "view", "7", "-R", "acme/repo", "--json", test.fields}, &output, &bytes.Buffer{})
+			if test.name == "viewer_changed" || test.name == "missing_pr" {
+				if !isLocalFallback(err) || output.Len() != 0 {
+					t.Fatalf("unproved comments escaped: %s / %v", output.String(), err)
+				}
+			} else {
+				var result struct {
+					Number   int               `json:"number"`
+					Comments []prDetailComment `json:"comments"`
+				}
+				if err != nil || json.Unmarshal(output.Bytes(), &result) != nil || result.Comments == nil || len(result.Comments) != test.total {
+					t.Fatalf("comments export: %s / %v", output.String(), err)
+				}
+				for i, comment := range result.Comments {
+					if comment.ID != fmt.Sprintf("IC_%d", i) || !comment.ViewerDidAuthor {
+						t.Fatalf("comment order or viewer changed at %d: %+v", i, comment)
+					}
+				}
+				if test.name == "basic_field" && result.Number != 7 {
+					t.Fatalf("basic PR field lost: %s", output.String())
+				}
+			}
+			wantBasic := 0
+			if test.name == "basic_field" {
+				wantBasic = 1
+			}
+			if basicReads != wantBasic || pages != max(1, (test.total+99)/100) {
+				t.Errorf("unexpected data reads: basic=%d want=%d pages=%d", basicReads, wantBasic, pages)
+			}
+		})
+	}
+}
+
 func TestPRDetailCombinedExport(t *testing.T) {
 	setPRViewer(t, "U_alice")
 	reads := 0

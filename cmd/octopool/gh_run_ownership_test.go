@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -23,9 +25,12 @@ func TestRunOwnershipFreshAndHistoricalHead(t *testing.T) {
 				}
 				const head = "224a80eeebec678db6646ef888f5bbc89caf63c4"
 				var paths []string
+				var pathsMu sync.Mutex
 				relayTestServer(t, func(body map[string]any) any {
 					path := body["path"].(string)
+					pathsMu.Lock()
 					paths = append(paths, path)
+					pathsMu.Unlock()
 					headers, _ := body["headers"].(map[string]any)
 					if fresh && headers["cache-control"] != "max-age=0" {
 						t.Errorf("%s headers=%v, want max-age=0", path, headers)
@@ -43,7 +48,7 @@ func TestRunOwnershipFreshAndHistoricalHead(t *testing.T) {
 					return map[string]any{"id": numericID, "workflow_id": 9, "head_sha": head, "head_branch": "fixture-branch", "event": "pull_request", "name": "historical label", "run_attempt": 1, "pull_requests": []any{map[string]any{"head": map[string]any{"sha": "9999999999999999999999999999999999999999"}}}}
 				})
 				var out bytes.Buffer
-				result := handleGHRun(t.Context(), []string{"view", id, "-R", "openclaw/Peekaboo", "--json", "databaseId,headSha,headBranch,event,workflowName,jobs"}, &out)
+				result := runGHTopLevel(t.Context(), []string{"run", "view", id, "-R", "openclaw/Peekaboo", "--json", "databaseId,headSha,headBranch,event,workflowName,jobs"}, &out)
 				if result.err != nil || result.action != ghComplete {
 					t.Fatalf("result=%+v", result)
 				}
@@ -54,6 +59,8 @@ func TestRunOwnershipFreshAndHistoricalHead(t *testing.T) {
 				if got["headSha"] != head || got["workflowName"] != "CI" {
 					t.Fatalf("historical head mapping=%v", got)
 				}
+				// Run ownership precedes both independent metadata reads.
+				slices.Sort(paths[1:])
 				if !reflect.DeepEqual(paths, []string{
 					"/repos/openclaw/Peekaboo/actions/runs/" + id,
 					"/repos/openclaw/Peekaboo/actions/runs/" + id + "/attempts/1/jobs",

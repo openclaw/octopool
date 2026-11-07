@@ -25,7 +25,8 @@ type ghResult struct {
 	err    error
 }
 
-type ghTopHandler func(context.Context, []string, io.Writer) ghResult
+// Handlers receive only options admitted by their command-specific read specs.
+type ghTopHandler func(context.Context, string, ghTopOptions, io.Writer) ghResult
 
 var ghTopHandlers = map[string]ghTopHandler{
 	"pr":       handleGHPR,
@@ -47,7 +48,21 @@ func runGHTopLevel(ctx context.Context, args []string, stdout io.Writer) ghResul
 	if !ok {
 		return ghDelegated()
 	}
-	return handler(ctx, args[1:], stdout)
+	resource, command := args[0], args[1]
+	if resource == "run" && command == "watch" {
+		return handleGHRunWatch(ctx, args[2:], stdout)
+	}
+	if resource == "pr" && command == "checks" && hasWatchFlag(args[2:]) {
+		return handleGHPRChecksWatch(ctx, args[2:], stdout)
+	}
+	if resource == "search" && (len(args) < 3 || (command != "issues" && command != "prs" && command != "repos")) {
+		return ghDelegated()
+	}
+	opts, early, ok := prepareGHTopOptions(resource+" "+command, args[2:])
+	if !ok {
+		return early
+	}
+	return handler(ctx, command, opts, stdout)
 }
 
 func ghDelegated() ghResult {

@@ -253,7 +253,7 @@ func TestGHRunWatchRerunAttemptAndExitStatus(t *testing.T) {
 				if exitStatus {
 					args = append(args, "--exit-status")
 				}
-				result := handleGHRun(t.Context(), args, &stdout)
+				result := runGHTopLevel(t.Context(), append([]string{"run"}, args...), &stdout)
 				if exitStatus && conclusion != "success" {
 					assertExitCode(t, result.err, 1)
 				} else if result.action != ghComplete || result.err != nil {

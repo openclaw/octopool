@@ -21,7 +21,13 @@ import {
   rateHeaders,
   seedPool,
 } from "./harness";
-import { appIdentity, PATH, requestWithEnv, requestWithWarmEnv } from "./identity-routing-support";
+import {
+  appIdentity,
+  PATH,
+  requestWithEnv,
+  requestWithWarmEnv,
+  expectNoPublicationWork,
+} from "./identity-routing-support";
 import { ownedWork } from "./owned-work";
 
 const DIFF_PATH = "/repos/openclaw/octopool/pulls/42";
@@ -150,11 +156,7 @@ describe("identity routing lifecycle boundaries", () => {
           ([input, init]) => bearer(input, init) === "test-secondary-token",
         ),
       ).toHaveLength(1);
-      expect(
-        await runInDurableObject(coordinator(), (_instance, state) =>
-          state.storage.sql.exec("SELECT * FROM cache_fills").toArray(),
-        ),
-      ).toEqual([]);
+      await expectNoPublicationWork();
     } finally {
       release.release();
       await Promise.allSettled(follower === undefined ? [pending] : [pending, follower]);
@@ -208,11 +210,7 @@ describe("identity routing lifecycle boundaries", () => {
       expect((await coordinator().snapshot()).cooldowns).toHaveLength(phase === "after" ? 1 : 0);
       expect((await coordinator().snapshot()).rates).toEqual([]);
       expect(JSON.stringify(logs.mock.calls)).not.toContain("TEST_PAT_PRIMARY");
-      expect(
-        await runInDurableObject(coordinator(), (_instance, state) =>
-          state.storage.sql.exec("SELECT * FROM cache_fills").toArray(),
-        ),
-      ).toEqual([]);
+      await expectNoPublicationWork();
     },
   );
 
@@ -298,11 +296,7 @@ describe("identity routing lifecycle boundaries", () => {
       const health = await coordinator().snapshot();
       expect(health.rates).toEqual([]);
       expect(health.cooldowns).toHaveLength(failure === "local" ? 2 : 0);
-      expect(
-        await runInDurableObject(coordinator(), (_instance, state) =>
-          state.storage.sql.exec("SELECT * FROM cache_fills").toArray(),
-        ),
-      ).toEqual([]);
+      await expectNoPublicationWork();
     },
   );
 
@@ -354,11 +348,7 @@ describe("identity routing lifecycle boundaries", () => {
         state.storage.get("protocol-marker"),
       ),
     ).toBe(true);
-    expect(
-      await runInDurableObject(coordinator(), (_instance, state) =>
-        state.storage.sql.exec("SELECT * FROM cache_fills").toArray(),
-      ),
-    ).toEqual([]);
+    await expectNoPublicationWork();
     expect(
       await env.DB.prepare(
         "SELECT status, error_code FROM audit_events ORDER BY rowid DESC LIMIT 1",
@@ -457,11 +447,7 @@ describe("identity routing lifecycle boundaries", () => {
     expect(calls).toEqual(["primary", "secondary"]);
     expect((await coordinator().snapshot()).cooldowns).toHaveLength(2);
     expect((await coordinator().snapshot()).rates).toEqual([]);
-    expect(
-      await runInDurableObject(coordinator(), (_instance, state) =>
-        state.storage.sql.exec("SELECT * FROM cache_fills").toArray(),
-      ),
-    ).toEqual([]);
+    await expectNoPublicationWork();
   });
 
   it("rescans a late shared publication after the last local failure feedback without filtering its cache", async () => {
@@ -697,11 +683,7 @@ describe("identity routing lifecycle boundaries", () => {
         await readGitHubCache(env, await githubCacheKey(POOL, cacheRequest, route, identity)),
       ).toBeUndefined();
     }
-    expect(
-      await runInDurableObject(coordinator(), (_instance, state) =>
-        state.storage.sql.exec("SELECT * FROM cache_fills").toArray(),
-      ),
-    ).toEqual([]);
+    await expectNoPublicationWork();
     clock.mockRestore();
   });
 

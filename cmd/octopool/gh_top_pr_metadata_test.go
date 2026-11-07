@@ -300,21 +300,29 @@ func TestRunGHPRViewRollupPaginates(t *testing.T) {
 	}
 }
 
-func TestRunGHPRViewDeletedForkOwner(t *testing.T) {
-	for _, deletedOwner := range []bool{false, true} {
-		t.Run(fmt.Sprint(deletedOwner), func(t *testing.T) {
-			var owner any
+func TestRunGHPRViewForkOwner(t *testing.T) {
+	for _, scenario := range []string{"deleted", "summary", "organization", "organization-missing-node-id"} {
+		t.Run(scenario, func(t *testing.T) {
+			var owner map[string]any
 			wantOwner := map[string]any{"login": ""}
-			if !deletedOwner {
+			if scenario != "deleted" {
 				owner = map[string]any{"node_id": "O_org", "login": "org"}
 				wantOwner = map[string]any{"id": "O_org", "login": "org"}
 			}
+			if strings.HasPrefix(scenario, "organization") {
+				owner["type"] = "Organization"
+			}
+			if scenario == "organization-missing-node-id" {
+				delete(owner, "node_id")
+			}
+			profileCalls := 0
 			rewriteTestServer(t, rewriteActiveTestPolicy, func(w http.ResponseWriter, r *http.Request) {
 				request := decodeCLIRequest(t, w, r)
 				switch request["path"] {
 				case "/repos/acme/repo/pulls/1":
 					writeCLIEnvelope(t, w, map[string]any{"head": map[string]any{"repo": nil, "user": owner}, "assignees": []any{}})
 				case "/users/org":
+					profileCalls++
 					writeCLIEnvelope(t, w, map[string]any{"node_id": "O_org", "id": 14, "login": "org", "name": "Organization", "type": "Organization"})
 				default:
 					t.Errorf("unexpected request: %#v", request)
@@ -333,6 +341,13 @@ func TestRunGHPRViewDeletedForkOwner(t *testing.T) {
 			want := map[string]any{"assignees": []any{}, "headRepository": nil, "headRepositoryOwner": wantOwner}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("deleted fork projection = %s, want %#v", out.String(), want)
+			}
+			wantProfileCalls := 1
+			if scenario == "deleted" || scenario == "organization" {
+				wantProfileCalls = 0
+			}
+			if profileCalls != wantProfileCalls {
+				t.Errorf("profile calls = %d, want %d", profileCalls, wantProfileCalls)
 			}
 			if _, err := os.Stat(capture); !os.IsNotExist(err) {
 				t.Fatal("deleted fork unexpectedly ran native gh")
