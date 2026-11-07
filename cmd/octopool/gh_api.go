@@ -60,95 +60,64 @@ func parseGHAPIArgs(args []string) (ghAPIRequest, bool, error) {
 	}
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
-		switch arg {
-		case "--cache":
-			index++
-			if index >= len(args) {
-				return request, true, nil
-			}
-			cacheValue, cacheSet = args[index], true
-		case "--hostname":
-			index++
-			if index >= len(args) {
-				return request, false, errors.New("--hostname requires a value")
-			}
-			hostname = args[index]
-			hostnameExplicit = true
-		case "--method", "-X":
-			index++
-			if index >= len(args) {
-				return request, false, errors.New("--method requires a value")
-			}
-			request.method = strings.ToUpper(args[index])
-		case "--jq", "-q":
-			index++
-			if index >= len(args) {
-				return request, false, errors.New("--jq requires a value")
-			}
-			request.jq = args[index]
-		case "-H", "--header":
-			index++
-			if index >= len(args) {
-				return request, false, errors.New("--header requires a value")
-			}
-			key, value, ok := strings.Cut(args[index], ":")
-			if ok {
-				header := strings.ToLower(strings.TrimSpace(key))
-				if !safeRelayHeader(header) {
-					return request, true, nil
+		name, value, inline := strings.Cut(arg, "=")
+		switch {
+		case strings.HasPrefix(arg, "-H") && arg != "-H":
+			name, value, inline = "--header", strings.TrimPrefix(arg[2:], "="), true
+		case arg == "-H":
+			name = "--header"
+		case arg == "-X":
+			name = "--method"
+		case arg == "-q":
+			name = "--jq"
+		}
+		switch name {
+		case "--cache", "--hostname", "--method", "--jq", "--header":
+			if !inline {
+				index++
+				if index >= len(args) {
+					if name == "--cache" {
+						return request, true, nil
+					}
+					return request, false, errors.New(name + " requires a value")
 				}
-				request.headers[header] = strings.TrimSpace(value)
+				value = args[index]
 			}
-		case "--paginate":
-			request.paginate = true
-		case "--slurp":
-			request.slurp = true
-		case "-f", "-F", "--field", "--raw-field":
-			return request, true, nil
-		default:
-			if value, ok := strings.CutPrefix(arg, "--cache="); ok {
+			switch name {
+			case "--cache":
 				cacheValue, cacheSet = value, true
-				continue
-			}
-			if name, value, ok := strings.Cut(arg, "="); ok && (name == "--paginate" || name == "--slurp") {
-				enabled, err := strconv.ParseBool(value)
-				if err != nil {
-					return request, true, nil
-				}
-				if name == "--paginate" {
-					request.paginate = enabled
-				} else {
-					request.slurp = enabled
-				}
-				continue
-			}
-			if strings.HasPrefix(arg, "--hostname=") {
-				hostname = strings.TrimPrefix(arg, "--hostname=")
-				hostnameExplicit = true
-				continue
-			}
-			if strings.HasPrefix(arg, "--method=") {
-				request.method = strings.ToUpper(strings.TrimPrefix(arg, "--method="))
-				continue
-			}
-			if strings.HasPrefix(arg, "--jq=") {
-				request.jq = strings.TrimPrefix(arg, "--jq=")
-				continue
-			}
-			if raw, long := strings.CutPrefix(arg, "--header="); long || strings.HasPrefix(arg, "-H") {
-				if !long {
-					raw = strings.TrimPrefix(strings.TrimPrefix(arg, "-H"), "=")
-				}
-				key, value, ok := strings.Cut(raw, ":")
-				if ok {
+			case "--hostname":
+				hostname, hostnameExplicit = value, true
+			case "--method":
+				request.method = strings.ToUpper(value)
+			case "--jq":
+				request.jq = value
+			case "--header":
+				if key, value, ok := strings.Cut(value, ":"); ok {
 					header := strings.ToLower(strings.TrimSpace(key))
 					if !safeRelayHeader(header) {
 						return request, true, nil
 					}
 					request.headers[header] = strings.TrimSpace(value)
 				}
-				continue
 			}
+		case "--paginate", "--slurp":
+			enabled := true
+			if inline {
+				var err error
+				enabled, err = strconv.ParseBool(value)
+				if err != nil {
+					return request, true, nil
+				}
+			}
+			if name == "--paginate" {
+				request.paginate = enabled
+			} else {
+				request.slurp = enabled
+			}
+		case "-f", "-F", "--field", "--raw-field":
+			return request, true, nil
+		default:
 			if strings.HasPrefix(arg, "-") || request.path != "" {
 				return request, true, nil
 			}
