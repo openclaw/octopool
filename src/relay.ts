@@ -9,7 +9,7 @@ import {
   withBackendWorkSignal,
 } from "./backend-work";
 import {
-  withGitHubEgress,
+  withCompiledGitHubEgress,
   type GitHubEgressEnv,
   rethrowStringRewriteDenial,
 } from "./github-egress";
@@ -226,7 +226,7 @@ async function relayGitHubRequest(
   const loadProtection = async () => {
     const policy = await loadStringRewritePolicy(env);
     guardStringRewriteRead(relayRequest, policy.compiled);
-    return { policy, env: withGitHubEgress(env, policy.compiled) };
+    return { policy, env: withCompiledGitHubEgress(env, policy.compiled) };
   };
   let protection: ReturnType<typeof loadProtection> | undefined;
   const protectedRequest = () => (protection ??= loadProtection());
