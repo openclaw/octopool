@@ -83,8 +83,12 @@ jobs:
         run: pnpm docs:site
 
   go:
-    name: Linux Go suite
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} Go suite
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - name: Check out
@@ -110,13 +114,10 @@ jobs:
       - name: Check Go formatting
         shell: bash
         run: |
-          mapfile -t files < <(git ls-files '*.go')
-          if [ "${#files[@]}" -gt 0 ]; then
-            diff="$(gofmt -l "${files[@]}")"
-            if [ -n "$diff" ]; then
-              echo "$diff"
-              exit 1
-            fi
+          diff="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
+          if [ -n "$diff" ]; then
+            echo "$diff"
+            exit 1
           fi
 
       - name: Test and vet Go
