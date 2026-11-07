@@ -7,6 +7,7 @@ import {
   compileStringRewriteRules,
   guardStringRewriteRead,
   type StringRewriteRule,
+  type CompiledStringRewriteRule,
 } from "./string-rewrites";
 
 // A new frozen context per authenticated relay request, never a mutation of the
@@ -19,8 +20,19 @@ export type GitHubEgressEnv = Env & {
 };
 
 export function withGitHubEgress(env: Env, rules: readonly StringRewriteRule[]): GitHubEgressEnv {
-  const compiled = Object.freeze(
+  return withCompiledGitHubEgress(
+    env,
     compileStringRewriteRules(rules.map(({ pattern, replacement }) => ({ pattern, replacement }))),
+  );
+}
+
+// Accept only a snapshot compiled by this request's authoritative policy load.
+export function withCompiledGitHubEgress(
+  env: Env,
+  rules: readonly CompiledStringRewriteRule[],
+): GitHubEgressEnv {
+  const compiled = Object.freeze(
+    rules.map(({ pattern, replacement, regex }) => Object.freeze({ pattern, replacement, regex })),
   );
   let scope: Promise<string> | undefined;
   const githubEgress = Object.freeze({

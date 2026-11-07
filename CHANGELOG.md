@@ -5,6 +5,8 @@
 - Skip workflow-run and catalogue reads for `gh pr checks` output with unique, slash-free check names that does not request event or workflow metadata, preserving check identity validation and native deduplication.
 - Run the Go test suite and vet on native macOS as well as Linux and Windows, covering Darwin-specific filesystem and process helpers.
 
+- Compile each relay request's authoritative string-protection rules once and reuse the request-local snapshot for outbound checks.
+
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 - Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
 

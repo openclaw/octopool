@@ -1,8 +1,34 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { withGitHubEgress } from "../src/github-egress";
+import { withCompiledGitHubEgress, withGitHubEgress } from "../src/github-egress";
+
+import { compileStringRewriteRules, guardStringRewriteRead } from "../src/string-rewrites";
+import { RE2JS } from "re2js";
 
 describe("request-local canonical GitHub transport", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("reuses one compiled snapshot for request and egress checks", async () => {
+    const compile = vi.spyOn(RE2JS, "compile");
+    const upstream = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", upstream);
+    const rules = [{ pattern: "cobalt-mint", replacement: "public" }];
+    const compiled = compileStringRewriteRules(rules);
+    const protectedEnv = withCompiledGitHubEgress({} as Env, compiled);
+    guardStringRewriteRead({ pool: "test", method: "GET", path: "/repos/example/demo" }, compiled);
+    await protectedEnv.githubEgress.fetch("https://api.github.com/repos/example/demo");
+    await expect(
+      protectedEnv.githubEgress.fetch("https://api.github.com/repos/example/cobalt-mint"),
+    ).rejects.toMatchObject({ code: "string_rewrite_denied" });
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    // A later request owns a distinct compiled snapshot.
+    const next = compileStringRewriteRules(rules);
+    expect(next[0]!.regex).not.toBe(compiled[0]!.regex);
+    expect(compile).toHaveBeenCalledTimes(2);
+  });
 
   it("scopes sharing by admission patterns with fixed-size keys", async () => {
     const first = withGitHubEgress({} as Env, [
