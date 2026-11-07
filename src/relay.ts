@@ -1745,9 +1745,7 @@ async function readWorkflowCatalogueCache(
   const route = classifyRoute(request, state.policy);
   const expectedURL = `https://api.github.com${state.request.path}`;
   const expectedPath = `.github/workflows/${selector}`;
-  const probe = async (identity?: Identity) => {
-    const key = await githubCacheKey(request.pool, request, route, identity);
-    const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
+  const probe = async (cached: CachedGitHubResponse | undefined, identity?: Identity) => {
     if (
       cached === undefined ||
       cached.status !== 200 ||
@@ -1785,7 +1783,7 @@ async function readWorkflowCatalogueCache(
     return { ...cached, body: item, headers: transformedGitHubHeaders(cached.headers) };
   };
   // A missing catalogue item proves nothing; keep the normal view fill and its owner.
-  return readOptionalCacheCandidates(state.env, request.pool, route, probe);
+  return readOptionalFreshCacheCandidates(state, request, route, probe);
 }
 
 async function readLargerRunListCache(
@@ -1804,6 +1802,37 @@ async function readLargerRunListCache(
     return projected === undefined ? undefined : { ...cached, ...projected };
   };
   return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
+}
+
+async function readOptionalFreshCacheCandidates(
+  state: ActiveRelay,
+  request: RelayRequest,
+  route: RouteInfo,
+  accept: (
+    cached: CachedGitHubResponse | undefined,
+    identity?: Identity,
+  ) => Promise<CachedGitHubResponse | undefined>,
+): Promise<CachedGitHubResponse | undefined> {
+  try {
+    const anonymousKey = await githubCacheKey(request.pool, request, route);
+    const anonymous = await accept(
+      await readGitHubCache(state.env, anonymousKey, state.ctx, state.maxAgeSeconds),
+    );
+    if (anonymous !== undefined) return anonymous;
+    const identities = await loadIdentities(state.env, request.pool, route);
+    const keys = await Promise.all(
+      identities.map((identity) => githubCacheKey(request.pool, request, route, identity)),
+    );
+    const read = createGitHubCacheCandidateReader(state.env, keys, state.ctx, state.maxAgeSeconds);
+    for (const [index, identity] of identities.entries()) {
+      const cached = await accept(await read(keys[index]!), identity);
+      if (cached !== undefined) return cached;
+    }
+  } catch (error) {
+    rethrowStringRewriteDenial(error);
+    if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
+  }
+  return undefined;
 }
 
 async function readOptionalCacheCandidates(
