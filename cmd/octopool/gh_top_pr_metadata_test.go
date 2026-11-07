@@ -706,7 +706,7 @@ func TestPRChecksMetadataGuardedFallback(t *testing.T) {
 				t.Setenv("OCTOPOOL_NO_FALLBACK", noFallback)
 				capture := captureRewriteGH(t)
 				var out, stderr bytes.Buffer
-				err := runGH(t.Context(), []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name"}, &out, &stderr)
+				err := runGH(t.Context(), []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name,workflow"}, &out, &stderr)
 				if noFallback != "" {
 					if !isLocalFallback(err) || out.Len() != 0 {
 						t.Errorf("NO_FALLBACK lost: err=%v output=%q", err, out.String())
@@ -773,7 +773,7 @@ func TestPRChecksMetadataPolicyRefresh(t *testing.T) {
 			}
 			capture := captureRewriteGH(t)
 			var out bytes.Buffer
-			err := runGH(t.Context(), []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name"}, &out, io.Discard)
+			err := runGH(t.Context(), []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name,workflow"}, &out, io.Discard)
 			if err == nil || out.Len() != 0 {
 				t.Errorf("new authoritative policy must block next lookup/child: err=%v output=%q", err, out.String())
 			}

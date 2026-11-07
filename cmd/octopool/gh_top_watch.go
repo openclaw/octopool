@@ -417,7 +417,7 @@ func relayPRChecksWatch(ctx context.Context, stdout io.Writer, opts ghPRChecksWa
 		var head prCheckHead
 		err := retryWatchTick(ctx, &backoff, func() error {
 			var pollErr error
-			items, head, pollErr = relayPRCheckItemsWithHead(ctx, client, opts.repo, opts.number)
+			items, head, pollErr = relayPRCheckItemsWithHead(ctx, client, opts.repo, opts.number, true)
 			return pollErr
 		})
 		if err != nil {

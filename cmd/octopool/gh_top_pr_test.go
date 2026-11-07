@@ -385,13 +385,16 @@ func TestRunGHPRChecksFreshUsesCurrentHead(t *testing.T) {
 				"/repos/acme/repo/actions/runs",
 				"/repos/acme/repo/actions/workflows",
 			}
+			if format == "human" {
+				wantPaths = wantPaths[:3]
+			}
 			if len(paths) != len(wantPaths) || paths[0] != wantPaths[0] {
 				t.Fatalf("fresh head must precede both collections, then Actions metadata: paths=%v", paths)
 			}
 			if !(paths[1] == wantPaths[1] && paths[2] == wantPaths[2] || paths[1] == wantPaths[2] && paths[2] == wantPaths[1]) {
 				t.Fatalf("expected one check-runs and one status read at the fresh head: paths=%v", paths)
 			}
-			if !(paths[3] == wantPaths[3] && paths[4] == wantPaths[4] || paths[3] == wantPaths[4] && paths[4] == wantPaths[3]) {
+			if len(wantPaths) > 3 && !(paths[3] == wantPaths[3] && paths[4] == wantPaths[4] || paths[3] == wantPaths[4] && paths[4] == wantPaths[3]) {
 				t.Fatalf("expected one runs and one workflows read after both check collections: paths=%v", paths)
 			}
 		})

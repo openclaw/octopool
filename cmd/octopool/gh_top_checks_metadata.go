@@ -19,33 +19,16 @@ func prCheckID(raw any) (int64, bool) {
 // Both checks and the PR-view rollup use verified workflow names. Never use a
 // run's display title/name or follow URLs from response bodies to hydrate them.
 func verifiedPRCheckMetadata(ctx context.Context, client ghRelayClient, repo, sha string, runHeaders, catalogueHeaders map[string]string, contexts []prCheckContext) (map[int64]prCheckMetadata, error) {
-	needed := map[int64]bool{}
-	for _, context := range contexts {
-		if context.isStatus {
-			continue
-		}
-		check := context.raw
-		if firstString(check, "head_sha") != sha {
-			return nil, localFallbackError{Reason: "check response did not match pull request head"}
-		}
-		app, _ := check["app"].(map[string]any)
-		_, appOK := prCheckID(app["id"])
-		slug := firstString(app, "slug")
-		suite, _ := valueAtPath(check, "check_suite", "id")
-		suiteID, suiteOK := prCheckID(suite)
-		if !appOK || slug == "" || !suiteOK {
-			return nil, localFallbackError{Reason: "check response did not include app and suite identity"}
-		}
-		if slug == "github-actions" {
-			needed[suiteID] = true
-		}
+	needed, err := validatePRCheckContexts(sha, contexts)
+	if err != nil {
+		return nil, err
 	}
 	metadata := map[int64]prCheckMetadata{}
 	if len(needed) == 0 {
 		return metadata, nil
 	}
 	var names map[int64]string
-	err := relayReadPair(ctx, func(ctx context.Context) error {
+	err = relayReadPair(ctx, func(ctx context.Context) error {
 		runs, err := relayCompleteCollection(ctx, client, ghAPIRequest{
 			method: "GET", path: repoPath(repo, "actions", "runs"), headers: runHeaders,
 			query: map[string]any{"head_sha": sha},
@@ -121,4 +104,29 @@ func relayPRCheckWorkflowNames(ctx context.Context, client ghRelayClient, repo s
 		names[id] = firstString(workflow, "name")
 	}
 	return names, nil
+}
+
+func validatePRCheckContexts(sha string, contexts []prCheckContext) (map[int64]bool, error) {
+	needed := map[int64]bool{}
+	for _, context := range contexts {
+		if context.isStatus {
+			continue
+		}
+		check := context.raw
+		if firstString(check, "head_sha") != sha {
+			return nil, localFallbackError{Reason: "check response did not match pull request head"}
+		}
+		app, _ := check["app"].(map[string]any)
+		_, appOK := prCheckID(app["id"])
+		slug := firstString(app, "slug")
+		suite, _ := valueAtPath(check, "check_suite", "id")
+		suiteID, suiteOK := prCheckID(suite)
+		if !appOK || slug == "" || !suiteOK {
+			return nil, localFallbackError{Reason: "check response did not include app and suite identity"}
+		}
+		if slug == "github-actions" {
+			needed[suiteID] = true
+		}
+	}
+	return needed, nil
 }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -99,5 +101,70 @@ func TestPRCheckMetadataCatalogueRefresh(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPRChecksSkipUnusedWorkflowMetadata(t *testing.T) {
+	for _, fields := range [][]string{nil, {"name", "state", "bucket"}, {"name", "workflow"}, {"name", "event"}} {
+		t.Run(strings.Join(fields, ","), func(t *testing.T) {
+			f := newPRChecksFixture()
+			relayTestServer(t, func(request map[string]any) any { return f.response(t, request) })
+			var out bytes.Buffer
+			if err := relayPRChecks(t.Context(), &out, "acme/repo", "7", ghTopOptions{json: fields}); err != nil {
+				t.Fatal(err)
+			}
+			wantMetadata := 0
+			if hasJSONField(fields, "workflow") || hasJSONField(fields, "event") {
+				wantMetadata = 1
+			}
+			if f.calls("/actions/runs") != wantMetadata || f.calls("/actions/workflows") != wantMetadata {
+				t.Fatalf("unexpected metadata reads: %v", f.requests)
+			}
+			if len(fields) == 0 {
+				if !strings.Contains(out.String(), "unit\tpass") {
+					t.Fatalf("human output = %q", out.String())
+				}
+			} else {
+				var rows []map[string]any
+				if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+					t.Fatal(err)
+				}
+				if len(rows) != 1 || rows[0]["name"] != "unit" {
+					t.Fatalf("rows = %v", rows)
+				}
+				if hasJSONField(fields, "workflow") && rows[0]["workflow"] != "CI" {
+					t.Fatalf("workflow = %v", rows)
+				}
+				if hasJSONField(fields, "event") && rows[0]["event"] != "pull_request" {
+					t.Fatalf("event = %v", rows)
+				}
+			}
+		})
+	}
+}
+
+func TestPRChecksUnusedMetadataStillValidatesIdentity(t *testing.T) {
+	for _, scenario := range []string{"wrong-head", "missing-app", "missing-suite"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newPRChecksFixture()
+			check := f.checks[0].(map[string]any)
+			switch scenario {
+			case "wrong-head":
+				check["head_sha"] = strings.Repeat("f", 40)
+			case "missing-app":
+				delete(check, "app")
+			case "missing-suite":
+				delete(check, "check_suite")
+			}
+			relayTestServer(t, func(request map[string]any) any { return f.response(t, request) })
+			var out bytes.Buffer
+			err := relayPRChecks(t.Context(), &out, "acme/repo", "7", ghTopOptions{json: []string{"name"}})
+			if !isLocalFallback(err) || out.Len() != 0 {
+				t.Fatalf("invalid identity escaped: err=%v output=%q", err, out.String())
+			}
+			if f.calls("/actions/runs") != 0 || f.calls("/actions/workflows") != 0 {
+				t.Fatalf("invalid identity fetched metadata: %v", f.requests)
+			}
+		})
 	}
 }
