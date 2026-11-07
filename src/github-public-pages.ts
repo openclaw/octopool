@@ -203,9 +203,6 @@ function issueListPageQuery(
     kind === "issue"
       ? new Set(["per_page", "page", "state", "creator", "assignee", "labels"])
       : new Set(["per_page", "page", "state"]);
-  if (!validScalarQuery(query, allowed)) {
-    return undefined;
-  }
   const pageQuery = simplePageQuery(query, allowed);
   if (pageQuery === undefined) {
     return undefined;

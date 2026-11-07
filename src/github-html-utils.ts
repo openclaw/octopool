@@ -9,7 +9,7 @@ export function htmlAttribute(attributes: string, name: string): string | undefi
 
 export function textMatch(input: string, pattern: RegExp): string | undefined {
   const value = pattern.exec(input)?.[1];
-  return value === undefined ? undefined : decodeHTML(stripHTMLTags(value)).trim();
+  return value === undefined ? undefined : plainHTML(value);
 }
 
 export function stripHTMLTags(value: string): string {
