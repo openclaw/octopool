@@ -190,7 +190,7 @@ func TestPRCheckCollectionsDenialOverridesEarlierFailure(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			var stdout, stderr bytes.Buffer
-			err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name"}, &stdout, &stderr)
+			err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name,workflow"}, &stdout, &stderr)
 			var relay *relayResponseError
 			if !errors.As(err, &relay) || relay.Status != http.StatusForbidden || relay.Code != "string_rewrite_denied" || stdout.Len() != 0 || stderr.Len() != 0 {
 				t.Fatalf("peer denial was hidden: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
@@ -242,7 +242,7 @@ func TestPRCheckCollectionsCancelAndJoin(t *testing.T) {
 			go func() {
 				defer close(done)
 				var stdout, stderr bytes.Buffer
-				err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name"}, &stdout, &stderr)
+				err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name,workflow"}, &stdout, &stderr)
 				settledAtReturn = settled.Load()
 				done <- prCheckReadResult{err, stdout.String(), stderr.String()}
 			}()
@@ -335,7 +335,7 @@ func TestPRCheckCollectionsKeepDenialBeforePolicyCancellation(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			var stdout, stderr bytes.Buffer
-			err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name"}, &stdout, &stderr)
+			err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name,workflow"}, &stdout, &stderr)
 			var relay *relayResponseError
 			if !errors.As(err, &relay) || relay.Status != http.StatusUnauthorized || relay.Code != "invalid_auth" || stdout.Len() != 0 || stderr.Len() != 0 {
 				t.Fatalf("policy cancellation replaced denial: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())

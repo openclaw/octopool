@@ -44,7 +44,7 @@ func relayPRChecks(ctx context.Context, stdout io.Writer, repo, number string, o
 	if err != nil {
 		return err
 	}
-	items, head, err := relayPRCheckItemsWithHead(ctx, client, repo, number)
+	items, head, err := relayPRCheckItemsWithHead(ctx, client, repo, number, hasJSONField(opts.json, "event") || hasJSONField(opts.json, "workflow"))
 	if err != nil {
 		return err
 	}
@@ -129,7 +129,7 @@ func relayPRChecksHead(ctx context.Context, client ghRelayClient, repo, number s
 	return head, nil
 }
 
-func relayPRCheckItemsWithHead(ctx context.Context, client ghRelayClient, repo, number string) ([]prCheckRow, prCheckHead, error) {
+func relayPRCheckItemsWithHead(ctx context.Context, client ghRelayClient, repo, number string, hydrate bool) ([]prCheckRow, prCheckHead, error) {
 	maxAge := prChecksMaxPRAgeSeconds
 	// This internal default must not pin a fresh checks read to a cached head.
 	if freshReadRequested() {
@@ -139,7 +139,7 @@ func relayPRCheckItemsWithHead(ctx context.Context, client ghRelayClient, repo, 
 	if err != nil {
 		return nil, prCheckHead{}, err
 	}
-	items, err := prCheckItemsForSHAWithHeaders(ctx, client, repo, head.SHA, nil)
+	items, err := readPRCheckItems(ctx, client, repo, head.SHA, nil, hydrate)
 	return items, head, err
 }
 
@@ -150,11 +150,20 @@ func prCheckItemsForSHAFresh(ctx context.Context, client ghRelayClient, repo, sh
 }
 
 func prCheckItemsForSHAWithHeaders(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string) ([]prCheckRow, error) {
+	return readPRCheckItems(ctx, client, repo, sha, headers, true)
+}
+
+func readPRCheckItems(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string, hydrate bool) ([]prCheckRow, error) {
 	contexts, err := prCheckContextsForSHA(ctx, client, repo, sha, headers)
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := verifiedPRCheckMetadata(ctx, client, repo, sha, headers, headers, contexts)
+	var metadata map[int64]prCheckMetadata
+	if hydrate || prCheckMetadataNeededForDeduplication(contexts) {
+		metadata, err = verifiedPRCheckMetadata(ctx, client, repo, sha, headers, headers, contexts)
+	} else {
+		_, err = validatePRCheckContexts(sha, contexts)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -297,4 +306,21 @@ func checkExitCode(items []prCheckRow) error {
 		return exitCodeError{Code: code}
 	}
 	return nil
+}
+
+func prCheckMetadataNeededForDeduplication(contexts []prCheckContext) bool {
+	names := make(map[string]bool)
+	for _, item := range contexts {
+		if item.isStatus {
+			continue
+		}
+		name := firstString(item.raw, "name")
+		// Native deduplication joins name/workflow/event with slashes. A slash in
+		// the name can collide with another tuple even when names differ.
+		if names[name] || strings.Contains(name, "/") {
+			return true
+		}
+		names[name] = true
+	}
+	return false
 }
