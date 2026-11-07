@@ -6,6 +6,8 @@
 - Run the Go test suite and vet on native macOS as well as Linux and Windows, covering Darwin-specific filesystem and process helpers.
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
+- Batch identity-backed workflow catalogue cache reads while preserving anonymous-first lookup and identity validation.
+
 - Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
 
 ### Fixes

@@ -1,12 +1,17 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
+import { githubCacheKey, GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { queries } from "../../src/generated/sql";
 import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";
-import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, relay, seedPool, POOL } from "./harness";
 import { requestWithEnv } from "./identity-routing-support";
 import { observePublicationD1 } from "./publication-d1-observer";
+
+import { loadIdentities } from "../../src/db";
+import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
+import type { RelayRequest } from "../../src/types";
 
 const LIST = "/repos/openclaw/octopool/actions/workflows";
 const VIEW = `${LIST}/123`;
@@ -34,6 +39,81 @@ type Envelope = {
 
 describe("workflow catalogue cache reuse", () => {
   beforeEach(seedPool);
+
+  it.each([false, true])(
+    "batches pooled misses without bypassing candidate validation (revoked=%s)",
+    async (revoked) => {
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO identities (id, pool_id, kind, login, secret_ref, weight, status) SELECT 'secondary', pool_id, kind, 'secondary', secret_ref, 50, status FROM identities WHERE id = 'primary'",
+        ),
+        env.DB.prepare(
+          "INSERT INTO identity_scopes (identity_id, owner, repo, permission, allow_private) SELECT 'secondary', owner, repo, permission, allow_private FROM identity_scopes WHERE identity_id = 'primary'",
+        ),
+      ]);
+      const request: RelayRequest = {
+        pool: POOL,
+        method: "GET",
+        path: LIST,
+        query: { page: "1", per_page: "100" },
+      };
+      const route = classifyRoute(request, defaultPolicy("openclaw"));
+      const identities = await loadIdentities(env, POOL, route);
+      const keys: string[] = [];
+      for (const identity of identities) {
+        const key = await githubCacheKey(POOL, request, route, identity);
+        keys.push(key);
+        await writeOwnedGitHubCache(
+          env,
+          key,
+          request,
+          route,
+          {
+            status: 200,
+            headers: {},
+            body: { total_count: 1, workflows: [workflow] },
+          },
+          identity,
+        );
+        await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
+      }
+      await seedPublicRepoProof(env, route);
+      let changed = false;
+      const observed = observePublicationD1(env.DB, {
+        after: async (sql, values) => {
+          if (revoked && !changed && sql === queries.readGitHubCache && values[0] === keys[0]) {
+            changed = true;
+            await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = ?")
+              .bind(identities[0]!.id)
+              .run();
+          }
+        },
+      });
+      const batches: number[] = [];
+      const db = new Proxy(observed, {
+        get(target, property) {
+          if (property === "batch")
+            return (statements: D1PreparedStatement[]) => {
+              batches.push(statements.length);
+              return target.batch(statements);
+            };
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const upstream = vi.fn<typeof fetch>();
+      vi.stubGlobal("fetch", upstream);
+      const response = await requestWithEnv({ DB: db }, VIEW, {});
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        body: workflow,
+        identity: { id: identities[revoked ? 1 : 0]!.id },
+        relay: { cache: "hit" },
+      });
+      expect(batches).toContain(2);
+      expect(upstream).not.toHaveBeenCalled();
+    },
+  );
 
   it.each<{
     scenario: string;
