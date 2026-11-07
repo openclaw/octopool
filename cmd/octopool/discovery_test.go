@@ -17,23 +17,41 @@ func TestNormalizeBaseURLDefaultsSchemeAndDropsQuery(t *testing.T) {
 	}
 }
 
-func TestDiscoverLoginServerUsesDefaultPool(t *testing.T) {
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/octopool" {
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
-		w.Header().Set("content-type", "application/json")
-		_, _ = w.Write([]byte(`{"service":"octopool","version":1,"api_base":"` + server.URL + `","app_base":"` + server.URL + `","default_pool":"core","allowed_org":"acme","auth":{"cli_github_token":true,"web_login":true}}`))
-	}))
-	defer server.Close()
+func TestDiscoverLoginServerPoolPrecedence(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		override    string
+		environment string
+		advertised  string
+		want        string
+	}{
+		{"explicit", "flag-pool", "env-pool", "server-pool", "flag-pool"},
+		{"environment", "", "env-pool", "server-pool", "env-pool"},
+		{"discovery", "", "", "server-pool", "server-pool"},
+		{"fallback", "", "", "", "maintainers"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_POOL", test.environment)
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/.well-known/octopool" {
+					t.Errorf("unexpected path %s", r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("content-type", "application/json")
+				_, _ = w.Write([]byte(`{"service":"octopool","version":1,"api_base":"` + server.URL + `","default_pool":"` + test.advertised + `","auth":{"cli_github_token":true}}`))
+			}))
+			t.Cleanup(server.Close)
 
-	resolved, err := discoverLoginServer(t.Context(), server.URL, "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.APIBase != server.URL || resolved.Pool != "core" {
-		t.Fatalf("resolved = %#v", resolved)
+			resolved, err := discoverLoginServer(t.Context(), server.URL, test.override, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.APIBase != server.URL || resolved.Pool != test.want {
+				t.Fatalf("resolved = %#v, want pool %q", resolved, test.want)
+			}
+		})
 	}
 }
 

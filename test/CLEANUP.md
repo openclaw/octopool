@@ -22,6 +22,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   Modifier cases from [#302](https://github.com/openclaw/octopool/pull/302) now
   pair working relay controls with each rejection. Two duplicate PR-diff cases
   were removed; workflow-option and duplicate-repository mutations are caught.
+  Discovery pool selection now isolates inherited configuration and covers all
+  four precedence levels. Four mutations were caught and unused fixture fields removed.
 - **Unit tests:** isolated parser rejection conditions, removed duplicate PR-state
   and release cases plus unused HTML, replaced cosmetic assertions with contracts,
   checked outbound queries/signals/cache writes, used fake time and isolated docs
