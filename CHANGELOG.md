@@ -13,6 +13,7 @@
 - Batch identity-backed workflow catalogue cache reads while preserving anonymous-first lookup and identity validation.
 
 - Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
+- Read pool statistics in one D1 batch for a consistent report with fewer database round trips.
 
 ### Fixes
 
