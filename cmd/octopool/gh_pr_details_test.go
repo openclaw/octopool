@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -42,7 +43,7 @@ func TestPRDetailNativeAssembly(t *testing.T) {
 		encoded, _ := json.Marshal(item)
 		var got map[string]any
 		_ = json.Unmarshal(encoded, &got)
-		if err != nil || key != "IC_1" || got["viewerDidAuthor"] != strings.EqualFold(login, "alice") || got["minimizedReason"] != "" || len(got["reactionGroups"].([]any)) != 1 || len(got["author"].(map[string]any)) != 1 {
+		if err != nil || key != "IC_1" || got["viewerDidAuthor"] != strings.EqualFold(login, "alice") || got["minimizedReason"] != "" || len(got["author"].(map[string]any)) != 1 {
 			t.Fatalf("comment %q: %s / %v", login, encoded, err)
 		}
 		if _, _, err := mapPRDetail(raw, "comments", ""); !isLocalFallback(err) {
@@ -70,6 +71,43 @@ func TestPRDetailNativeAssembly(t *testing.T) {
 	want := `{"authoredDate":"2026-09-24T01:02:03Z","authors":[{"email":"synthetic@example.test","id":"","login":"","name":"Unlinked"}],"committedDate":"2026-09-24T01:02:03Z","messageBody":"Body\n","messageHeadline":"Subject","oid":"abc123"}`
 	if err != nil || string(encoded) != want {
 		t.Fatalf("commit: %s / %v", encoded, err)
+	}
+}
+
+func TestPRDetailCommentReactionGroups(t *testing.T) {
+	for _, test := range []struct{ name, groups, want string }{
+		{"null", `null`, `[]`},
+		{"empty", `[]`, `[]`},
+		{"zero_only", `[{"content":"HEART","users":{"totalCount":0}}]`, `[]`},
+		{"mixed", `[{"content":"HEART","users":{"totalCount":0}},{"content":"EYES","users":{"totalCount":2}},{"content":"ROCKET","users":{"totalCount":3}}]`, `[{"content":"EYES","users":{"totalCount":2}},{"content":"ROCKET","users":{"totalCount":3}}]`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			comment := detailComment(1, "alice")
+			comment["reactionGroups"] = json.RawMessage(test.groups)
+			raw, err := json.Marshal(comment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			item, _, err := mapPRDetail(raw, "comments", "U_alice")
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(encoded, &got); err != nil {
+				t.Fatal(err)
+			}
+			var want any
+			if err := json.Unmarshal([]byte(test.want), &want); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got["reactionGroups"], want) {
+				t.Fatalf("reaction groups: got %s, want %s", encoded, test.want)
+			}
+		})
 	}
 }
 

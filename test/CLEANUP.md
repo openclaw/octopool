@@ -24,6 +24,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   were removed; workflow-option and duplicate-repository mutations are caught.
   Discovery pool selection now isolates inherited configuration and covers all
   four precedence levels. Four mutations were caught and unused fixture fields removed.
+  PR-comment reactions now check exact values and empty-array output instead of
+  repeating a count-only assertion across author cases; two mutations were caught.
 - **Unit tests:** isolated parser rejection conditions, removed duplicate PR-state
   and release cases plus unused HTML, replaced cosmetic assertions with contracts,
   checked outbound queries/signals/cache writes, used fake time and isolated docs
