@@ -100,7 +100,7 @@ export async function routeRequest(
   if (request.method === "GET" && /^\/v1\/pools\/[^/]+\/health$/.test(url.pathname)) {
     const pool = routeParam(url.pathname, /^\/v1\/pools\/(?<pool>[^/]+)\/health$/, "pool");
     await authenticateCaller(request, env, pool);
-    return poolHealth(env, pool);
+    return poolHealth(env, pool, url.searchParams.get("capacity") === "1");
   }
   if (request.method === "POST" && url.pathname === "/v1/github/request") {
     return relayGitHub(request, env, ctx, requestId);

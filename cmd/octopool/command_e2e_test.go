@@ -39,6 +39,20 @@ func TestCLIEndToEndServiceCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("health capacity", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/pools/maintainers/health" || r.URL.Query().Get("capacity") != "1" {
+				t.Errorf("unexpected capacity request: %s", r.URL)
+			}
+			writeCommandJSON(t, w, map[string]any{"capacity": map[string]any{"active_cooldowns": 1}})
+		}))
+		t.Cleanup(server.Close)
+		result := runCLI(t, bin, server.URL, nil, "health", "--capacity")
+		if result.err != nil || !strings.Contains(result.stdout, `"active_cooldowns": 1`) {
+			t.Fatalf("err=%v stdout=%q stderr=%q", result.err, result.stdout, result.stderr)
+		}
+	})
+
 	t.Run("stats client filter", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet || r.URL.Path != "/v1/pools/maintainers/stats" {

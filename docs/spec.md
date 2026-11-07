@@ -171,8 +171,9 @@ Mutations remain native.
   one-time plaintext token for a named client; only its SHA-256 hash is stored, and
   rotating one client does not invalidate the caller's other clients. Each caller retains
   at most 16 named clients; a new name retires the least recently updated other session.
-- `GET /v1/pools/:pool/health`: `pool`, `identities_total`, `identities_healthy`,
-  `policy_version`.
+- `GET /v1/pools/:pool/health`: `pool`, `identities_total`, `identities_active`,
+  `identities_healthy` (compatibility alias), `health_basis`, `policy_version`.
+  Add `?capacity=1` for an observed coordinator capacity summary.
 - `GET /v1/pools/:pool/stats`: pool/caller/client request, outcome, cache, coalescing, and
   route aggregates for a bounded time window.
 - `POST /v1/admin/callers`: verify/provision a caller and pool grant.
