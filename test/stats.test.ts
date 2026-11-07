@@ -108,11 +108,14 @@ describe("client-filtered stats", () => {
 
   it("keeps the calling client by default and emits no filter field", async () => {
     const bindings: unknown[][] = [];
-    const response = await poolStats(statsEnv(bindings), "maintainers", caller, {
+    const env = statsEnv(bindings);
+    const response = await poolStats(env, "maintainers", caller, {
       label: "24h",
       seconds: 86_400,
     });
 
+    expect(env.DB.batch).toHaveBeenCalledOnce();
+    expect(vi.mocked(env.DB.batch).mock.calls[0]![0]).toHaveLength(10);
     expect(response).not.toHaveProperty("client_filter");
     expect(clientScopedBindings(bindings)).toEqual([
       ["maintainers", "-86400 seconds", "caller-id", "test-mac"],
@@ -151,7 +154,8 @@ function statsEnv(bindings: unknown[][]): Env {
       };
     },
   }));
-  return { DB: { prepare } } as unknown as Env;
+  const batch = vi.fn(async (statements: unknown[]) => statements.map(() => ({ results: [] })));
+  return { DB: { prepare, batch } } as unknown as Env;
 }
 
 function clientScopedBindings(bindings: unknown[][]): unknown[][] {

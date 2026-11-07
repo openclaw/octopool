@@ -7,6 +7,7 @@
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 - Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
+- Read pool statistics in one D1 batch for a consistent report with fewer database round trips.
 
 ### Fixes
 
