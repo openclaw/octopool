@@ -1,4 +1,4 @@
-import { HttpError } from "./http";
+import { HttpError, requireString } from "./http";
 import { parseGraphQLRead } from "./graphql-read";
 import { defaultGitHubJSONAccept } from "./github-response";
 import { landingGraphQLRequest } from "./github-landing";
@@ -70,9 +70,9 @@ export function validateRelayRequest(value: unknown): RelayRequest {
   if (!isRecord(value)) {
     throw new HttpError(400, "invalid_request", "Request body must be an object");
   }
-  const pool = requireText(value.pool, "pool");
-  const method = requireText(value.method, "method").toUpperCase();
-  const path = requireText(value.path, "path");
+  const pool = requireString(value.pool, "pool");
+  const method = requireString(value.method, "method").toUpperCase();
+  const path = requireString(value.path, "path");
   const lowerPath = path.toLowerCase();
   if (
     !path.startsWith("/") ||
@@ -442,13 +442,6 @@ export function normalizeRouteKey(method: string, path: string): string {
     }
   }
   return `${method.toUpperCase()} ${path}`;
-}
-
-function requireText(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new HttpError(400, "invalid_request", `${field} must be a non-empty string`);
-  }
-  return value.trim();
 }
 
 function normalizeQuery(value: unknown): Record<string, string | string[]> | undefined {

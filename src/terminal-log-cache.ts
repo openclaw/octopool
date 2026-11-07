@@ -1,5 +1,5 @@
 import { relayPhase, relayTiming } from "./relay-timing";
-import { base64ToBytes } from "./encoding";
+import { base64ToBytes, bytesToBase64 } from "./encoding";
 import type { CacheMissObserver } from "./cache";
 import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
 import { queries } from "./generated/sql";
@@ -271,11 +271,7 @@ function encodeLogBody(body: unknown, encoding: "json" | "text" | "base64"): Uin
 
 function decodeLogBytes(bytes: Uint8Array, encoding: "json" | "text" | "base64"): unknown {
   if (encoding === "base64") {
-    let binary = "";
-    for (const byte of bytes) {
-      binary += String.fromCharCode(byte);
-    }
-    return btoa(binary);
+    return bytesToBase64(bytes);
   }
   const text = new TextDecoder().decode(bytes);
   if (encoding !== "json") {

@@ -20,14 +20,7 @@ func relayPRMergeSnapshot(ctx context.Context, client ghRelayClient, repo, numbe
 	if err != nil {
 		return nil, err
 	}
-	var response struct {
-		Errors []json.RawMessage `json:"errors"`
-		Data   struct {
-			Repository struct {
-				PullRequest map[string]json.RawMessage `json:"pullRequest"`
-			} `json:"repository"`
-		} `json:"data"`
-	}
+	var response prGraphQLResponse
 	if json.Unmarshal(body, &response) != nil || len(response.Errors) > 0 {
 		return nil, prDetailFallback()
 	}

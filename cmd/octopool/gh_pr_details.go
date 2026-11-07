@@ -12,6 +12,15 @@ import (
 
 const prCommentPageLimit = 10
 
+type prGraphQLResponse struct {
+	Errors []json.RawMessage `json:"errors"`
+	Data   struct {
+		Repository struct {
+			PullRequest map[string]json.RawMessage `json:"pullRequest"`
+		} `json:"repository"`
+	} `json:"data"`
+}
+
 // A saved gh login can be stale after a rename. Resolve the immutable viewer ID
 // with the same native credential, without exposing it to the pooled projection.
 func localPRCommentViewer(ctx context.Context, client ghRelayClient) (string, error) {
@@ -95,14 +104,7 @@ func relayPRDetail(ctx context.Context, client ghRelayClient, repo, number, fiel
 		if err != nil {
 			return nil, err
 		}
-		var response struct {
-			Errors []json.RawMessage `json:"errors"`
-			Data   struct {
-				Repository struct {
-					PullRequest map[string]json.RawMessage `json:"pullRequest"`
-				} `json:"repository"`
-			} `json:"data"`
-		}
+		var response prGraphQLResponse
 		if json.Unmarshal(body, &response) != nil {
 			return nil, prDetailFallback()
 		}
