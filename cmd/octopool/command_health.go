@@ -10,6 +10,7 @@ func runHealth(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("health", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	requestFlags := newCallerRequestFlags(fs)
+	capacity := fs.Bool("capacity", false, "Include observed coordinator capacity")
 	if handled, err := parseCommandFlags(fs, args, stdout, "usage: octopool health [flags]"); err != nil {
 		return err
 	} else if handled {
@@ -23,5 +24,9 @@ func runHealth(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return getJSON(ctx, stdout, apiURL(*requestFlags.baseURL, "/v1/pools/"+urlPath(*requestFlags.pool)+"/health"), token)
+	path := "/v1/pools/" + urlPath(*requestFlags.pool) + "/health"
+	if *capacity {
+		path += "?capacity=1"
+	}
+	return getJSON(ctx, stdout, apiURL(*requestFlags.baseURL, path), token)
 }

@@ -112,8 +112,16 @@ Notes:
 
 A wildcard PAT is eligible after public proof even when the requested owner is explicitly
 allowed by the pool. Registration and `GET /v1/pools/:pool/health` describe stored rows:
-`identities_healthy` counts active identities, not verified credential readiness or current
-coordinator availability. Neither operation eagerly validates every Worker binding.
+`identities_active` counts configured active identities; `identities_healthy` remains a
+compatibility alias. `health_basis: "configuration"` makes this explicit. Neither operation
+validates every Worker binding or proves current availability.
+
+Use `octopool health --capacity` (HTTP `?capacity=1`) for a live coordinator snapshot:
+observed and exhausted identities per rate-limit resource, active cooldown records, and
+active leases. These observations can include identities disabled since their last request.
+Missing observations mean unknown capacity; a cooldown may affect only one resource or route.
+The response omits identity IDs and credentials. The optional snapshot requires a working
+coordinator; ordinary health checks and local-user lookups do not contact it.
 
 The relay checks the selected credential at use time. Classified local configuration
 failures can select another eligible identity after recording a shared 120-second

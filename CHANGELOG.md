@@ -11,6 +11,8 @@
 ### Fixes
 
 - Prune expired PR-state verification proofs during scheduled maintenance without removing fresh proofs or their cached responses, using the existing per-table cleanup budget.
+- Clarify configured identity health and add `octopool health --capacity` for observed rate exhaustion, cooldowns, and leases.
+
 - Count UTF-8 bytes in serialized cached JSON payloads for stats and the dashboard, correcting non-ASCII undercounts without changing the metric to physical database allocation.
 - Prune expired dashboard sessions during scheduled maintenance in indexed batches, preserving unexpired sessions and existing per-table cleanup budgets.
 

@@ -4,6 +4,7 @@ import { beforeClientNameUpgrade, applyClientNameUpgrade } from "./client-name-u
 import { hashToken } from "../../src/auth";
 import { captureD1Baseline } from "./d1-baseline";
 import { insertAudit } from "../../src/db";
+import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { poolHealth } from "../../src/health";
 import {
   concurrentEnrollments,
@@ -668,6 +669,8 @@ describe("Worker end-to-end control plane", () => {
       pool: POOL,
       identities_total: 2,
       identities_healthy: 1,
+      identities_active: 1,
+      health_basis: "configuration",
       policy_version: 1,
     });
 
@@ -683,6 +686,40 @@ describe("Worker end-to-end control plane", () => {
       status: 404,
       code: "pool_not_found",
     });
+  });
+
+  it("reports observed capacity separately from configured active identities", async () => {
+    await seedPool({ secondary: true });
+    const coordinator = poolCoordinatorStub(env, POOL);
+    await coordinator.recordResult({
+      identityId: "primary",
+      routeKey: "repo",
+      resource: "core",
+      status: 429,
+      rate: { remaining: 0, resetAt: Math.floor(Date.now() / 1000) + 300 },
+    });
+    await coordinator.recordResult({
+      identityId: "secondary",
+      routeKey: "repo",
+      resource: "core",
+      status: 200,
+      rate: { remaining: 10, resetAt: Math.floor(Date.now() / 1000) + 300 },
+    });
+    const response = await authenticatedGet(`/v1/pools/${POOL}/health?capacity=1`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      identities_active: 2,
+      identities_healthy: 2,
+      health_basis: "configuration",
+      capacity: {
+        source: "coordinator_snapshot",
+        rate_limits: [{ resource: "core", observed_identities: 2, exhausted_identities: 1 }],
+        active_cooldowns: 1,
+        active_leases: 0,
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("primary");
   });
 
   it("gates and persists admin identity provisioning with scope replacement", async () => {
