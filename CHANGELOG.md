@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
+- Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
 
 ### Fixes
 

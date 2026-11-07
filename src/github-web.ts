@@ -48,9 +48,8 @@ export async function callGitHubWeb(
       continue;
     }
     try {
-      const body = await readWebBody(response, web.capBytes);
       const payload = await web.payload(
-        new Uint8Array(body),
+        await readWebBody(response, web.capBytes),
         response.headers,
         response.status,
         responseURL,
@@ -115,9 +114,8 @@ export async function callAnonymousGitHubAPI(
       : {};
   }
   try {
-    const body = await readWebBody(response, api.capBytes);
     const payload = await api.payload(
-      new Uint8Array(body),
+      await readWebBody(response, api.capBytes),
       response.headers,
       response.status,
       responseURL,
