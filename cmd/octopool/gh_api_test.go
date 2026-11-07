@@ -81,6 +81,15 @@ func TestParseGHAPIArgsOptionTypeControls(t *testing.T) {
 		jq, accept string
 		fallback   bool
 	}{
+		{"missing_cache_value", []string{"--cache"}, "", "", true},
+		{"empty_cache_value", []string{"--cache="}, "", "", true},
+		{"attached_header", []string{"-HAccept: application/json"}, "", "application/json", false},
+		{"equals_short_header", []string{"-H=Accept: application/json"}, "", "application/json", false},
+		{"empty_header", []string{"--header="}, "", "", false},
+		{"ignored_header_without_colon", []string{"--header=invalid"}, "", "", false},
+		{"unsafe_attached_header", []string{"-HAuthorization: value"}, "", "", true},
+		{"unsupported_short_jq_equals", []string{"-q=.number"}, "", "", true},
+		{"unsupported_short_method_equals", []string{"-X=GET"}, "", "", true},
 		{"last_jq", []string{"--jq", "(", "--jq=.number"}, ".number", "", false},
 		{"empty_last_jq", []string{"--jq", "(", "--jq="}, "", "", false},
 		{"literal_header_comma", []string{"-H", "Accept: application/json,text/plain"}, "", "application/json,text/plain", false},
@@ -297,5 +306,18 @@ func TestRunGHAPIColonOutsidePlaceholderSegmentRelays(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "real-gh:") || !strings.Contains(out.String(), `"relayed":true`) {
 		t.Fatalf("output = %q, want relay response", out.String())
+	}
+}
+
+func TestParseGHAPIArgsMissingValue(t *testing.T) {
+	for _, flag := range []string{"--hostname", "--method", "--jq", "--header", "-X", "-q", "-H"} {
+		name := map[string]string{"-X": "--method", "-q": "--jq", "-H": "--header"}[flag]
+		if name == "" {
+			name = flag
+		}
+		_, fallback, err := parseGHAPIArgs([]string{"/repos/acme/repo", flag})
+		if fallback || err == nil || err.Error() != name+" requires a value" {
+			t.Fatalf("flag=%q: fallback=%v err=%v", flag, fallback, err)
+		}
 	}
 }
