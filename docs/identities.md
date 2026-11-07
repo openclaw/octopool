@@ -62,14 +62,15 @@ v1; the [public-repo guard](cache.md) blocks private routes regardless.
 ## Selection (PoolCoordinator)
 
 Identity selection runs in a Durable Object partitioned per pool (`pool:<pool_id>`). It
-keeps four SQLite tables in DO storage:
+keeps three active SQLite tables in DO storage:
 
 - `leases` — sticky route→identity binding, 10s TTL.
 - `rate_states` — newest reset window and lowest observed remaining budget within that
   window, per identity and resource bucket.
 - `cooldowns` — per identity, scoped to `*`, `resource:<r>`, or a route key.
-- `cache_fills` — renewable, token-fenced ownership for concurrent identical cache misses;
-  completion wakes followers with the confirmed publication outcome.
+
+Cache publication ownership lives in D1 `cache_publication_owners`; the coordinator
+wakes waiting followers when publication completes.
 
 `selectIdentity` logic:
 

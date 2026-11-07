@@ -207,7 +207,9 @@ PoolCoordinator SQLite tables:
 - `leases`: 10-second route-to-identity bindings.
 - `rate_states`: last GitHub remaining/reset state by identity/resource.
 - `cooldowns`: global/resource/route exclusions.
-- `cache_fills`: renewable, token-fenced ownership for duplicate misses and follower wake-up.
+
+Cache publication ownership uses D1 `cache_publication_owners`, with follower wake-up
+managed by PoolCoordinator.
 
 Runtime SQL lives in `sql/queries/*.sql`, is validated against `migrations/` and
 `sql/schema/coordinator.sql`, and generates `src/generated/sql.ts`. Secret values are not

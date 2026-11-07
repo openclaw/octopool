@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retire the pre-publication cache-fill RPCs and their local SQL/timer machinery. Deployment requires old Worker routing and in-flight requests to be drained first; existing legacy tables are left intact.
+
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 
 ### Fixes
