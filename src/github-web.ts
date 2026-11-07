@@ -30,19 +30,7 @@ export async function callGitHubWeb(
   options: { skipAnonymousAPI?: boolean; skipNoQuota?: boolean; ctx?: ExecutionContext } = {},
 ): Promise<GitHubRelayResponse | undefined> {
   using _phase = relayPhase("anonymous_fetch");
-  let requests = webRequests(env, request, route);
-  if (requests.length === 0) {
-    return undefined;
-  }
-  const hasPublicAlternative =
-    requests.some((candidate) => candidate.usesApiQuota) &&
-    requests.some((candidate) => !candidate.usesApiQuota);
-  if (hasPublicAlternative) {
-    requests = [
-      ...requests.filter((candidate) => !candidate.usesApiQuota),
-      ...requests.filter((candidate) => candidate.usesApiQuota),
-    ];
-  }
+  const requests = webRequests(env, request, route);
   for (const web of requests) {
     if (options.skipAnonymousAPI && web.usesApiQuota) continue;
     if (options.skipNoQuota && !web.usesApiQuota) continue;
@@ -159,24 +147,13 @@ function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteIn
     const mediaRequest = mediaWebRequest(env, request, route, media);
     return mediaRequest === undefined ? [] : [mediaRequest];
   }
-  const out: WebRequest[] = [];
   const publicApi = publicAPIRequest(env, request, route);
-  if (publicApi !== undefined) {
-    out.push(publicApi);
-  }
-  const releaseMetadata = releaseMetadataPageRequest(env, request, route);
-  if (releaseMetadata !== undefined) out.push(releaseMetadata);
-  const gitRef = gitRefRequest(env, request, route);
-  if (gitRef !== undefined) {
-    out.push(gitRef);
-  }
-  const summaryPage = summaryPageRequest(env, request, route);
-  if (summaryPage !== undefined) {
-    out.push(summaryPage);
-  }
-  const actions = actionsPageRequest(env, request, route);
-  if (actions !== undefined) {
-    out.push(actions);
-  }
-  return out;
+  // Try quota-free sources before the exact anonymous API fallback.
+  return [
+    releaseMetadataPageRequest(env, request, route),
+    gitRefRequest(env, request, route),
+    summaryPageRequest(env, request, route),
+    actionsPageRequest(env, request, route),
+    publicApi,
+  ].filter((candidate) => candidate !== undefined);
 }
