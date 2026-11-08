@@ -1592,13 +1592,11 @@ async function serveEquivalentRunJobsCache(state: ActiveRelay): Promise<Response
   const proofRequest = { ...state.request, path: lookup.runPath, query: {} };
   const proofRoute = classifyRoute(proofRequest, state.policy);
   const proof =
-    (await readOptionalCacheCandidates(
-      state.env,
-      state.request.pool,
+    (await readOptionalFreshCacheCandidates(
+      state,
+      proofRequest,
       proofRoute,
-      async (identity) => {
-        const key = await githubCacheKey(proofRequest.pool, proofRequest, proofRoute, identity);
-        const cached = await readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds);
+      async (cached, identity) => {
         if (
           cached === undefined ||
           cachedLatestRunAttempt(cached, lookup) === undefined ||
