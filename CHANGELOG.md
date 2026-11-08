@@ -9,6 +9,8 @@
 
 - Compile each relay request's authoritative string-protection rules once and reuse the request-local snapshot for outbound checks.
 
+- Load dashboard database panels in one read-only batch for a consistent snapshot and fewer database round trips.
+
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 - Batch identity-backed workflow catalogue cache reads while preserving anonymous-first lookup and identity validation.
 
