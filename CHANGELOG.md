@@ -14,6 +14,8 @@
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 - Batch identity-backed workflow catalogue cache reads while preserving anonymous-first lookup and identity validation.
 
+- Batch pooled run-proof cache reads when reusing equivalent Actions job lists, preserving candidate order and current identity checks.
+
 - Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
 - Read pool statistics in one D1 batch for a consistent report with fewer database round trips.
 
