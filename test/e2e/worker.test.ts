@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { PoolCoordinator } from "../../src/index";
+import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import type { CoordinatorSnapshot } from "../../src/types";
@@ -848,6 +849,15 @@ describe("Worker end-to-end read models", () => {
   it("composes the authenticated dashboard from D1 and Durable Object state", async () => {
     await seedPool();
     const session = await seedWebSession();
+    await env.DB.batch(
+      [CACHE_PUBLICATION_EPOCH, "old-epoch"].map((epoch) =>
+        env.DB.prepare(`INSERT INTO github_public_repo_proofs
+        (protocol_epoch, owner, repo, is_public, checked_at, expires_at, publication_id, publication_token)
+        VALUES (?, 'other-org', 'dashboard-proof', 1, CURRENT_TIMESTAMP, datetime('now', '+1 hour'), 1, 'proof')`).bind(
+          epoch,
+        ),
+      ),
+    );
     await seedAudit("request-1", "caller", "repo_view", "miss", 200);
     await seedAudit("request-2", "caller", "repo_view", "hit", 200);
     await seedAudit("request-3", "caller", "actions_log", "unknown", 424, {
@@ -883,6 +893,7 @@ describe("Worker end-to-end read models", () => {
         },
       ],
       cache: { total_entries: 0, body_bytes: 0 },
+      public_repos: { total_entries: 1, fresh_entries: 1, newest_checked_at: expect.any(String) },
     });
     expect(body.route_usage).toEqual(
       expect.arrayContaining([
@@ -963,7 +974,12 @@ describe("Worker end-to-end read models", () => {
       );
       expect(dashboardResponse.status).toBe(200);
       const dashboard = await dashboardResponse.json<DashboardEnvelope>();
-      expect(dashboard.cache).toMatchObject(expectedCache);
+      expect(dashboard.cache).toMatchObject({
+        ...expectedCache,
+        routes: [
+          expect.objectContaining({ route_kind: "repo_view", entries: 2, fresh_entries: 1 }),
+        ],
+      });
       expect(dashboard.cache.body_bytes).toBe(stats.cache.body_bytes);
     },
   );

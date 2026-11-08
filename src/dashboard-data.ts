@@ -10,6 +10,83 @@ import {
 import { poolCoordinatorStub } from "./pool-coordinator";
 import { requireDashboardAdmin } from "./web-session";
 
+type IdentityRow = {
+  id: string;
+  kind: string;
+  login: string;
+  installation_id: number | null;
+  status: string;
+  weight: number;
+  updated_at: string;
+};
+
+type CacheRouteRow = {
+  route_kind: string;
+  entries: number;
+  fresh_entries: number | null;
+  latest_created_at: string | null;
+};
+
+type UserRow = {
+  id: string;
+  name: string;
+  github_login: string;
+  requests: number;
+  errors: number | null;
+  avg_duration_ms: number | null;
+  last_seen: string | null;
+};
+
+type ClientRow = {
+  github_login: string;
+  client_name: string;
+  requests: number;
+  errors: number | null;
+  cache_served_responses: number | null;
+  uncached_outcomes: number | null;
+  last_seen: string | null;
+};
+
+type RecentRow = {
+  created_at: string;
+  github_login: string;
+  client_name: string | null;
+  route_kind: string;
+  route_key: string;
+  identity_id: string | null;
+  status: number;
+  error_code: string | null;
+  fallback_reason: string | null;
+  duration_ms: number;
+};
+
+type RouteKeyRow = {
+  route_kind: string;
+  route_key: string;
+  requests: number;
+  cache_hits: number | null;
+  cache_misses: number | null;
+  coalesced: number | null;
+  fallbacks: number | null;
+  service_errors: number | null;
+  latest_seen_at: string | null;
+};
+
+type ErrorCodeRow = {
+  outcome: string;
+  route_kind: string;
+  requests: number;
+  latest_seen_at: string | null;
+};
+
+type IdentityUsageRow = { identity_id: string; requests: number; errors: number | null };
+
+type PublicRepoRow = {
+  total_entries: number;
+  fresh_entries: number | null;
+  newest_checked_at: string | null;
+};
+
 export async function dashboardData(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const pool = url.searchParams.get("pool")?.trim() || "maintainers";
@@ -36,9 +113,10 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
     ]),
     coordinator.snapshot(),
   ]);
-  const format = <T, R>(index: number, normalize: (rows: T[]) => R): R =>
-    normalize(results[index]!.results as T[]);
-  const identities = format(0, dashboardIdentities);
+  const rows = <T>(index: number) => results[index]!.results as T[];
+  const identities = rows<IdentityRow>(0);
+  const cache = rows<CacheTotalsRow>(1)[0] ?? null;
+  const publicRepos = rows<PublicRepoRow>(11)[0];
   return jsonResponse({
     generated_at: new Date().toISOString(),
     pool,
@@ -52,22 +130,48 @@ export async function dashboardData(request: Request, env: Env): Promise<Respons
       active: identities.filter((identity) => identity.status === "active").length,
       items: identities,
     },
-    cache: { ...format(1, dashboardCache), routes: format(2, dashboardCacheRoutes) },
-    usage: format(3, dashboardUsage),
-    users: format(4, dashboardUsers),
-    clients: format(5, dashboardClients),
-    recent: format(6, dashboardRecent),
-    route_usage: format(7, dashboardRouteUsage),
-    route_keys_7d: format(8, dashboardRouteKeys7d),
-    error_codes_7d: format(9, dashboardErrorCodes7d),
-    identity_usage: format(10, dashboardIdentityUsage),
-    public_repos: format(11, dashboardPublicRepos),
+    cache: {
+      ...normalizeCacheTotals(cache),
+      oldest_created_at: cache?.oldest_created_at ?? null,
+      newest_created_at: cache?.newest_created_at ?? null,
+      routes: rows<CacheRouteRow>(2).map((row) => ({
+        ...row,
+        fresh_entries: row.fresh_entries ?? 0,
+      })),
+    },
+    usage: dashboardUsage(rows<UsageAggregateRow>(3)[0] ?? null),
+    users: rows<UserRow>(4).map((row) => ({ ...row, errors: row.errors ?? 0 })),
+    clients: rows<ClientRow>(5).map((row) => ({
+      ...row,
+      errors: row.errors ?? 0,
+      cache_served_responses: row.cache_served_responses ?? 0,
+      uncached_outcomes: row.uncached_outcomes ?? 0,
+      // Deprecated wire aliases count relay outcomes, not avoided or actual upstream requests.
+      saved_github_requests: row.cache_served_responses ?? 0,
+      backend_requests: row.uncached_outcomes ?? 0,
+    })),
+    recent: rows<RecentRow>(6),
+    route_usage: dashboardRouteUsage(rows<UsageAggregateRow & { route_kind: string }>(7)),
+    route_keys_7d: rows<RouteKeyRow>(8).map((row) => ({
+      ...row,
+      cache_hits: row.cache_hits ?? 0,
+      cache_misses: row.cache_misses ?? 0,
+      coalesced: row.coalesced ?? 0,
+      fallbacks: row.fallbacks ?? 0,
+      service_errors: row.service_errors ?? 0,
+    })),
+    error_codes_7d: rows<ErrorCodeRow>(9),
+    identity_usage: rows<IdentityUsageRow>(10).map((row) => ({ ...row, errors: row.errors ?? 0 })),
+    public_repos: {
+      total_entries: publicRepos?.total_entries ?? 0,
+      fresh_entries: publicRepos?.fresh_entries ?? 0,
+      newest_checked_at: publicRepos?.newest_checked_at ?? null,
+    },
     coordinator: coordinatorSnapshot,
   });
 }
 
-function dashboardUsage(rows: UsageAggregateRow[]) {
-  const row = rows[0] ?? null;
+function dashboardUsage(row: UsageAggregateRow | null) {
   const cache = normalizeCacheActivity(row);
   return {
     requests_24h: row?.requests ?? 0,
@@ -85,96 +189,6 @@ function dashboardUsage(rows: UsageAggregateRow[]) {
     avg_duration_ms_24h: row?.avg_duration_ms ?? null,
     latest_seen_at: row?.latest_seen_at ?? null,
   };
-}
-
-function dashboardIdentities(
-  rows: {
-    id: string;
-    kind: string;
-    login: string;
-    installation_id: number | null;
-    status: string;
-    weight: number;
-    updated_at: string;
-  }[],
-) {
-  return rows;
-}
-
-function dashboardCache(rows: CacheTotalsRow[]) {
-  const row = rows[0] ?? null;
-  return {
-    ...normalizeCacheTotals(row),
-    oldest_created_at: row?.oldest_created_at ?? null,
-    newest_created_at: row?.newest_created_at ?? null,
-  };
-}
-
-function dashboardCacheRoutes(
-  rows: {
-    route_kind: string;
-    entries: number;
-    fresh_entries: number | null;
-    latest_created_at: string | null;
-  }[],
-) {
-  return rows.map((row) => ({
-    ...row,
-    fresh_entries: row.fresh_entries ?? 0,
-  }));
-}
-
-function dashboardUsers(
-  rows: {
-    id: string;
-    name: string;
-    github_login: string;
-    requests: number;
-    errors: number | null;
-    avg_duration_ms: number | null;
-    last_seen: string | null;
-  }[],
-) {
-  return rows.map((row) => ({ ...row, errors: row.errors ?? 0 }));
-}
-
-function dashboardClients(
-  rows: {
-    github_login: string;
-    client_name: string;
-    requests: number;
-    errors: number | null;
-    cache_served_responses: number | null;
-    uncached_outcomes: number | null;
-    last_seen: string | null;
-  }[],
-) {
-  return rows.map((row) => ({
-    ...row,
-    errors: row.errors ?? 0,
-    cache_served_responses: row.cache_served_responses ?? 0,
-    uncached_outcomes: row.uncached_outcomes ?? 0,
-    // Deprecated wire aliases count relay outcomes, not avoided or actual upstream requests.
-    saved_github_requests: row.cache_served_responses ?? 0,
-    backend_requests: row.uncached_outcomes ?? 0,
-  }));
-}
-
-function dashboardRecent(
-  rows: {
-    created_at: string;
-    github_login: string;
-    client_name: string | null;
-    route_kind: string;
-    route_key: string;
-    identity_id: string | null;
-    status: number;
-    error_code: string | null;
-    fallback_reason: string | null;
-    duration_ms: number;
-  }[],
-) {
-  return rows;
 }
 
 function dashboardRouteUsage(rows: (UsageAggregateRow & { route_kind: string })[]) {
@@ -199,59 +213,4 @@ function dashboardRouteUsage(rows: (UsageAggregateRow & { route_kind: string })[
       eligible_cache_hit_rate: cache.eligible_cache_hit_rate,
     };
   });
-}
-
-function dashboardRouteKeys7d(
-  rows: {
-    route_kind: string;
-    route_key: string;
-    requests: number;
-    cache_hits: number | null;
-    cache_misses: number | null;
-    coalesced: number | null;
-    fallbacks: number | null;
-    service_errors: number | null;
-    latest_seen_at: string | null;
-  }[],
-) {
-  return rows.map((row) => ({
-    ...row,
-    cache_hits: row.cache_hits ?? 0,
-    cache_misses: row.cache_misses ?? 0,
-    coalesced: row.coalesced ?? 0,
-    fallbacks: row.fallbacks ?? 0,
-    service_errors: row.service_errors ?? 0,
-  }));
-}
-
-function dashboardErrorCodes7d(
-  rows: {
-    outcome: string;
-    route_kind: string;
-    requests: number;
-    latest_seen_at: string | null;
-  }[],
-) {
-  return rows;
-}
-
-function dashboardIdentityUsage(
-  rows: { identity_id: string; requests: number; errors: number | null }[],
-) {
-  return rows.map((row) => ({ ...row, errors: row.errors ?? 0 }));
-}
-
-function dashboardPublicRepos(
-  rows: {
-    total_entries: number;
-    fresh_entries: number | null;
-    newest_checked_at: string | null;
-  }[],
-) {
-  const row = rows[0] ?? null;
-  return {
-    total_entries: row?.total_entries ?? 0,
-    fresh_entries: row?.fresh_entries ?? 0,
-    newest_checked_at: row?.newest_checked_at ?? null,
-  };
 }
