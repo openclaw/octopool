@@ -16,6 +16,7 @@
 - Load dashboard database panels in one read-only batch for a consistent snapshot and fewer database round trips.
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
+- Batch pooled Actions job-aggregate cache reads while preserving candidate validation, projection, and cache-miss reporting.
 - Batch identity-backed workflow catalogue cache reads while preserving anonymous-first lookup and identity validation.
 
 - Batch pooled run-proof cache reads when reusing equivalent Actions job lists, preserving candidate order and current identity checks.

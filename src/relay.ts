@@ -1562,10 +1562,12 @@ async function readRunJobsSupersetCache(
   const view = page ?? rawRunJobsSupersetView(state.request, state.route);
   if (view === undefined) return undefined;
   const request = view.cacheRequest;
-  const probe = async (identity?: Identity) => {
-    const key = await githubCacheKey(request.pool, request, state.route, identity);
-    const cached = await readCacheEntry(state, key, identity);
+  const probe = async (cached: CachedGitHubResponse | undefined, identity?: Identity) => {
     if (cached === undefined) return undefined;
+    if (!(await cachedResponseAvailable(state.env, request.pool, state.route, cached, identity))) {
+      recordCacheMiss(state, "unusable");
+      return undefined;
+    }
     const complete =
       page === undefined
         ? completeRawRunJobsPage(cached, view.limit)
@@ -1582,7 +1584,9 @@ async function readRunJobsSupersetCache(
       ? { ...cached, headers: transformedGitHubHeaders(cached.headers) }
       : { ...cached, ...filterRunJobsSuperset(cached, page, page.offset) };
   };
-  return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
+  return readOptionalFreshCacheCandidates(state, request, state.route, probe, (reason) =>
+    recordCacheMiss(state, reason),
+  );
 }
 
 async function serveEquivalentRunJobsCache(state: ActiveRelay): Promise<Response | undefined> {
@@ -1810,18 +1814,25 @@ async function readOptionalFreshCacheCandidates(
     cached: CachedGitHubResponse | undefined,
     identity?: Identity,
   ) => Promise<CachedGitHubResponse | undefined>,
+  onMiss?: (reason: CacheMissReason) => void,
 ): Promise<CachedGitHubResponse | undefined> {
   try {
     const anonymousKey = await githubCacheKey(request.pool, request, route);
     const anonymous = await accept(
-      await readGitHubCache(state.env, anonymousKey, state.ctx, state.maxAgeSeconds),
+      await readGitHubCache(state.env, anonymousKey, state.ctx, state.maxAgeSeconds, onMiss),
     );
     if (anonymous !== undefined) return anonymous;
     const identities = await loadIdentities(state.env, request.pool, route);
     const keys = await Promise.all(
       identities.map((identity) => githubCacheKey(request.pool, request, route, identity)),
     );
-    const read = createGitHubCacheCandidateReader(state.env, keys, state.ctx, state.maxAgeSeconds);
+    const read = createGitHubCacheCandidateReader(
+      state.env,
+      keys,
+      state.ctx,
+      state.maxAgeSeconds,
+      onMiss,
+    );
     for (const [index, identity] of identities.entries()) {
       const cached = await accept(await read(keys[index]!), identity);
       if (cached !== undefined) return cached;

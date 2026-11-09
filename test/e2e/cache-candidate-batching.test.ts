@@ -7,6 +7,7 @@ import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import { queries } from "../../src/generated/sql";
+import { observeD1Batches } from "./d1-batch-observer";
 import { observePublicationD1 } from "./publication-d1-observer";
 import { requestWithEnv } from "./identity-routing-support";
 import type { RelayRequest } from "../../src/types";
@@ -221,4 +222,116 @@ describe("multi-identity candidate semantics", () => {
       await env.DB.prepare("SELECT cache_status, cache_miss_reason FROM audit_events").first(),
     ).toEqual({ cache_status: "stale", cache_miss_reason: null });
   });
+});
+
+describe("job aggregate candidate batching", () => {
+  it.each(["first", "second", "revoked", "incomplete", "expired"])(
+    "preserves aggregate selection and miss reporting: %s",
+    async (scenario) => {
+      await seedPool({ secondary: true });
+      const request = {
+        pool: POOL,
+        method: "GET",
+        path: "/repos/openclaw/octopool/actions/runs/42/jobs",
+        query: { page: "1", per_page: "100" },
+        headers: { "x-octopool-public-shape": "actions-jobs-v1" },
+      } satisfies RelayRequest;
+      const route = classifyRoute(request, defaultPolicy("openclaw"));
+      const identities = await loadIdentities(env, POOL, route);
+      const keys: string[] = [];
+      for (const [index, identity] of identities.entries()) {
+        const key = await githubCacheKey(POOL, request, route, identity);
+        keys.push(key);
+        if ((scenario === "second" && index === 0) || (scenario === "expired" && index === 1))
+          continue;
+        await writeOwnedGitHubCache(
+          env,
+          key,
+          request,
+          route,
+          {
+            status: 200,
+            headers: {},
+            body: {
+              total_count: scenario === "incomplete" ? 121 : 120,
+              jobs: Array.from({ length: 120 }, (_, i) => ({
+                id: index * 1000 + i + 1,
+                status: "queued",
+              })),
+            },
+          },
+          identity,
+        );
+        if (scenario === "expired")
+          await env.DB.prepare(
+            "UPDATE github_cache_entries SET expires_at = datetime('now', '-120 seconds'), stale_expires_at = datetime('now', '-60 seconds') WHERE cache_key = ?",
+          )
+            .bind(key)
+            .run();
+        await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
+      }
+      await seedPublicRepoProof(env, route);
+      let revoked = false;
+      const observed = observePublicationD1(env.DB, {
+        after: async (sql, values) => {
+          if (
+            scenario === "revoked" &&
+            !revoked &&
+            sql === queries.readGitHubCache &&
+            values[0] === keys[0]
+          ) {
+            revoked = true;
+            await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = ?")
+              .bind(identities[0]!.id)
+              .run();
+          }
+        },
+      });
+      const batches: number[] = [];
+      const db = observeD1Batches(observed, (statements) => batches.push(statements.length));
+      const pages: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const fetched = new Request(input, init);
+          const url = new URL(fetched.url);
+          if (url.hostname === "github.com") return new Response(null, { status: 404 });
+          if (bearer(fetched) === "test-org-token") return jsonResponse({ private: false });
+          pages.push(url.searchParams.get("page")!);
+          return jsonResponse({ total_count: 120, jobs: [{ id: 9999, status: "queued" }] });
+        }),
+      );
+      const response = await requestWithEnv({ DB: db }, request.path, {
+        headers: request.headers,
+        query: { page: "2", per_page: "100" },
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json<any>();
+      expect(batches).toContain(2);
+      expect(revoked).toBe(scenario === "revoked");
+      if (scenario === "incomplete" || scenario === "expired") {
+        expect(pages).toEqual(["2"]);
+        expect(body.body.jobs).toEqual([{ id: 9999, status: "queued" }]);
+        expect(
+          await env.DB.prepare(
+            "SELECT cache_status, cache_miss_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+          ).first(),
+        ).toEqual({
+          cache_status: "miss",
+          cache_miss_reason: scenario === "incomplete" ? "unusable" : "expired",
+        });
+      } else {
+        const index = scenario === "first" ? 0 : 1;
+        expect(pages).toEqual([]);
+        expect(body).toMatchObject({
+          identity: { id: identities[index]!.id },
+          relay: { cache: "hit" },
+          body: {
+            total_count: 120,
+            jobs: Array.from({ length: 20 }, (_, i) => ({ id: index * 1000 + i + 101 })),
+          },
+        });
+      }
+    },
+  );
 });
