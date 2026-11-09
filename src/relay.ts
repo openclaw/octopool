@@ -1795,15 +1795,19 @@ async function readLargerRunListCache(
     return undefined;
   const request = largerRunListCacheRequest(state.runListSuperset);
   if (request === undefined) return undefined;
-  const probe = async (identity?: Identity) => {
-    const key = await githubCacheKey(request.pool, request, state.route, identity);
-    const cached = await readCacheEntry(state, key, identity);
+  const probe = async (cached: CachedGitHubResponse | undefined, identity?: Identity) => {
     if (cached === undefined) return undefined;
+    if (!(await cachedResponseAvailable(state.env, request.pool, state.route, cached, identity))) {
+      recordCacheMiss(state, "unusable");
+      return undefined;
+    }
     const projected = projectLargerRunListPage(cached);
     if (projected === undefined) recordCacheMiss(state, "unusable");
     return projected === undefined ? undefined : { ...cached, ...projected };
   };
-  return readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
+  return readOptionalFreshCacheCandidates(state, request, state.route, probe, (reason) =>
+    recordCacheMiss(state, reason),
+  );
 }
 
 async function readOptionalFreshCacheCandidates(
