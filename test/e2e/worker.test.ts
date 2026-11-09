@@ -850,12 +850,14 @@ describe("Worker end-to-end read models", () => {
     await seedPool();
     const session = await seedWebSession();
     await env.DB.batch(
-      [CACHE_PUBLICATION_EPOCH, "old-epoch"].map((epoch) =>
+      [
+        [CACHE_PUBLICATION_EPOCH, "dashboard-fresh", "2026-01-02 00:00:00", "+1 hour"],
+        [CACHE_PUBLICATION_EPOCH, "dashboard-expired", "2026-01-01 00:00:00", "-1 hour"],
+        ["old-epoch", "dashboard-old", "2026-01-03 00:00:00", "+1 hour"],
+      ].map((values) =>
         env.DB.prepare(`INSERT INTO github_public_repo_proofs
         (protocol_epoch, owner, repo, is_public, checked_at, expires_at, publication_id, publication_token)
-        VALUES (?, 'other-org', 'dashboard-proof', 1, CURRENT_TIMESTAMP, datetime('now', '+1 hour'), 1, 'proof')`).bind(
-          epoch,
-        ),
+        VALUES (?, 'other-org', ?, 1, ?, datetime('now', ?), 1, 'proof')`).bind(...values),
       ),
     );
     await seedAudit("request-1", "caller", "repo_view", "miss", 200);
@@ -893,7 +895,11 @@ describe("Worker end-to-end read models", () => {
         },
       ],
       cache: { total_entries: 0, body_bytes: 0 },
-      public_repos: { total_entries: 1, fresh_entries: 1, newest_checked_at: expect.any(String) },
+      public_repos: {
+        total_entries: 2,
+        fresh_entries: 1,
+        newest_checked_at: "2026-01-02 00:00:00",
+      },
     });
     expect(body.route_usage).toEqual(
       expect.arrayContaining([
