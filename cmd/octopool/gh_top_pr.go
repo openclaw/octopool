@@ -137,6 +137,9 @@ func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, op
 		projected = make([]any, len(items))
 	}
 	for i, pr := range items {
+		if pr == nil {
+			continue
+		}
 		normalizePRViewState(pr)
 		projected[i] = filterJSONValue(pr, opts.json, fieldMapPR)
 	}

@@ -140,6 +140,8 @@ func TestRunGHPRListJSONOutput(t *testing.T) {
 	}{
 		{name: "empty", items: []map[string]any{}, want: "[]\n"},
 		{name: "null", want: "null\n"},
+		{name: "null and empty entries", items: []map[string]any{nil, {}}, want: "[null,{}]\n"},
+		{name: "null entry jq", items: []map[string]any{nil}, jq: ".[0] == null", want: "true\n"},
 		{
 			name: "selected fields",
 			items: []map[string]any{{
