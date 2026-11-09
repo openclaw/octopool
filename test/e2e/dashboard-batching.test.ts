@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
+import { observeD1Batches } from "./d1-batch-observer";
 import { dashboardData } from "../../src/dashboard-data";
 import { POOL, seedAudit, seedPool, seedWebSession } from "./harness";
 
@@ -33,17 +34,7 @@ describe("dashboard database snapshot", () => {
         ).run();
       }
       const batches: number[] = [];
-      const db = new Proxy(env.DB, {
-        get(target, property) {
-          if (property === "batch")
-            return (statements: D1PreparedStatement[]) => {
-              batches.push(statements.length);
-              return target.batch(statements);
-            };
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
+      const db = observeD1Batches(env.DB, (statements) => batches.push(statements.length));
       const response = await dashboardData(await request(), { ...env, DB: db });
       const body = await response.json<any>();
       expect(batches).toEqual([12]);
@@ -75,16 +66,9 @@ describe("dashboard database snapshot", () => {
   it("does not issue panel reads before session authentication", async () => {
     await seedPool();
     let batches = 0;
-    const db = new Proxy(env.DB, {
-      get(target, property) {
-        if (property === "batch")
-          return () => {
-            batches++;
-            throw new Error("unexpected panel read");
-          };
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
+    const db = observeD1Batches(env.DB, () => {
+      batches++;
+      throw new Error("unexpected panel read");
     });
     await expect(
       dashboardData(new Request("https://octopool.openclaw.ai/v1/dashboard"), { ...env, DB: db }),

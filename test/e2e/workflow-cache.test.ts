@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { observeD1Batches } from "./d1-batch-observer";
 import { githubCacheKey, GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { queries } from "../../src/generated/sql";
@@ -90,17 +91,7 @@ describe("workflow catalogue cache reuse", () => {
         },
       });
       const batches: number[] = [];
-      const db = new Proxy(observed, {
-        get(target, property) {
-          if (property === "batch")
-            return (statements: D1PreparedStatement[]) => {
-              batches.push(statements.length);
-              return target.batch(statements);
-            };
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
+      const db = observeD1Batches(observed, (statements) => batches.push(statements.length));
       const upstream = vi.fn<typeof fetch>();
       vi.stubGlobal("fetch", upstream);
       const response = await requestWithEnv({ DB: db }, VIEW, {});
