@@ -105,22 +105,27 @@ func TestPRCheckMetadataCatalogueRefresh(t *testing.T) {
 }
 
 func TestPRChecksSkipUnusedWorkflowMetadata(t *testing.T) {
-	for _, fields := range [][]string{nil, {"name", "state", "bucket"}, {"name", "workflow"}, {"name", "event"}} {
-		t.Run(strings.Join(fields, ","), func(t *testing.T) {
+	for _, test := range []struct {
+		fields        []string
+		metadataReads int
+		row           map[string]any
+	}{
+		{nil, 0, nil},
+		{[]string{"name", "state", "bucket"}, 0, map[string]any{"name": "unit", "state": "SUCCESS", "bucket": "pass"}},
+		{[]string{"name", "workflow"}, 1, map[string]any{"name": "unit", "workflow": "CI"}},
+		{[]string{"name", "event"}, 1, map[string]any{"name": "unit", "event": "pull_request"}},
+	} {
+		t.Run(strings.Join(test.fields, ","), func(t *testing.T) {
 			f := newPRChecksFixture()
 			relayTestServer(t, func(request map[string]any) any { return f.response(t, request) })
 			var out bytes.Buffer
-			if err := relayPRChecks(t.Context(), &out, "acme/repo", "7", ghTopOptions{json: fields}); err != nil {
+			if err := relayPRChecks(t.Context(), &out, "acme/repo", "7", ghTopOptions{json: test.fields}); err != nil {
 				t.Fatal(err)
 			}
-			wantMetadata := 0
-			if hasJSONField(fields, "workflow") || hasJSONField(fields, "event") {
-				wantMetadata = 1
-			}
-			if f.calls("/actions/runs") != wantMetadata || f.calls("/actions/workflows") != wantMetadata {
+			if f.calls("/actions/runs") != test.metadataReads || f.calls("/actions/workflows") != test.metadataReads {
 				t.Fatalf("unexpected metadata reads: %v", f.requests)
 			}
-			if len(fields) == 0 {
+			if test.row == nil {
 				if !strings.Contains(out.String(), "unit\tpass") {
 					t.Fatalf("human output = %q", out.String())
 				}
@@ -129,14 +134,8 @@ func TestPRChecksSkipUnusedWorkflowMetadata(t *testing.T) {
 				if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
 					t.Fatal(err)
 				}
-				if len(rows) != 1 || rows[0]["name"] != "unit" {
-					t.Fatalf("rows = %v", rows)
-				}
-				if hasJSONField(fields, "workflow") && rows[0]["workflow"] != "CI" {
-					t.Fatalf("workflow = %v", rows)
-				}
-				if hasJSONField(fields, "event") && rows[0]["event"] != "pull_request" {
-					t.Fatalf("event = %v", rows)
+				if want := []map[string]any{test.row}; !reflect.DeepEqual(rows, want) {
+					t.Fatalf("rows = %v, want %v", rows, want)
 				}
 			}
 		})
