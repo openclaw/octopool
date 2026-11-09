@@ -327,6 +327,27 @@ func relayReadHeaders(method string, headers map[string]string) map[string]strin
 	return headers
 }
 
+func (request ghAPIRequest) relayBody(pool string) map[string]any {
+	body := map[string]any{
+		"pool":   pool,
+		"method": request.method,
+		"path":   request.path,
+	}
+	if len(request.query) > 0 {
+		body["query"] = request.query
+	}
+	if len(request.headers) > 0 {
+		body["headers"] = request.headers
+	}
+	if len(request.routeHint) > 0 {
+		body["route_hint"] = request.routeHint
+	}
+	if request.graphql != nil {
+		body["graphql"] = request.graphql
+	}
+	return body
+}
+
 func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest, budget *relayRetryBudget) (relayEnvelope, error) {
 	attemptCtx := ctx
 	if budget.overloaded {
@@ -344,23 +365,7 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest, bu
 	if err := policy.guardRequest(request); err != nil {
 		return relayEnvelope{}, err
 	}
-	body := map[string]any{
-		"pool":   client.pool,
-		"method": request.method,
-		"path":   request.path,
-	}
-	if len(request.query) > 0 {
-		body["query"] = request.query
-	}
-	if len(request.headers) > 0 {
-		body["headers"] = request.headers
-	}
-	if len(request.routeHint) > 0 {
-		body["route_hint"] = request.routeHint
-	}
-	if request.graphql != nil {
-		body["graphql"] = request.graphql
-	}
+	body := request.relayBody(client.pool)
 	// Initial slot/policy acquisition is outside the read budget. Overload retries
 	// share its deadline, including subsequent slot/policy acquisition.
 	timeout := relayReadTimeout()

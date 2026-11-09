@@ -38,20 +38,6 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	requestMethod := strings.ToUpper(*method)
 	headers := relayReadHeaders(requestMethod, valuesMap(headerValues))
-	body := map[string]any{
-		"pool":   *requestFlags.pool,
-		"method": requestMethod,
-		"path":   *path,
-	}
-	if len(queryValues) > 0 {
-		body["query"] = valuesMap(queryValues)
-	}
-	if len(headers) > 0 {
-		body["headers"] = headers
-	}
-	if len(routeHintValues) > 0 {
-		body["route_hint"] = valuesMap(routeHintValues)
-	}
 	client := ghRelayClient{baseURL: *requestFlags.baseURL, pool: *requestFlags.pool, token: token}
 	policy, err := client.stringRewritePolicy(ctx)
 	if err != nil {
@@ -64,10 +50,11 @@ func runRequest(ctx context.Context, args []string, stdout io.Writer) error {
 	for key, value := range valuesMap(queryValues) {
 		query[key] = value
 	}
-	if err := policy.guardRequest(ghAPIRequest{method: requestMethod, path: *path, query: query, headers: headers, routeHint: valuesMap(routeHintValues)}); err != nil {
+	request := ghAPIRequest{method: requestMethod, path: *path, query: query, headers: headers, routeHint: valuesMap(routeHintValues)}
+	if err := policy.guardRequest(request); err != nil {
 		return err
 	}
-	return postJSON(ctx, stdout, apiURL(*requestFlags.baseURL, "/v1/github/request"), token, body)
+	return postJSON(ctx, stdout, apiURL(*requestFlags.baseURL, "/v1/github/request"), token, request.relayBody(*requestFlags.pool))
 }
 
 type multiFlag []string
