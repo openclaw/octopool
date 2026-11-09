@@ -206,14 +206,12 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 	if len(opts.json) == 0 {
 		return renderHumanIssueList(stdout, filtered)
 	}
+	projected := make([]any, 0, len(filtered))
 	for _, issue := range filtered {
 		normalizeIssueJSONState(issue)
+		projected = append(projected, filterJSONValue(issue, opts.json, fieldMapIssue))
 	}
-	raw, err := json.Marshal(filtered)
-	if err != nil {
-		return err
-	}
-	raw, err = filterJSONFields(raw, opts.json, fieldMapIssue)
+	raw, err := json.Marshal(projected)
 	if err != nil {
 		return err
 	}
