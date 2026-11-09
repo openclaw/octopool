@@ -26,6 +26,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   four precedence levels. Four mutations were caught and unused fixture fields removed.
   PR-comment reactions now check exact values and empty-array output instead of
   repeating a count-only assertion across author cases; two mutations were caught.
+  PR-checks metadata tests use explicit read counts and complete JSON expectations
+  independent of production predicates; two mutations were caught.
 - **Unit tests:** isolated parser rejection conditions, removed duplicate PR-state
   and release cases plus unused HTML, replaced cosmetic assertions with contracts,
   checked outbound queries/signals/cache writes, used fake time and isolated docs
