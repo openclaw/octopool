@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Select requested pull-request list JSON fields before serialization, avoiding a redundant encode/decode pass while preserving output formatting.
+
 - Batch pooled cache reads when checking whether an Actions run attempt completed, preserving candidate order, access checks, and conservative fallback TTLs.
 
 - Skip workflow-run and catalogue reads for `gh pr checks` output with unique, slash-free check names that does not request event or workflow metadata, preserving check identity validation and native deduplication.
