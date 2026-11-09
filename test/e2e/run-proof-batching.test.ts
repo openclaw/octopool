@@ -13,7 +13,7 @@ import { requestWithEnv } from "./identity-routing-support";
 import { observePublicationD1 } from "./publication-d1-observer";
 
 describe("batched run proof lookup", () => {
-  it.each(["valid", "invalid", "revoked"])(
+  it.each(["valid", "wrong run", "wrong URL", "revoked"])(
     "validates %s candidates after prefetch",
     async (scenario) => {
       await seedPool({ secondary: true });
@@ -34,35 +34,40 @@ describe("batched run proof lookup", () => {
             status: 200,
             headers: {},
             body: {
-              id: index === 0 && scenario === "invalid" ? 43 : 42,
-              url: `https://api.github.com${path}`,
-              run_attempt: index === 0 && scenario === "revoked" ? 3 : 2,
+              id: index === 0 && scenario === "wrong run" ? 43 : 42,
+              url:
+                index === 0 && scenario === "wrong URL"
+                  ? "https://api.github.com/repos/openclaw/octopool/actions/runs/43"
+                  : `https://api.github.com${path}`,
+              run_attempt: index === 0 && scenario !== "valid" ? 3 : 2,
             },
           },
           identity,
         );
         await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
       }
-      const jobsRequest: RelayRequest = {
-        ...request,
-        path: `${path}/attempts/2/jobs`,
-        query: { page: "1", per_page: "30" },
-      };
-      const jobsRoute = classifyRoute(jobsRequest, defaultPolicy("openclaw"));
-      await writeOwnedGitHubCache(
-        env,
-        await githubCacheKey(POOL, jobsRequest, jobsRoute),
-        jobsRequest,
-        jobsRoute,
-        {
-          status: 200,
-          headers: {},
-          body: {
-            total_count: 1,
-            jobs: [{ id: 1, run_id: 42, run_attempt: 2 }],
+      for (const attempt of [2, 3]) {
+        const jobsRequest: RelayRequest = {
+          ...request,
+          path: `${path}/attempts/${attempt}/jobs`,
+          query: { page: "1", per_page: "30" },
+        };
+        const jobsRoute = classifyRoute(jobsRequest, defaultPolicy("openclaw"));
+        await writeOwnedGitHubCache(
+          env,
+          await githubCacheKey(POOL, jobsRequest, jobsRoute),
+          jobsRequest,
+          jobsRoute,
+          {
+            status: 200,
+            headers: {},
+            body: {
+              total_count: 1,
+              jobs: [{ id: attempt, run_id: 42, run_attempt: attempt }],
+            },
           },
-        },
-      );
+        );
+      }
       await seedPublicRepoProof(env, route);
       let changed = false;
       const observed = observePublicationD1(env.DB, {
@@ -87,7 +92,7 @@ describe("batched run proof lookup", () => {
       const response = await requestWithEnv({ DB: db }, `${path}/jobs`, {});
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({
-        body: { total_count: 1, jobs: [{ id: 1, run_id: 42, run_attempt: 2 }] },
+        body: { total_count: 1, jobs: [{ id: 2, run_id: 42, run_attempt: 2 }] },
         relay: { cache: "hit" },
       });
       expect(batches).toContain(2);
