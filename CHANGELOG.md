@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Batch pooled larger Actions run-list cache reads while preserving candidate order, access checks, small-page projection, and cache-miss reporting.
+- Preserve null entries in pull-request list JSON output and jq expressions when projecting selected fields.
 
 - Select requested pull-request list JSON fields before serialization, avoiding a redundant encode/decode pass while preserving output formatting.
 
