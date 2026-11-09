@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Batch pooled larger Actions run-list cache reads while preserving candidate order, access checks, small-page projection, and cache-miss reporting.
+
 - Select requested pull-request list JSON fields before serialization, avoiding a redundant encode/decode pass while preserving output formatting.
 
 - Batch pooled cache reads when checking whether an Actions run attempt completed, preserving candidate order, access checks, and conservative fallback TTLs.

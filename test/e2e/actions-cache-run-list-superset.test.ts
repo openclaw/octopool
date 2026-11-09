@@ -2,10 +2,15 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 import { historicalHead, runCard } from "../fixtures/actions-ownership";
-import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
+import { githubCacheKey, GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";
 import { queries } from "../../src/generated/sql";
+import { loadIdentities } from "../../src/db";
+import { classifyRoute, defaultPolicy } from "../../src/policy";
+import type { RelayRequest } from "../../src/types";
+import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
+import { observeD1Batches } from "./d1-batch-observer";
 import { observePublicationD1 } from "./publication-d1-observer";
 import { requestWithEnv } from "./identity-routing-support";
 
@@ -984,3 +989,118 @@ function runListHTML(total: number, runs: [id: number, branch: string, state: st
     )
     .join("")}`;
 }
+
+describe("larger run-list candidate batching", () => {
+  it.each(["first", "second", "revoked", "incomplete", "expired"])(
+    "preserves candidate validation and miss reporting: %s",
+    async (scenario) => {
+      await seedPool({ secondary: true });
+      const headers = { "x-octopool-public-shape": "actions-summary-v1" };
+      const request: RelayRequest = {
+        pool: "maintainers",
+        method: "GET",
+        path: RUNS_PATH,
+        query: { page: "1", per_page: "100" },
+        headers,
+      };
+      const route = classifyRoute(request, defaultPolicy("openclaw"));
+      const identities = await loadIdentities(env, request.pool, route);
+      const keys: string[] = [];
+      for (const [index, identity] of identities.entries()) {
+        const key = await githubCacheKey(request.pool, request, route, identity);
+        keys.push(key);
+        if ((scenario === "second" && index === 0) || (scenario === "expired" && index === 1))
+          continue;
+        await writeOwnedGitHubCache(
+          env,
+          key,
+          request,
+          route,
+          {
+            status: 200,
+            headers: {},
+            body: {
+              total_count: 1000,
+              workflow_runs: Array.from({ length: scenario === "incomplete" ? 20 : 100 }, (_, i) =>
+                run(index * 1000 + i + 1, "main", "completed", "success"),
+              ),
+            },
+          },
+          identity,
+        );
+        if (scenario === "expired")
+          await env.DB.prepare(
+            "UPDATE github_cache_entries SET expires_at = datetime('now', '-120 seconds'), stale_expires_at = datetime('now', '-60 seconds') WHERE cache_key = ?",
+          )
+            .bind(key)
+            .run();
+        await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key);
+      }
+      await seedPublicRepoProof(env, route);
+      let revoked = false;
+      const observed = observePublicationD1(env.DB, {
+        after: async (sql, values) => {
+          if (
+            scenario === "revoked" &&
+            !revoked &&
+            sql === queries.readGitHubCache &&
+            values[0] === keys[0]
+          ) {
+            revoked = true;
+            await env.DB.prepare("UPDATE identities SET status = 'disabled' WHERE id = ?")
+              .bind(identities[0]!.id)
+              .run();
+          }
+        },
+      });
+      const batches: number[] = [];
+      const db = observeD1Batches(observed, (statements) => batches.push(statements.length));
+      const pages: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const fetched = new Request(input, init);
+          const url = new URL(fetched.url);
+          if (url.hostname === "github.com") return new Response(null, { status: 404 });
+          if (bearer(fetched) === "test-org-token") return jsonResponse({ private: false });
+          pages.push(url.searchParams.get("per_page")!);
+          return jsonResponse({
+            total_count: 1,
+            workflow_runs: [run(9999, "main", "completed", "success")],
+          });
+        }),
+      );
+      const response = await requestWithEnv({ DB: db }, RUNS_PATH, {
+        headers,
+        query: { limit: "10" },
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json<any>();
+      expect(batches).toContain(2);
+      expect(revoked).toBe(scenario === "revoked");
+      if (scenario === "incomplete" || scenario === "expired") {
+        expect(pages).toEqual(["25"]);
+        expect(runIDs(body.body)).toEqual([9999]);
+        expect(
+          await env.DB.prepare(
+            "SELECT cache_status, cache_miss_reason FROM audit_events ORDER BY rowid DESC LIMIT 1",
+          ).first(),
+        ).toEqual({
+          cache_status: "miss",
+          cache_miss_reason: scenario === "incomplete" ? "unusable" : "expired",
+        });
+      } else {
+        const index = scenario === "first" ? 0 : 1;
+        expect(pages).toEqual([]);
+        expect(body).toMatchObject({
+          identity: { id: identities[index]!.id },
+          relay: { cache: "hit" },
+        });
+        expect(runIDs(body.body)).toEqual(
+          Array.from({ length: 10 }, (_, i) => index * 1000 + i + 1),
+        );
+        expect(body.body.total_count).toBe(1000);
+      }
+    },
+  );
+});
