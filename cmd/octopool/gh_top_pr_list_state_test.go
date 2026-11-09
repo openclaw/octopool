@@ -130,3 +130,43 @@ func TestRunGHPRListStateDelegation(t *testing.T) {
 		})
 	}
 }
+
+func TestRunGHPRListJSONOutput(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		items []map[string]any
+		jq    string
+		want  string
+	}{
+		{name: "empty", items: []map[string]any{}, want: "[]\n"},
+		{name: "null", want: "null\n"},
+		{
+			name: "selected fields",
+			items: []map[string]any{{
+				"number": 7, "title": "A < B & café", "state": "closed", "merged_at": prStateTestTime,
+				"user": map[string]any{"login": "octocat", "extra": "retained"},
+				"body": "unrequested payload",
+			}},
+			want: "[{\"author\":{\"extra\":\"retained\",\"login\":\"octocat\"},\"number\":7,\"state\":\"MERGED\",\"title\":\"A \\u003c B \\u0026 café\"}]\n",
+		},
+		{
+			name:  "jq",
+			items: []map[string]any{{"number": 7, "title": "café", "state": "open", "draft": true}},
+			jq:    ".[0] | [.number, .state, .title]",
+			want:  "[\n  7,\n  \"OPEN\",\n  \"café\"\n]\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			relayTestServer(t, func(request map[string]any) any { return test.items })
+			args := []string{"pr", "list", "-R", "openclaw/octopool", "--json", "number,title,state,author"}
+			if test.jq != "" {
+				args = append(args, "--jq", test.jq)
+			}
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), args, &out)
+			if result.action != ghComplete || result.err != nil || out.String() != test.want {
+				t.Fatalf("action=%v err=%v output=%q, want %q", result.action, result.err, out.String(), test.want)
+			}
+		})
+	}
+}
