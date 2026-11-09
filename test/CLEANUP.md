@@ -42,6 +42,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   publication-owner cleanup and strict fallback outcomes, and removed timing-only
   policy assertions. Scoped runs: 128 and 123 cases; two expiry mutations caught.
   [#293](https://github.com/openclaw/octopool/pull/293), [#295](https://github.com/openclaw/octopool/pull/295).
+  Dashboard proofs now distinguish current/old epochs and fresh/expired rows,
+  with an exact newest-check timestamp; two mutations were caught.
 - **Authentication:** verified App JWT signatures and timestamps, removed the
   duplicate key binding, and checked the actual OAuth fetch signal. 49 scoped
   cases passed; invalid-signature mutation caught.
