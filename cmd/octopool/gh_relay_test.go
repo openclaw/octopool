@@ -19,6 +19,10 @@ func TestDecodeRelayBody(t *testing.T) {
 		{name: "text", envelope: relayEnvelope{BodyEncoding: "text", Body: []byte(`"hello"`)}, want: []byte("hello")},
 		{name: "null text", envelope: relayEnvelope{BodyEncoding: "text", Body: []byte("null")}},
 		{name: "base64", envelope: relayEnvelope{BodyEncoding: "base64", Body: quotedBase64([]byte{0, 1, 2})}, want: []byte{0, 1, 2}},
+		{name: "null base64", envelope: relayEnvelope{BodyEncoding: "base64", Body: []byte("null")}},
+		{name: "non-string text", envelope: relayEnvelope{BodyEncoding: "text", Body: []byte(`{}`)}, wantErr: true},
+		{name: "non-string base64", envelope: relayEnvelope{BodyEncoding: "base64", Body: []byte(`{}`)}, wantErr: true},
+		{name: "partial base64", envelope: relayEnvelope{BodyEncoding: "base64", Body: []byte(`"aGVs!"`)}, wantErr: true},
 		{name: "unknown", envelope: relayEnvelope{BodyEncoding: "yaml", Body: []byte(`"unsafe"`)}, wantErr: true},
 		{name: "missing", envelope: relayEnvelope{Body: []byte(`{"unsafe":true}`)}, wantErr: true},
 	}

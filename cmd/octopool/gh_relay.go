@@ -418,22 +418,16 @@ func decodeRelayBody(envelope relayEnvelope) ([]byte, error) {
 	switch envelope.BodyEncoding {
 	case "json":
 		return append([]byte(nil), envelope.Body...), nil
-	case "text":
-		if rawJSONIsNull(envelope.Body) {
-			return nil, nil
-		}
-		var text string
-		if err := json.Unmarshal(envelope.Body, &text); err != nil {
-			return nil, err
-		}
-		return []byte(text), nil
-	case "base64":
+	case "text", "base64":
 		if rawJSONIsNull(envelope.Body) {
 			return nil, nil
 		}
 		var encoded string
 		if err := json.Unmarshal(envelope.Body, &encoded); err != nil {
 			return nil, err
+		}
+		if envelope.BodyEncoding == "text" {
+			return []byte(encoded), nil
 		}
 		decoded, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
