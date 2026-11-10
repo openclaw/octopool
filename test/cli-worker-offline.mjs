@@ -102,21 +102,26 @@ try {
       env: cliEnv,
       timeout: 15_000,
     });
-    assert.equal(JSON.parse(stdout).name, "octopool");
+    assert.deepEqual(JSON.parse(stdout), {
+      id: 7,
+      name: "octopool",
+      full_name: "openclaw/octopool",
+      private: false,
+    });
     assert.equal(upstreamCalls, 1, "the second CLI request must reuse the Worker cache");
   }
-  // Audit settlement is asynchronous; wait for both records before checking order.
+  // Audit writes settle asynchronously and may arrive in either request order.
   let audits;
   for (let attempt = 0; attempt < 80; attempt++) {
     audits = await db
-      .prepare("SELECT cache_status, identity_id, status FROM audit_events ORDER BY rowid")
+      .prepare("SELECT cache_status, identity_id, status FROM audit_events ORDER BY cache_status")
       .all();
     if (audits.results.length === 2) break;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   assert.deepEqual(audits.results, [
-    { cache_status: "miss", identity_id: null, status: 200 },
     { cache_status: "hit", identity_id: null, status: 200 },
+    { cache_status: "miss", identity_id: null, status: 200 },
   ]);
   assert.equal(
     await db.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first("count"),
