@@ -37,6 +37,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   [#283](https://github.com/openclaw/octopool/pull/283), [#288](https://github.com/openclaw/octopool/pull/288), [#291](https://github.com/openclaw/octopool/pull/291).
   Stats batches now use distinct non-empty query results and verify every report
   section; unused single-query fixture methods and the batch-size assertion were removed.
+  Cache unit fixtures share their D1 first-row scaffold while retaining dynamic
+  rows, rejection callbacks, and explicit binding spies.
 - **Worker SQL and concurrency:** removed rewritten allocator and shadow-index
   experiments. Shared an actual publication-waiter barrier and enforced coalesced
   results with owned cleanup. Scoped runs: 13 and 89 cases.
