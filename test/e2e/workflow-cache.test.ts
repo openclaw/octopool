@@ -135,7 +135,8 @@ describe("workflow catalogue cache reuse", () => {
     { scenario: "query parameters", expected: "miss" },
     { scenario: "filename selector", expected: "hit", filename: true },
     { scenario: "duplicate workflow path", expected: "miss", filename: true },
-    { scenario: "partial filename catalogue", expected: "miss", filename: true },
+    { scenario: "filename count mismatch", expected: "miss", filename: true },
+    { scenario: "filename next-page link", expected: "miss", filename: true },
     { scenario: "inactive filename", expected: "miss", filename: true },
     { scenario: "wrong repository URL", expected: "miss", filename: true },
     { scenario: "string item ID", expected: "miss", filename: true },
@@ -171,14 +172,15 @@ describe("workflow catalogue cache reuse", () => {
             : test.scenario === "duplicate item"
               ? [item, item]
               : [item];
-      const complete = test.filename && test.scenario !== "partial filename catalogue";
+      const complete = test.filename && test.scenario !== "filename count mismatch";
+      const paginated = !test.filename || test.scenario === "filename next-page link";
       return jsonResponse(
         list ? { total_count: complete ? workflows.length : 101, workflows } : workflow,
         200,
         {
           etag: list ? '"catalogue"' : '"view"',
           "last-modified": "Thu, 01 Jan 2026 00:00:00 GMT",
-          ...(list && !complete ? { link: '<https://api.github.com/next>; rel="next"' } : {}),
+          ...(list && paginated ? { link: '<https://api.github.com/next>; rel="next"' } : {}),
         },
       );
     });

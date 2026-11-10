@@ -56,6 +56,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   with an exact newest-check timestamp; two mutations were caught.
   Run-proof candidates now distinguish accepted and rejected attempts through
   different cached jobs; missing run-ID and URL guards are both caught.
+  Workflow filename reuse rejects count mismatches and next-page links independently;
+  removing either completeness guard now fails its dedicated case.
   Cache-retirement suites share the expiry update and edge eviction while retaining
   their explicit one-second and 61-second ages.
 - **Authentication:** verified App JWT signatures and timestamps, removed the
