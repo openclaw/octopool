@@ -350,25 +350,17 @@ describe("github cache policy", () => {
         delete: vi.fn(async () => true),
       },
     });
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: () => ({
-            first: async () => ({
-              status: 200,
-              response_headers_json: "{}",
-              body_json: '{"head":{"sha":"abc"}}',
-              publication_epoch: CACHE_PUBLICATION_EPOCH,
-              body_encoding: "json",
-              identity_id: null,
-              identity_kind: null,
-              created_at: sqliteUTC(Date.now() - 30_000),
-              expires_at: sqliteUTC(Date.now() + 60_000),
-            }),
-          }),
-        }),
-      },
-    } as unknown as Env;
+    const env = cacheDBEnv(async () => ({
+      status: 200,
+      response_headers_json: "{}",
+      body_json: '{"head":{"sha":"abc"}}',
+      publication_epoch: CACHE_PUBLICATION_EPOCH,
+      body_encoding: "json",
+      identity_id: null,
+      identity_kind: null,
+      created_at: sqliteUTC(Date.now() - 30_000),
+      expires_at: sqliteUTC(Date.now() + 60_000),
+    }));
 
     await expect(readGitHubCache(env, "cache-key", undefined, 60)).resolves.toMatchObject({
       body: { head: { sha: "abc" } },
@@ -447,25 +439,17 @@ describe("github cache policy", () => {
         delete: edgeDelete,
       },
     });
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: () => ({
-            first: async () => ({
-              status: 200,
-              response_headers_json: "{}",
-              body_json: '{"head":{"sha":"new"}}',
-              publication_epoch: CACHE_PUBLICATION_EPOCH,
-              body_encoding: "json",
-              identity_id: null,
-              identity_kind: null,
-              created_at: sqliteUTC(Date.now() - 1_000),
-              expires_at: sqliteUTC(Date.now() + 90_000),
-            }),
-          }),
-        }),
-      },
-    } as unknown as Env;
+    const env = cacheDBEnv(async () => ({
+      status: 200,
+      response_headers_json: "{}",
+      body_json: '{"head":{"sha":"new"}}',
+      publication_epoch: CACHE_PUBLICATION_EPOCH,
+      body_encoding: "json",
+      identity_id: null,
+      identity_kind: null,
+      created_at: sqliteUTC(Date.now() - 1_000),
+      expires_at: sqliteUTC(Date.now() + 90_000),
+    }));
 
     await expect(readGitHubCache(env, "cache-key", undefined, 15)).resolves.toMatchObject({
       body: { head: { sha: "new" } },
@@ -1174,13 +1158,7 @@ describe("github cache policy", () => {
       path: "/repos/openclaw/openclaw/pulls/42",
     });
     const route = classifyRoute(request, policy);
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: () => ({ first }),
-        }),
-      },
-    } as unknown as Env;
+    const env = cacheDBEnv(first);
 
     await expect(
       writeGitHubCache(
@@ -1227,9 +1205,7 @@ describe("github cache policy", () => {
       path: "/repos/openclaw/openclaw/pulls/42",
     });
     const route = classifyRoute(request, policy);
-    const env = {
-      DB: { prepare: () => ({ bind: () => ({ first }) }) },
-    } as unknown as Env;
+    const env = cacheDBEnv(first);
 
     await expect(
       writeGitHubCache(
@@ -1264,17 +1240,9 @@ describe("github cache policy", () => {
       path: "/repos/openclaw/openclaw/pulls/42",
     });
     const route = classifyRoute(request, policy);
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: () => ({
-            first: async () => {
-              throw new Error("D1 unavailable");
-            },
-          }),
-        }),
-      },
-    } as unknown as Env;
+    const env = cacheDBEnv(async () => {
+      throw new Error("D1 unavailable");
+    });
 
     await expect(
       writeGitHubCache(env, "cache-key", request, route, response({ number: 42 }), fixtureOwner()),
@@ -1293,25 +1261,17 @@ describe("github cache policy", () => {
       policy,
     );
     let expiresAt = sqliteUTC(Date.now() - 60_000);
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: () => ({
-            first: async () => ({
-              status: 200,
-              response_headers_json: "{}",
-              body_json: '{"number":42}',
-              body_encoding: "json",
-              identity_id: null,
-              identity_kind: null,
-              created_at: sqliteUTC(Date.now() - 120_000),
-              expires_at: expiresAt,
-              stale_expires_at: sqliteUTC(Date.now() + 60_000),
-            }),
-          }),
-        }),
-      },
-    } as unknown as Env;
+    const env = cacheDBEnv(async () => ({
+      status: 200,
+      response_headers_json: "{}",
+      body_json: '{"number":42}',
+      body_encoding: "json",
+      identity_id: null,
+      identity_kind: null,
+      created_at: sqliteUTC(Date.now() - 120_000),
+      expires_at: expiresAt,
+      stale_expires_at: sqliteUTC(Date.now() + 60_000),
+    }));
 
     await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toMatchObject({
       status: 200,
@@ -1359,25 +1319,17 @@ describe("github cache policy", () => {
       }),
       policy,
     );
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: () => ({
-            first: async () => ({
-              status: 200,
-              response_headers_json: "{}",
-              body_json: '{"number":42}',
-              body_encoding: "json",
-              identity_id: null,
-              identity_kind: null,
-              created_at: sqliteUTC(Date.now() - 120_000),
-              expires_at: sqliteUTC(Date.now() - 60_000),
-              stale_expires_at: sqliteUTC(Date.now() - 1_000),
-            }),
-          }),
-        }),
-      },
-    } as unknown as Env;
+    const env = cacheDBEnv(async () => ({
+      status: 200,
+      response_headers_json: "{}",
+      body_json: '{"number":42}',
+      body_encoding: "json",
+      identity_id: null,
+      identity_kind: null,
+      created_at: sqliteUTC(Date.now() - 120_000),
+      expires_at: sqliteUTC(Date.now() - 60_000),
+      stale_expires_at: sqliteUTC(Date.now() - 1_000),
+    }));
 
     await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
   });
@@ -1393,24 +1345,16 @@ describe("github cache policy", () => {
     );
     let createdAt = sqliteUTC(Date.now() - 13 * 60 * 60 * 1000);
     let expiresAt = sqliteUTC(Date.now() - 12 * 60 * 60 * 1000);
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: () => ({
-            first: async () => ({
-              status: 200,
-              response_headers_json: "{}",
-              body_json: '{"status":"completed"}',
-              body_encoding: "json",
-              identity_id: null,
-              identity_kind: null,
-              created_at: createdAt,
-              expires_at: expiresAt,
-            }),
-          }),
-        }),
-      },
-    } as unknown as Env;
+    const env = cacheDBEnv(async () => ({
+      status: 200,
+      response_headers_json: "{}",
+      body_json: '{"status":"completed"}',
+      body_encoding: "json",
+      identity_id: null,
+      identity_kind: null,
+      created_at: createdAt,
+      expires_at: expiresAt,
+    }));
 
     await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toMatchObject({
       body: { status: "completed" },
@@ -1467,10 +1411,12 @@ function cacheRowEnv(overrides: Record<string, unknown>): Env {
     expires_at: sqliteUTC(Date.now() + 60_000),
     ...overrides,
   };
+  return cacheDBEnv(async () => row);
+}
+
+function cacheDBEnv(first: () => Promise<unknown>): Env {
   return {
-    DB: {
-      prepare: () => ({ bind: () => ({ first: async () => row }) }),
-    },
+    DB: { prepare: () => ({ bind: () => ({ first }) }) },
   } as unknown as Env;
 }
 
