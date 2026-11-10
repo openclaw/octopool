@@ -39,21 +39,18 @@ const sections = [
   ["Reference", ["spec.md"]],
 ];
 
-const buildExcludes = [];
-
 fs.rmSync(outDir, { recursive: true, force: true });
 fs.mkdirSync(outDir, { recursive: true });
 
-const allPages = filesWithExtension(docsDir, ".md").map((file) => {
+const pages = filesWithExtension(docsDir, ".md").map((file) => {
   const rel = path.relative(docsDir, file).replaceAll(path.sep, "/");
   const raw = fs.readFileSync(file, "utf8");
   const { frontmatter, body } = parseFrontmatter(raw);
   const cleaned = stripStrayDirectives(body);
   const title = frontmatter.title || firstHeading(cleaned) || titleize(path.basename(rel, ".md"));
-  return { file, rel, title, outRel: outPath(rel, frontmatter), markdown: cleaned, frontmatter };
+  return { rel, title, outRel: outPath(rel, frontmatter), markdown: cleaned, frontmatter };
 });
 
-const pages = allPages.filter((page) => !buildExcludes.some((re) => re.test(page.rel)));
 const pageMap = new Map(pages.map((page) => [page.rel, page]));
 const permalinkMap = new Map();
 for (const page of pages) {
