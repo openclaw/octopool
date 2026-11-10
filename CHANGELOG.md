@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Preserve weighted `Accept` negotiation at the GitHub API instead of forcing a public diff or patch representation that the caller may have excluded.
+
 - Use default integer limits for malformed or unsafe configuration values instead of silently truncating unit suffixes, fractions, or exponents.
 
 - Accept case-insensitive JSON media types on login, provisioning, and relay requests while rejecting non-JSON types that merely contain `application/json`.

@@ -82,6 +82,27 @@ describe("github web provider", () => {
     );
   });
 
+  it.each([
+    "application/vnd.github.patch;q=0",
+    "application/vnd.github.patch;q=0, application/json;q=1",
+    "application/vnd.github.diff;q=1, application/vnd.github.patch;q=0.1",
+    "application/vnd.github.v3.patch; charset=utf-8; Q=0",
+  ])("delegates weighted media negotiation to the API: %s", async (accept) => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/pulls/12",
+      headers: { accept },
+    });
+    const route = classifyRoute(request, policy);
+
+    expect(hasNoQuotaGitHubWebRequest(env(), request, route)).toBe(false);
+    await expect(callGitHubWeb(env(), request, route)).resolves.toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("keeps custom-media PR diffs on their single public candidate", async () => {
     const fetchMock = vi.fn(async () => new Response("diff --git a/README.md b/README.md\n"));
     vi.stubGlobal("fetch", fetchMock);
