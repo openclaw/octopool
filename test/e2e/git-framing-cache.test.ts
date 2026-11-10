@@ -17,7 +17,11 @@ import {
   gitNodeURL,
   malformedGitAdvertisements,
 } from "../fixtures/git-advertisement";
-import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
+import {
+  expireGitHubCache,
+  seedPublicRepoProof,
+  writeOwnedGitHubCache,
+} from "./cache-publication-fixture";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 import { requestWithEnv } from "./identity-routing-support";
 
@@ -197,8 +201,8 @@ describe("Git framing and cache retirement at the Worker", () => {
       const request = validateRelayRequest(fixture.request);
       const route = classifyRoute(request, defaultPolicy("openclaw"));
       await seedOld(true, fixture);
-      await expire(fixture.shared);
-      await expire(fixture.identity);
+      await expireGitHubCache(env, fixture.shared);
+      await expireGitHubCache(env, fixture.identity);
       let outage = false;
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const fetched = new Request(input, init);
@@ -233,7 +237,7 @@ describe("Git framing and cache retirement at the Worker", () => {
         )
         .not.toContain('"old-partial"');
       const key = await githubCacheKey(request.pool, request, route);
-      await expire(key);
+      await expireGitHubCache(env, key);
       expect
         .soft(await (await relay(request.path, undefined, request)).json())
         .toMatchObject({ body: exactGitRefs, relay: { cache: "hit" } });
@@ -244,7 +248,7 @@ describe("Git framing and cache retirement at the Worker", () => {
           ),
         )
         .toContain('"complete"');
-      await expire(key);
+      await expireGitHubCache(env, key);
       outage = true;
       expect
         .soft(await (await relay(request.path, undefined, request)).json())
@@ -260,8 +264,8 @@ describe("Git framing and cache retirement at the Worker", () => {
     async (fixture) => {
       const request = validateRelayRequest(fixture.request);
       await seedOld(true, fixture);
-      await expire(fixture.shared);
-      await expire(fixture.identity);
+      await expireGitHubCache(env, fixture.shared);
+      await expireGitHubCache(env, fixture.identity);
       const upstream = vi.fn<typeof fetch>(async (input, init) =>
         new Request(input, init).url === repoURL
           ? jsonResponse({ private: false })
@@ -392,13 +396,4 @@ async function seedOld(
       ),
     ).toBe("shared");
   }
-}
-
-async function expire(key: string) {
-  await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
-  )
-    .bind(key)
-    .run();
-  await deleteEdgeJSON("github-publication-v1", key);
 }

@@ -6,7 +6,11 @@ import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/po
 import type { Identity } from "../../src/types";
 import { opaqueCacheKeys, unchangedJSONKeys } from "../fixtures/opaque-cache-keys";
 import { envelopeBytes } from "../fixtures/opaque-bytes";
-import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
+import {
+  expireGitHubCache,
+  seedPublicRepoProof,
+  writeOwnedGitHubCache,
+} from "./cache-publication-fixture";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
 const fixture = opaqueCacheKeys[0];
@@ -60,8 +64,8 @@ describe("opaque cache retirement at the Worker", () => {
 
   it("retires old shared and identity validators while retaining new 304 and stale behavior", async () => {
     const { request, route } = await seedOld();
-    await expire(fixture.shared);
-    await expire(fixture.identity);
+    await expireGitHubCache(env, fixture.shared);
+    await expireGitHubCache(env, fixture.identity);
     let outage = false;
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const fetchRequest = new Request(input, init);
@@ -100,7 +104,7 @@ describe("opaque cache retirement at the Worker", () => {
       )
       .not.toContain('"old-lossy"');
     const newKey = await githubCacheKey(request.pool, request, route, identity);
-    await expire(newKey);
+    await expireGitHubCache(env, newKey);
     const revalidated = await (await relay(request.path, undefined, request)).json<Envelope>();
     expect.soft(envelopeBytes(revalidated)).toEqual([0xff, 0x41]);
     expect.soft(revalidated.relay.cache).toBe("hit");
@@ -111,7 +115,7 @@ describe("opaque cache retirement at the Worker", () => {
         ),
       )
       .toContain('"lossless"');
-    await expire(newKey);
+    await expireGitHubCache(env, newKey);
     outage = true;
     const stale = await (await relay(request.path, undefined, request)).json<Envelope>();
     expect.soft(envelopeBytes(stale)).toEqual([0xff, 0x41]);
@@ -120,8 +124,8 @@ describe("opaque cache retirement at the Worker", () => {
 
   it("never serves old shared or identity stale bodies during an outage", async () => {
     const { request } = await seedOld();
-    await expire(fixture.shared);
-    await expire(fixture.identity);
+    await expireGitHubCache(env, fixture.shared);
+    await expireGitHubCache(env, fixture.identity);
     const upstream = vi.fn<typeof fetch>(async (input, init) =>
       new URL(new Request(input, init).url).pathname === "/repos/openclaw/octopool"
         ? jsonResponse({ private: false })
@@ -198,15 +202,6 @@ async function seedOld(shared = true) {
     ).toBe("shared");
   }
   return { request, route };
-}
-
-async function expire(key: string) {
-  await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
-  )
-    .bind(key)
-    .run();
-  await deleteEdgeJSON("github-publication-v1", key);
 }
 
 function upstreamBytes() {

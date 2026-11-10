@@ -6,7 +6,11 @@ import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/po
 import type { Identity } from "../../src/types";
 import { contentsCacheKeys } from "../fixtures/contents-cache-keys";
 import { contentsLinks } from "../fixtures/contents-links";
-import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
+import {
+  expireGitHubCache,
+  seedPublicRepoProof,
+  writeOwnedGitHubCache,
+} from "./cache-publication-fixture";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 
 const frozen = contentsCacheKeys[0];
@@ -105,8 +109,8 @@ describe("contents cache retirement at the Worker", () => {
       const request = validateRelayRequest(fixture.request);
       const route = classifyRoute(request, defaultPolicy("openclaw"));
       await seedOld(true, fixture);
-      await expire(fixture.shared);
-      await expire(fixture.identity);
+      await expireGitHubCache(env, fixture.shared, 61);
+      await expireGitHubCache(env, fixture.identity, 61);
       let outage = false;
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const fetched = new Request(input, init);
@@ -141,7 +145,7 @@ describe("contents cache retirement at the Worker", () => {
         )
         .not.toContain('"old-raw"');
       const key = await githubCacheKey(request.pool, request, route);
-      await expire(key);
+      await expireGitHubCache(env, key, 61);
       expect
         .soft(await (await relay(request.path, undefined, request)).json())
         .toMatchObject({ body: expected, relay: { cache: "hit" } });
@@ -152,7 +156,7 @@ describe("contents cache retirement at the Worker", () => {
           ),
         )
         .toContain('"new-rest"');
-      await expire(key);
+      await expireGitHubCache(env, key, 61);
       outage = true;
       expect
         .soft(await (await relay(request.path, undefined, request)).json())
@@ -165,8 +169,8 @@ describe("contents cache retirement at the Worker", () => {
     async (fixture) => {
       const request = validateRelayRequest(fixture.request);
       await seedOld(true, fixture);
-      await expire(fixture.shared);
-      await expire(fixture.identity);
+      await expireGitHubCache(env, fixture.shared, 61);
+      await expireGitHubCache(env, fixture.identity, 61);
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const fetched = new Request(input, init);
         if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
@@ -238,13 +242,4 @@ async function seedOld(
       ),
     ).toBe("shared");
   }
-}
-
-async function expire(key: string) {
-  await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-61 seconds'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
-  )
-    .bind(key)
-    .run();
-  await deleteEdgeJSON("github-publication-v1", key);
 }

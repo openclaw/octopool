@@ -1,4 +1,7 @@
-import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
+import {
+  expireGitHubCache,
+  writeOwnedGitHubCache as writeGitHubCache,
+} from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../../src/cache";
@@ -47,7 +50,7 @@ describe.each(["tags/v0.8.0", "latest"])("release %s body cache", (suffix) => {
 
   it("never serves legacy stale HTML when the anonymous API is unavailable", async () => {
     const { request, oldKey } = await seedLegacy(path);
-    await expire(oldKey);
+    await expireGitHubCache(env, oldKey);
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => outageResponse(new Request(input, init))),
@@ -60,7 +63,7 @@ describe.each(["tags/v0.8.0", "latest"])("release %s body cache", (suffix) => {
   it("coalesces exact fills, revalidates only new source, and preserves it during outages", async () => {
     // Even legacy entries carrying an API validator must be ineligible for a 304 revival.
     const { request, route, oldKey } = await seedLegacy(path, true);
-    await expire(oldKey);
+    await expireGitHubCache(env, oldKey);
     let started!: () => void;
     const { promise: gate, release } = ownedWork.gate();
     const entered = new Promise<void>((resolve) => {
@@ -112,13 +115,13 @@ describe.each(["tags/v0.8.0", "latest"])("release %s body cache", (suffix) => {
     }
 
     const key = await githubCacheKey(request.pool, request, route);
-    await expire(key);
+    await expireGitHubCache(env, key);
     phase = "revalidate";
     const revalidated = await (await relay(path, undefined, request)).json<Envelope>();
     expect(revalidated.body).toEqual(body);
     expect(revalidated.relay.cache).toBe("hit");
     expect(conditionals).toEqual([null, '"raw"']);
-    await expire(key);
+    await expireGitHubCache(env, key);
     phase = "outage";
     const stale = await (await relay(path, undefined, request)).json<Envelope>();
     expect(stale.body).toEqual(body);
@@ -138,15 +141,6 @@ async function seedLegacy(path: string, apiValidator = false) {
     body_encoding: "json",
   });
   return { request, route, oldKey };
-}
-
-async function expire(key: string) {
-  await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
-  )
-    .bind(key)
-    .run();
-  await deleteEdgeJSON("github-publication-v1", key);
 }
 
 function mockAPI(path: string) {
