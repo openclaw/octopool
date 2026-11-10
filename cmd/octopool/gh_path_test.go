@@ -42,73 +42,47 @@ func TestResolveGHPathSkipsOctopoolWrapper(t *testing.T) {
 	}
 }
 
-func TestResolveGHPathSkipsOctopoolSymlink(t *testing.T) {
-	dir := t.TempDir()
-	wrapperDir := filepath.Join(dir, "wrapper")
-	realDir := filepath.Join(dir, "real")
-	if err := os.Mkdir(wrapperDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(realDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	octopoolBinary := filepath.Join(dir, "octopool")
-	if err := os.WriteFile(octopoolBinary, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(octopoolBinary, filepath.Join(wrapperDir, "gh")); err != nil {
-		t.Fatal(err)
-	}
-	realGH := filepath.Join(realDir, "gh")
-	if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+func TestResolveGHPathSkipsSymlinkedShims(t *testing.T) {
+	for _, test := range []struct {
+		name, target, current string
+	}{
+		{"octopool", "octopool", "current-octopool"},
+		{"gitcrawl", "gitcrawl-gh", "octopool"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			shimDir := filepath.Join(dir, "shim")
+			realDir := filepath.Join(dir, "real")
+			if err := os.Mkdir(shimDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(realDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			binary := filepath.Join(dir, test.target)
+			if err := os.WriteFile(binary, []byte("binary"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(binary, filepath.Join(shimDir, "gh")); err != nil {
+				t.Fatal(err)
+			}
+			realGH := filepath.Join(realDir, "gh")
+			if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
 
-	got, err := resolveGHPathFrom(
-		"gh",
-		filepath.Join(dir, "current-octopool"),
-		ghPathCandidates(wrapperDir+string(os.PathListSeparator)+realDir, nil),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != realGH {
-		t.Fatalf("resolveGHPathFrom() = %q, want %q", got, realGH)
-	}
-}
-
-func TestResolveGHPathSkipsGitcrawlShim(t *testing.T) {
-	dir := t.TempDir()
-	shimDir := filepath.Join(dir, "shim")
-	realDir := filepath.Join(dir, "real")
-	if err := os.Mkdir(shimDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(realDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	gitcrawlBinary := filepath.Join(dir, "gitcrawl-gh")
-	if err := os.WriteFile(gitcrawlBinary, []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(gitcrawlBinary, filepath.Join(shimDir, "gh")); err != nil {
-		t.Fatal(err)
-	}
-	realGH := filepath.Join(realDir, "gh")
-	if err := os.WriteFile(realGH, []byte("#!/bin/sh\necho gh version\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := resolveGHPathFrom(
-		"gh",
-		filepath.Join(dir, "octopool"),
-		ghPathCandidates(shimDir+string(os.PathListSeparator)+realDir, nil),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != realGH {
-		t.Fatalf("resolveGHPathFrom() = %q, want %q", got, realGH)
+			got, err := resolveGHPathFrom(
+				"gh",
+				filepath.Join(dir, test.current),
+				ghPathCandidates(shimDir+string(os.PathListSeparator)+realDir, nil),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != realGH {
+				t.Fatalf("resolveGHPathFrom() = %q, want %q", got, realGH)
+			}
+		})
 	}
 }
 

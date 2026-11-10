@@ -249,47 +249,32 @@ func TestRunGHReleaseViewIDStaysLocal(t *testing.T) {
 	}
 }
 
-func TestRunGHReleaseViewKeepsNumericTags(t *testing.T) {
-	relayTestServer(t, func(body map[string]any) any {
-		if body["path"] != "/repos/openclaw/octopool/releases/tags/20240530" {
-			t.Fatalf("path = %v", body["path"])
-		}
-		return map[string]any{"tag_name": "20240530"}
-	})
-	var out bytes.Buffer
-	result := runGHTopLevel(t.Context(), []string{
-		"release", "view",
-		"20240530",
-		"-R", "openclaw/octopool",
-		"--json", "tagName",
-	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
-	if got := out.String(); !strings.Contains(got, `"tagName":"20240530"`) {
-		t.Fatalf("out = %s", got)
-	}
-}
-
-func TestRunGHReleaseViewEscapesSlashTagsOnce(t *testing.T) {
-	relayTestServer(t, func(body map[string]any) any {
-		if body["path"] != "/repos/openclaw/octopool/releases/tags/release%2F1.0" {
-			t.Fatalf("path = %v", body["path"])
-		}
-		return map[string]any{"tag_name": "release/1.0"}
-	})
-	var out bytes.Buffer
-	result := runGHTopLevel(t.Context(), []string{
-		"release", "view",
-		"release/1.0",
-		"-R", "openclaw/octopool",
-		"--json", "tagName",
-	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
-	if got := out.String(); !strings.Contains(got, `"tagName":"release/1.0"`) {
-		t.Fatalf("out = %s", got)
+func TestRunGHReleaseViewTagRouting(t *testing.T) {
+	for _, test := range []struct {
+		name, tag, path, output string
+	}{
+		{"numeric", "20240530", "/repos/openclaw/octopool/releases/tags/20240530", `"tagName":"20240530"`},
+		{"slash escaped once", "release/1.0", "/repos/openclaw/octopool/releases/tags/release%2F1.0", `"tagName":"release/1.0"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			relayTestServer(t, func(body map[string]any) any {
+				if body["path"] != test.path {
+					t.Fatalf("path = %v", body["path"])
+				}
+				return map[string]any{"tag_name": test.tag}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{
+				"release", "view", test.tag,
+				"-R", "openclaw/octopool", "--json", "tagName",
+			}, &out)
+			if result.err != nil || result.action != ghComplete {
+				t.Fatalf("action=%v err=%v", result.action, result.err)
+			}
+			if got := out.String(); !strings.Contains(got, test.output) {
+				t.Fatalf("out = %s", got)
+			}
+		})
 	}
 }
 

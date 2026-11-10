@@ -11,6 +11,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   redirect controls, fixture-only immutability checks and synthetic transcript
   claims. Replaced a timed stdin pipe with a read-count guard.
   [#280](https://github.com/openclaw/octopool/pull/280), [#282](https://github.com/openclaw/octopool/pull/282), [#286](https://github.com/openclaw/octopool/pull/286).
+  Shared table fixtures retain both symlink-shim cases, both paginated jq outputs,
+  and numeric/slash release-tag routing without duplicate setup.
 - **Go test controls:** isolated inherited environment, required exact fallback
   reasons, repaired query/asset/review fixtures, synchronized disabled-limiter
   overlap and removed unused fixture setup. Seven mutations caught; constrained
