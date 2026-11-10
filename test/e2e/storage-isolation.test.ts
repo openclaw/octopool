@@ -42,7 +42,13 @@ describe("per-test setup boundary", () => {
       await caches.open("previous-test")
     ).put(key, new Response("old", { headers: { "cache-control": "public, max-age=3600" } }));
     expect(await caches.default.match(key)).toBeDefined();
-    expect((await coordinator().acquireCacheFill(key)).kind).toBe("owner");
+    expect(
+      await coordinator().selectIdentity({
+        routeKey: key,
+        resource: "core",
+        candidates: [{ id: "identity", weight: 1 }],
+      }),
+    ).toMatchObject({ kind: "selected", reason: "highest_remaining" });
     await runInDurableObject(coordinator(), async (_instance, state) => {
       await state.storage.setAlarm(Date.now() + 86_400_000);
     });
@@ -55,7 +61,7 @@ describe("per-test setup boundary", () => {
     expect(await (await caches.open("previous-test")).match(key)).toBeUndefined();
     await runInDurableObject(coordinator(), async (_instance, state) => {
       expect(await state.storage.getAlarm()).toBeNull();
-      expect(state.storage.sql.exec("SELECT * FROM cache_fills").toArray()).toEqual([]);
+      expect(state.storage.sql.exec("SELECT * FROM leases").toArray()).toEqual([]);
     });
     await seedPool();
   });
@@ -222,13 +228,21 @@ describe("real configured storage ownership", () => {
     const ids = ["storage-isolation-a", "storage-isolation-b"].map((name) =>
       env.POOL_COORDINATOR.idFromName(name),
     );
-    const oldTokens: string[] = [];
+    const selection = {
+      routeKey: "old-key",
+      resource: "core",
+      candidates: [{ id: "identity", weight: 1 }],
+    };
     for (const id of ids) {
       const stub = env.POOL_COORDINATOR.get(id);
-      const lease = await stub.acquireCacheFill("old-key");
-      expect(lease.kind).toBe("owner");
-      if (lease.kind !== "owner") throw new Error("Expected fresh owner");
-      oldTokens.push(lease.token);
+      expect(await stub.selectIdentity(selection)).toMatchObject({
+        kind: "selected",
+        reason: "highest_remaining",
+      });
+      expect(await stub.selectIdentity(selection)).toMatchObject({
+        kind: "selected",
+        reason: "sticky",
+      });
       await runInDurableObject(stub, async (_instance, state) => {
         await state.storage.put("sentinel", "old");
         state.storage.sql.exec("CREATE TABLE isolation_sentinel (value TEXT)");
@@ -241,7 +255,7 @@ describe("real configured storage ownership", () => {
       expect.arrayContaining(ids.map(String)),
     );
     await clearCoordinators(env.POOL_COORDINATOR);
-    for (const [index, id] of ids.entries()) {
+    for (const id of ids) {
       const stub = env.POOL_COORDINATOR.get(id);
       await runInDurableObject(stub, async (_instance, state) => {
         expect(await state.storage.get("sentinel")).toBeUndefined();
@@ -251,15 +265,13 @@ describe("real configured storage ownership", () => {
             .exec("SELECT name FROM sqlite_schema WHERE name = 'isolation_sentinel'")
             .toArray(),
         ).toEqual([]);
-        // Constructor recreation is required: deleteAll removed cache_fills too.
-        expect(state.storage.sql.exec("SELECT * FROM cache_fills").toArray()).toEqual([]);
+        // Constructor recreation is required: deleteAll removed leases too.
+        expect(state.storage.sql.exec("SELECT * FROM leases").toArray()).toEqual([]);
       });
-      const fresh = await stub.acquireCacheFill("old-key");
-      expect(fresh.kind).toBe("owner");
-      if (fresh.kind !== "owner") throw new Error("Expected recreated owner");
-      expect(fresh.token).not.toBe(oldTokens[index]);
-      expect(await stub.completeCacheFill("old-key", oldTokens[index]!, "shared")).toBe(false);
-      expect(await stub.completeCacheFill("old-key", fresh.token, "shared")).toBe(true);
+      expect(await stub.selectIdentity(selection)).toMatchObject({
+        kind: "selected",
+        reason: "highest_remaining",
+      });
     }
   });
 

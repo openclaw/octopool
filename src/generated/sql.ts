@@ -26,8 +26,6 @@ export const queries = {
     "ALTER TABLE rate_states ADD COLUMN limit_count INTEGER NOT NULL DEFAULT 5000",
   createCooldownsTable:
     "CREATE TABLE IF NOT EXISTS cooldowns (\n  identity_id TEXT NOT NULL,\n  route_key TEXT NOT NULL,\n  status INTEGER NOT NULL,\n  reason TEXT NOT NULL,\n  expires_at INTEGER NOT NULL,\n  PRIMARY KEY (identity_id, route_key)\n)",
-  createCacheFillsTable:
-    "CREATE TABLE IF NOT EXISTS cache_fills (\n  cache_key TEXT PRIMARY KEY,\n  owner_token TEXT NOT NULL,\n  expires_at INTEGER NOT NULL\n)",
   getLease: "SELECT identity_id, expires_at\nFROM leases\nWHERE route_key = ?",
   createLeasesExpiryIndex:
     "CREATE INDEX IF NOT EXISTS leases_expiry ON leases(expires_at, route_key)",
@@ -37,10 +35,6 @@ export const queries = {
     "DELETE FROM leases\nWHERE route_key IN (\n  SELECT old.route_key FROM leases AS old WHERE old.expires_at <= ?1\n  ORDER BY old.expires_at LIMIT 16\n)",
   deleteExpiredCooldowns:
     "DELETE FROM cooldowns\nWHERE (identity_id, route_key) IN (\n  SELECT old.identity_id, old.route_key FROM cooldowns AS old WHERE old.expires_at <= ?1\n  ORDER BY old.expires_at LIMIT 16\n)",
-  createLegacyCacheFillExpiryIndex:
-    "CREATE INDEX IF NOT EXISTS cache_fills_expiry ON cache_fills(expires_at)",
-  drainExpiredLegacyCacheFills:
-    "DELETE FROM cache_fills\nWHERE cache_key IN (\n  SELECT old.cache_key FROM cache_fills AS old WHERE old.expires_at <= ?1\n  ORDER BY old.expires_at LIMIT 16\n)",
   getRateState:
     "SELECT limit_count, remaining, reset_at\nFROM rate_states\nWHERE identity_id = ?\n  AND resource = ?",
   upsertLease:
@@ -57,13 +51,6 @@ export const queries = {
     "SELECT route_key, identity_id, expires_at\nFROM leases\nWHERE expires_at > ?\nORDER BY expires_at",
   getCooldownExpiresAt:
     "SELECT expires_at\nFROM cooldowns\nWHERE identity_id = ?\n  AND route_key = ?",
-  getCacheFill: "SELECT owner_token, expires_at\nFROM cache_fills\nWHERE cache_key = ?",
-  upsertCacheFill:
-    "INSERT INTO cache_fills (cache_key, owner_token, expires_at)\nVALUES (?1, ?2, ?3)\nON CONFLICT(cache_key) DO UPDATE SET\n  owner_token = excluded.owner_token,\n  expires_at = excluded.expires_at",
-  renewCacheFill:
-    "UPDATE cache_fills\nSET expires_at = ?3\nWHERE cache_key = ?1\n  AND owner_token = ?2\n  AND expires_at > ?4",
-  completeCacheFill:
-    "DELETE FROM cache_fills\nWHERE cache_key = ?1\n  AND owner_token = ?2\n  AND expires_at > ?3",
   authenticateCaller:
     "SELECT callers.id, callers.name, callers.github_login, callers.github_user_id, callers.org_login,\n       callers.org_identity_verified_at AS org_verified_at,\n       caller_tokens.id AS caller_token_id, caller_tokens.client_name\nFROM caller_tokens\nJOIN callers ON callers.id = caller_tokens.caller_id\nJOIN caller_pools ON caller_pools.caller_id = callers.id\nWHERE caller_tokens.token_hash = ?1\n  AND callers.status = 'active'\n  AND caller_pools.pool_id = ?2\nLIMIT 1",
   updateCallerOrgIdentityVerifiedAt:

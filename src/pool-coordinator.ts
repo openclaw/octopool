@@ -23,8 +23,6 @@ type RateRow = {
   reset_at: number;
 };
 
-const CACHE_FILL_LEASE_MS = 8_000;
-
 // The coordinator must live near the D1 primary (WNAM since the 2026-08 region
 // move) or every selectIdentity/recordResult hop re-adds the cross-region
 // latency the migration removed. Location hints only apply when an object is
@@ -35,24 +33,6 @@ export function poolCoordinatorStub(env: Env, pool: string): DurableObjectStub<P
   return env.POOL_COORDINATOR.get(id, { locationHint: "wnam" });
 }
 
-type LegacyCacheFillAcquisition =
-  | { kind: "owner"; token: string }
-  | { kind: "completed"; outcome: CacheFillOutcome }
-  | { kind: "retry" };
-
-type CacheFillRow = {
-  owner_token: string;
-  expires_at: number;
-};
-
-type CacheFillWaiterGroup = {
-  ownerToken: string;
-  expiresAt: number;
-  completion: Promise<Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>>;
-  resolve(result: Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>): void;
-  timer?: ReturnType<typeof setTimeout>;
-};
-
 type PublicationWaiterGroup = {
   owner: PublicationOwner;
   resolve(value: CacheFillAcquisition): void;
@@ -61,8 +41,6 @@ type PublicationWaiterGroup = {
 };
 
 export class PoolCoordinator extends DurableObject<Env> {
-  private readonly cacheFillWaiters = new Map<string, CacheFillWaiterGroup>();
-
   private readonly publicationWaiters = new Map<string, PublicationWaiterGroup>();
   private readonly publicationOperations = new Map<string, Promise<void>>();
 
@@ -79,14 +57,11 @@ export class PoolCoordinator extends DurableObject<Env> {
       this.ctx.storage.sql.exec(queries.createCooldownsTable);
       this.ctx.storage.sql.exec(queries.createLeasesExpiryIndex);
       this.ctx.storage.sql.exec(queries.createCooldownsExpiryIndex);
-      this.ctx.storage.sql.exec(queries.createCacheFillsTable);
-      this.ctx.storage.sql.exec(queries.createLegacyCacheFillExpiryIndex);
     });
   }
 
   async tryAcquirePublication(resource: string): Promise<PublicationOwner | undefined> {
     return this.withPublicationResource(resource, async () => {
-      this.ctx.storage.sql.exec(queries.drainExpiredLegacyCacheFills, Date.now());
       const owner = await tryPublicationOwner(this.env, resource);
       if (owner !== undefined) this.wakePublication(resource, { kind: "retry" });
       return owner;
@@ -95,7 +70,6 @@ export class PoolCoordinator extends DurableObject<Env> {
 
   async acquirePublication(resource: string): Promise<CacheFillAcquisition> {
     const acquisition = await this.withPublicationResource(resource, async () => {
-      this.ctx.storage.sql.exec(queries.drainExpiredLegacyCacheFills, Date.now());
       const owner = await tryPublicationOwner(this.env, resource);
       if (owner !== undefined) {
         this.wakePublication(resource, { kind: "retry" });
@@ -222,60 +196,6 @@ export class PoolCoordinator extends DurableObject<Env> {
     this.publicationWaiters.delete(resource);
     clearTimeout(group.timer);
     group.resolve(result);
-  }
-
-  // In-flight pre-epoch Workers still call these RPCs. Their keys and proof table
-  // are retired for new readers. Remove this surface after old routing is drained.
-  acquireCacheFill(
-    cacheKey: string,
-  ): Promise<LegacyCacheFillAcquisition> | LegacyCacheFillAcquisition {
-    const now = Date.now();
-    const fill = this.cacheFill(cacheKey);
-    if (fill !== undefined && fill.expires_at > now) {
-      return this.waitForCacheFill(cacheKey, fill);
-    }
-    if (fill !== undefined) {
-      this.wakeCacheFill(cacheKey, fill.owner_token, { kind: "retry" });
-    }
-    const ownerToken = crypto.randomUUID();
-    this.ctx.storage.sql.exec(
-      queries.upsertCacheFill,
-      cacheKey,
-      ownerToken,
-      now + CACHE_FILL_LEASE_MS,
-    );
-    return { kind: "owner", token: ownerToken };
-  }
-
-  renewCacheFill(cacheKey: string, ownerToken: string): boolean {
-    const now = Date.now();
-    const expiresAt = now + CACHE_FILL_LEASE_MS;
-    const updated = this.ctx.storage.sql.exec(
-      queries.renewCacheFill,
-      cacheKey,
-      ownerToken,
-      expiresAt,
-      now,
-    );
-    if (updated.rowsWritten === 0) {
-      return false;
-    }
-    this.extendCacheFillWaiter(cacheKey, ownerToken, expiresAt);
-    return true;
-  }
-
-  completeCacheFill(cacheKey: string, ownerToken: string, outcome: CacheFillOutcome): boolean {
-    const deleted = this.ctx.storage.sql.exec(
-      queries.completeCacheFill,
-      cacheKey,
-      ownerToken,
-      Date.now(),
-    );
-    if (deleted.rowsWritten === 0) {
-      return false;
-    }
-    this.wakeCacheFill(cacheKey, ownerToken, { kind: "completed", outcome });
-    return true;
   }
 
   selectIdentity(request: SelectionRequest): SelectionResult {
@@ -426,79 +346,6 @@ export class PoolCoordinator extends DurableObject<Env> {
       .exec<RateRow>(queries.getRateState, identityId, resource)
       .toArray()[0];
     return rate !== undefined && rate.reset_at > now && rate.remaining <= 0;
-  }
-
-  private cacheFill(cacheKey: string): CacheFillRow | undefined {
-    return this.ctx.storage.sql.exec<CacheFillRow>(queries.getCacheFill, cacheKey).toArray()[0];
-  }
-
-  private waitForCacheFill(
-    cacheKey: string,
-    fill: CacheFillRow,
-  ): Promise<LegacyCacheFillAcquisition> {
-    let group = this.cacheFillWaiters.get(cacheKey);
-    if (group === undefined || group.ownerToken !== fill.owner_token) {
-      if (group !== undefined) {
-        this.wakeCacheFill(cacheKey, group.ownerToken, { kind: "retry" });
-      }
-      let resolve!: CacheFillWaiterGroup["resolve"];
-      const completion = new Promise<Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>>(
-        (complete) => {
-          resolve = complete;
-        },
-      );
-      group = {
-        ownerToken: fill.owner_token,
-        expiresAt: fill.expires_at,
-        completion,
-        resolve,
-      };
-      this.cacheFillWaiters.set(cacheKey, group);
-      this.scheduleCacheFillExpiry(cacheKey, group, fill.expires_at);
-    } else if (fill.expires_at > group.expiresAt) {
-      this.scheduleCacheFillExpiry(cacheKey, group, fill.expires_at);
-    }
-    return group.completion;
-  }
-
-  private scheduleCacheFillExpiry(
-    cacheKey: string,
-    group: CacheFillWaiterGroup,
-    expiresAt: number,
-  ): void {
-    group.expiresAt = expiresAt;
-    if (group.timer !== undefined) {
-      clearTimeout(group.timer);
-    }
-    group.timer = setTimeout(
-      () => {
-        this.wakeCacheFill(cacheKey, group.ownerToken, { kind: "retry" });
-      },
-      Math.max(1, expiresAt - Date.now()),
-    );
-  }
-
-  private extendCacheFillWaiter(cacheKey: string, ownerToken: string, expiresAt: number): void {
-    const group = this.cacheFillWaiters.get(cacheKey);
-    if (group !== undefined && group.ownerToken === ownerToken) {
-      this.scheduleCacheFillExpiry(cacheKey, group, expiresAt);
-    }
-  }
-
-  private wakeCacheFill(
-    cacheKey: string,
-    ownerToken: string,
-    result: Exclude<LegacyCacheFillAcquisition, { kind: "owner" }>,
-  ): void {
-    const group = this.cacheFillWaiters.get(cacheKey);
-    if (group === undefined || group.ownerToken !== ownerToken) {
-      return;
-    }
-    this.cacheFillWaiters.delete(cacheKey);
-    if (group.timer !== undefined) {
-      clearTimeout(group.timer);
-    }
-    group.resolve(result);
   }
 }
 
