@@ -201,11 +201,15 @@ export function logUnexpectedWorkerError(
   });
 }
 
-export async function parseJsonObject(request: Request): Promise<JsonObject> {
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
+export function requireJsonContentType(request: Request): void {
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (mediaType !== "application/json") {
     throw new HttpError(415, "unsupported_media_type", "Expected application/json");
   }
+}
+
+export async function parseJsonObject(request: Request): Promise<JsonObject> {
+  requireJsonContentType(request);
   let value: unknown;
   try {
     value = await request.json();
