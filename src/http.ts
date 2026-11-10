@@ -230,11 +230,12 @@ export function requireString(value: unknown, field: string): string {
 }
 
 export function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (value === undefined || value.trim() === "") {
+  const normalized = value?.trim();
+  if (normalized === undefined || !/^[0-9]+$/.test(normalized)) {
     return fallback;
   }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export function requestBearer(request: Request): string {

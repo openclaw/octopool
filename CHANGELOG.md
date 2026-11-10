@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Use default integer limits for malformed or unsafe configuration values instead of silently truncating unit suffixes, fractions, or exponents.
+
 - Accept case-insensitive JSON media types on login, provisioning, and relay requests while rejecting non-JSON types that merely contain `application/json`.
 
 - Continue independent scheduled cleanup after a table fails, preserving per-table budgets and reporting failures after all tables have been attempted.

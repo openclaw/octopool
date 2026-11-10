@@ -100,6 +100,24 @@ describe("opaque Worker wire bytes", () => {
     },
   );
 
+  it("uses the default response cap for a malformed configured value", async () => {
+    const text = "response larger than two bytes";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        if (bearer(input, init) === "test-org-token") return jsonResponse({ private: false });
+        return new Response(text, { headers: { "content-type": "text/plain" } });
+      }),
+    );
+
+    const response = await requestWithEnv({ MAX_RESPONSE_BYTES: "2MiB" }, apiPath, {
+      headers: { accept: "application/vnd.github.raw" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ body: text, body_encoding: "text" });
+  });
+
   it.each(opaqueBytes)("preserves pooled API $name through fill and hit", async (fixture) => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);
