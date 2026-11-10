@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
@@ -70,6 +71,34 @@ describe("opaque Worker wire bytes", () => {
       upstream.mock.calls.filter(([input, init]) => bearer(input, init) === "test-primary-token"),
     ).toHaveLength(1);
   });
+
+  it.each([262143, 262144, 262145, 1048577])(
+    "preserves %i binary bytes through cache fill and hit",
+    async (length) => {
+      const bytes = Uint8Array.from({ length }, (_, index) => index % 256);
+      const expected = Buffer.from(bytes).toString("base64");
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        if (bearer(input, init) === "test-org-token") return jsonResponse({ private: false });
+        return new Response(bytes, { headers: { "content-type": "application/octet-stream" } });
+      });
+      vi.stubGlobal("fetch", upstream);
+
+      for (const cache of ["miss", "hit"]) {
+        const response = await relay(apiPath, undefined, {
+          headers: { accept: "application/vnd.github.raw" },
+        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          body: expected,
+          body_encoding: "base64",
+          relay: { cache },
+        });
+      }
+      expect(
+        upstream.mock.calls.filter(([input, init]) => bearer(input, init) === "test-primary-token"),
+      ).toHaveLength(1);
+    },
+  );
 
   it.each(opaqueBytes)("preserves pooled API $name through fill and hit", async (fixture) => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
