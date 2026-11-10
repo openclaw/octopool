@@ -1191,11 +1191,14 @@ describe("github web provider", () => {
     },
   );
 
-  it("prefers embedded issue and PR lists when the whole result fits", async () => {
+  it.each([
+    ["Sign in <code>fails</code>", "Sign in fails"],
+    ["Bad &#1114112; <code>&#x110000;</code> title", "Bad \uFFFD \uFFFD title"],
+  ])("prefers complete embedded issue and PR lists with title %s", async (titleHtml, title) => {
     const issueNode = {
       __typename: "Issue",
       number: 5,
-      titleHtml: "Sign in <code>fails</code>",
+      titleHtml,
       state: "CLOSED",
       createdAt: "2026-05-27T23:17:12Z",
       updatedAt: "2026-05-27T23:19:04Z",
@@ -1265,9 +1268,7 @@ describe("github web provider", () => {
       "https://github.com/openclaw/octopool/issues?q=is%3Apr",
       expect.any(Object),
     );
-    expect(issueResponse?.body).toMatchObject([
-      { number: 5, title: "Sign in fails", state: "CLOSED" },
-    ]);
+    expect(issueResponse?.body).toMatchObject([{ number: 5, title, state: "CLOSED" }]);
     expect(prResponse?.body).toMatchObject([
       {
         number: 11,

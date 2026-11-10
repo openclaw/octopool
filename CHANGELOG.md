@@ -39,6 +39,8 @@
 - Count UTF-8 bytes in serialized cached JSON payloads for stats and the dashboard, correcting non-ASCII undercounts without changing the metric to physical database allocation.
 - Prune expired dashboard sessions during scheduled maintenance in indexed batches, preserving unexpired sessions and existing per-table cleanup budgets.
 
+- Replace out-of-range numeric HTML entities instead of aborting GitHub page text extraction.
+
 ## 0.9.11 - 2026-10-26
 
 ### Performance
