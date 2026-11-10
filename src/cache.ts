@@ -890,11 +890,6 @@ function routeStateHint(route: RouteInfo): string | undefined {
   return route.state_hint;
 }
 
-export async function pruneExpiredGitHubCache(env: Env, limit = 500): Promise<number> {
-  const result = await env.DB.prepare(queries.deleteExpiredGitHubCacheBatch).bind(limit).run();
-  return result.meta.changes;
-}
-
 function parseJSONRecord(raw: string): Record<string, string> | undefined {
   const value: unknown = JSON.parse(raw);
   if (!isRecord(value) || Object.values(value).some((item) => typeof item !== "string")) {
