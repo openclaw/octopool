@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
+import { counterBytes, envelopeBytes, opaqueBytes } from "../fixtures/opaque-bytes";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 import { requestWithEnv } from "./identity-routing-support";
 
@@ -75,7 +75,7 @@ describe("opaque Worker wire bytes", () => {
   it.each([262143, 262144, 262145, 1048577])(
     "preserves %i binary bytes through cache fill and hit",
     async (length) => {
-      const bytes = Uint8Array.from({ length }, (_, index) => index % 256);
+      const bytes = counterBytes(length);
       const expected = Buffer.from(bytes).toString("base64");
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         if (bearer(input, init) === "test-org-token") return jsonResponse({ private: false });

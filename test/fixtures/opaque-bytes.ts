@@ -1,5 +1,13 @@
 import { Buffer } from "node:buffer";
 
+// Successive four-byte counters make repeated or reordered blocks distinguishable.
+export function counterBytes(length: number): Uint8Array {
+  return Uint8Array.from({ length }, (_, index) => {
+    const counter = Math.floor(index / 4);
+    return (counter >>> ((index % 4) * 8)) & 0xff;
+  });
+}
+
 // Literal wire bytes and classifications, never the production decoder as an oracle.
 export const opaqueBytes = [
   { name: "invalid UTF-8", bytes: [0xff, 0xfe, 0x41], encoding: "base64" },
