@@ -1848,12 +1848,12 @@ async function readOptionalFreshCacheCandidates(
   return undefined;
 }
 
-async function readOptionalCacheCandidates(
+async function readOptionalCacheCandidates<T>(
   env: Env,
   pool: string,
   route: RouteInfo,
-  probe: (identity?: Identity) => Promise<CachedGitHubResponse | undefined>,
-): Promise<CachedGitHubResponse | undefined> {
+  probe: (identity?: Identity) => Promise<T | undefined>,
+): Promise<T | undefined> {
   try {
     const anonymous = await probe();
     if (anonymous !== undefined) return anonymous;
@@ -1905,20 +1905,7 @@ async function serveExactRunListCache(
       return undefined;
     return { key, cached, identity };
   };
-  let candidate: Awaited<ReturnType<typeof probe>>;
-  try {
-    candidate = await probe();
-    if (candidate === undefined) {
-      for (const identity of await loadIdentities(state.env, request.pool, state.route)) {
-        candidate = await probe(identity);
-        if (candidate !== undefined) break;
-      }
-    }
-  } catch (error) {
-    rethrowStringRewriteDenial(error);
-    if (error instanceof HttpError && error.status >= 400 && error.status < 500) throw error;
-    return undefined;
-  }
+  const candidate = await readOptionalCacheCandidates(state.env, request.pool, state.route, probe);
   if (candidate === undefined) return undefined;
   // Only an eligible hit changes the request or settles its canonical fill owner.
   await switchToExactRunList(state);
