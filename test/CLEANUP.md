@@ -39,6 +39,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   section; unused single-query fixture methods and the batch-size assertion were removed.
   Cache unit fixtures share their D1 first-row scaffold while retaining dynamic
   rows, rejection callbacks, and explicit binding spies.
+  Contents and Git generation cases share their cache-key assertions while preserving
+  both frozen fixture sets and the Git-only request assertion.
 - **Worker SQL and concurrency:** removed rewritten allocator and shadow-index
   experiments. Shared an actual publication-waiter barrier and enforced coalesced
   results with owned cleanup. Scoped runs: 13 and 89 cases.
