@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Replace out-of-range numeric HTML entities instead of aborting GitHub page text extraction.
+
 - Prune expired PR-state verification proofs during scheduled maintenance without removing fresh proofs or their cached responses, using the existing per-table cleanup budget.
 - Clarify configured identity health and add `octopool health --capacity` for observed rate exhaustion, cooldowns, and leases.
 
