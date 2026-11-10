@@ -13,7 +13,7 @@ export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGit
     if (offset + 4 > body.byteLength) {
       return undefined;
     }
-    const lengthText = decoder.decode(body.slice(offset, offset + 4));
+    const lengthText = decoder.decode(body.subarray(offset, offset + 4));
     if (!/^[0-9a-fA-F]{4}$/.test(lengthText)) {
       return undefined;
     }
@@ -35,7 +35,7 @@ export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGit
     ) {
       return undefined;
     }
-    const payload = decoder.decode(body.slice(offset, offset + length - 4));
+    const payload = decoder.decode(body.subarray(offset, offset + length - 4));
     offset += length - 4;
     if (phase === "service") {
       if (payload !== "# service=git-upload-pack" && payload !== "# service=git-upload-pack\n") {

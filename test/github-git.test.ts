@@ -24,6 +24,33 @@ describe("Git smart HTTP refs", () => {
     }
   });
 
+  it("respects an input view's offset and leaves its backing buffer unchanged", () => {
+    const bytes = new TextEncoder().encode(completeGitAdvertisement);
+    const backing = new Uint8Array(bytes.length + 19).fill(0xff);
+    backing.set(bytes, 7);
+    const before = backing.slice();
+    const refs = parseGitUploadPackAdvertisement(backing.subarray(7, 7 + bytes.length));
+
+    expect([...refs!]).toEqual([
+      ["refs/heads/main", gitSHA],
+      ["refs/heads/maint", "abcdefabcdefabcdefabcdefabcdefabcdefabcd"],
+    ]);
+    expect(backing).toEqual(before);
+    backing.fill(0);
+    expect(refs?.get("refs/heads/main")).toBe(gitSHA);
+  });
+
+  it("returns every ref in a large advertisement", () => {
+    const expected: [string, string][] = Array.from({ length: 10000 }, (_, index) => [
+      `refs/heads/branch-${index}`,
+      index.toString(16).padStart(40, "0"),
+    ]);
+    const bytes = advertisement(expected.map(([ref, sha]) => [sha, ref]));
+
+    expect([...parseGitUploadPackAdvertisement(bytes)!]).toEqual(expected);
+    expect(parseGitUploadPackAdvertisement(bytes.subarray(0, bytes.length - 1))).toBeUndefined();
+  });
+
   it("accepts optional LF, byte-counted UTF8, 64-hex IDs, HEAD, and deterministic matching", () => {
     const sha = "ABCDEF01".repeat(8);
     const wire =
