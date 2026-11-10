@@ -97,12 +97,11 @@ describe("scheduled maintenance", () => {
 
     await expect(runScheduledMaintenance(env)).rejects.toBe(failure);
 
-    expect(calls).toEqual([
-      ...TABLES.slice(0, TABLES.indexOf(failedTable)),
-      failedTable,
-      failedTable,
-    ]);
-    expect(console.log).toHaveBeenLastCalledWith(
+    expect(calls).toEqual(
+      TABLES.flatMap((table) => (table === failedTable ? [table, table] : [table])),
+    );
+    expect(console.log).toHaveBeenCalledTimes(TABLES.length);
+    expect(console.log).toHaveBeenCalledWith(
       expect.objectContaining({
         table: failedTable,
         deleted_rows: 500,
@@ -111,6 +110,42 @@ describe("scheduled maintenance", () => {
         failed: true,
       }),
     );
+  });
+
+  it("preserves multiple failures while completing independent cleanup", async () => {
+    const first = new Error("publication cleanup unavailable");
+    const last = new Error("PR proof cleanup unavailable");
+    const { env, calls } = maintenanceEnv((table) => {
+      if (table === TABLES[0]) throw first;
+      if (table === TABLES.at(-1)) throw last;
+      return 0;
+    });
+
+    await expect(runScheduledMaintenance(env)).rejects.toMatchObject({
+      name: "AggregateError",
+      errors: [first, last],
+    });
+
+    expect(calls).toEqual(TABLES);
+    expect(console.log).toHaveBeenCalledTimes(TABLES.length);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.objectContaining({ table: "web_sessions", failed: false }),
+    );
+  });
+
+  it("attempts each table only once during a database outage", async () => {
+    const failure = new Error("database unavailable");
+    const { env, calls } = maintenanceEnv(() => {
+      throw failure;
+    });
+
+    await expect(runScheduledMaintenance(env)).rejects.toMatchObject({
+      name: "AggregateError",
+      errors: TABLES.map(() => failure),
+    });
+
+    expect(calls).toEqual(TABLES);
+    expect(console.log).toHaveBeenCalledTimes(TABLES.length);
   });
 });
 

@@ -2,11 +2,63 @@ import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { env } from "cloudflare:workers";
 import { applyD1Migrations } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
+import { runScheduledMaintenance } from "../../src/maintenance";
 import { queries } from "../../src/generated/sql";
 import { restoreD1Baseline } from "./d1-baseline";
 import { callWorker, runScheduled, seedAudit, seedPool, seedWebSession } from "./harness";
 
 describe("Worker scheduled session maintenance", () => {
+  it("prunes expired sessions and audits after an earlier D1 cleanup fails", async () => {
+    await seedPool();
+    await seedWebSession();
+    const validSessions = (await env.DB.prepare("SELECT * FROM web_sessions").all()).results;
+    await seedAudit("expired-audit", "caller", "repo_view", "miss", 200);
+    await seedAudit("retained-audit", "caller", "repo_view", "miss", 200);
+    await env.DB.prepare(
+      "UPDATE audit_events SET created_at = datetime('now', '-31 days') WHERE request_id = 'expired-audit'",
+    ).run();
+    await env.DB.prepare(
+      `INSERT INTO web_sessions (session_hash, caller_id, expires_at)
+       VALUES ('expired', 'caller', datetime('now', '-1 day'))`,
+    ).run();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const db = new Proxy(env.DB, {
+      get(target, property, receiver) {
+        if (property === "prepare") {
+          return (query: string) =>
+            target.prepare(
+              query === queries.deleteExpiredPublicationOwners
+                ? "SELECT * FROM missing_maintenance_fixture WHERE ?1 IS NOT NULL"
+                : query,
+            );
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    await expect(runScheduledMaintenance({ ...env, DB: db })).rejects.toThrow(
+      "missing_maintenance_fixture",
+    );
+
+    expect((await env.DB.prepare("SELECT * FROM web_sessions").all()).results).toEqual(
+      validSessions,
+    );
+    expect((await env.DB.prepare("SELECT request_id FROM audit_events").all()).results).toEqual([
+      { request_id: "retained-audit" },
+    ]);
+    expect(log).toHaveBeenCalledTimes(6);
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ table: "cache_publication_owners", failed: true }),
+    );
+    expect(log).toHaveBeenCalledWith(
+      expect.objectContaining({ table: "web_sessions", deleted_rows: 1, failed: false }),
+    );
+    expect(log).toHaveBeenLastCalledWith(
+      expect.objectContaining({ table: "github_pr_state_proofs", failed: false }),
+    );
+  });
+
   it("upgrades v0.9.10 session data before scheduled cleanup without changing valid access", async () => {
     const migrations = (env as Env & { TEST_MIGRATIONS: D1Migration[] }).TEST_MIGRATIONS;
     // v0.9.10 (78b159d4) has the same 25 migration blobs as this branch's base:

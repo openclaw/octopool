@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Continue independent scheduled cleanup after a table fails, preserving per-table budgets and reporting failures after all tables have been attempted.
+
 - Prune expired PR-state verification proofs during scheduled maintenance without removing fresh proofs or their cached responses, using the existing per-table cleanup budget.
 - Clarify configured identity health and add `octopool health --capacity` for observed rate exhaustion, cooldowns, and leases.
 
