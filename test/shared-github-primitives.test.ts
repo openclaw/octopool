@@ -11,6 +11,7 @@ import { defaultGitHubJSONAccept, githubResponseHeaders } from "../src/github-re
 import { isRecord } from "../src/object";
 import { readBodyCapped } from "../src/response-body";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "../src/sqlite-time";
+import { counterBytes } from "./fixtures/opaque-bytes";
 
 describe("shared GitHub primitives", () => {
   it("round-trips standard and URL-safe base64", () => {
@@ -25,13 +26,13 @@ describe("shared GitHub primitives", () => {
     0, 1, 2, 3, 255, 256, 24575, 24576, 24577, 49151, 49152, 49153, 262143, 262144, 262145, 270335,
     270336, 270337, 4194304,
   ])("matches standard and URL-safe base64 for %i bytes across chunk boundaries", (length) => {
-    const bytes = Uint8Array.from({ length }, (_, index) => index % 256);
+    const bytes = counterBytes(length);
     expect(bytesToBase64(bytes)).toBe(Buffer.from(bytes).toString("base64"));
     expect(bytesToBase64URL(bytes)).toBe(Buffer.from(bytes).toString("base64url"));
   });
 
   it("encodes only the bytes in a nonzero-offset view", () => {
-    const buffer = Uint8Array.from({ length: 300000 }, (_, index) => index % 256);
+    const buffer = counterBytes(300000);
     const view = buffer.subarray(7, 294925);
     expect(bytesToBase64(view)).toBe(Buffer.from(view).toString("base64"));
   });

@@ -37,6 +37,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   [#283](https://github.com/openclaw/octopool/pull/283), [#288](https://github.com/openclaw/octopool/pull/288), [#291](https://github.com/openclaw/octopool/pull/291).
   Stats batches now use distinct non-empty query results and verify every report
   section; unused single-query fixture methods and the batch-size assertion were removed.
+  Large-binary fixtures now use successive counters instead of repeating bytes;
+  chunk replay and reordering are caught by both unit and Worker tests.
   Cache unit fixtures share their D1 first-row scaffold while retaining dynamic
   rows, rejection callbacks, and explicit binding spies.
   Contents and Git generation cases share their cache-key assertions while preserving
