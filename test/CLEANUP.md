@@ -57,6 +57,9 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   GitHub CLI protocol validation is documented and passed locally. Live Linux
   CLI-to-Worker and success/failure/TERM cleanup checks passed.
   [#275](https://github.com/openclaw/octopool/pull/275); CLI smoke changes accompany this ledger.
+  Offline CLI-to-Worker smoke checks the complete response and both audit outcomes
+  without relying on asynchronous insertion order. A dropped field is caught;
+  delayed miss-audit settlement passes.
 
 Retain captured Actions HTML with dynamic consumers, historical cache fixtures,
 and legacy fill RPC compatibility for in-flight pre-epoch Workers. Docs fixture
