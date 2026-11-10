@@ -6,7 +6,7 @@ import (
 )
 
 type prCheckMetadata struct {
-	runID, workflowID   int64
+	workflowID          int64
 	workflowName, event string
 }
 
@@ -41,7 +41,6 @@ func verifiedPRCheckMetadata(ctx context.Context, client ghRelayClient, repo, sh
 			if firstString(run, "head_sha") != sha {
 				return localFallbackError{Reason: "workflow run response did not match pull request head"}
 			}
-			runID, _ := prCheckID(run["id"]) // Already validated by the raw collector.
 			suiteID, suiteOK := prCheckID(run["check_suite_id"])
 			workflowID, workflowOK := prCheckID(run["workflow_id"])
 			if !suiteOK || !workflowOK {
@@ -50,7 +49,7 @@ func verifiedPRCheckMetadata(ctx context.Context, client ghRelayClient, repo, sh
 			if _, exists := metadata[suiteID]; exists {
 				return localFallbackError{Reason: "ambiguous workflow runs for check suite"}
 			}
-			metadata[suiteID] = prCheckMetadata{runID: runID, workflowID: workflowID, event: firstString(run, "event")}
+			metadata[suiteID] = prCheckMetadata{workflowID: workflowID, event: firstString(run, "event")}
 		}
 		return nil
 	}, func(ctx context.Context) error {
