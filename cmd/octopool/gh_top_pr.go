@@ -511,7 +511,6 @@ func relayPagedArrayWithHeaders(
 	headers map[string]string,
 ) ([]any, error) {
 	items := []any{}
-	complete := false
 	for page := 1; page <= maxRelayPages; page++ {
 		var pageItems []any
 		if err := client.readJSON(ctx, ghAPIRequest{
@@ -525,14 +524,10 @@ func relayPagedArrayWithHeaders(
 		}
 		items = append(items, pageItems...)
 		if len(pageItems) < relayPageSize {
-			complete = true
-			break
+			return items, nil
 		}
 	}
-	if !complete {
-		return nil, localFallbackError{Reason: "pagination_exhausted"}
-	}
-	return items, nil
+	return nil, localFallbackError{Reason: "pagination_exhausted"}
 }
 
 func mapPRFiles(items []any) ([]any, error) {

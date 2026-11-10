@@ -227,12 +227,10 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 				return errors.New("workflow run confirmation did not include status")
 			}
 			if confirmedStatus != "completed" {
-				if confirmedStatus != "" && confirmedStatus != status {
-					if _, err := fmt.Fprintf(stdout, "run %s: %s -> %s\n", opts.id, status, confirmedStatus); err != nil {
-						return err
-					}
-					previousStatus = confirmedStatus
+				if _, err := fmt.Fprintf(stdout, "run %s: %s -> %s\n", opts.id, status, confirmedStatus); err != nil {
+					return err
 				}
+				previousStatus = confirmedStatus
 				if err := backoff.sleep(ctx); err != nil {
 					return err
 				}
