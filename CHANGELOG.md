@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Accept case-insensitive JSON media types on login, provisioning, and relay requests while rejecting non-JSON types that merely contain `application/json`.
+
 - Continue independent scheduled cleanup after a table fails, preserving per-table budgets and reporting failures after all tables have been attempted.
 
 - Prune expired PR-state verification proofs during scheduled maintenance without removing fresh proofs or their cached responses, using the existing per-table cleanup budget.

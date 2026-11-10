@@ -51,7 +51,7 @@ import { callAnonymousGitHubAPI, callGitHubWeb, hasNoQuotaGitHubWebRequest } fro
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
-import { HttpError, jsonResponse } from "./http";
+import { HttpError, jsonResponse, requireJsonContentType } from "./http";
 import { isRecord } from "./object";
 import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
@@ -213,9 +213,7 @@ async function relayGitHubRequest(
   requestId: string,
 ): Promise<Response> {
   const started = Date.now();
-  if (!request.headers.get("content-type")?.includes("application/json")) {
-    throw new HttpError(415, "unsupported_media_type", "Expected application/json");
-  }
+  requireJsonContentType(request);
   let body: unknown;
   try {
     body = await readStringRewriteJSON(request, STRING_REWRITE_LIMITS.contentBytes);
