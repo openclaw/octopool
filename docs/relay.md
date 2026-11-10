@@ -90,6 +90,8 @@ and patch hosts.
 
 - `headers` are filtered to a safe allowlist (content negotiation, caching,
   rate-limit, request id). Authorization and cookies never leave the Worker.
+- Weighted `Accept` headers (with `q=` parameters) use the GitHub API instead of the
+  public diff/patch shortcut, so upstream selects the requested representation.
 - `body_encoding` is `json`, `text`, or `base64`. Opaque API and public diff/patch
   responses preserve bytes: invalid UTF-8, a leading UTF-8 BOM, or NUL in the first
   1,024 bytes selects base64. Other valid UTF-8 stays text, including literal U+FFFD,
