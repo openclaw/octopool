@@ -872,7 +872,8 @@ Each table emits an `octopool.maintenance` log with deleted rows, completed batc
 duration, failure status, and `budget_exhausted`. Each run allows 20 batches of 500 rows
 per table. A full final batch means capacity was exhausted; check expired-row counts and
 oldest timestamps to confirm a backlog. For repeated exhaustion, compare arrival and
-cleanup rates. A failed table stops the run before later tables.
+cleanup rates. A failed table stops only its own cleanup; later tables still run within
+their budgets. The run reports failure after every table has been attempted.
 
 `GET /v1/pools/<pool>/stats?since=24h` returns pool-, caller-, and client-specific cache stats,
 plus bounded backend-by-route and local-fallback-reason aggregates.

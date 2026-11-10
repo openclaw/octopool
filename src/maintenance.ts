@@ -7,25 +7,35 @@ const BATCH_SIZE = 500;
 const MAX_BATCHES = 20;
 
 export async function runScheduledMaintenance(env: Env): Promise<void> {
-  await pruneTable("cache_publication_owners", () =>
-    pruneExpiredPublicationOwners(env, BATCH_SIZE),
-  );
-  await pruneTable("github_public_repo_proofs", async () => {
+  const failures: unknown[] = [];
+  const prune = async (table: string, callback: () => Promise<number>): Promise<void> => {
+    try {
+      await pruneTable(table, callback);
+    } catch (error) {
+      failures.push(error);
+    }
+  };
+  await prune("cache_publication_owners", () => pruneExpiredPublicationOwners(env, BATCH_SIZE));
+  await prune("github_public_repo_proofs", async () => {
     const result = await env.DB.prepare(queries.deleteExpiredPublicRepoProofs)
       .bind(BATCH_SIZE)
       .run();
     return result.meta.changes;
   });
-  await pruneTable("github_cache_entries", () => pruneExpiredGitHubCache(env, BATCH_SIZE));
-  await pruneTable("audit_events", () => pruneOldAuditEvents(env, BATCH_SIZE));
-  await pruneTable("web_sessions", async () => {
+  await prune("github_cache_entries", () => pruneExpiredGitHubCache(env, BATCH_SIZE));
+  await prune("audit_events", () => pruneOldAuditEvents(env, BATCH_SIZE));
+  await prune("web_sessions", async () => {
     const result = await env.DB.prepare(queries.deleteExpiredWebSessions).bind(BATCH_SIZE).run();
     return result.meta.changes;
   });
-  await pruneTable("github_pr_state_proofs", async () => {
+  await prune("github_pr_state_proofs", async () => {
     const result = await env.DB.prepare(queries.deleteExpiredPRStateProofs).bind(BATCH_SIZE).run();
     return result.meta.changes;
   });
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    throw new AggregateError(failures, "Scheduled maintenance failed for multiple tables");
+  }
 }
 
 async function pruneTable(table: string, prune: () => Promise<number>): Promise<void> {
