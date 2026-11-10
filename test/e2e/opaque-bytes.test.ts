@@ -37,6 +37,40 @@ describe("opaque Worker wire bytes", () => {
     },
   );
 
+  it.each([
+    ["Application/JSON", true],
+    ["APPLICATION/JSON; charset=utf-8", true],
+    ["application/jsonp", false],
+    ['text/plain; note="application/json"', false],
+  ])("preserves %s response classification through fill and hit", async (contentType, json) => {
+    const body = { name: "fixture" };
+    const text = JSON.stringify(body);
+    const upstream = vi.fn<typeof fetch>(async (input, init) => {
+      if (bearer(input, init) === "test-org-token") return jsonResponse({ private: false });
+      return new Response(text, {
+        headers: { "content-type": String(contentType), ...rateHeaders({ remaining: 4998 }) },
+      });
+    });
+    vi.stubGlobal("fetch", upstream);
+
+    for (const cache of ["miss", "hit"]) {
+      const response = await relay(apiPath, undefined, {
+        headers: { accept: "application/vnd.github.raw" },
+      });
+      expect(response.status).toBe(200);
+      const wire = await response.json<Envelope>();
+      expect(wire).toMatchObject({
+        body: json ? body : text,
+        body_encoding: json ? "json" : "text",
+        headers: { "content-type": contentType },
+        relay: { cache },
+      });
+    }
+    expect(
+      upstream.mock.calls.filter(([input, init]) => bearer(input, init) === "test-primary-token"),
+    ).toHaveLength(1);
+  });
+
   it.each(opaqueBytes)("preserves pooled API $name through fill and hit", async (fixture) => {
     const upstream = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);

@@ -43,6 +43,8 @@
 
 - Replace out-of-range numeric HTML entities instead of aborting GitHub page text extraction.
 
+- Decode mixed-case JSON response media types correctly while preserving non-JSON response bytes and secondary-rate-limit feedback.
+
 ## 0.9.11 - 2026-10-26
 
 ### Performance

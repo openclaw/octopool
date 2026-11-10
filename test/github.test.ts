@@ -56,6 +56,43 @@ describe("github api provider", () => {
     });
   });
 
+  it.each([
+    ["Application/JSON", true],
+    ["APPLICATION/JSON; charset=utf-8", true],
+    ["application/json ; charset=UTF-8", true],
+    ["application/jsonp", false],
+    ["application/json-seq", false],
+    ['text/plain; note="application/json"', false],
+  ])(
+    "classifies %s before parsing JSON and secondary-limit feedback",
+    async (contentType, json) => {
+      const body = { message: "You have exceeded a secondary rate limit." };
+      const text = JSON.stringify(body);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          async () =>
+            new Response(text, {
+              status: 403,
+              headers: { "content-type": String(contentType) },
+            }),
+        ),
+      );
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: "/repos/openclaw/octopool",
+      });
+
+      const response = await callPublicGitHub(env(), request, classifyRoute(request, policy));
+
+      expect(response.body_encoding).toBe(json ? "json" : "text");
+      expect(response.body).toEqual(json ? body : text);
+      expect(response.headers["content-type"]).toBe(contentType);
+      expect(response.secondaryRateLimited).toBe(json ? true : undefined);
+    },
+  );
+
   it.each(opaqueBytes)("round-trips API $name without changing bytes", async (fixture) => {
     const request = validateRelayRequest({
       pool: "maintainers",
