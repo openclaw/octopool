@@ -61,11 +61,7 @@ func relayPRChecks(ctx context.Context, stdout io.Writer, repo, number string, o
 	for _, item := range items {
 		rows = append(rows, item.export(opts.json))
 	}
-	raw, err := json.Marshal(rows)
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, raw, opts.jq)
+	return writeJSONValue(ctx, stdout, rows, opts.jq)
 }
 
 func (row prCheckRow) export(fields []string) map[string]any {

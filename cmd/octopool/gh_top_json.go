@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+func writeJSONValue(ctx context.Context, stdout io.Writer, value any, jq string) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return writeBytes(ctx, stdout, raw, jq)
+}
+
 func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) error {
 	if jq != "" {
 		return runJQ(ctx, stdout, data, jq)

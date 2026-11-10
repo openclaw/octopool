@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"strconv"
@@ -211,9 +210,5 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 		normalizeIssueJSONState(issue)
 		projected = append(projected, filterJSONValue(issue, opts.json, fieldMapIssue))
 	}
-	raw, err := json.Marshal(projected)
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, raw, opts.jq)
+	return writeJSONValue(ctx, stdout, projected, opts.jq)
 }

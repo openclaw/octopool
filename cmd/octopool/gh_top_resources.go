@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"strconv"
@@ -71,11 +70,7 @@ func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTo
 			return localFallbackError{Reason: "repository response did not include a valid visibility"}
 		}
 	}
-	raw, err := json.Marshal(filterJSONValue(repository, opts.json, fieldMapRepo))
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, raw, opts.jq)
+	return writeJSONValue(ctx, stdout, filterJSONValue(repository, opts.json, fieldMapRepo), opts.jq)
 }
 
 func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
@@ -208,11 +203,7 @@ func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts 
 	if len(opts.json) > 0 {
 		output = filterJSONValue(items, opts.json, nil)
 	}
-	raw, err := json.Marshal(output)
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, raw, opts.jq)
+	return writeJSONValue(ctx, stdout, output, opts.jq)
 }
 
 func workflowActive(item any) bool {
