@@ -296,7 +296,7 @@ function decodeBody(
   if (bytes.length === 0) {
     return { body: null, encoding: "text" };
   }
-  if (contentType.includes("application/json")) {
+  if (contentType.split(";", 1)[0]?.trim().toLowerCase() === "application/json") {
     try {
       const text = new TextDecoder().decode(bytes);
       return { body: JSON.parse(text) as unknown, encoding: "json" };
