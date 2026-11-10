@@ -1,4 +1,17 @@
+// Large-input chunks contain whole three-byte groups so only the final chunk has padding.
+const BASE64_CHUNK_BYTES = 3 * 8192;
+
 export function bytesToBase64(bytes: Uint8Array): string {
+  // Keep smaller payloads on the original path; chunking pays off for larger buffers.
+  if (bytes.length <= 262_144) return encodeBase64Chunk(bytes);
+  let encoded = "";
+  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_BYTES) {
+    encoded += encodeBase64Chunk(bytes.subarray(offset, offset + BASE64_CHUNK_BYTES));
+  }
+  return encoded;
+}
+
+function encodeBase64Chunk(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) {
     binary += String.fromCharCode(byte);

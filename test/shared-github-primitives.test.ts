@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { describe, expect, it, vi } from "vitest";
 import { base64ToBytes, base64ToBytesSafe, bytesToBase64, bytesToBase64URL } from "../src/encoding";
 import {
@@ -18,6 +19,21 @@ describe("shared GitHub primitives", () => {
     expect(base64ToBytes(bytesToBase64(bytes))).toEqual(bytes);
     expect(base64ToBytesSafe(bytesToBase64URL(bytes))).toEqual(bytes);
     expect(base64ToBytesSafe("not base64!")).toBeUndefined();
+  });
+
+  it.each([
+    0, 1, 2, 3, 255, 256, 24575, 24576, 24577, 49151, 49152, 49153, 262143, 262144, 262145, 270335,
+    270336, 270337, 4194304,
+  ])("matches standard and URL-safe base64 for %i bytes across chunk boundaries", (length) => {
+    const bytes = Uint8Array.from({ length }, (_, index) => index % 256);
+    expect(bytesToBase64(bytes)).toBe(Buffer.from(bytes).toString("base64"));
+    expect(bytesToBase64URL(bytes)).toBe(Buffer.from(bytes).toString("base64url"));
+  });
+
+  it("encodes only the bytes in a nonzero-offset view", () => {
+    const buffer = Uint8Array.from({ length: 300000 }, (_, index) => index % 256);
+    const view = buffer.subarray(7, 294925);
+    expect(bytesToBase64(view)).toBe(Buffer.from(view).toString("base64"));
   });
 
   it("normalizes SQLite UTC timestamps at second precision", () => {
