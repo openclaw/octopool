@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"regexp"
 	"strconv"
@@ -95,11 +94,7 @@ func relaySearchRepos(ctx context.Context, stdout io.Writer, rawQuery string, op
 	if len(opts.json) > 0 && items != nil {
 		output = filterJSONValue(items, opts.json, fieldMapRepo)
 	}
-	raw, err := json.Marshal(output)
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, raw, opts.jq)
+	return writeJSONValue(ctx, stdout, output, opts.jq)
 }
 
 func relayGitHubSearch(

@@ -143,11 +143,7 @@ func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, op
 		normalizePRViewState(pr)
 		projected[i] = filterJSONValue(pr, opts.json, fieldMapPR)
 	}
-	raw, err := json.Marshal(projected)
-	if err != nil {
-		return err
-	}
-	return writeBytes(ctx, stdout, raw, opts.jq)
+	return writeJSONValue(ctx, stdout, projected, opts.jq)
 }
 
 func relayPRView(ctx context.Context, stdout io.Writer, repo string, number string, opts ghTopOptions) error {
