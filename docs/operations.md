@@ -174,6 +174,12 @@ deployment sets 900 — see the public-repo guard notes in `cache.md` for the tr
 `PUBLIC_REPO_NEGATIVE_TTL_SECONDS` (default 3600), `DEFAULT_LOGIN_POOL` (default
 `maintainers`).
 
+`MAX_RESPONSE_BYTES`, `REQUEST_TIMEOUT_MS`, `CLIENT_BACKEND_CONCURRENCY`,
+`PUBLIC_REPO_TTL_SECONDS`, and `PUBLIC_REPO_NEGATIVE_TTL_SECONDS` accept positive
+base-10 integers, with optional surrounding whitespace. Missing values, unit suffixes,
+fractions, and integers above JavaScript's exact integer range use the stated defaults.
+For example, set `REQUEST_TIMEOUT_MS` to `15000`, not `15s`.
+
 Secrets (via `wrangler secret put`, never in D1/KV/logs):
 
 - `OCTOPOOL_ADMIN_TOKEN` — admin API auth.
