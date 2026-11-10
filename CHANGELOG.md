@@ -51,6 +51,8 @@
 
 - Encode binary response envelopes in bounded base64 chunks to reduce large-payload encoding overhead while preserving exact wire bytes.
 
+- Avoid copying Git advertisement packet bytes while parsing public ref listings.
+
 ## 0.9.11 - 2026-10-26
 
 ### Performance
