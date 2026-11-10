@@ -1,4 +1,7 @@
-import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
+import {
+  expireGitHubCache,
+  writeOwnedGitHubCache as writeGitHubCache,
+} from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../../src/cache";
@@ -210,7 +213,7 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
           }),
           identity,
         );
-        if (layer === "stale") await expire(key);
+        if (layer === "stale") await expireGitHubCache(env, key);
         if (layer === "shared") await deleteEdgeJSON("github-publication-v1", key);
       }
       const before = await cacheRows();
@@ -250,7 +253,7 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
         },
         identity,
       );
-      await expire(key);
+      await expireGitHubCache(env, key);
     }
     const before = await cacheRows();
     const calls = mockUpstream(() => jsonResponse({ message: "unavailable" }, 503));
@@ -277,13 +280,13 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
     });
     expect((await relay(path)).status).toBe(200);
     const key = await githubCacheKey(request.pool, request, route);
-    await expire(key);
+    await expireGitHubCache(env, key);
     phase = "revalidate";
     const revalidated = await (await relay(path)).json<Envelope>();
     expect(revalidated.body).toEqual(publicBody);
     expect(revalidated.relay.cache).toBe("hit");
     phase = "outage";
-    await expire(key);
+    await expireGitHubCache(env, key);
     const stale = await (await relay(path)).json<Envelope>();
     expect(stale.body).toEqual(publicBody);
     expect(stale.relay).toMatchObject({
@@ -306,7 +309,7 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
   it("rejects stale public events after the target repository becomes private", async () => {
     mockUpstream(() => jsonResponse(publicBody, 200, apiHeaders('"public"')));
     expect((await relay(path)).status).toBe(200);
-    await expire(await githubCacheKey(request.pool, request, route));
+    await expireGitHubCache(env, await githubCacheKey(request.pool, request, route));
     await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
     await deleteEdgeJSON("public-repo-publication-v1", "openclaw/octopool");
     const calls: Request[] = [];
@@ -330,15 +333,6 @@ describe.each(issueEventCases)("$kind anonymous visibility at the Worker boundar
     ).toBe(true);
   });
 });
-
-async function expire(key: string) {
-  await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
-  )
-    .bind(key)
-    .run();
-  await deleteEdgeJSON("github-publication-v1", key);
-}
 
 function cacheRows() {
   return env.DB.prepare(

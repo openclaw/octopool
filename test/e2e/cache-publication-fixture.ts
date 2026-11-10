@@ -1,3 +1,4 @@
+import { deleteEdgeJSON } from "../../src/edge-cache";
 import { observeAnonymousPublicRepo } from "../../src/public-repos";
 import { writeGitHubCache } from "../../src/cache";
 import { acquireOwnedCacheFill } from "../../src/cache-fill";
@@ -35,4 +36,13 @@ export async function seedPublicRepoProof(env: Env, route: RouteInfo): Promise<v
     headers: {},
     body: { private: false },
   }));
+}
+
+export async function expireGitHubCache(env: Env, key: string, ageSeconds = 1): Promise<void> {
+  await env.DB.prepare(
+    "UPDATE github_cache_entries SET expires_at = datetime('now', ?), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
+  )
+    .bind(`-${ageSeconds} seconds`, key)
+    .run();
+  await deleteEdgeJSON("github-publication-v1", key);
 }

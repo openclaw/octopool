@@ -1,4 +1,7 @@
-import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
+import {
+  expireGitHubCache,
+  writeOwnedGitHubCache as writeGitHubCache,
+} from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -54,8 +57,8 @@ describe("Actions ownership cache migration", () => {
   it("never revives current-v2 validators or stale bodies, including identity entries", async () => {
     const fixture = currentV2ActionsKeys[0];
     const { request, body } = await seedCurrentV2(fixture);
-    await expire(fixture.shared);
-    await expire(fixture.identity);
+    await expireGitHubCache(env, fixture.shared, 61);
+    await expireGitHubCache(env, fixture.identity, 61);
     const upstream = mockUpstream(body);
     expect(await (await relay(fixture.path, undefined, request)).json<Envelope>()).toMatchObject({
       body,
@@ -72,8 +75,8 @@ describe("Actions ownership cache migration", () => {
   it("refuses current-v2 outage stale data", async () => {
     const fixture = currentV2ActionsKeys[0];
     const { request } = await seedCurrentV2(fixture);
-    await expire(fixture.shared);
-    await expire(fixture.identity);
+    await expireGitHubCache(env, fixture.shared, 61);
+    await expireGitHubCache(env, fixture.identity, 61);
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => outageResponse(new Request(input, init))),
@@ -88,8 +91,8 @@ describe("Actions ownership cache migration", () => {
     async (age) => {
       const fixture = currentV2ActionsKeys[0];
       const { request, body } = await seedCurrentV2(fixture);
-      await expire(fixture.shared);
-      if (age === "expired") await expire(fixture.identity);
+      await expireGitHubCache(env, fixture.shared, 61);
+      if (age === "expired") await expireGitHubCache(env, fixture.identity, 61);
       const upstream = vi.fn<typeof fetch>(async (input, init) => {
         const fetchRequest = new Request(input, init);
         if (bearer(fetchRequest) === "test-primary-token")
@@ -118,8 +121,8 @@ describe("Actions ownership cache migration", () => {
   it("does not join an outstanding current-v2 fill", async () => {
     const fixture = currentV2ActionsKeys[0];
     const { request, body } = await seedCurrentV2(fixture);
-    await expire(fixture.shared);
-    await expire(fixture.identity);
+    await expireGitHubCache(env, fixture.shared, 61);
+    await expireGitHubCache(env, fixture.identity, 61);
     const oldFill = await acquireOwnedCacheFill(
       poolCoordinatorStub(env, request.pool),
       bodyPublicationResource(fixture.shared),
@@ -165,7 +168,7 @@ describe("Actions ownership cache migration", () => {
 
   it("never serves a contaminated legacy stale entry during an outage", async () => {
     const { request, oldKey } = await seedLegacy(path);
-    await expire(oldKey);
+    await expireGitHubCache(env, oldKey, 61);
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => outageResponse(new Request(input, init))),
@@ -182,8 +185,9 @@ describe("Actions ownership cache migration", () => {
         generation === "legacy"
           ? await seedLegacy(path)
           : await seedCurrentV2(currentV2ActionsKeys[0]);
-      await expire(oldKey);
-      if (generation === "current-v2") await expire(currentV2ActionsKeys[0].identity);
+      await expireGitHubCache(env, oldKey, 61);
+      if (generation === "current-v2")
+        await expireGitHubCache(env, currentV2ActionsKeys[0].identity, 61);
       let started!: () => void;
       const { promise: gate, release } = ownedWork.gate();
       const entered = new Promise<void>((resolve) => {
@@ -247,14 +251,14 @@ describe("Actions ownership cache migration", () => {
 
       const newKey = await githubCacheKey(request.pool, request, route);
       expect(newKey).not.toBe(oldKey);
-      await expire(newKey);
+      await expireGitHubCache(env, newKey, 61);
       phase = "revalidate";
       expect(await (await relay(path, undefined, request)).json<Envelope>()).toMatchObject({
         body,
         relay: { cache: "hit" },
       });
       expect(conditionals).toEqual([null, '"clean"']);
-      await expire(newKey);
+      await expireGitHubCache(env, newKey, 61);
       phase = "outage";
       expect(await (await relay(path, undefined, request)).json<Envelope>()).toMatchObject({
         body,
@@ -342,15 +346,6 @@ async function seedLegacy(routePath: string) {
   });
   expect(JSON.stringify(body)).toContain(historicalHead);
   return { request, oldKey, body, route };
-}
-
-async function expire(key: string) {
-  await env.DB.prepare(
-    "UPDATE github_cache_entries SET expires_at = datetime('now', '-61 seconds'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?",
-  )
-    .bind(key)
-    .run();
-  await deleteEdgeJSON("github-publication-v1", key);
 }
 
 function mockUpstream(body: unknown) {
