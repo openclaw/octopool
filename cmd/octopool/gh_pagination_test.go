@@ -471,25 +471,34 @@ func TestRunGHAPISlurpWrapsObjectPages(t *testing.T) {
 	}
 }
 
-func TestRunGHAPIJQFiltersPaginatedStream(t *testing.T) {
+func TestRunGHAPIJQPaginatedOutput(t *testing.T) {
 	if !jqAvailable() {
 		t.Skip("jq is required")
 	}
-	relayTestServer(t, func(body map[string]any) any {
-		if body["query"].(map[string]any)["page"] == "1" {
-			return []map[string]any{{"id": 1}, {"id": 2}}
-		}
-		return []map[string]any{{"id": 3}}
-	})
+	for _, test := range []struct {
+		name, filter, want string
+	}{
+		{"stream items", ".[] | .id", "1\n2\n3\n"},
+		{"per-page length", "length", "2\n1\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			relayTestServer(t, func(body map[string]any) any {
+				if body["query"].(map[string]any)["page"] == "1" {
+					return []map[string]any{{"id": 1}, {"id": 2}}
+				}
+				return []map[string]any{{"id": 3}}
+			})
 
-	var out bytes.Buffer
-	if err := runGH(t.Context(), []string{
-		"api", "repos/openclaw/octopool/issues?per_page=2", "--paginate", "--jq", ".[] | .id",
-	}, &out, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if out.String() != "1\n2\n3\n" {
-		t.Fatalf("output = %q", out.String())
+			var out bytes.Buffer
+			if err := runGH(t.Context(), []string{
+				"api", "repos/openclaw/octopool/issues?per_page=2", "--paginate", "--jq", test.filter,
+			}, &out, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != test.want {
+				t.Fatalf("output = %q, want %q", out.String(), test.want)
+			}
+		})
 	}
 }
 
@@ -568,28 +577,6 @@ func TestRunGHAPIPaginationClampsOversizedPerPage(t *testing.T) {
 	}
 	if len(perPages) != 2 || perPages[0] != "100" || perPages[1] != "100" || len(merged) != relayPageSize+1 {
 		t.Fatalf("per_page sent = %v merged=%d; oversized per_page must clamp to GitHub's cap", perPages, len(merged))
-	}
-}
-
-func TestRunGHAPIJQAppliesPerPage(t *testing.T) {
-	if !jqAvailable() {
-		t.Skip("jq is required")
-	}
-	relayTestServer(t, func(body map[string]any) any {
-		if body["query"].(map[string]any)["page"] == "1" {
-			return []map[string]any{{"id": 1}, {"id": 2}}
-		}
-		return []map[string]any{{"id": 3}}
-	})
-
-	var out bytes.Buffer
-	if err := runGH(t.Context(), []string{
-		"api", "repos/openclaw/octopool/issues?per_page=2", "--paginate", "--jq", "length",
-	}, &out, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	if out.String() != "2\n1\n" {
-		t.Fatalf("jq must run once per page like real gh, got %q", out.String())
 	}
 }
 
