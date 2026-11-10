@@ -33,6 +33,7 @@ describe("scheduled maintenance", () => {
       expect.stringContaining("DELETE FROM web_sessions"),
       expect.stringContaining("DELETE FROM github_pr_state_proofs"),
     ]);
+    expect(queries[3]).toContain("created_at < datetime(CURRENT_TIMESTAMP, '-30 days')");
     expect(console.log).toHaveBeenCalledTimes(TABLES.length);
     for (const table of TABLES) {
       expect(console.log).toHaveBeenCalledWith({

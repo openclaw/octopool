@@ -7,7 +7,6 @@ import {
   cachedGitHubCreatedAt,
   githubCacheRevalidationHeaders,
   githubCacheKey,
-  pruneExpiredGitHubCache,
   readEdgeGitHubCache,
   readGitHubCache,
   readStaleGitHubCache,
@@ -1420,25 +1419,6 @@ describe("github cache policy", () => {
     createdAt = sqliteUTC(Date.now() - 12 * 60 * 60 * 1000 - 15_000);
     expiresAt = sqliteUTC(Date.now() - 12 * 60 * 60 * 1000);
     await expect(readStaleGitHubCache(env, "cache-key", route)).resolves.toBeUndefined();
-  });
-
-  it("prunes expired cache entries in bounded batches", async () => {
-    let boundLimit: unknown;
-    const env = {
-      DB: {
-        prepare: () => ({
-          bind: (limit: unknown) => {
-            boundLimit = limit;
-            return {
-              run: async () => ({ meta: { changes: 37 } }),
-            };
-          },
-        }),
-      },
-    } as unknown as Env;
-
-    await expect(pruneExpiredGitHubCache(env, 100)).resolves.toBe(37);
-    expect(boundLimit).toBe(100);
   });
 });
 

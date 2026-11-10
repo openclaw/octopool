@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearConfigCache, withConfigCacheScope } from "../src/config-cache";
-import { loadIdentities, loadPoolPolicy, pruneOldAuditEvents } from "../src/db";
+import { loadIdentities, loadPoolPolicy } from "../src/db";
 import { restrictivePolicy } from "./fixtures/stored-policy";
 
 describe("stored pool policy loading", () => {
@@ -136,30 +136,6 @@ describe("identity loading", () => {
       },
     ]);
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("identity_scopes.owner = '*'"));
-  });
-});
-
-describe("database maintenance", () => {
-  it("prunes old audit rows in bounded batches", async () => {
-    let boundLimit: unknown;
-    const env = {
-      DB: {
-        prepare: (query: string) => {
-          expect(query).toContain("created_at < datetime(CURRENT_TIMESTAMP, '-30 days')");
-          return {
-            bind: (limit: unknown) => {
-              boundLimit = limit;
-              return {
-                run: async () => ({ meta: { changes: 41 } }),
-              };
-            },
-          };
-        },
-      },
-    } as unknown as Env;
-
-    await expect(pruneOldAuditEvents(env, 100)).resolves.toBe(41);
-    expect(boundLimit).toBe(100);
   });
 });
 

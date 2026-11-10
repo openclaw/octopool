@@ -144,8 +144,3 @@ export function scheduleRelayAudit(
   if (timing === undefined) insert();
   else timing.onReady(insert);
 }
-
-export async function pruneOldAuditEvents(env: Env, limit = 500): Promise<number> {
-  const result = await env.DB.prepare(queries.deleteOldAuditEventsBatch).bind(limit).run();
-  return result.meta.changes;
-}
