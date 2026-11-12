@@ -240,9 +240,14 @@ describe("candidate cache reads", () => {
     ).rejects.toThrow("D1 unavailable");
   });
 
-  it.each([undefined, 0, 10, 60])(
-    "matches serial stale eligibility at max-age=%s with one round trip",
-    async (maxAge) => {
+  it.each([
+    { maxAge: undefined, reuse: true },
+    { maxAge: 0, reuse: false },
+    { maxAge: 10, reuse: false },
+    { maxAge: 60, reuse: true },
+  ])(
+    "preserves stale eligibility at max-age=$maxAge with one round trip",
+    async ({ maxAge, reuse }) => {
       const { env, first, batch } = fixture({
         primary: row("primary", { expires_at: sqliteTimestamp(now - 1000) }),
         secondary: row("secondary", { publication_epoch: "old" }),
@@ -253,7 +258,21 @@ describe("candidate cache reads", () => {
       const keys = ["primary", "secondary", "expired", "malformed", "shared", "absent", "primary"];
       const serial = [];
       for (const key of keys) serial.push(await readStaleGitHubCache(env, key, route, maxAge));
-      expect(await readStaleGitHubCacheCandidates(env, keys, route, maxAge)).toEqual(serial);
+      const batched = await readStaleGitHubCacheCandidates(env, keys, route, maxAge);
+      expect(batched).toEqual(serial);
+      expect(batched.map((candidate) => candidate?.body)).toEqual(
+        reuse
+          ? [
+              { id: "primary" },
+              undefined,
+              undefined,
+              undefined,
+              { id: "shared" },
+              undefined,
+              { id: "primary" },
+            ]
+          : keys.map(() => undefined),
+      );
       expect(first).toHaveBeenCalledTimes(maxAge === 0 ? 0 : 7);
       expect(batch).toHaveBeenCalledTimes(maxAge === 0 ? 0 : 1);
       if (maxAge !== 0) expect(batch.mock.calls[0]![0]).toHaveLength(6);
