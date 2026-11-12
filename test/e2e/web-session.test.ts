@@ -21,6 +21,30 @@ import {
 const APP = "https://octopool.openclaw.ai";
 
 describe("Worker end-to-end web sessions", () => {
+  it.each(["%", "%GG", "%E0%A4%A"])(
+    "treats malformed cookie encoding %s as a missing session or OAuth state",
+    async (malformed) => {
+      const headers = { cookie: `octopool_session=${malformed}` };
+      const me = await callWorker(`${APP}/v1/me`, { headers });
+      expect(me.status).toBe(401);
+      expect(await me.json()).toMatchObject({ error: { code: "missing_web_session" } });
+
+      const dashboard = await callWorker(`${APP}/dashboard`, { headers });
+      expect(dashboard.status).toBe(302);
+      expect(dashboard.headers.get("location")).toBe(`${APP}/login/github?next=%2Fdashboard`);
+
+      const logout = await callWorker(`${APP}/logout`, { headers });
+      expect(logout.status).toBe(302);
+      expect(logout.headers.get("location")).toBe("/");
+      expect(logout.headers.get("set-cookie")).toContain("octopool_session=; Max-Age=0;");
+
+      const callback = await callWorker(`${APP}/login/github/callback?code=test&state=test`, {
+        headers: { cookie: `octopool_oauth_state=${malformed}` },
+      });
+      expect(callback.status).toBe(401);
+    },
+  );
+
   it.each(["new", "singleton", "disabled"])(
     "shares atomic browser/CLI enrollment for a %s identity without transferring authority",
     async (state) => {

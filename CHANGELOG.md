@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Treat malformed browser session and OAuth state cookies as missing credentials instead of returning an internal server error.
+
 - Preserve weighted `Accept` negotiation at the GitHub API instead of forcing a public diff or patch representation that the caller may have excluded.
 
 - Use default integer limits for malformed or unsafe configuration values instead of silently truncating unit suffixes, fractions, or exponents.

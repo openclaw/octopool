@@ -330,7 +330,11 @@ function readCookie(request: Request, name: string): string | undefined {
   for (const part of header.split(";")) {
     const [rawName, ...rawValue] = part.trim().split("=");
     if (rawName === name) {
-      return decodeURIComponent(rawValue.join("="));
+      try {
+        return decodeURIComponent(rawValue.join("="));
+      } catch {
+        return undefined;
+      }
     }
   }
   return undefined;
