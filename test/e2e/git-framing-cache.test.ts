@@ -75,6 +75,54 @@ describe("Git framing and cache retirement at the Worker", () => {
     );
   });
 
+  it("falls back to exact API refs for an invalid UTF-8 advertisement", async () => {
+    await seedPublicRepoProof(env, route);
+    const wire = new TextEncoder().encode(completeGitAdvertisement);
+    wire[completeGitAdvertisement.lastIndexOf("maint") + 4] = 0xff;
+    const upstream = stubAdvertisement(wire);
+    expect(await (await relay(request.path)).json()).toMatchObject({
+      body: exactGitRefs,
+      relay: { cache: "miss" },
+    });
+    expect(urls(upstream)).toEqual([gitAdvertisementURL, apiURL]);
+    expect(await (await relay(request.path)).json()).toMatchObject({
+      body: exactGitRefs,
+      relay: { cache: "hit" },
+    });
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["edge", "shared", "identity"])(
+    "retires UTF-8 replacement-era %s entries and validators",
+    async (layer) => {
+      // Captured from githubCacheKey at 1913c89, before strict UTF-8 decoding.
+      const prior = {
+        ...frozen,
+        shared: "lUwnKo_k0BZv_ehTAlRoWmDarXc6IMbqrx2se7foyQ4",
+        identity: "ARPn_-6vx6qjl9KC8jQ2kmwZuhNGk00i7haDRIedfQM",
+      };
+      await seedOld(layer !== "identity", prior);
+      if (layer !== "edge") await deleteEdgeJSON("github-publication-v1", prior.shared);
+      const upstream = stubAdvertisement(malformedGitAdvertisements[0][1], layer === "identity");
+      expect(await (await relay(request.path)).json()).toMatchObject({
+        body: exactGitRefs,
+        relay: { cache: "miss" },
+      });
+      expect(
+        upstream.mock.calls.map(([input, init]) =>
+          new Request(input, init).headers.get("if-none-match"),
+        ),
+      ).not.toContain('"old-partial"');
+      await seedOld(true, prior);
+      const calls = upstream.mock.calls.length;
+      expect(await (await relay(request.path)).json()).toMatchObject({
+        body: exactGitRefs,
+        relay: { cache: "hit" },
+      });
+      expect(upstream).toHaveBeenCalledTimes(calls);
+    },
+  );
+
   it("keeps complete Git advertisements cacheable", async () => {
     await seedPublicRepoProof(env, route);
     const upstream = stubAdvertisement(completeGitAdvertisement);
@@ -348,12 +396,14 @@ describe("Git framing and cache retirement at the Worker", () => {
   });
 });
 
-function stubAdvertisement(wire: string, pooled = false) {
+function stubAdvertisement(wire: string | Uint8Array, pooled = false) {
   const upstream = vi.fn<typeof fetch>(async (input, init) => {
     const fetched = new Request(input, init);
     if (fetched.url === repoURL) return jsonResponse({ private: false });
     if (fetched.url === gitAdvertisementURL)
-      return new Response(new TextEncoder().encode(wire), { headers: { "content-type": gitMIME } });
+      return new Response(typeof wire === "string" ? new TextEncoder().encode(wire) : wire, {
+        headers: { "content-type": gitMIME },
+      });
     if (fetched.url === gitNodeURL) return new Response(gitNodeHTML);
     if (pooled && bearer(fetched) === undefined)
       return jsonResponse({ message: "unavailable" }, 503);

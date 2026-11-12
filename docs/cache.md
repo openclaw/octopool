@@ -175,8 +175,8 @@ media (including their `body_codec`), blobs, README routes, and unrelated
 representations retain their keys. No publication epoch, public-repository proof,
 or R2 generation changes or cache purge are required.
 
-Default JSON `git_ref` and `git_matching_refs` keys include `git-refs-framing-v1`.
-This retires older potentially incomplete ref objects and arrays for exact and matching
+Default JSON `git_ref` and `git_matching_refs` keys include `git-refs-framing-v2`.
+This retires older potentially incomplete or UTF-8-corrupted ref objects and arrays for exact and matching
 heads/tags across shared and identity entries, edge/D1 hits, stale fallback, validators,
 and fill coalescing. Complete API-origin entries may also miss once; stored provenance
 is not guessed. Branch lists/views, Git objects, custom media, contents, Actions, R2,

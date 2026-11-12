@@ -5,7 +5,7 @@ export type AdvertisedGitRefs = Map<string, string>;
 
 export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGitRefs | undefined {
   const refs = new Map<string, string>();
-  const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
+  const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   let offset = 0;
   let phase: "service" | "header-flush" | "refs" = "service";
   let firstRef = true;
@@ -13,8 +13,8 @@ export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGit
     if (offset + 4 > body.byteLength) {
       return undefined;
     }
-    const lengthText = decoder.decode(body.subarray(offset, offset + 4));
-    if (!/^[0-9a-fA-F]{4}$/.test(lengthText)) {
+    const lengthText = decodeGitText(decoder, body.subarray(offset, offset + 4));
+    if (lengthText === undefined || !/^[0-9a-fA-F]{4}$/.test(lengthText)) {
       return undefined;
     }
     const length = Number.parseInt(lengthText, 16);
@@ -35,7 +35,8 @@ export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGit
     ) {
       return undefined;
     }
-    const payload = decoder.decode(body.subarray(offset, offset + length - 4));
+    const payload = decodeGitText(decoder, body.subarray(offset, offset + length - 4));
+    if (payload === undefined) return undefined;
     offset += length - 4;
     if (phase === "service") {
       if (payload !== "# service=git-upload-pack" && payload !== "# service=git-upload-pack\n") {
@@ -64,6 +65,14 @@ export function parseGitUploadPackAdvertisement(body: Uint8Array): AdvertisedGit
     refs.set(match[2]!, match[1]!.toLowerCase());
   }
   return undefined;
+}
+
+function decodeGitText(decoder: TextDecoder, bytes: Uint8Array): string | undefined {
+  try {
+    return decoder.decode(bytes);
+  } catch {
+    return undefined;
+  }
 }
 
 export function gitRefResponse(

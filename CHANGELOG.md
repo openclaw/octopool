@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Fall back to exact GitHub API ref responses when a public Git advertisement contains invalid UTF-8, and retire cached ref names from the older decoder.
+
 - Treat malformed browser session and OAuth state cookies as missing credentials instead of returning an internal server error.
 
 - Preserve weighted `Accept` negotiation at the GitHub API instead of forcing a public diff or patch representation that the caller may have excluded.
