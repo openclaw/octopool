@@ -77,16 +77,12 @@ func relaySearchRepos(ctx context.Context, stdout io.Writer, rawQuery string, op
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, ghAPIRequest{
+	var response map[string]any
+	if err := client.readJSON(ctx, ghAPIRequest{
 		method: "GET",
 		path:   "/search/repositories",
 		query:  map[string]any{"q": strings.Join(terms, " "), "per_page": strconv.Itoa(desiredLimit(opts))},
-	})
-	if err != nil {
-		return err
-	}
-	var response map[string]any
-	if err := decodeRelayJSON(envelope, &response); err != nil {
+	}, &response); err != nil {
 		return err
 	}
 	items, _ := response["items"].([]any)
