@@ -147,10 +147,10 @@ export async function githubCacheKey(
     defaultGitHubJSONAccept(request.headers?.accept)
       ? { representation: "contents-rest-v2" }
       : {}),
-    // Retire partial advertisements across every body, validator, and fill owner.
+    // Retire partial or UTF-8-corrupted advertisements across every body, validator, and fill owner.
     ...((route.kind === "git_ref" || route.kind === "git_matching_refs") &&
     defaultGitHubJSONAccept(request.headers?.accept)
-      ? { representation: "git-refs-framing-v1" }
+      ? { representation: "git-refs-framing-v2" }
       : {}),
     ...(varyHeaders.accept === undefined ? {} : { body_codec: "lossless-v1" }),
     ...(identity === undefined ? {} : { identity: `${identity.kind}:${identity.id}` }),

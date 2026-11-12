@@ -14,6 +14,22 @@ describe("Git smart HTTP refs", () => {
     expect(parseGitUploadPackAdvertisement(new TextEncoder().encode(wire))).toBeUndefined();
   });
 
+  it.each([[0xff], [0xc0, 0xaf], [0xed, 0xa0, 0x80], [0xe2, 0x82]])(
+    "rejects invalid UTF-8 ref bytes %j without exposing earlier refs",
+    (...invalid) => {
+      const prefix = gitService + gitMain;
+      const packet = gitPacket(`${gitSHA} refs/heads/ma${"x".repeat(invalid.length)}\n`);
+      const wire = new TextEncoder().encode(prefix + packet + "0000");
+      wire.set(invalid, wire.length - 5 - invalid.length);
+      expect(parseGitUploadPackAdvertisement(wire)).toBeUndefined();
+    },
+  );
+
+  it("preserves a literal Unicode replacement character in a valid ref name", () => {
+    const wire = advertisement([[gitSHA, "refs/heads/ma\ufffd"]]);
+    expect([...parseGitUploadPackAdvertisement(wire)!]).toEqual([["refs/heads/ma\ufffd", gitSHA]]);
+  });
+
   it("rejects every proper byte prefix of a canonical advertisement", () => {
     const bytes = new TextEncoder().encode(completeGitAdvertisement);
     expect(parseGitUploadPackAdvertisement(bytes)?.size).toBe(2);
