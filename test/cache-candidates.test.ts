@@ -106,16 +106,23 @@ async function choose(
 
 describe("candidate cache reads", () => {
   it.each([
-    { name: "miss", rows: {}, edges: {} },
+    {
+      name: "miss",
+      rows: {},
+      edges: {},
+      expected: { key: undefined, misses: ["absent", "absent"], batches: 1 },
+    },
     {
       name: "earlier D1 beats later edge",
       rows: { primary: row("primary") },
       edges: { secondary: edgeBody("secondary") },
+      expected: { key: "primary", misses: [], batches: 1 },
     },
     {
       name: "first edge needs no D1",
       rows: { secondary: row("secondary") },
       edges: { primary: edgeBody("primary") },
+      expected: { key: "primary", misses: [], batches: 0 },
     },
     {
       name: "expired primary",
@@ -124,6 +131,7 @@ describe("candidate cache reads", () => {
         secondary: row("secondary"),
       },
       edges: {},
+      expected: { key: "secondary", misses: ["expired"], batches: 1 },
     },
     {
       name: "caller age",
@@ -133,50 +141,60 @@ describe("candidate cache reads", () => {
       },
       edges: {},
       maxAge: 10,
+      expected: { key: "secondary", misses: ["caller_max_age"], batches: 1 },
     },
     {
       name: "wrong epoch",
       rows: { primary: row("primary", { publication_epoch: "old" }), secondary: row("secondary") },
       edges: {},
+      expected: { key: "secondary", misses: ["unusable"], batches: 1 },
     },
     {
       name: "bad JSON",
       rows: { primary: row("primary", { body_json: "{" }), secondary: row("secondary") },
       edges: {},
+      expected: { key: "secondary", misses: ["unusable"], batches: 1 },
     },
     {
       name: "unvisited rejection",
       rows: { primary: row("primary") },
       edges: { secondary: edgeBody("secondary", { protocol_epoch: "old" }) },
+      expected: { key: "primary", misses: [], batches: 1 },
     },
     {
       name: "edge rejection then D1 hit",
       rows: { primary: row("primary") },
       edges: { primary: edgeBody("primary", { expires_at: sqliteTimestamp(now) }) },
+      expected: { key: "primary", misses: ["expired"], batches: 1 },
     },
     {
       name: "forced fresh",
       rows: { primary: row("primary") },
       edges: { primary: edgeBody("primary") },
       maxAge: 0,
+      expected: { key: undefined, misses: [], batches: 0 },
     },
-  ])("matches serial candidate choice and miss reasons: $name", async ({ rows, edges, maxAge }) => {
-    const { env, batch } = fixture(rows, edges);
-    const keys = ["primary", "secondary"];
-    const serialMisses: CacheMissReason[] = [];
-    const serial = await choose(keys, (key) =>
-      readGitHubCache(env, key, undefined, maxAge, (reason) => serialMisses.push(reason)),
-    );
-    const batchedMisses: CacheMissReason[] = [];
-    const read = createGitHubCacheCandidateReader(env, keys, undefined, maxAge, (reason) =>
-      batchedMisses.push(reason),
-    );
-    expect(await choose(keys, read)).toEqual(serial);
-    expect(batchedMisses).toEqual(serialMisses);
-    expect(batch.mock.calls.length).toBeLessThanOrEqual(1);
-    if (maxAge === 0 || (edges.primary && serialMisses.length === 0))
-      expect(batch).not.toHaveBeenCalled();
-  });
+  ])(
+    "preserves candidate choice and miss reasons: $name",
+    async ({ rows, edges, maxAge, expected }) => {
+      const { env, batch } = fixture(rows, edges);
+      const keys = ["primary", "secondary"];
+      const serialMisses: CacheMissReason[] = [];
+      const serial = await choose(keys, (key) =>
+        readGitHubCache(env, key, undefined, maxAge, (reason) => serialMisses.push(reason)),
+      );
+      const misses: CacheMissReason[] = [];
+      const read = createGitHubCacheCandidateReader(env, keys, undefined, maxAge, (reason) =>
+        misses.push(reason),
+      );
+      const selected = await choose(keys, read);
+      expect(selected).toEqual(serial);
+      expect(selected?.key).toBe(expected.key);
+      expect(misses).toEqual(expected.misses);
+      expect(serialMisses).toEqual(expected.misses);
+      expect(batch).toHaveBeenCalledTimes(expected.batches);
+    },
+  );
 
   it("deduplicates within a pass and rereads storage in a new pass", async () => {
     const { env, batch, match, rows } = fixture();
