@@ -121,15 +121,11 @@ func relayMachineRunList(ctx context.Context, stdout io.Writer, request ghAPIReq
 	if err != nil {
 		return err
 	}
-	envelope, err := client.do(ctx, request)
-	if err != nil {
-		return err
-	}
 	var response struct {
 		TotalCount int             `json:"total_count"`
 		Runs       json.RawMessage `json:"workflow_runs"`
 	}
-	if err := decodeRelayJSON(envelope, &response); err != nil {
+	if err := client.readJSON(ctx, request, &response); err != nil {
 		return err
 	}
 	raw := bytes.TrimSpace(response.Runs)

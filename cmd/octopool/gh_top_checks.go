@@ -78,20 +78,16 @@ func (row prCheckRow) export(fields []string) map[string]any {
 }
 
 func relayPRHead(ctx context.Context, client ghRelayClient, repo, number string, maxAgeSeconds int) (prCheckHead, error) {
-	envelope, err := client.do(ctx, ghAPIRequest{
+	var pr struct {
+		Head map[string]json.RawMessage `json:"head"`
+	}
+	if err := client.readJSON(ctx, ghAPIRequest{
 		method: "GET", path: repoPath(repo, "pulls", number),
 		headers: map[string]string{
 			"cache-control":           "max-age=" + strconv.Itoa(maxAgeSeconds),
 			"x-octopool-public-shape": publicShapePullRequestSummary,
 		},
-	})
-	if err != nil {
-		return prCheckHead{}, err
-	}
-	var pr struct {
-		Head map[string]json.RawMessage `json:"head"`
-	}
-	if err := decodeRelayJSON(envelope, &pr); err != nil {
+	}, &pr); err != nil {
 		return prCheckHead{}, err
 	}
 	var head prCheckHead

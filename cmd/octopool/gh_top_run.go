@@ -94,15 +94,11 @@ func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id st
 	if opts.attemptSet && opts.attempt != 0 {
 		runPath = repoPath(repo, "actions", "runs", id, "attempts", strconv.Itoa(opts.attempt))
 	}
-	envelope, err := client.do(ctx, ghAPIRequest{
+	if err := client.readJSON(ctx, ghAPIRequest{
 		method:  "GET",
 		path:    runPath,
 		headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
-	})
-	if err != nil {
-		return err
-	}
-	if err := decodeRelayJSON(envelope, &run); err != nil {
+	}, &run); err != nil {
 		return err
 	}
 	attempt, ok := positiveJSONInt(run["run_attempt"])
