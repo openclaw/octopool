@@ -39,6 +39,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   section; unused single-query fixture methods and the batch-size assertion were removed.
   Large-binary fixtures now use successive counters instead of repeating bytes;
   chunk replay and reordering are caught by both unit and Worker tests.
+  Fresh cache-candidate tests use explicit selections, miss reasons and batch counts;
+  shared epoch-validation and expiry-reporting mutations are caught.
   Cache unit fixtures share their D1 first-row scaffold while retaining dynamic
   rows, rejection callbacks, and explicit binding spies.
   Contents and Git generation cases share their cache-key assertions while preserving
