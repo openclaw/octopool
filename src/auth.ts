@@ -3,7 +3,7 @@ import { relayPhase } from "./relay-timing";
 import { cachedConfigLookup, invalidateConfigValue } from "./config-cache";
 import { normalizeClientName } from "./client-name";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
-import { HttpError, requestBearer } from "./http";
+import { HttpError, parsePositiveInt, requestBearer } from "./http";
 import { queries } from "./generated/sql";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { readBodyCapped } from "./response-body";
@@ -471,8 +471,7 @@ export async function ensureFreshOrgMembership(
 ): Promise<void> {
   // A timestamp alone must never authorize credentials with no enrolled account.
   requireGitHubUserId(caller.github_user_id);
-  const ttlSeconds = Number.parseInt(env.ORG_VERIFY_TTL_SECONDS, 10);
-  const ttlMs = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds * 1000 : 86_400_000;
+  const ttlMs = parsePositiveInt(env.ORG_VERIFY_TTL_SECONDS, 86_400) * 1000;
   const verifiedAt = caller.org_verified_at === null ? 0 : Date.parse(caller.org_verified_at);
   if (Number.isFinite(verifiedAt) && Date.now() - verifiedAt < ttlMs) {
     return;

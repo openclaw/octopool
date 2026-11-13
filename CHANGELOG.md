@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Use the 24-hour default for malformed or unsafe `ORG_VERIFY_TTL_SECONDS` values instead of silently truncating or extending membership rechecks.
+
 - Preserve literal HTML entity text in public issue and pull-request list titles and workflow metadata by decoding each reference only once.
 
 - Fall back to exact GitHub API ref responses when a public Git advertisement contains invalid UTF-8, and retire cached ref names from the older decoder.

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticateCaller } from "../src/auth";
+import { authenticateCaller, ensureFreshOrgMembership } from "../src/auth";
 import { clearConfigCache, withConfigCacheScope } from "../src/config-cache";
 import { withGitHubEgress } from "../src/github-egress";
 import { HttpError } from "../src/http";
@@ -10,6 +10,45 @@ describe("caller authentication cache", () => {
     clearConfigCache();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it.each(["30s", "1.5", "1e3", "+30", "-30", "9007199254740992"])(
+    "uses the 24-hour membership default for invalid TTL %s",
+    async (ttl) => {
+      const fixture = authFixture();
+      const verifiedAt = Date.UTC(2026, 0, 1);
+      const clock = vi.spyOn(Date, "now").mockReturnValue(verifiedAt + 3_600_000);
+      const caller = { ...fixture.caller, org_verified_at: new Date(verifiedAt).toISOString() };
+      const env = { ...fixture.env, ORG_VERIFY_TTL_SECONDS: ttl } as unknown as Env;
+      const upstream = vi.fn(async () => membershipResponse());
+      vi.stubGlobal("fetch", upstream);
+
+      await ensureFreshOrgMembership(env, caller);
+      expect(upstream).not.toHaveBeenCalled();
+      expect(fixture.run).not.toHaveBeenCalled();
+
+      clock.mockReturnValue(verifiedAt + 86_400_000);
+      await ensureFreshOrgMembership(env, caller);
+      expect(upstream).toHaveBeenCalledOnce();
+      expect(fixture.run).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["60", " 60 ", "00060"])("honors the exact membership expiry for TTL %s", async (ttl) => {
+    const fixture = authFixture();
+    const verifiedAt = Date.UTC(2026, 0, 1);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(verifiedAt + 59_999);
+    const caller = { ...fixture.caller, org_verified_at: new Date(verifiedAt).toISOString() };
+    const env = { ...fixture.env, ORG_VERIFY_TTL_SECONDS: ttl } as unknown as Env;
+    const upstream = vi.fn(async () => membershipResponse());
+    vi.stubGlobal("fetch", upstream);
+
+    await ensureFreshOrgMembership(env, caller);
+    expect(upstream).not.toHaveBeenCalled();
+    clock.mockReturnValue(verifiedAt + 60_000);
+    await ensureFreshOrgMembership(env, caller);
+    expect(upstream).toHaveBeenCalledOnce();
+    expect(fixture.run).toHaveBeenCalledOnce();
   });
 
   it("shares a request's concurrent D1 lookups and membership refreshes after each guard", async () => {
