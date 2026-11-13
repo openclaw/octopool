@@ -50,6 +50,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
 - **Worker SQL and concurrency:** removed rewritten allocator and shadow-index
   experiments. Shared an actual publication-waiter barrier and enforced coalesced
   results with owned cleanup. Scoped runs: 13 and 89 cases.
+  Completion-proof batching now uses the shared D1 observer, preserving its
+  publication hooks and all batch, metadata, revocation, and TTL assertions.
   [#279](https://github.com/openclaw/octopool/pull/279), [#289](https://github.com/openclaw/octopool/pull/289).
 - **Worker expiry and outcomes:** crossed expiry at observed lookup boundaries,
   observed native renewal, removed historical SQL comparison, asserted current
