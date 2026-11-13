@@ -199,7 +199,7 @@ func prepareRewriteAPI(policy stringRewritePolicy, args []string, stdin io.Reade
 		return nil
 	}
 	if ciRetryPath(request.path) {
-		return prepareRewriteCIRetryAPI(policy, opts, request, prepared)
+		return prepareRewriteCIRetryAPI(opts, request, prepared)
 	}
 	if rewriteWorkflowRunsPath.MatchString(request.path) && (len(opts.fields) > 0 || opts.inputSet || opts.method != "GET") {
 		request, err = workflowRunsQuery(opts, request)
