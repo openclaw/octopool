@@ -45,7 +45,7 @@ func validCIRetryID(value string) bool {
 	return err == nil && n > 0 && isDigits(value) && value[0] != '0'
 }
 
-func prepareRewriteCIRetryAPI(policy stringRewritePolicy, opts rewriteAPIOptions, request ghAPIRequest, prepared *rewritePreparation) error {
+func prepareRewriteCIRetryAPI(opts rewriteAPIOptions, request ghAPIRequest, prepared *rewritePreparation) error {
 	match := rewriteCIRetryPath.FindStringSubmatch(request.path)
 	if match == nil || strings.Contains(match[1], "..") || !validCIRetryID(strings.Split(match[2], "/")[1]) || opts.method != "POST" || opts.inputSet || len(opts.fields) != 0 || len(request.query) != 0 {
 		return errRewriteBlocked
