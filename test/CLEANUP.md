@@ -55,6 +55,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   observed native renewal, removed historical SQL comparison, asserted current
   publication-owner cleanup and strict fallback outcomes, and removed timing-only
   policy assertions. Scoped runs: 128 and 123 cases; two expiry mutations caught.
+  Run-list expiry stays fresh in SQLite beyond the test timeout; the controlled
+  JavaScript clock crosses that expiry only at the public-proof lookup.
   [#293](https://github.com/openclaw/octopool/pull/293), [#295](https://github.com/openclaw/octopool/pull/295).
   Dashboard proofs now distinguish current/old epochs and fresh/expired rows,
   with an exact newest-check timestamp; two mutations were caught.
