@@ -21,6 +21,25 @@ describe("GitHub HTML text extraction", () => {
     expect(decodeHTML("&#invalid; &#xnope;")).toBe("&#invalid; &#xnope;");
   });
 
+  it.each([
+    ["&#38;lt;", "&lt;"],
+    ["&#38;quot;", "&quot;"],
+    ["&#x26;#65;", "&#65;"],
+    ["&#x26;#x41;", "&#x41;"],
+    ["&#x26;amp;", "&amp;"],
+    ["&#x26;#38;lt;", "&#38;lt;"],
+    ["&#38;#x110000;", "&#x110000;"],
+  ])("decodes %s only once", (encoded, literal) => {
+    expect(decodeHTML(encoded)).toBe(literal);
+    expect(plainHTML(`<b>${encoded}</b>`)).toBe(literal);
+    expect(htmlAttribute(`title="${encoded}"`, "title")).toBe(literal);
+  });
+
+  it("keeps supported named entities and malformed references compatible", () => {
+    expect(decodeHTML("&quot; &#39; &lt; &gt; &amp;")).toBe(`" ' < > &`);
+    expect(decodeHTML("&QUOT; &unknown; &#x; &#65")).toBe("&QUOT; &unknown; &#x; &#65");
+  });
+
   it("drops unterminated tag-like tails", () => {
     expect(plainHTML("safe <strong>text</strong><script")).toBe("safe text");
     expect(textMatch("title: safe <strong>text</strong><script", /^title: (.*)$/)).toBe(

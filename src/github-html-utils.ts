@@ -28,15 +28,18 @@ export function stripHTMLTags(value: string): string {
   return text;
 }
 
+const NAMED_ENTITIES: Record<string, string> = { quot: '"', lt: "<", gt: ">", amp: "&" };
+
 export function decodeHTML(value: string): string {
-  return value
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => numericEntity(Number.parseInt(code, 16)))
-    .replace(/&#([0-9]+);/g, (_, code) => numericEntity(Number(code)))
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&amp;", "&");
+  // Decode original references once; replacement text must not become another entity.
+  return value.replace(
+    /&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));|&(quot|lt|gt|amp);/g,
+    (match, hex: string | undefined, decimal: string | undefined, named: string) => {
+      if (hex !== undefined) return numericEntity(Number.parseInt(hex, 16));
+      if (decimal !== undefined) return numericEntity(Number(decimal));
+      return NAMED_ENTITIES[named] ?? match;
+    },
+  );
 }
 
 function numericEntity(codePoint: number): string {

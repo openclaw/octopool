@@ -94,6 +94,26 @@ describe.each([
   });
 });
 
+it("preserves literal entity text in public issue-list titles and cache hits", async () => {
+  await seedPool();
+  await env.DB.prepare("UPDATE identities SET status = 'disabled'").run();
+  mockGitHub(() =>
+    issuePage("list", {
+      ...issue,
+      titleHtml: "<b>Keep &#38;lt; and &#x26;#65;</b>",
+    }),
+  );
+  const headers = { "x-octopool-public-shape": "issue-list-v1" };
+  for (const cache of ["miss", "hit"]) {
+    const response = await relay("/repos/openclaw/octopool/issues", undefined, { headers });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      body: [{ number: 7, title: "Keep &lt; and &#65;" }],
+      relay: { cache },
+    });
+  }
+});
+
 function issuePage(kind: string, node: Record<string, unknown>): string {
   const queryName = kind === "view" ? "IssueViewerViewQuery" : "IssueIndexPageQuery";
   const repository =
