@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Preserve literal HTML entity text in public issue and pull-request list titles and workflow metadata by decoding each reference only once.
+
 - Fall back to exact GitHub API ref responses when a public Git advertisement contains invalid UTF-8, and retire cached ref names from the older decoder.
 
 - Treat malformed browser session and OAuth state cookies as missing credentials instead of returning an internal server error.
