@@ -35,14 +35,14 @@ func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) e
 }
 
 // Keep native nested struct field order and literal HTML characters in gh exports.
-func marshalGHFields(value map[string]any, fields []string, fieldMap map[string][]string) ([]byte, error) {
+func writeGHViewFields(ctx context.Context, stdout io.Writer, value map[string]any, opts ghTopOptions, fieldMap map[string][]string) error {
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(filterJSONValue(value, fields, fieldMap)); err != nil {
-		return nil, err
+	if err := encoder.Encode(filterJSONValue(value, opts.json, fieldMap)); err != nil {
+		return err
 	}
-	return out.Bytes(), nil
+	return writeGHViewJSON(ctx, stdout, out.Bytes(), opts.jq)
 }
 
 func writeGHViewJSON(ctx context.Context, stdout io.Writer, data []byte, jq string) error {

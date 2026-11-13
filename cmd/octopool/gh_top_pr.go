@@ -409,11 +409,7 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			return localFallbackError{Reason: "pr_comment_viewer_changed"}
 		}
 	}
-	filtered, err := marshalGHFields(pr, opts.json, fieldMapPR)
-	if err != nil {
-		return err
-	}
-	return writeGHViewJSON(ctx, stdout, filtered, opts.jq)
+	return writeGHViewFields(ctx, stdout, pr, opts, fieldMapPR)
 }
 
 func relayPRViewBody(ctx context.Context, client ghRelayClient, request ghAPIRequest) (map[string]any, error) {

@@ -131,11 +131,7 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 		}
 		issue["assignees"] = mapped
 	}
-	filtered, err := marshalGHFields(issue, opts.json, fieldMapIssue)
-	if err != nil {
-		return err
-	}
-	return writeGHViewJSON(ctx, stdout, filtered, opts.jq)
+	return writeGHViewFields(ctx, stdout, issue, opts, fieldMapIssue)
 }
 
 type issueAssignee struct {
