@@ -158,17 +158,7 @@ describe("batched attempt completion proof", () => {
         },
       });
       const batches: number[] = [];
-      const db = new Proxy(observed, {
-        get(target, property) {
-          if (property === "batch")
-            return (statements: D1PreparedStatement[]) => {
-              batches.push(statements.length);
-              return target.batch(statements);
-            };
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
+      const db = observeD1Batches(observed, (statements) => batches.push(statements.length));
       const metadata: string[] = [];
       vi.stubGlobal(
         "fetch",
