@@ -399,7 +399,8 @@ describe("exact run views from indexed fresh REST lists", () => {
     await relay(list);
     await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
     await deleteEdgeJSON(PUBLIC_PROOF_EDGE_NAMESPACE, "openclaw/run-view-fixture");
-    let now = Date.now();
+    // Keep SQLite's real clock behind the controlled expiry for the whole test.
+    let now = Date.now() + 60_000;
     const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
     await env.DB.prepare("UPDATE github_cache_entries SET expires_at = ?")
       .bind(new Date(now + 1_000).toISOString().slice(0, 19).replace("T", " "))
