@@ -175,8 +175,8 @@ deployment sets 900 — see the public-repo guard notes in `cache.md` for the tr
 `maintainers`).
 
 `MAX_RESPONSE_BYTES`, `REQUEST_TIMEOUT_MS`, `CLIENT_BACKEND_CONCURRENCY`,
-`PUBLIC_REPO_TTL_SECONDS`, and `PUBLIC_REPO_NEGATIVE_TTL_SECONDS` accept positive
-base-10 integers, with optional surrounding whitespace. Missing values, unit suffixes,
+`ORG_VERIFY_TTL_SECONDS`, `PUBLIC_REPO_TTL_SECONDS`, and `PUBLIC_REPO_NEGATIVE_TTL_SECONDS`
+accept positive base-10 integers, with optional surrounding whitespace. Missing values, unit suffixes,
 fractions, and integers above JavaScript's exact integer range use the stated defaults.
 For example, set `REQUEST_TIMEOUT_MS` to `15000`, not `15s`.
 
