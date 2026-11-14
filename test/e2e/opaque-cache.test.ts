@@ -11,7 +11,7 @@ import {
   seedPublicRepoProof,
   writeOwnedGitHubCache,
 } from "./cache-publication-fixture";
-import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, rateHeaders, relay, seedPool, rateLimitedResponse } from "./harness";
 
 const fixture = opaqueCacheKeys[0];
 const identity: Identity = {
@@ -72,12 +72,7 @@ describe("opaque cache retirement at the Worker", () => {
       if (new URL(fetchRequest.url).pathname === "/repos/openclaw/octopool")
         return jsonResponse({ private: false });
       const validator = fetchRequest.headers.get("if-none-match");
-      if (outage)
-        return jsonResponse(
-          { message: "rate limited" },
-          429,
-          rateHeaders({ remaining: 0, retryAfter: 60 }),
-        );
+      if (outage) return rateLimitedResponse();
       if (validator !== null)
         return new Response(null, {
           status: 304,
@@ -129,11 +124,7 @@ describe("opaque cache retirement at the Worker", () => {
     const upstream = vi.fn<typeof fetch>(async (input, init) =>
       new URL(new Request(input, init).url).pathname === "/repos/openclaw/octopool"
         ? jsonResponse({ private: false })
-        : jsonResponse(
-            { message: "rate limited" },
-            429,
-            rateHeaders({ remaining: 0, retryAfter: 60 }),
-          ),
+        : rateLimitedResponse(),
     );
     vi.stubGlobal("fetch", upstream);
     const response = await relay(request.path, undefined, request);

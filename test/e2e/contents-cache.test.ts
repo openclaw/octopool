@@ -12,7 +12,7 @@ import {
   seedPublicRepoProof,
   writeOwnedGitHubCache,
 } from "./cache-publication-fixture";
-import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, rateHeaders, relay, seedPool, rateLimitedResponse } from "./harness";
 
 const frozen = contentsCacheKeys[0];
 const blankFixtures = contentsCacheKeys.filter(
@@ -118,12 +118,7 @@ describe("contents cache retirement at the Worker", () => {
         if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
           return jsonResponse({ private: false });
         expect(fetched.url).toBe(expected.url);
-        if (outage)
-          return jsonResponse(
-            { message: "rate limited" },
-            429,
-            rateHeaders({ remaining: 0, retryAfter: 60 }),
-          );
+        if (outage) return rateLimitedResponse();
         const validator = fetched.headers.get("if-none-match");
         if (validator !== null)
           return new Response(null, {
@@ -177,11 +172,7 @@ describe("contents cache retirement at the Worker", () => {
         if (fetched.url === "https://api.github.com/repos/openclaw/octopool")
           return jsonResponse({ private: false });
         expect(fetched.url).toBe(expected.url);
-        return jsonResponse(
-          { message: "rate limited" },
-          429,
-          rateHeaders({ remaining: 0, retryAfter: 60 }),
-        );
+        return rateLimitedResponse();
       });
       vi.stubGlobal("fetch", upstream);
       const response = await relay(request.path, undefined, request);

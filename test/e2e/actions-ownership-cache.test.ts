@@ -17,7 +17,7 @@ import { legacyActionsKey } from "../fixtures/actions-legacy-cache";
 import { currentV2ActionsKeys } from "../fixtures/actions-current-v2-cache";
 import type { Identity } from "../../src/types";
 import { exactRun, historicalHead, runIDs, wrongPatchHead } from "../fixtures/actions-ownership";
-import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, rateHeaders, relay, seedPool, rateLimitedResponse } from "./harness";
 import { ownedWork } from "./owned-work";
 
 const headers = { "x-octopool-public-shape": "actions-summary-v1" };
@@ -363,9 +363,5 @@ function outageResponse(request: Request): Response {
   if (new URL(request.url).pathname.toLowerCase() === "/repos/openclaw/peekaboo") {
     return jsonResponse({ private: false });
   }
-  return jsonResponse(
-    { message: "rate limited" },
-    429,
-    rateHeaders({ remaining: 0, retryAfter: 60 }),
-  );
+  return rateLimitedResponse();
 }

@@ -251,6 +251,14 @@ export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit)
   });
 }
 
+export function rateLimitedResponse(): Response {
+  return jsonResponse(
+    { message: "rate limited" },
+    429,
+    rateHeaders({ remaining: 0, retryAfter: 60 }),
+  );
+}
+
 export function orgMembershipResponse(member: boolean, userId: number): Response {
   return jsonResponse({
     data: {

@@ -9,7 +9,14 @@ import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
 import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import { legacyReleaseKey, releaseMarkdown } from "../fixtures/release-summary";
-import { jsonResponse, rateHeaders, relay, seedPool, waitForPublicationFollower } from "./harness";
+import {
+  jsonResponse,
+  rateHeaders,
+  relay,
+  seedPool,
+  waitForPublicationFollower,
+  rateLimitedResponse,
+} from "./harness";
 
 import { ownedWork } from "./owned-work";
 
@@ -161,9 +168,5 @@ function outageResponse(request: Request) {
   }
   expect(request.url).toMatch(/^https:\/\/api\.github\.com\/repos\/openclaw\/octopool\/releases\//);
   expect(request.headers.has("authorization")).toBe(false);
-  return jsonResponse(
-    { message: "rate limited" },
-    429,
-    rateHeaders({ remaining: 0, retryAfter: 60 }),
-  );
+  return rateLimitedResponse();
 }

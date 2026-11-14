@@ -23,7 +23,7 @@ import {
   seedPublicRepoProof,
   writeOwnedGitHubCache,
 } from "./cache-publication-fixture";
-import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
+import { bearer, jsonResponse, rateHeaders, relay, seedPool, rateLimitedResponse } from "./harness";
 import { requestWithEnv } from "./identity-routing-support";
 
 const frozen = gitCacheKeys[0];
@@ -257,12 +257,7 @@ describe("Git framing and cache retirement at the Worker", () => {
         const fetched = new Request(input, init);
         if (fetched.url === repoURL) return jsonResponse({ private: false });
         if (fetched.url === gitAdvertisementURL) return new Response(null, { status: 404 });
-        if (outage)
-          return jsonResponse(
-            { message: "rate limited" },
-            429,
-            rateHeaders({ remaining: 0, retryAfter: 60 }),
-          );
+        if (outage) return rateLimitedResponse();
         const validator = fetched.headers.get("if-none-match");
         return validator === null
           ? jsonResponse(exactGitRefs, 200, {
@@ -318,11 +313,7 @@ describe("Git framing and cache retirement at the Worker", () => {
       const upstream = vi.fn<typeof fetch>(async (input, init) =>
         new Request(input, init).url === repoURL
           ? jsonResponse({ private: false })
-          : jsonResponse(
-              { message: "rate limited" },
-              429,
-              rateHeaders({ remaining: 0, retryAfter: 60 }),
-            ),
+          : rateLimitedResponse(),
       );
       vi.stubGlobal("fetch", upstream);
       const response = await relay(request.path, undefined, request);

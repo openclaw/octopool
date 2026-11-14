@@ -53,6 +53,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   Completion-proof batching now uses the shared D1 observer, preserving its
   publication hooks and all batch, metadata, revocation, and TTL assertions.
   [#279](https://github.com/openclaw/octopool/pull/279), [#289](https://github.com/openclaw/octopool/pull/289).
+  Rate-limit responses share one harness fixture across six suites; request guards,
+  fallback assertions, and distinct rate-limit messages remain unchanged.
 - **Worker expiry and outcomes:** crossed expiry at observed lookup boundaries,
   observed native renewal, removed historical SQL comparison, asserted current
   publication-owner cleanup and strict fallback outcomes, and removed timing-only
