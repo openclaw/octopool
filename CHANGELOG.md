@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Send encoded CLI JSON request bodies without an extra full-body string copy, preserving redirect replay.
+
 - Bound the fallback CLI shim-content probe to 8 KiB plus one byte instead of loading whole candidate executables.
 
 - Batch pooled larger Actions run-list cache reads while preserving candidate order, access checks, small-page projection, and cache-miss reporting.

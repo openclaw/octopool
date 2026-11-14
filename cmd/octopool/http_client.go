@@ -162,7 +162,7 @@ func postJSONRawWithTimeout(ctx context.Context, url, token string, body map[str
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(encoded)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
 	if err != nil {
 		return nil, err
 	}

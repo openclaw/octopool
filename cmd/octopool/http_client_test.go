@@ -570,3 +570,33 @@ func TestAuthenticatedJSONRedirectRequestErrors(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkJSONPostBody(b *testing.B) {
+	previous := httpClient
+	httpClient = &http.Client{
+		Transport: rewritePolicyTestTransport(func(request *http.Request) (*http.Response, error) {
+			_, err := io.Copy(io.Discard, request.Body)
+			request.Body.Close()
+			if err != nil {
+				return nil, err
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       http.NoBody,
+				Request:    request,
+			}, nil
+		}),
+	}
+	b.Cleanup(func() { httpClient = previous })
+	body := map[string]any{"payload": strings.Repeat("x", 128<<10)}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		response, err := postJSONRaw(b.Context(), "https://example.test/request", "synthetic-token", body)
+		if err != nil {
+			b.Fatal(err)
+		}
+		response.Body.Close()
+	}
+}
