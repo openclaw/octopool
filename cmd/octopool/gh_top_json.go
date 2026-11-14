@@ -144,7 +144,15 @@ func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
 
 func filterJSONFields(raw []byte, fields []string, fieldMap map[string][]string) ([]byte, error) {
 	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("response contains multiple JSON values")
+		}
 		return nil, err
 	}
 	filtered := filterJSONValue(value, fields, fieldMap)
