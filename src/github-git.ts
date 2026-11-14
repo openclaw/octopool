@@ -93,17 +93,16 @@ export function gitRefResponse(
     return undefined;
   }
   const selected = matching
-    ? [...refs.entries()]
-        .filter(([ref]) => !ref.endsWith("^{}") && ref.startsWith(prefix))
-        .sort(([left], [right]) => compareStrings(left, right))
+    ? [...refs.keys()].filter((ref) => !ref.endsWith("^{}") && ref.startsWith(prefix)).sort()
     : refs.has(prefix)
-      ? ([[prefix, refs.get(prefix)!]] as [string, string][])
+      ? [prefix]
       : [];
   if (!matching && selected.length !== 1) {
     return undefined;
   }
   const response: Record<string, unknown>[] = [];
-  for (const [ref, sha] of selected) {
+  for (const ref of selected) {
+    const sha = refs.get(ref)!;
     const type = ref.startsWith("refs/heads/")
       ? "commit"
       : refs.has(`${ref}^{}`)
@@ -180,8 +179,4 @@ function messagePackString(value: string): Uint8Array | undefined {
     return undefined;
   }
   return new Uint8Array([...prefix, ...bytes]);
-}
-
-function compareStrings(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
