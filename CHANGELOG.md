@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Preserve numeric precision received by the CLI when selecting JSON fields, including workflow IDs and nested values.
+
 - Recheck GitHub organization membership when its stored verification timestamp is in the future instead of extending the authorization window.
 
 - Preserve large integers and precise numeric values in CLI JSON responses, including `stats --json`, without accepting trailing JSON data.
