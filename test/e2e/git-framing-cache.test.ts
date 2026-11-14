@@ -19,6 +19,7 @@ import {
 } from "../fixtures/git-advertisement";
 import {
   expireGitHubCache,
+  seedFrozenGitHubCache,
   seedPublicRepoProof,
   writeOwnedGitHubCache,
 } from "./cache-publication-fixture";
@@ -421,29 +422,20 @@ async function seedOld(
   shared = true,
   fixture: { request: unknown; shared: string; identity: string } = frozen,
 ) {
-  const request = validateRelayRequest(fixture.request);
-  const route = classifyRoute(request, defaultPolicy("openclaw"));
-  await seedPublicRepoProof(env, route);
-  for (const owner of [undefined, identity]) {
-    if (!shared && owner === undefined) continue;
-    expect(
-      await writeOwnedGitHubCache(
-        env,
-        owner === undefined ? fixture.shared : fixture.identity,
-        request,
-        route,
-        {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-            etag: '"old-partial"',
-            ...rateHeaders({ remaining: 4998 }),
-          },
-          body: oldBody,
-          body_encoding: "json",
-        },
-        owner,
-      ),
-    ).toBe("shared");
-  }
+  await seedFrozenGitHubCache(
+    env,
+    fixture,
+    {
+      status: 200,
+      headers: {
+        "content-type": "application/json",
+        etag: '"old-partial"',
+        ...rateHeaders({ remaining: 4998 }),
+      },
+      body: oldBody,
+      body_encoding: "json",
+    },
+    identity,
+    shared,
+  );
 }
