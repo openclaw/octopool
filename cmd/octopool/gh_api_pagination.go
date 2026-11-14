@@ -63,7 +63,7 @@ func relayPaginatedGHAPI(
 		var hasNext, empty, inferable bool
 		if suiteChecks {
 			perPage, validPerPage = positiveQueryInt(request.query["per_page"])
-			page, validPage = positiveQueryInt(request.query["page"])
+			_, validPage = positiveQueryInt(request.query["page"])
 			body, err := decodeRelayBody(envelope)
 			if err != nil {
 				return err

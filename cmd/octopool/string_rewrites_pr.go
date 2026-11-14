@@ -29,7 +29,7 @@ func prepareRewritePRLifecycle(policy stringRewritePolicy, args []string, stdin 
 	}
 	command := args[0] + " " + args[1]
 	values := rewriteFlagNames("--repo,-R")
-	booleans := map[string]string{}
+	var booleans map[string]string
 	switch command {
 	case "pr ready":
 		booleans = rewriteFlagNames("--undo")
