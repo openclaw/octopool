@@ -20,7 +20,8 @@ Relay and health requests send `Authorization: Bearer <octopool_caller_token>`.
 - Org membership is re-verified on use once it goes stale (`ORG_VERIFY_TTL_SECONDS`,
   default 24h), using the org verifier token. Every verification page must resolve the
   enrolled immutable `github_user_id`; a matching organization on a replacement account
-  cannot refresh the caller. A member who leaves the org loses access at the next check.
+  cannot refresh the caller. Future-dated verification records also require a recheck.
+  A member who leaves the org loses access at the next check.
 
 A missing/invalid token returns `401`; a valid token without the pool grant returns
 `401 invalid_auth`.
