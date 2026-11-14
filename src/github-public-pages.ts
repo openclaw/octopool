@@ -162,12 +162,11 @@ async function completeWorkflowList(
   html: string,
 ): Promise<Record<string, unknown>[] | undefined> {
   const pageCount = parseWorkflowPageCount(html);
-  const first = parseWorkflowListHTML(html, route.owner!, route.repo!);
+  const workflows = parseWorkflowListHTML(html, route.owner!, route.repo!);
   // Missing pagination metadata cannot prove the first page is complete.
-  if (pageCount === undefined || pageCount > MAX_PUBLIC_WORKFLOW_PAGES || first === undefined) {
+  if (pageCount === undefined || pageCount > MAX_PUBLIC_WORKFLOW_PAGES || workflows === undefined) {
     return undefined;
   }
-  const workflows = [...first];
   for (let page = 2; page <= pageCount; page++) {
     const next = await fetchPublicPage(
       `https://github.com/${encodedPathSegments([
@@ -186,13 +185,11 @@ async function completeWorkflowList(
     }
     workflows.push(...parsed);
   }
-  const unique = new Map(workflows.map((workflow) => [workflow.id, workflow]));
+  const unique = new Set(workflows.map((workflow) => workflow.id));
   if (unique.size !== workflows.length) {
     return undefined;
   }
-  return [...unique.values()].sort((left, right) =>
-    compareStrings(String(left.path), String(right.path)),
-  );
+  return workflows.sort((left, right) => compareStrings(String(left.path), String(right.path)));
 }
 
 function issueListPageQuery(
