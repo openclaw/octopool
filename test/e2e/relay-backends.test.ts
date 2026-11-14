@@ -1,6 +1,6 @@
+import { expireGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { deleteEdgeJSON } from "../../src/edge-cache";
 import { bearer, jsonResponse, relay, seedPool } from "./harness";
 
 type RelayEnvelope = {
@@ -243,15 +243,7 @@ describe("Worker end-to-end relay backends", () => {
       "SELECT cache_key FROM github_cache_entries LIMIT 1",
     ).first<{ cache_key: string }>();
     expect(cacheRow).not.toBeNull();
-    await env.DB.prepare(
-      `UPDATE github_cache_entries
-       SET expires_at = datetime('now', '-1 second'),
-           stale_expires_at = datetime('now', '+1 hour')
-       WHERE cache_key = ?`,
-    )
-      .bind(cacheRow!.cache_key)
-      .run();
-    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
+    await expireGitHubCache(env, cacheRow!.cache_key);
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async () => jsonResponse({ message: "unavailable" }, 503)),

@@ -1,10 +1,10 @@
+import { expireGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { PoolCoordinator } from "../../src/index";
 import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { deleteEdgeJSON } from "../../src/edge-cache";
 import type { CoordinatorSnapshot } from "../../src/types";
 import {
   bearer,
@@ -455,15 +455,7 @@ describe("Worker end-to-end relay", () => {
       "SELECT cache_key FROM github_cache_entries LIMIT 1",
     ).first<{ cache_key: string }>();
     expect(cacheRow).not.toBeNull();
-    await env.DB.prepare(
-      `UPDATE github_cache_entries
-       SET expires_at = datetime('now', '-1 second'),
-           stale_expires_at = datetime('now', '+1 hour')
-       WHERE cache_key = ?`,
-    )
-      .bind(cacheRow!.cache_key)
-      .run();
-    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
+    await expireGitHubCache(env, cacheRow!.cache_key);
     const limited = githubUpstream({
       primary: rateLimitedResponse(),
     });
@@ -528,15 +520,7 @@ describe("Worker end-to-end relay", () => {
       "SELECT cache_key FROM github_cache_entries LIMIT 1",
     ).first<{ cache_key: string }>();
     expect(cacheRow).not.toBeNull();
-    await env.DB.prepare(
-      `UPDATE github_cache_entries
-       SET expires_at = datetime('now', '-1 second'),
-           stale_expires_at = datetime('now', '+1 hour')
-       WHERE cache_key = ?`,
-    )
-      .bind(cacheRow!.cache_key)
-      .run();
-    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
+    await expireGitHubCache(env, cacheRow!.cache_key);
 
     const upstream = githubUpstream({
       primary: rateLimitedResponse(),
@@ -576,15 +560,7 @@ describe("Worker end-to-end relay", () => {
       "SELECT cache_key FROM github_cache_entries LIMIT 1",
     ).first<{ cache_key: string }>();
     expect(cacheRow).not.toBeNull();
-    await env.DB.prepare(
-      `UPDATE github_cache_entries
-       SET expires_at = datetime('now', '-1 second'),
-           stale_expires_at = datetime('now', '+1 hour')
-       WHERE cache_key = ?`,
-    )
-      .bind(cacheRow!.cache_key)
-      .run();
-    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
+    await expireGitHubCache(env, cacheRow!.cache_key);
 
     const upstream = githubUpstream({
       primary: rateLimitedResponse(),
@@ -641,15 +617,7 @@ describe("Worker end-to-end relay", () => {
       "SELECT cache_key, identity_id FROM github_cache_entries LIMIT 1",
     ).first<{ cache_key: string; identity_id: string | null }>();
     expect(cacheRow).toMatchObject({ identity_id: null });
-    await env.DB.prepare(
-      `UPDATE github_cache_entries
-       SET expires_at = datetime('now', '-61 seconds'),
-           stale_expires_at = datetime('now', '+1 hour')
-       WHERE cache_key = ?`,
-    )
-      .bind(cacheRow!.cache_key)
-      .run();
-    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
+    await expireGitHubCache(env, cacheRow!.cache_key, 61);
 
     const limited = vi.fn<typeof fetch>(async (input, init) => {
       const token = bearer(input, init);

@@ -72,6 +72,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   removing either completeness guard now fails its dedicated case.
   Cache-retirement suites share the expiry update and edge eviction while retaining
   their explicit one-second and 61-second ages.
+  Identity and token-free backend fallback suites reuse that fixture for five more
+  expiry setups, preserving the one-hour stale window and all outcome assertions.
   Contents and Git retirement suites also share frozen-key publication setup;
   their old bodies, ETags, and shared-versus-identity cases remain explicit.
 - **Authentication:** verified App JWT signatures and timestamps, removed the
