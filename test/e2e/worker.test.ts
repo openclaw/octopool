@@ -20,6 +20,7 @@ import {
   seedPool,
   seedWebSession,
   waitForPublicationFollower,
+  rateLimitedResponse,
 } from "./harness";
 import { ownedWork } from "./owned-work";
 
@@ -194,11 +195,7 @@ describe("Worker end-to-end relay", () => {
   it("retries a rate-limited identity and persists its coordinator cooldown", async () => {
     await seedPool({ secondary: true });
     const upstream = githubUpstream({
-      primary: jsonResponse(
-        { message: "rate limited" },
-        429,
-        rateHeaders({ remaining: 0, retryAfter: 60 }),
-      ),
+      primary: rateLimitedResponse(),
       secondary: jsonResponse(
         { id: 2, full_name: "openclaw/octopool", private: false },
         200,
@@ -468,11 +465,7 @@ describe("Worker end-to-end relay", () => {
       .run();
     await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
     const limited = githubUpstream({
-      primary: jsonResponse(
-        { message: "rate limited" },
-        429,
-        rateHeaders({ remaining: 0, retryAfter: 60 }),
-      ),
+      primary: rateLimitedResponse(),
     });
     vi.stubGlobal("fetch", limited);
 
@@ -546,11 +539,7 @@ describe("Worker end-to-end relay", () => {
     await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
 
     const upstream = githubUpstream({
-      primary: jsonResponse(
-        { message: "rate limited" },
-        429,
-        rateHeaders({ remaining: 0, retryAfter: 60 }),
-      ),
+      primary: rateLimitedResponse(),
       secondary: jsonResponse(
         { id: 7, full_name: "openclaw/octopool", private: false },
         200,
@@ -598,16 +587,8 @@ describe("Worker end-to-end relay", () => {
     await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
 
     const upstream = githubUpstream({
-      primary: jsonResponse(
-        { message: "rate limited" },
-        429,
-        rateHeaders({ remaining: 0, retryAfter: 60 }),
-      ),
-      secondary: jsonResponse(
-        { message: "rate limited" },
-        429,
-        rateHeaders({ remaining: 0, retryAfter: 60 }),
-      ),
+      primary: rateLimitedResponse(),
+      secondary: rateLimitedResponse(),
     });
     vi.stubGlobal("fetch", upstream);
 
@@ -680,11 +661,7 @@ describe("Worker end-to-end relay", () => {
         return jsonResponse({ message: "public unavailable" }, 503);
       }
       if (token === "test-primary-token") {
-        return jsonResponse(
-          { message: "rate limited" },
-          429,
-          rateHeaders({ remaining: 0, retryAfter: 60 }),
-        );
+        return rateLimitedResponse();
       }
       return jsonResponse({ message: "unexpected request" }, 500);
     });
