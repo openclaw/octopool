@@ -1,9 +1,11 @@
+import { expect } from "vitest";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { observeAnonymousPublicRepo } from "../../src/public-repos";
 import { writeGitHubCache } from "../../src/cache";
 import { acquireOwnedCacheFill } from "../../src/cache-fill";
 import { bodyPublicationResource } from "../../src/cache-publication";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "../../src/types";
 
 // Synthetic fixture evidence is observed only after the real grant commits.
@@ -36,6 +38,31 @@ export async function seedPublicRepoProof(env: Env, route: RouteInfo): Promise<v
     headers: {},
     body: { private: false },
   }));
+}
+
+export async function seedFrozenGitHubCache(
+  env: Env,
+  fixture: { request: unknown; shared: string; identity: string },
+  response: GitHubRelayResponse,
+  identity: Identity,
+  shared: boolean,
+): Promise<void> {
+  const request = validateRelayRequest(fixture.request);
+  const route = classifyRoute(request, defaultPolicy("openclaw"));
+  await seedPublicRepoProof(env, route);
+  for (const owner of [undefined, identity]) {
+    if (!shared && owner === undefined) continue;
+    expect(
+      await writeOwnedGitHubCache(
+        env,
+        owner === undefined ? fixture.shared : fixture.identity,
+        request,
+        route,
+        response,
+        owner,
+      ),
+    ).toBe("shared");
+  }
 }
 
 export async function expireGitHubCache(env: Env, key: string, ageSeconds = 1): Promise<void> {

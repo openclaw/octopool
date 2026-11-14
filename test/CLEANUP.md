@@ -68,6 +68,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   removing either completeness guard now fails its dedicated case.
   Cache-retirement suites share the expiry update and edge eviction while retaining
   their explicit one-second and 61-second ages.
+  Contents and Git retirement suites also share frozen-key publication setup;
+  their old bodies, ETags, and shared-versus-identity cases remain explicit.
 - **Authentication:** verified App JWT signatures and timestamps, removed the
   duplicate key binding, and checked the actual OAuth fetch signal. 49 scoped
   cases passed; invalid-signature mutation caught.
