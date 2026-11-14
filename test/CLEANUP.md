@@ -43,6 +43,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   shared epoch-validation and expiry-reporting mutations are caught.
   Stale-candidate parity also requires explicit reused bodies and age rejection;
   dropping reuse or ignoring the requested age is caught.
+  Coalescing owner-cleanup cases require the original error object to survive;
+  substituting a generic failure is caught while cleanup checks remain intact.
   Cache unit fixtures share their D1 first-row scaffold while retaining dynamic
   rows, rejection callbacks, and explicit binding spies.
   Contents and Git generation cases share their cache-key assertions while preserving

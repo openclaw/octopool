@@ -24,43 +24,35 @@ describe("cache miss coalescing", () => {
     );
   });
 
-  it.each([
-    {
-      name: "shared-cache recheck",
-      readShared: async () => {
-        throw new Error("recheck failed");
-      },
-      acceptCached: undefined,
-    },
-    {
-      name: "cached acceptance",
-      readShared: async () => sharedRead(),
-      acceptCached: async () => {
-        throw new Error("acceptance failed");
-      },
-    },
-  ])("fails an acquired owner when $name throws", async ({ readShared, acceptCached }) => {
-    vi.useFakeTimers();
-    try {
-      const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "leader" }]);
-      await expect(
-        coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
-          readShared,
-          ...(acceptCached === undefined ? {} : { acceptCached }),
-        }),
-      ).rejects.toThrow();
+  it.each(["shared-cache recheck", "cached acceptance"])(
+    "fails an acquired owner and preserves the error from %s",
+    async (stage) => {
+      vi.useFakeTimers();
+      try {
+        const failure = new Error(`${stage} failed`);
+        const fail = async () => {
+          throw failure;
+        };
+        const coordinator = fakeCacheFillCoordinator([{ kind: "owner", token: "leader" }]);
+        await expect(
+          coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+            readShared: stage === "shared-cache recheck" ? fail : async () => sharedRead(),
+            ...(stage === "cached acceptance" ? { acceptCached: fail } : {}),
+          }),
+        ).rejects.toBe(failure);
 
-      expect(coordinator.completePublication).toHaveBeenCalledWith(
-        expect.objectContaining({ owner_token: "leader" }),
-        "failed",
-        undefined,
-      );
-      await vi.advanceTimersByTimeAsync(6_000);
-      expect(coordinator.renewPublication).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        expect(coordinator.completePublication).toHaveBeenCalledWith(
+          expect.objectContaining({ owner_token: "leader" }),
+          "failed",
+          undefined,
+        );
+        await vi.advanceTimersByTimeAsync(6_000);
+        expect(coordinator.renewPublication).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it.each(["shared", "edge_only"] as const)(
     "waits for %s publication then acquires zero-age ownership without reading bodies",
