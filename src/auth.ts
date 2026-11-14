@@ -473,7 +473,8 @@ export async function ensureFreshOrgMembership(
   requireGitHubUserId(caller.github_user_id);
   const ttlMs = parsePositiveInt(env.ORG_VERIFY_TTL_SECONDS, 86_400) * 1000;
   const verifiedAt = caller.org_verified_at === null ? 0 : Date.parse(caller.org_verified_at);
-  if (Number.isFinite(verifiedAt) && Date.now() - verifiedAt < ttlMs) {
+  const ageMs = Date.now() - verifiedAt;
+  if (Number.isFinite(verifiedAt) && ageMs >= 0 && ageMs < ttlMs) {
     return;
   }
   const now = await verifyGitHubOrgMember(env, caller.github_login, caller.github_user_id, egress);

@@ -1,7 +1,14 @@
 import { env } from "cloudflare:workers";
 import { expect, it, vi } from "vitest";
 import { clearConfigCache } from "../../src/config-cache";
-import { CALLER_TOKEN, orgMembershipResponse, POOL, seedPool } from "./harness";
+import {
+  callWorker,
+  CALLER_TOKEN,
+  orgMembershipResponse,
+  POOL,
+  seedPool,
+  seedWebSession,
+} from "./harness";
 import { ownedWork } from "./owned-work";
 
 it("loads membership independently across native requests and then reuses settled data", async () => {
@@ -103,3 +110,37 @@ it("keeps a relay's paginated policy denial out of a concurrent native health re
   });
   expect(upstream).toHaveBeenCalledTimes(3);
 });
+
+for (const surface of ["caller", "browser"] as const) {
+  it.each([true, false])(
+    `rechecks future membership for ${surface} authentication (member=%s)`,
+    async (member) => {
+      await seedPool();
+      const session = await seedWebSession();
+      const future = "2099-01-01T00:00:00.000Z";
+      await env.DB.prepare("UPDATE callers SET org_identity_verified_at = ? WHERE id = 'caller'")
+        .bind(future)
+        .run();
+      const upstream = vi.fn(async () => orgMembershipResponse(member, 42));
+      vi.stubGlobal("fetch", upstream);
+
+      const response =
+        surface === "caller"
+          ? await callWorker(`/v1/pools/${POOL}/health`, {
+              headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+            })
+          : await callWorker("https://octopool.openclaw.ai/v1/me", {
+              headers: { cookie: `octopool_session=${session}` },
+            });
+      expect(response.status).toBe(member ? 200 : 403);
+      const body = await response.json();
+      if (!member) expect(body).toMatchObject({ error: { code: "org_member_denied" } });
+      expect(upstream).toHaveBeenCalledOnce();
+      const proof = await env.DB.prepare(
+        "SELECT org_identity_verified_at FROM callers WHERE id = 'caller'",
+      ).first<{ org_identity_verified_at: string }>();
+      if (member) expect(proof!.org_identity_verified_at).not.toBe(future);
+      else expect(proof!.org_identity_verified_at).toBe(future);
+    },
+  );
+}

@@ -12,6 +12,35 @@ describe("caller authentication cache", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([1, 60_000, 365 * 86_400_000])(
+    "refreshes a membership proof %i ms in the future",
+    async (ahead) => {
+      const fixture = authFixture();
+      const now = Date.UTC(2026, 0, 1);
+      vi.spyOn(Date, "now").mockReturnValue(now);
+      const caller = { ...fixture.caller, org_verified_at: new Date(now + ahead).toISOString() };
+      const upstream = vi.fn(async () => membershipResponse());
+      vi.stubGlobal("fetch", upstream);
+
+      await ensureFreshOrgMembership(fixture.env, caller);
+      expect(upstream).toHaveBeenCalledOnce();
+      expect(fixture.run).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps a membership proof at the current time fresh", async () => {
+    const fixture = authFixture();
+    const now = Date.UTC(2026, 0, 1);
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const caller = { ...fixture.caller, org_verified_at: new Date(now).toISOString() };
+    const upstream = vi.fn();
+    vi.stubGlobal("fetch", upstream);
+
+    await ensureFreshOrgMembership(fixture.env, caller);
+    expect(upstream).not.toHaveBeenCalled();
+    expect(fixture.run).not.toHaveBeenCalled();
+  });
+
   it.each(["30s", "1.5", "1e3", "+30", "-30", "9007199254740992"])(
     "uses the 24-hour membership default for invalid TTL %s",
     async (ttl) => {

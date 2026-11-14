@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Recheck GitHub organization membership when its stored verification timestamp is in the future instead of extending the authorization window.
+
 - Preserve large integers and precise numeric values in CLI JSON responses, including `stats --json`, without accepting trailing JSON data.
 
 - Preserve JSON response headers supplied as `Headers` or header pairs, and honor cache-control overrides regardless of header-name casing.
