@@ -4,6 +4,7 @@ import (
 	"debug/buildinfo"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -140,7 +141,14 @@ func ghShimPath(path string) bool {
 			return true
 		}
 	}
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	// Read one byte past the script limit to reject oversized candidates
+	// without loading an entire executable into memory.
+	data, err := io.ReadAll(io.LimitReader(file, 8193))
 	if err != nil || len(data) == 0 || len(data) > 8192 {
 		return false
 	}

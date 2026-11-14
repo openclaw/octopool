@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bound the fallback CLI shim-content probe to 8 KiB plus one byte instead of loading whole candidate executables.
+
 - Batch pooled larger Actions run-list cache reads while preserving candidate order, access checks, small-page projection, and cache-miss reporting.
 - Preserve null entries in pull-request list JSON output and jq expressions when projecting selected fields.
 

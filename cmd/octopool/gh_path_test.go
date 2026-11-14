@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"debug/buildinfo"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -290,4 +292,42 @@ func TestGHPathCandidatesIncludesWindowsExtensions(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected gh.exe in names %#v", names)
+}
+
+func TestGHShimPathScriptSizeBoundary(t *testing.T) {
+	for _, size := range []int{0, 8191, 8192, 8193} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "candidate")
+			body := bytes.Repeat([]byte(" "), size)
+			copy(body, "#!/bin/sh\nexec octopool gh \"$@\"\n")
+			if err := os.WriteFile(path, body, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := ghShimPath(path), size > 0 && size <= 8192; got != want {
+				t.Fatalf("ghShimPath() = %v, want %v for %d bytes", got, want, size)
+			}
+		})
+	}
+}
+
+func BenchmarkGHShimPathLargeCandidate(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "candidate")
+	file, err := os.Create(path)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := file.Truncate(8 << 20); err != nil {
+		file.Close()
+		b.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if ghShimPath(path) {
+			b.Fatal("non-shim candidate was rejected")
+		}
+	}
 }
