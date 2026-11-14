@@ -17,6 +17,60 @@ import (
 	"time"
 )
 
+func TestJSONResponsePreservesNumbers(t *testing.T) {
+	for _, test := range []struct{ name, input, want string }{
+		{"large integer", `9007199254740993`, "9007199254740993\n"},
+		{"large exponent", `1e400`, "1e400\n"},
+		{"nested numbers", `{"values":[18446744073709551615,-9007199254740993,0.123456789012345678901]}`, "{\n  \"values\": [\n    18446744073709551615,\n    -9007199254740993,\n    0.123456789012345678901\n  ]\n}\n"},
+		{"formatting", `{"z":"<&>","a":true}`, "{\n  \"a\": true,\n  \"z\": \"\\u003c\\u0026\\u003e\"\n}\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(test.input))}
+			var output bytes.Buffer
+			if err := writeJSONResponse(&output, response); err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != test.want {
+				t.Fatalf("output = %q, want %q", output.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestJSONResponseRejectsInvalidOrTrailingJSON(t *testing.T) {
+	for _, input := range []string{"", "{", `{"ok":true}{"extra":true}`, `{"ok":true} garbage`} {
+		t.Run(input, func(t *testing.T) {
+			response := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(input))}
+			var output bytes.Buffer
+			if err := writeJSONResponse(&output, response); err == nil || output.Len() != 0 {
+				t.Fatalf("err = %v, output = %q", err, output.String())
+			}
+		})
+	}
+}
+
+func TestStatsJSONPreservesNumbers(t *testing.T) {
+	isolateTestConfig(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/pools/maintainers/stats" || r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Error("unexpected stats request")
+		}
+		_, _ = io.WriteString(w, `{"pool_usage":{"requests":9007199254740993}}`)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("OCTOPOOL_URL", server.URL)
+	t.Setenv("OCTOPOOL_TOKEN", "test-token")
+	t.Setenv("OCTOPOOL_POOL", "maintainers")
+	var output, stderr bytes.Buffer
+	if err := run(t.Context(), []string{"stats", "--json"}, &output, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	const want = "{\n  \"pool_usage\": {\n    \"requests\": 9007199254740993\n  }\n}\n"
+	if output.String() != want || stderr.Len() != 0 {
+		t.Fatalf("output = %q, stderr = %q", output.String(), stderr.String())
+	}
+}
+
 func TestJSONResponseSizeLimitRejectsHiddenSuffix(t *testing.T) {
 	const frame = `{"status":200,"body":{"ok":true},"body_encoding":"json","pool":"maintainers"}`
 	const limit = 8 << 20
