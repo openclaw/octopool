@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -182,7 +183,15 @@ func writeJSONResponse(stdout io.Writer, resp *http.Response) error {
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 	var value any
-	if err := json.Unmarshal(body, &value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return errors.New("response contains multiple JSON values")
+		}
 		return err
 	}
 	encoder := json.NewEncoder(stdout)

@@ -31,6 +31,8 @@
 
 ### Fixes
 
+- Preserve large integers and precise numeric values in CLI JSON responses, including `stats --json`, without accepting trailing JSON data.
+
 - Preserve JSON response headers supplied as `Headers` or header pairs, and honor cache-control overrides regardless of header-name casing.
 
 - Use the 24-hour default for malformed or unsafe `ORG_VERIFY_TTL_SECONDS` values instead of silently truncating or extending membership rechecks.
