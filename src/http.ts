@@ -15,13 +15,9 @@ export class HttpError extends Error {
 
 export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit): Response {
   using _phase = relayPhase("response_encode");
-  return Response.json(body, {
-    status,
-    headers: {
-      "cache-control": "no-store",
-      ...headers,
-    },
-  });
+  const response = Response.json(body, { status, headers: headers ?? {} });
+  if (!response.headers.has("cache-control")) response.headers.set("cache-control", "no-store");
+  return response;
 }
 
 // D1 and Durable Objects throw untyped Errors when their request queues back up
