@@ -26,6 +26,27 @@ describe("github web provider", () => {
     vi.unstubAllGlobals();
   });
 
+  it("declines anonymous API JSON with malformed UTF-8", async () => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/jobs/42",
+    });
+    const route = classifyRoute(request, policy);
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode('{"id":42,"name":"'),
+      0xff,
+      ...encoder.encode('"}'),
+    ]);
+    const fetch = vi.fn(async () => new Response(body));
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(callAnonymousGitHubAPI(env(), request, route)).resolves.toEqual({});
+    await expect(callGitHubWeb(env(), request, route)).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it.each([200, 403])(
     "job metadata selects anonymous REST, not the Actions HTML parser (%s)",
     async (status) => {

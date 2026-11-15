@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Reject malformed UTF-8 in anonymous API JSON and Actions job-group responses instead of returning silently altered text.
+
 - Preserve numeric precision received by the CLI when selecting JSON fields, including workflow IDs and nested values.
 
 - Recheck GitHub organization membership when its stored verification timestamp is in the future instead of extending the authorization window.

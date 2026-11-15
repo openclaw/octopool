@@ -50,7 +50,9 @@ export function decodePathStrict(value: string): string | undefined {
 
 export function parseJSONBytes(body: Uint8Array): unknown | undefined {
   try {
-    return JSON.parse(new TextDecoder().decode(body)) as unknown;
+    return JSON.parse(
+      new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(body),
+    ) as unknown;
   } catch {
     return undefined;
   }
