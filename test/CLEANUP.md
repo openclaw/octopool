@@ -74,6 +74,8 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   their explicit one-second and 61-second ages.
   Identity and token-free backend fallback suites reuse that fixture for five more
   expiry setups, preserving the one-hour stale window and all outcome assertions.
+  PR-state stale-body tests also reuse the expiry and rate-limit fixtures, with
+  proof-row updates and forged-hint rejection assertions unchanged.
   Contents and Git retirement suites also share frozen-key publication setup;
   their old bodies, ETags, and shared-versus-identity cases remain explicit.
 - **Authentication:** verified App JWT signatures and timestamps, removed the

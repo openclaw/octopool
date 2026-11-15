@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { deleteEdgeJSON } from "../../src/edge-cache";
+import { expireGitHubCache } from "./cache-publication-fixture";
 import { queries } from "../../src/generated/sql";
-import { jsonResponse, relay, runScheduled, seedPool } from "./harness";
+import { jsonResponse, rateLimitedResponse, relay, runScheduled, seedPool } from "./harness";
 import { requestWithEnv } from "./identity-routing-support";
 import {
   matchingPRMetadata,
@@ -541,15 +541,7 @@ describe("Worker end-to-end PR-state cache", () => {
       "SELECT cache_key FROM github_cache_entries WHERE route_kind = 'pr_files' LIMIT 1",
     ).first<{ cache_key: string }>();
     expect(cacheRow).not.toBeNull();
-    await env.DB.prepare(
-      `UPDATE github_cache_entries
-       SET expires_at = datetime('now', '-1 second'),
-           stale_expires_at = datetime('now', '+1 hour')
-       WHERE cache_key = ?`,
-    )
-      .bind(cacheRow!.cache_key)
-      .run();
-    await deleteEdgeJSON("github-publication-v1", cacheRow!.cache_key);
+    await expireGitHubCache(env, cacheRow!.cache_key);
 
     vi.stubGlobal(
       "fetch",
@@ -566,13 +558,7 @@ describe("Worker end-to-end PR-state cache", () => {
         if (token === null && url.pathname === FILES_PATH) {
           return jsonResponse({ message: "public unavailable" }, 503);
         }
-        return jsonResponse({ message: "rate limited" }, 429, {
-          "retry-after": "60",
-          "x-ratelimit-limit": "5000",
-          "x-ratelimit-remaining": "0",
-          "x-ratelimit-reset": String(Math.floor(Date.now() / 1000) + 3600),
-          "x-ratelimit-resource": "core",
-        });
+        return rateLimitedResponse();
       }),
     );
 
@@ -649,12 +635,7 @@ async function primeStaleHintedBody() {
   ).run();
   const rows = await fileCacheRows();
   expect(rows).toHaveLength(1);
-  await env.DB.prepare(
-    `UPDATE github_cache_entries SET expires_at = datetime('now', '-1 second'), stale_expires_at = datetime('now', '+1 hour') WHERE cache_key = ?`,
-  )
-    .bind(rows[0]!.cache_key)
-    .run();
-  await deleteEdgeJSON("github-publication-v1", rows[0]!.cache_key);
+  await expireGitHubCache(env, rows[0]!.cache_key);
   return (await fileCacheRows())[0]!;
 }
 
