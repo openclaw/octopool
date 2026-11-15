@@ -1,9 +1,64 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { supportsStaleWhileRevalidate, withinSWRWindow } from "../src/cache-swr";
+import { backendAdmissionStub } from "../src/backend-admission";
+import {
+  scheduleCacheRefresh,
+  supportsStaleWhileRevalidate,
+  withinSWRWindow,
+} from "../src/cache-swr";
 import type { RouteKind } from "../src/route-manifest";
+import { fakeCacheFillCoordinator, fixtureOwner } from "./cache-fill-test-support";
 
 vi.mock("../src/backend-admission", () => ({ backendAdmissionStub: vi.fn() }));
 afterEach(() => vi.useRealTimers());
+
+it("caps refreshes across clients at eight and frees capacity after completion", async () => {
+  const admission = {
+    acquire: vi.fn(async () => true),
+    renew: vi.fn(async () => true),
+    release: vi.fn(async (): Promise<void> => undefined),
+  };
+  vi.mocked(backendAdmissionStub).mockReturnValue(
+    admission as unknown as ReturnType<typeof backendAdmissionStub>,
+  );
+  const coordinator = {
+    ...fakeCacheFillCoordinator([]),
+    tryAcquirePublication: vi.fn(async (resource: string) => fixtureOwner(resource, resource)),
+  };
+  const background: Promise<unknown>[] = [];
+  const ctx = {
+    waitUntil: (promise: Promise<unknown>) => background.push(promise),
+  } as unknown as ExecutionContext;
+  const gate = Promise.withResolvers<void>();
+  const refresh = vi.fn(() => gate.promise);
+  const schedule = (index: number) =>
+    scheduleCacheRefresh(
+      {} as Env,
+      ctx,
+      coordinator,
+      "pool",
+      `cache-${index}`,
+      JSON.stringify(["caller", `client-${index}`]),
+      refresh,
+    );
+
+  try {
+    // Each client has its own admission allowance; only the isolate cap binds.
+    for (let index = 0; index < 9; index++) schedule(index);
+    expect(admission.acquire).toHaveBeenCalledTimes(8);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(8));
+    gate.resolve();
+    await Promise.all(background);
+
+    schedule(8);
+    await Promise.all(background);
+    expect(refresh).toHaveBeenCalledTimes(9);
+    expect(coordinator.tryAcquirePublication).toHaveBeenLastCalledWith("swr:cache-8");
+  } finally {
+    gate.resolve();
+    while (background.length) await Promise.all(background.splice(0));
+    vi.mocked(backendAdmissionStub).mockReset();
+  }
+});
 
 it("bounds SWR strictly to the minute after fresh expiry", () => {
   vi.useFakeTimers();
