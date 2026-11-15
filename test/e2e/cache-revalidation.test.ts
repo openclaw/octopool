@@ -101,57 +101,60 @@ describe("Worker end-to-end cache revalidation", () => {
     });
   });
 
-  it("skips zero-age body reads through identity fallback while retaining validators and owners", async () => {
-    await seedPool({ secondary: true });
-    let warm = true;
-    const calls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) => {
-        const request = new Request(input, init);
-        const token = bearer(request);
-        if (warm) return jsonResponse({ id: 123 }, 200, apiHeaders('"stored"'));
-        if (token === "test-org-token") return jsonResponse({ private: false });
-        calls.push(token ?? request.headers.get("if-none-match") ?? "anonymous");
-        if (token === "test-secondary-token")
-          return jsonResponse({ id: 123 }, 200, rateHeaders({ remaining: 4999 }));
-        return new Response(null, { status: 429 });
-      }),
-    );
-    expect((await relay(RUN_PATH)).status).toBe(200);
-    warm = false;
-    const reads: string[] = [];
-    const db = observePublicationD1(env.DB, {
-      before: async (sql) => {
-        reads.push(sql);
-      },
-    });
-    const edge = vi.spyOn(caches.default, "match");
-    const response = await requestWithEnv({ DB: db }, RUN_PATH, {
-      headers: { "cache-control": "max-age=0" },
-    });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      identity: { id: "secondary" },
-      body: { id: 123 },
-    });
-    expect(calls).toEqual(['"stored"', "test-primary-token", "test-secondary-token"]);
-    expect(reads.filter((sql) => sql === queries.readGitHubCache)).toHaveLength(0);
-    expect(reads.filter((sql) => sql === queries.readGitHubCacheAny)).toHaveLength(3);
-    expect(
-      edge.mock.calls.filter(([request]) =>
-        String(request instanceof Request ? request.url : request).includes(
-          "github-publication-v1",
+  it.each(["max-age=0", 'max-age="0"', String.raw`max-age="\0"`])(
+    "skips zero-age body reads through identity fallback with %s",
+    async (cacheControl) => {
+      await seedPool({ secondary: true });
+      let warm = true;
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, init) => {
+          const request = new Request(input, init);
+          const token = bearer(request);
+          if (warm) return jsonResponse({ id: 123 }, 200, apiHeaders('"stored"'));
+          if (token === "test-org-token") return jsonResponse({ private: false });
+          calls.push(token ?? request.headers.get("if-none-match") ?? "anonymous");
+          if (token === "test-secondary-token")
+            return jsonResponse({ id: 123 }, 200, rateHeaders({ remaining: 4999 }));
+          return new Response(null, { status: 429 });
+        }),
+      );
+      expect((await relay(RUN_PATH)).status).toBe(200);
+      warm = false;
+      const reads: string[] = [];
+      const db = observePublicationD1(env.DB, {
+        before: async (sql) => {
+          reads.push(sql);
+        },
+      });
+      const edge = vi.spyOn(caches.default, "match");
+      const response = await requestWithEnv({ DB: db }, RUN_PATH, {
+        headers: { "cache-control": cacheControl },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        identity: { id: "secondary" },
+        body: { id: 123 },
+      });
+      expect(calls).toEqual(['"stored"', "test-primary-token", "test-secondary-token"]);
+      expect(reads.filter((sql) => sql === queries.readGitHubCache)).toHaveLength(0);
+      expect(reads.filter((sql) => sql === queries.readGitHubCacheAny)).toHaveLength(3);
+      expect(
+        edge.mock.calls.filter(([request]) =>
+          String(request instanceof Request ? request.url : request).includes(
+            "github-publication-v1",
+          ),
         ),
-      ),
-    ).toHaveLength(0);
-    // Successful publication proves the upstream path retained its fenced fill owner.
-    expect(
-      await env.DB.prepare(
-        "SELECT identity_id FROM github_cache_entries WHERE identity_id = 'secondary'",
-      ).first(),
-    ).toEqual({ identity_id: "secondary" });
-  });
+      ).toHaveLength(0);
+      // Successful publication proves the upstream path retained its fenced fill owner.
+      expect(
+        await env.DB.prepare(
+          "SELECT identity_id FROM github_cache_entries WHERE identity_id = 'secondary'",
+        ).first(),
+      ).toEqual({ identity_id: "secondary" });
+    },
+  );
 
   it("does not retry depleted anonymous quota for completed-jobs proof", async () => {
     await seedPool();

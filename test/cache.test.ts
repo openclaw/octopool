@@ -342,6 +342,30 @@ describe("github cache policy", () => {
     expect(requestCacheMaxAgeSeconds(request({ "cache-control": "max-age=oops" }))).toBeUndefined();
   });
 
+  it.each([
+    ['max-age="0"', 0],
+    [String.raw`max-age="\0"`, 0],
+    [String.raw`max-age="1\2"`, 12],
+    [String.raw`max-age="1\,2"`, undefined],
+    ['public, MAX-AGE="20"', 20],
+    ['extension="a, max-age=1, b", max-age="20"', 20],
+    ['extension="a, max-age=1, b"', undefined],
+    ['extension="a\\\"b, max-age=1, c", max-age="7"', 7],
+    ['max-age="20', undefined],
+    ['max-age="20"oops', undefined],
+    ['max-age="2,0"', undefined],
+    ['max-age="-1"', undefined],
+    ['max-age="1.5"', undefined],
+  ])("parses max-age without reading quoted extension content: %s", (cacheControl, expected) => {
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/openclaw/pulls/85341",
+      headers: { "cache-control": cacheControl },
+    });
+    expect(requestCacheMaxAgeSeconds(request)).toBe(expected);
+  });
+
   it("treats fresh entries beyond the requested max-age as misses", async () => {
     vi.stubGlobal("caches", {
       default: {

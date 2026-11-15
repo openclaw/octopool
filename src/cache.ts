@@ -186,8 +186,26 @@ export function requestCacheMaxAgeSeconds(request: RelayRequest): number | undef
   if (cacheControl === undefined) {
     return undefined;
   }
-  const match = /(?:^|[,\s])max-age=(\d{1,9})(?:[,\s]|$)/i.exec(cacheControl);
-  return match?.[1] === undefined ? undefined : Number.parseInt(match[1], 10);
+  let start = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index <= cacheControl.length; index += 1) {
+    const character = cacheControl[index];
+    if (index === cacheControl.length || (character === "," && !quoted)) {
+      const directive = cacheControl.slice(start, index).trim();
+      const match = /^max-age=(?:"((?:\\?[0-9]){1,9})"|([0-9]{1,9}))$/i.exec(directive);
+      const value = match?.[1] ?? match?.[2];
+      if (value !== undefined) return Number(value.replaceAll("\\", ""));
+      start = index + 1;
+    } else if (escaped) {
+      escaped = false;
+    } else if (quoted && character === "\\") {
+      escaped = true;
+    } else if (character === '"') {
+      quoted = !quoted;
+    }
+  }
+  return undefined;
 }
 
 export async function readGitHubCache(

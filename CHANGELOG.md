@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Honor quoted request `max-age` values and ignore directive-like text inside quoted Cache-Control extensions.
+
 - Reject malformed UTF-8 in anonymous API JSON and Actions job-group responses instead of returning silently altered text.
 
 - Preserve numeric precision received by the CLI when selecting JSON fields, including workflow IDs and nested values.
