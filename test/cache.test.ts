@@ -1049,6 +1049,72 @@ describe("github cache policy", () => {
     expect(staleCacheSeconds(gitRef)).toBe(300);
   });
 
+  describe("edge cache envelope validation", () => {
+    const now = Date.parse("2026-10-01T12:00:00Z");
+    const valid = {
+      protocol_epoch: CACHE_PUBLICATION_EPOCH,
+      status: 200,
+      headers: {},
+      body: { source: "edge" },
+      body_encoding: "json",
+      created_at: "2026-10-01 11:59:59",
+      expires_at: "2026-10-01 12:01:00",
+    };
+    it.each([
+      ["null", null],
+      ["array", []],
+      ["primitive", 42],
+      ["missing creation time", { ...valid, created_at: undefined }],
+      ["null creation time", { ...valid, created_at: null }],
+      ["invalid creation time", { ...valid, created_at: "invalid" }],
+      ["null expiry", { ...valid, expires_at: null }],
+      ["invalid expiry", { ...valid, expires_at: "invalid" }],
+      ["array headers", { ...valid, headers: [] }],
+      ["non-string header", { ...valid, headers: { etag: 42 } }],
+      ["missing body", { ...valid, body: undefined }],
+      ["unknown encoding", { ...valid, body_encoding: "unknown" }],
+      ["non-text body", { ...valid, body_encoding: "text" }],
+      ["non-base64 body", { ...valid, body_encoding: "base64" }],
+      ["invalid status", { ...valid, status: 200.5 }],
+      ["error status", { ...valid, status: 500 }],
+      ["null identity", { ...valid, identity: null }],
+      ["unknown identity kind", { ...valid, identity: { id: "primary", kind: "other" } }],
+      ["missing identity ID", { ...valid, identity: { kind: "pat" } }],
+    ])("falls back to D1 for %s", async (_name, value) => {
+      vi.spyOn(Date, "now").mockReturnValue(now);
+      vi.stubGlobal("caches", { default: { match: async () => Response.json(value) } });
+      const onMiss = vi.fn();
+      const cached = await readGitHubCache(
+        cacheRowEnv({
+          created_at: valid.created_at,
+          expires_at: valid.expires_at,
+          body_json: '{"source":"shared"}',
+        }),
+        "key",
+        undefined,
+        60,
+        onMiss,
+      );
+      expect(cached?.body).toEqual({ source: "shared" });
+      expect(onMiss).toHaveBeenCalledExactlyOnceWith("unusable");
+    });
+
+    it.each([
+      { body_encoding: "json", body: null },
+      { body_encoding: "text", body: null },
+      { body_encoding: "text", body: "log" },
+      { body_encoding: "base64", body: "AAE=" },
+      { identity: { id: "primary", kind: "pat" } },
+      { identity: { id: "app", kind: "github_app" } },
+    ])("preserves valid optional envelope fields: %j", async (fields) => {
+      vi.spyOn(Date, "now").mockReturnValue(now);
+      vi.stubGlobal("caches", {
+        default: { match: async () => Response.json({ ...valid, ...fields }) },
+      });
+      await expect(readEdgeGitHubCache("key", 60)).resolves.toMatchObject(fields);
+    });
+  });
+
   it("serves fresh edge entries without reading D1", async () => {
     const cached = {
       protocol_epoch: "publication-v1",

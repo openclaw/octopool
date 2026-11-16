@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Fall back to shared storage when an edge cache response envelope is malformed instead of failing requests or serving invalid body encodings.
+
 - Refetch cached Actions logs with future creation timestamps instead of extending their freshness and retention windows.
 
 - Fall back from public workflow HTML when workflow IDs are malformed instead of returning coerced or nonpositive IDs.
