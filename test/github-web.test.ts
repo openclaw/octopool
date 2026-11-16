@@ -1468,6 +1468,56 @@ describe("github web provider", () => {
     });
   });
 
+  describe.each([1, 2])("workflow IDs on page %i", (page) => {
+    it.each(["0", "-1", "+1", "1e2", "0x10", "1.5", "01", " 12 ", " ", "", "9007199254740992"])(
+      "rejects malformed ID %j without returning a partial list",
+      async (id) => {
+        const malformedPage = workflowPage([[id, "CI", "ci.yml"]], 1);
+        const fetchMock = vi.fn().mockResolvedValue(new Response("rate limited", { status: 403 }));
+        if (page === 2) {
+          fetchMock.mockResolvedValueOnce(
+            new Response(workflowPage([[42, "Build", "build.yml"]], 2)),
+          );
+        }
+        fetchMock.mockResolvedValueOnce(new Response(malformedPage));
+        vi.stubGlobal("fetch", fetchMock);
+        const request = validateRelayRequest({
+          pool: "maintainers",
+          method: "GET",
+          path: "/repos/openclaw/octopool/actions/workflows",
+          headers: { "x-octopool-public-shape": "workflow-list-v1" },
+        });
+
+        await expect(
+          callGitHubWeb(env(), request, classifyRoute(request, policy)),
+        ).resolves.toBeUndefined();
+        expect(fetchMock).toHaveBeenCalledTimes(page + 1);
+      },
+    );
+  });
+
+  it.each(["1", "9007199254740991", "&#49;&#50;"])("preserves valid workflow ID %j", async (id) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(new Response(workflowPage([[id, "CI", "ci.yml"]], 1))),
+    );
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows",
+      headers: { "x-octopool-public-shape": "workflow-list-v1" },
+    });
+
+    await expect(
+      callGitHubWeb(env(), request, classifyRoute(request, policy)),
+    ).resolves.toMatchObject({
+      body: {
+        total_count: 1,
+        workflows: [{ id: id.startsWith("&#") ? 12 : Number(id), name: "CI" }],
+      },
+    });
+  });
+
   it("prefers the complete workflow list for shaped workflow views", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       new Response(
@@ -2248,7 +2298,7 @@ function connection(nodes: Record<string, unknown>[]): Record<string, unknown> {
 }
 
 function workflowPage(
-  workflows: [number, string, string, boolean?][],
+  workflows: [number | string, string, string, boolean?][],
   totalPages?: number,
 ): string {
   return `${workflows

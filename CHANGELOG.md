@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Fall back from public workflow HTML when workflow IDs are malformed instead of returning coerced or nonpositive IDs.
+
 - Reject malformed GitHub App token responses and blank or expired installation tokens before use.
 
 - Honor quoted request `max-age` values and ignore directive-like text inside quoted Cache-Control extensions.
