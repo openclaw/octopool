@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Refetch cached Actions logs with future creation timestamps instead of extending their freshness and retention windows.
+
 - Fall back from public workflow HTML when workflow IDs are malformed instead of returning coerced or nonpositive IDs.
 
 - Reject malformed GitHub App token responses and blank or expired installation tokens before use.

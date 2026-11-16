@@ -69,6 +69,7 @@ describe("cache lookup miss observations", () => {
       { "created-at": sqliteTimestamp(now - 7 * 86_400_000), "body-codec": "lossless-v1" },
     ],
     ["unusable", { "created-at": "invalid" }],
+    ["unusable", { "created-at": sqliteTimestamp(now + 60_000), "body-codec": "lossless-v1" }],
     ["unusable", { "created-at": sqliteTimestamp(now) }],
   ] as const)("reports R2 %s from the existing object read", async (reason, metadata) => {
     vi.spyOn(Date, "now").mockReturnValue(now);
@@ -78,6 +79,7 @@ describe("cache lookup miss observations", () => {
         : {
             customMetadata: metadata,
             body: { cancel: async () => {} },
+            arrayBuffer: async () => new ArrayBuffer(0),
           },
     );
     const env = { ACTIONS_LOGS: { get, delete: async () => {} } } as unknown as Env;

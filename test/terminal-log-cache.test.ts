@@ -9,7 +9,10 @@ import {
   terminalLogCacheKey,
   terminalLogCacheProof,
   terminalLogJobID,
+  terminalLogNeedsRevalidation,
+  type CachedTerminalLog,
 } from "../src/terminal-log-cache";
+import { sqliteTimestamp } from "../src/sqlite-time";
 import type { RelayRequest } from "../src/types";
 
 vi.mock("../src/github-web", () => ({ callGitHubWeb: vi.fn() }));
@@ -143,5 +146,32 @@ describe("terminal job completion proof", () => {
       body: { id: 42, status: "completed" },
     });
     await expect(prove()).resolves.toEqual({ key: terminalLogCacheKey(request) });
+  });
+});
+
+describe("terminal log revalidation age", () => {
+  const now = Date.parse("2026-10-01T12:00:00Z");
+  it.each([
+    { age: -1000, maxAge: undefined, expected: true },
+    { age: -86_400_000, maxAge: undefined, expected: true },
+    { age: -1000, maxAge: 60, expected: true },
+    { age: 0, maxAge: undefined, expected: false },
+    { age: 0, maxAge: 0, expected: true },
+    { age: 60_000, maxAge: 60, expected: false },
+    { age: 61_000, maxAge: 60, expected: true },
+    { age: 3_599_000, maxAge: undefined, expected: false },
+    { age: 3_600_000, maxAge: undefined, expected: true },
+    { age: Number.NaN, maxAge: undefined, expected: true },
+  ])("revalidates age=$age with maxAge=$maxAge: $expected", ({ age, maxAge, expected }) => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const cached: CachedTerminalLog = {
+      status: 200,
+      headers: {},
+      body: "log",
+      body_encoding: "text",
+      created_at: Number.isNaN(age) ? "invalid" : sqliteTimestamp(now - age),
+      expires_at: sqliteTimestamp(now + 86_400_000),
+    };
+    expect(terminalLogNeedsRevalidation(cached, maxAge)).toBe(expected);
   });
 });

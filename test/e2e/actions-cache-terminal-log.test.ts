@@ -10,6 +10,7 @@ import { queries } from "../../src/generated/sql";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { sqliteTimestamp } from "../../src/sqlite-time";
 import { terminalLogCacheKey, terminalLogCacheProof } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";
 import {
@@ -1148,7 +1149,11 @@ describe("terminal Actions log cache", () => {
     expect(released).toBe(2);
   });
 
-  it("refetches an expired R2 log object", async () => {
+  it.each([
+    { age: 8 * 86_400_000, reason: "expired" },
+    { age: -60_000, reason: "unusable" },
+    { age: -86_400_000, reason: "unusable" },
+  ])("refetches an R2 log object with age=$age ($reason)", async ({ age, reason }) => {
     const upstream = terminalLogUpstream("completed");
     vi.stubGlobal("fetch", upstream);
     await relay(LOG_PATH);
@@ -1164,7 +1169,7 @@ describe("terminal Actions log cache", () => {
       ...(object!.httpMetadata === undefined ? {} : { httpMetadata: object!.httpMetadata }),
       customMetadata: {
         ...object!.customMetadata,
-        "created-at": "2000-01-01 00:00:00",
+        "created-at": sqliteTimestamp(Date.now() - age),
       },
     });
 
@@ -1183,7 +1188,7 @@ describe("terminal Actions log cache", () => {
     expect(
       (await env.DB.prepare("SELECT cache_miss_reason FROM audit_events ORDER BY rowid").all())
         .results,
-    ).toEqual([{ cache_miss_reason: "absent" }, { cache_miss_reason: "expired" }]);
+    ).toEqual([{ cache_miss_reason: "absent" }, { cache_miss_reason: reason }]);
   });
 
   it("re-establishes fresh public proof before serving an R2 hit", async () => {
