@@ -11,7 +11,11 @@ export function parseWorkflowListHTML(
   for (const match of html.matchAll(
     /<li\b([^>]*data-test-selector="workflow-rendered"[^>]*)>([\s\S]*?)<\/li>/g,
   )) {
-    const id = Number(htmlAttribute(match[1]!, "data-item-id"));
+    const rawID = htmlAttribute(match[1]!, "data-item-id");
+    if (rawID === undefined || !/^[1-9][0-9]*$/.test(rawID)) {
+      return undefined;
+    }
+    const id = Number(rawID);
     const body = match[2]!;
     const href = /<a\b[^>]*href="([^"]+)"/.exec(body)?.[1];
     const name = textMatch(body, /<tool-tip\b[^>]*>([\s\S]*?)<\/tool-tip>/);
