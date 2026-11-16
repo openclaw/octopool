@@ -33,6 +33,7 @@ import {
 import { coalesceGitHubCacheMiss } from "./cache-coalesce";
 import { cacheResponseEligible } from "./cache-policy";
 import { projectRunListItem, runViewListLookup } from "./run-view-superset";
+import { workflowListItem, workflowViewListLookup } from "./workflow-view-superset";
 import { startOwnedCacheFill, type CacheFillOutcome, type OwnedCacheFill } from "./cache-fill";
 import { scheduleCacheRefresh, supportsStaleWhileRevalidate, withinSWRWindow } from "./cache-swr";
 import { insertAudit, scheduleRelayAudit, loadIdentities, loadPoolPolicy } from "./db";
@@ -41,11 +42,7 @@ import { callGitHub, callPublicGitHub, GitHubTransportError, probeGitHubLog } fr
 import { githubToken, githubRepositoryToken, IdentityCredentialError } from "./github-auth";
 import { graphQLReadCacheable } from "./graphql-read";
 import { storePublicAPIRate, supportsAnonymousGitHubAPI } from "./github-public-api";
-import {
-  defaultGitHubJSONAccept,
-  isTransientGitHubStatus,
-  transformedGitHubHeaders,
-} from "./github-response";
+import { isTransientGitHubStatus, transformedGitHubHeaders } from "./github-response";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb, hasNoQuotaGitHubWebRequest } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
@@ -1721,62 +1718,16 @@ async function readRunViewFromListCache(
 async function readWorkflowCatalogueCache(
   state: ActiveRelay,
 ): Promise<CachedGitHubResponse | undefined> {
-  if (
-    !state.cacheEnabled ||
-    state.maxAgeSeconds === 0 ||
-    state.route.kind !== "workflow_view" ||
-    Object.keys(state.request.query ?? {}).length !== 0 ||
-    state.request.headers?.["x-octopool-public-shape"] !== undefined ||
-    !defaultGitHubJSONAccept(state.request.headers?.accept)
-  )
-    return undefined;
-  const match = /^(.*\/actions\/workflows)\/([1-9][0-9]*|[A-Za-z0-9_.-]+\.ya?ml)$/.exec(
-    state.request.path,
-  );
-  if (match === null) return undefined;
-  const selector = match[2]!;
-  const filename = selector.endsWith(".yml") || selector.endsWith(".yaml");
-  if (!filename && !Number.isSafeInteger(Number(selector))) return undefined;
-  const request: RelayRequest = {
-    ...state.request,
-    path: match[1]!,
-    query: { page: "1", per_page: "100" },
-  };
+  if (!state.cacheEnabled || state.maxAgeSeconds === 0) return undefined;
+  const lookup = workflowViewListLookup(state.request, state.route);
+  if (lookup === undefined) return undefined;
+  const { request } = lookup;
   const route = classifyRoute(request, state.policy);
-  const expectedURL = `https://api.github.com${state.request.path}`;
-  const expectedPath = `.github/workflows/${selector}`;
   const probe = async (cached: CachedGitHubResponse | undefined, identity?: Identity) => {
+    if (cached === undefined) return undefined;
+    const item = workflowListItem(cached, lookup);
     if (
-      cached === undefined ||
-      cached.status !== 200 ||
-      cached.body_encoding !== "json" ||
-      !isRecord(cached.body) ||
-      !Array.isArray(cached.body.workflows)
-    )
-      return undefined;
-    // Numeric IDs are unique within a partial page; filenames need the complete
-    // catalogue to rule out an older workflow with the same path on another page.
-    if (
-      filename &&
-      (cached.body.total_count !== cached.body.workflows.length ||
-        Object.keys(cached.headers).some((key) => key.toLowerCase() === "link"))
-    )
-      return undefined;
-    const matches = cached.body.workflows.filter(
-      (item) =>
-        isRecord(item) &&
-        (filename
-          ? item.path === expectedPath
-          : String(item.id) === selector || item.url === expectedURL),
-    );
-    const item = matches[0];
-    if (
-      matches.length !== 1 ||
-      !isRecord(item) ||
-      !Number.isSafeInteger(item.id) ||
-      Number(item.id) <= 0 ||
-      (filename ? item.state !== "active" : item.id !== Number(selector)) ||
-      item.url !== `https://api.github.com${match[1]}/${item.id}` ||
+      item === undefined ||
       !(await cachedResponseAvailable(state.env, request.pool, route, cached, identity))
     )
       return undefined;
