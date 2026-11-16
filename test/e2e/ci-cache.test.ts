@@ -23,6 +23,46 @@ const result = (status: string) => ({
 });
 
 describe("mutable commit CI cache", () => {
+  it.each(["null", "body", "timestamp"])(
+    "recovers a corrupt %s edge envelope from D1",
+    async (corrupt) => {
+      await seedPool();
+      const upstream = vi.fn<typeof fetch>(async () => jsonResponse(result("completed")));
+      vi.stubGlobal("fetch", upstream);
+      const request = { pool: POOL, method: "GET" as const, path };
+      const key = await githubCacheKey(
+        POOL,
+        request,
+        classifyRoute(request, defaultPolicy("openclaw")),
+      );
+      expect(await (await relay(path)).json()).toMatchObject({ body: result("completed") });
+      const edge = await readEdgeJSON<CachedGitHubResponse & { protocol_epoch: string }>(
+        GITHUB_EDGE_CACHE_NAMESPACE,
+        key,
+      );
+      expect(edge).toBeDefined();
+      await writeEdgeJSON(
+        GITHUB_EDGE_CACHE_NAMESPACE,
+        key,
+        corrupt === "null"
+          ? null
+          : { ...edge, ...(corrupt === "body" ? { body_encoding: "text" } : { created_at: null }) },
+        60,
+      );
+
+      const response = await relay(path);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        body: result("completed"),
+        body_encoding: "json",
+        relay: { cache: "hit" },
+      });
+      expect(upstream).toHaveBeenCalledTimes(1);
+      const { backend: _backend, ...shared } = edge!;
+      expect(await readEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, key)).toEqual(shared);
+    },
+  );
+
   it("refreshes completed checks after a same-SHA rerun within the mutable TTL", async () => {
     await seedPool();
     let status = "completed";

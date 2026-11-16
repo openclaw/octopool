@@ -380,16 +380,9 @@ async function probeEdgeGitHubCache(
 ): Promise<CachedGitHubResponse | undefined> {
   using _phase = relayPhase("cache_lookup");
   if (maxAgeSeconds === 0) return undefined;
-  const edge = await readEdgeJSON<CachedGitHubResponse & { protocol_epoch: string }>(
-    EDGE_CACHE_NAMESPACE,
-    cacheKey,
-  );
+  const edge = await readEdgeJSON<unknown>(EDGE_CACHE_NAMESPACE, cacheKey);
   if (edge !== undefined) {
-    if (
-      edge.protocol_epoch !== CACHE_PUBLICATION_EPOCH ||
-      typeof edge.expires_at !== "string" ||
-      !Number.isFinite(parseSQLiteTimestamp(edge.expires_at))
-    ) {
+    if (!validEdgeCachedResponse(edge)) {
       onMiss?.("unusable");
       return undefined;
     }
@@ -406,6 +399,36 @@ async function probeEdgeGitHubCache(
     }
   }
   return undefined;
+}
+
+function validEdgeCachedResponse(
+  value: unknown,
+): value is CachedGitHubResponse & { protocol_epoch: string } {
+  if (
+    !isRecord(value) ||
+    value.protocol_epoch !== CACHE_PUBLICATION_EPOCH ||
+    typeof value.status !== "number" ||
+    !Number.isInteger(value.status) ||
+    value.status < 200 ||
+    value.status >= 300 ||
+    !isRecord(value.headers) ||
+    Object.values(value.headers).some((header) => typeof header !== "string") ||
+    !Object.hasOwn(value, "body") ||
+    !validBodyEncoding(value.body_encoding) ||
+    !validCachedBody(value.body, value.body_encoding) ||
+    typeof value.created_at !== "string" ||
+    !Number.isFinite(parseSQLiteTimestamp(value.created_at)) ||
+    typeof value.expires_at !== "string" ||
+    !Number.isFinite(parseSQLiteTimestamp(value.expires_at))
+  )
+    return false;
+  return (
+    value.identity === undefined ||
+    (isRecord(value.identity) &&
+      typeof value.identity.id === "string" &&
+      value.identity.id !== "" &&
+      (value.identity.kind === "pat" || value.identity.kind === "github_app"))
+  );
 }
 
 function withinRequestedMaxAge(cached: CachedGitHubResponse, maxAgeSeconds?: number): boolean {
