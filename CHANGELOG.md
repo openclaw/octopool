@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Reject malformed GitHub App token responses and blank or expired installation tokens before use.
+
 - Honor quoted request `max-age` values and ignore directive-like text inside quoted Cache-Control extensions.
 
 - Reject malformed UTF-8 in anonymous API JSON and Actions job-group responses instead of returning silently altered text.

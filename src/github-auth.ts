@@ -188,12 +188,26 @@ async function githubAppInstallationToken(
       `GitHub App token exchange failed with ${response.status}`,
     );
   }
-  const body = (await response.json()) as { token?: unknown; expires_at?: unknown };
-  if (typeof body.token !== "string" || typeof body.expires_at !== "string") {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new HttpError(
+      502,
+      "github_app_token_failed",
+      "GitHub App token response was invalid JSON",
+    );
+  }
+  if (
+    !isRecord(body) ||
+    typeof body.token !== "string" ||
+    body.token.trim() === "" ||
+    typeof body.expires_at !== "string"
+  ) {
     throw new HttpError(502, "github_app_token_failed", "GitHub App token response was incomplete");
   }
   const expiresAt = Date.parse(body.expires_at);
-  if (!Number.isFinite(expiresAt)) {
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
     throw new HttpError(502, "github_app_token_failed", "GitHub App token expiry was invalid");
   }
   installationTokenCache.set(cacheKey, { token: body.token, expiresAt });
