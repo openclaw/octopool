@@ -85,6 +85,9 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   duplicate key binding, and checked the actual OAuth fetch signal. 49 scoped
   cases passed; invalid-signature mutation caught.
   [#296](https://github.com/openclaw/octopool/pull/296).
+  Cached App-token reuse is checked one millisecond before the refresh cutoff,
+  followed by keyless failover at the cutoff. Moving refresh one second early
+  is caught without adding a separate test or wall-clock wait.
 - **Smoke tests:** deployed-host smoke uses unique temporary state and exit/signal
   cleanup. CLI-to-Worker smoke now owns its descendants, state and port. Native
   GitHub CLI protocol validation is documented and passed locally. Live Linux
