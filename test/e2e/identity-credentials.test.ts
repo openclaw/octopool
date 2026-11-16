@@ -188,7 +188,7 @@ describe("selected identity credential failures", () => {
     }
   });
 
-  it("retains a cached App token without a key, then fails over at refresh", async () => {
+  it("keeps cached App tokens until refresh, then fails over without a key", async () => {
     await seedPool({ secondary: true });
     await appIdentity(92001);
     const now = Date.now();
@@ -211,6 +211,7 @@ describe("selected identity credential failures", () => {
         }),
       );
       expect(await (await requestWithEnv()).json()).toMatchObject({ identity: { id: "primary" } });
+      vi.setSystemTime(now + 3_539_999);
       expect(await (await requestWithEnv({ TEST_APP_KEY: undefined })).json()).toMatchObject({
         identity: { id: "primary" },
       });
