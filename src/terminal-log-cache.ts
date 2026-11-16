@@ -126,6 +126,7 @@ export function terminalLogNeedsRevalidation(
   const ageMs = Date.now() - createdAt;
   return (
     !Number.isFinite(createdAt) ||
+    ageMs < 0 ||
     ageMs >= LOG_REVALIDATE_SECONDS * 1000 ||
     maxAgeSeconds === 0 ||
     (maxAgeSeconds !== undefined && ageMs > maxAgeSeconds * 1000)
@@ -154,12 +155,14 @@ export async function readTerminalLogCache(
     }
     const createdAt = object.customMetadata?.[CREATED_AT_METADATA];
     const createdAtMs = createdAt === undefined ? Number.NaN : parseSQLiteTimestamp(createdAt);
+    const ageMs = Date.now() - createdAtMs;
     if (
       createdAt === undefined ||
       !Number.isFinite(createdAtMs) ||
-      Date.now() - createdAtMs >= LOG_TTL_SECONDS * 1000
+      ageMs < 0 ||
+      ageMs >= LOG_TTL_SECONDS * 1000
     ) {
-      onMiss?.(Number.isFinite(createdAtMs) ? "expired" : "unusable");
+      onMiss?.(ageMs >= LOG_TTL_SECONDS * 1000 ? "expired" : "unusable");
       await object.body.cancel();
       try {
         await env.ACTIONS_LOGS.delete(key);
