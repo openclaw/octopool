@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Escape complete pool-name path segments in CLI health, stats, and identity requests so reserved characters cannot change the URL path or query.
+
 - Fall back to shared storage when an edge cache response envelope is malformed instead of failing requests or serving invalid body encodings.
 
 - Refetch cached Actions logs with future creation timestamps instead of extending their freshness and retention windows.

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -124,7 +125,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func urlPath(value string) string {
-	return strings.ReplaceAll(value, "/", "%2F")
+	return url.PathEscape(value)
 }
 
 func apiURL(base string, path string) string {
