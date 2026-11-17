@@ -114,6 +114,7 @@ func normalizeBaseURL(rawURL string) (string, error) {
 		return "", fmt.Errorf("URL %q is missing a host", rawURL)
 	}
 	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	parsed.Fragment = ""
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 	return parsed.String(), nil

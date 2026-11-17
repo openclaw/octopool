@@ -35,6 +35,8 @@
 
 ### Fixes
 
+- Normalize login and discovery URLs with an empty query marker so the CLI requests the correct discovery and API paths.
+
 - Escape complete pool-name path segments in CLI health, stats, and identity requests so reserved characters cannot change the URL path or query.
 
 - Fall back to shared storage when an edge cache response envelope is malformed instead of failing requests or serving invalid body encodings.
