@@ -35,32 +35,17 @@ export function backendOverloadedError(error: unknown): HttpError | undefined {
 }
 
 export function errorResponse(error: unknown, requestId?: string): Response {
-  const overloaded = backendOverloadedError(error);
-  if (overloaded !== undefined) {
-    error = overloaded;
-  }
-  if (error instanceof HttpError) {
-    return jsonResponse(
-      {
-        error: {
-          code: error.code,
-          message: error.message,
-          request_id: requestId,
-          ...(error.details === undefined ? {} : { details: error.details }),
-        },
-      },
-      error.status,
-    );
-  }
+  const failure = error instanceof HttpError ? error : backendOverloadedError(error);
   return jsonResponse(
     {
       error: {
-        code: "internal_error",
-        message: "Internal error",
+        code: failure === undefined ? "internal_error" : failure.code,
+        message: failure === undefined ? "Internal error" : failure.message,
         request_id: requestId,
+        ...(failure?.details === undefined ? {} : { details: failure.details }),
       },
     },
-    500,
+    failure === undefined ? 500 : failure.status,
   );
 }
 
