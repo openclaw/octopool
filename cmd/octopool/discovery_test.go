@@ -17,6 +17,55 @@ func TestNormalizeBaseURLDefaultsSchemeAndDropsQuery(t *testing.T) {
 	}
 }
 
+func TestNormalizeBaseURLDropsEmptyQuery(t *testing.T) {
+	for _, raw := range []string{
+		"https://octopool.example.com/path?",
+		"https://octopool.example.com/path/?",
+		"https://octopool.example.com/path/?#fragment",
+		"octopool.example.com/path?",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			got, err := normalizeBaseURL(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != "https://octopool.example.com/path" {
+				t.Fatalf("normalizeBaseURL() = %q", got)
+			}
+		})
+	}
+}
+
+func TestDiscoverLoginServerDropsEmptyQuery(t *testing.T) {
+	for _, tt := range []struct{ name, inputSuffix, apiSuffix string }{
+		{"input", "?", ""},
+		{"advertised", "", "?"},
+		{"both with fragments", "?#fragment", "?#fragment"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OCTOPOOL_POOL", "")
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/.well-known/octopool" || r.URL.RawQuery != "" {
+					t.Errorf("unexpected discovery request %s", r.RequestURI)
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("content-type", "application/json")
+				_, _ = w.Write([]byte(`{"service":"octopool","version":1,"api_base":"` + server.URL + tt.apiSuffix + `","auth":{"cli_github_token":true}}`))
+			}))
+			defer server.Close()
+			resolved, err := discoverLoginServer(t.Context(), server.URL+tt.inputSuffix, "", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.APIBase != server.URL {
+				t.Fatalf("APIBase = %q, want %q", resolved.APIBase, server.URL)
+			}
+		})
+	}
+}
+
 func TestDiscoverLoginServerPoolPrecedence(t *testing.T) {
 	for _, test := range []struct {
 		name        string
