@@ -26,6 +26,12 @@ Use one short, plain-language sentence. For fixes, prefer:
 "Fixes: <what goes wrong> when <trigger or condition>."
 For other changes, describe the need without inventing a bug.
 Name the affected workflow, not the code-level cause.
+Start with the problem or task and why it matters to the reader, before
+implementation details.
+
+Illustrative Octopool example (not a claim about this PR):
+Less useful: "Add cache-bypass header handling."
+More useful: "Operators need fresh PR state before deciding whether to merge."
 -->
 
 ## User Impact
@@ -41,6 +47,7 @@ Keep important risks, breaking changes, migrations, and required user actions vi
 
 <!--
 Briefly explain how the change addresses the problem without repeating the impact.
+Now describe the approach, after establishing the problem or task and its value.
 Keep the body short. Leave file lists, internal acronyms, and root-cause walkthroughs
 in the diff or optional <details>; include technical detail only when it explains
 behavior or a material tradeoff. Do not hide risks or required actions in <details>.
@@ -58,4 +65,11 @@ Reviewers will inspect the code, tests, and CI. Use this section to make the
 validation easy to understand, not to restate the diff.
 Summarize what was checked and the result; note meaningful gaps. Link long output
 or put it in optional <details>, keeping the useful evidence summary visible.
+Lead with the observed outcome and what it demonstrates, then the commands,
+logs, or links that support it.
+
+Illustrative Octopool example (not a claim about this PR):
+Less useful: "Ran the cache-bypass tests."
+More useful: "Fresh PR reads bypass cached responses in the focused checks.
+Live GitHub calls were not checked." Follow with the exact command or evidence link.
 -->
