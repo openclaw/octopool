@@ -234,5 +234,9 @@ export function routeParam(pathname: string, pattern: RegExp, field: string): st
   if (value === undefined || value === "") {
     throw new HttpError(404, "not_found", "Route not found");
   }
-  return value;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new HttpError(400, "invalid_path", "Invalid path encoding");
+  }
 }
