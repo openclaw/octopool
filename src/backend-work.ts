@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { relayPhase, withRelayTiming } from "./relay-timing";
 import { HttpError, parsePositiveInt } from "./http";
-import { relayStorageUnavailableError } from "./local-fallback";
+import { createLocalFallbackError } from "./local-fallback";
 
 export const BACKEND_LEASE_MS = 30_000;
 export const BACKEND_DEADLINE_MS = 60_000;
@@ -149,7 +149,8 @@ export class BackendWork {
         } catch (error) {
           if (error instanceof HttpError) throw error;
           unavailable = true;
-          if (operation !== "acquire" || attempts === 2) throw relayStorageUnavailableError();
+          if (operation !== "acquire" || attempts === 2)
+            throw createLocalFallbackError("relay_storage_unavailable");
         }
         // Reuse the permit ID: a lost acknowledgement may have committed the grant.
         await this.waitForAdmissionRetry();
