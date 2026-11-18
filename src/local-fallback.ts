@@ -5,20 +5,18 @@ import { isTransientRelayStorageError } from "./relay-storage-error";
 export function localFallbackError(error: unknown): HttpError | undefined {
   if (isTransientRelayStorageError(error)) {
     console.error("relay storage unavailable", error);
-    return relayStorageUnavailableError();
+    return createLocalFallbackError("relay_storage_unavailable");
   }
   const typed = error instanceof HttpError ? error : backendOverloadedError(error);
   if (typed === undefined || !localFallbackReasons.has(typed.code)) {
     return undefined;
   }
-  return new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-    reason: typed.code,
-  });
+  return createLocalFallbackError(typed.code);
 }
 
-export function relayStorageUnavailableError(): HttpError {
+export function createLocalFallbackError(reason: string): HttpError {
   return new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-    reason: "relay_storage_unavailable",
+    reason,
   });
 }
 

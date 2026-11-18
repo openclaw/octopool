@@ -50,7 +50,11 @@ import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
 import { HttpError, jsonResponse, requireJsonContentType } from "./http";
 import { isRecord } from "./object";
-import { githubResponseLocalFallbackReason, localFallbackError } from "./local-fallback";
+import {
+  createLocalFallbackError,
+  githubResponseLocalFallbackReason,
+  localFallbackError,
+} from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
 import { loadStringRewritePolicy } from "./string-rewrite-policy";
 import { readStringRewriteJSON } from "./string-rewrite-json";
@@ -352,9 +356,7 @@ async function prepareRelay(
 async function executeRelay(state: ActiveRelay): Promise<Response> {
   // Caller-sensitive reads hand off before cache, public-repo probes, or any backend.
   if (isNativeReadRoute({ capabilities: capabilitiesForRouteKind(state.route.kind) })) {
-    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-      reason: "local_credentials_required",
-    });
+    throw createLocalFallbackError("local_credentials_required");
   }
   if (
     terminalLogJobID(state.request, state.route) !== undefined &&
@@ -462,9 +464,7 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   }
   await ensurePublicGitHubRepo(state.env, state.route);
   if (fallback === "local") {
-    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-      reason: "web_only_unavailable",
-    });
+    throw createLocalFallbackError("web_only_unavailable");
   }
   if (fallback === "github_public") {
     return callPublicBackend(state);
@@ -898,9 +898,7 @@ async function callTokenFreeBackend(
     if (isIssueEventRoute(state.route.kind)) {
       // No response to prove public: hand off before credentialed repo probes.
       // The error handler may serve only a covered entry from the new generation.
-      throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-        reason: "web_only_unavailable",
-      });
+      throw createLocalFallbackError("web_only_unavailable");
     }
     return undefined;
   }
@@ -960,9 +958,7 @@ async function callPublicBackend(state: ActiveRelay): Promise<Response> {
       // if the opportunistic pooled attempt cannot serve the request.
     }
   }
-  throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-    reason: fallbackReason,
-  });
+  throw createLocalFallbackError(fallbackReason);
 }
 
 async function callIdentityPool(
@@ -1086,9 +1082,7 @@ async function callIdentityPool(
   if (stale !== undefined) {
     return stale;
   }
-  throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-    reason: fallbackReason,
-  });
+  throw createLocalFallbackError(fallbackReason);
 }
 
 async function recoverGitHubTransportFailure(
@@ -1173,9 +1167,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
         coordinatorResult(state, result.identity, result.github, result.rate),
       );
     }
-    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-      reason: "pagination_exhausted",
-    });
+    throw createLocalFallbackError("pagination_exhausted");
   }
   if (completedRunJobsResponse(result.github)) {
     state.route = await proveRunAttemptCompleted(state);
@@ -2179,9 +2171,7 @@ async function serveFreshCachedRelayResponse(
 function rejectIncompleteRunJobs(state: ActiveRelay, response: GitHubRelayResponse): void {
   if (runJobsSupersetIncomplete(response, state.runJobsSuperset)) {
     recordCacheMiss(state, "unusable");
-    throw new HttpError(424, "fallback_local", "Run this request with local GitHub credentials", {
-      reason: "pagination_exhausted",
-    });
+    throw createLocalFallbackError("pagination_exhausted");
   }
 }
 
