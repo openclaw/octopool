@@ -364,6 +364,7 @@ func writeGHAPIPages(
 		// coalesces their arrays based on the upstream content type.
 		contentType, _ := relayResponseHeader(envelope.Headers, "content-type")
 		mediaType, _, _ := strings.Cut(contentType, ";")
+		mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 		hasOpaqueBody = hasOpaqueBody || (envelope.BodyEncoding != "json" &&
 			!strings.HasSuffix(mediaType, "/json") && !strings.HasSuffix(mediaType, "+json"))
 	}

@@ -57,6 +57,11 @@ func TestWriteGHAPIPagesPreservesRawBodies(t *testing.T) {
 		{"empty", "text", "text/plain", []string{`null`, `""`}, ""},
 		{"json array formatting", "json", "application/json", []string{`[1]`, `[2]`}, "[1,2]\n"},
 		{"text encoded json", "text", "application/vnd.github+json; charset=utf-8", []string{`"[1]"`, `"[2]"`}, "[1,2]\n"},
+		{"uppercase json", "text", "APPLICATION/JSON", []string{`"[1]"`, `"[2]"`}, "[1,2]\n"},
+		{"mixed case vendor json", "text", "Application/Vnd.GitHub+Json; charset=utf-8", []string{`"[1]"`, `"[2]"`}, "[1,2]\n"},
+		{"json whitespace", "text", " application/json ", []string{`"[1]"`, `"[2]"`}, "[1,2]\n"},
+		{"json parameter whitespace", "text", "application/json ; charset=utf-8", []string{`"[1]"`, `"[2]"`}, "[1,2]\n"},
+		{"mixed case non json", "text", "Text/Plain; charset=utf-8", []string{`"[1]"`, `"[2]"`}, "[1][2]"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			pages := make([]relayEnvelope, 0, len(test.bodies))
