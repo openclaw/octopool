@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Resolve encoded pool names consistently in health, stats, string-rewrite policy, and admin identity routes; reject malformed path encoding.
+- Update the development test runner to Vitest 4.1.12 while retaining the existing Cloudflare Worker test pool.
 
 - Send encoded CLI JSON request bodies without an extra full-body string copy, preserving redirect replay.
 
