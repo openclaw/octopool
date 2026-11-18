@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Update the development test runner to Vitest 4.1.12 while retaining the existing Cloudflare Worker test pool.
+
 - Send encoded CLI JSON request bodies without an extra full-body string copy, preserving redirect replay.
 
 - Bound the fallback CLI shim-content probe to 8 KiB plus one byte instead of loading whole candidate executables.
