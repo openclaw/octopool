@@ -31,11 +31,8 @@ export async function readBodyCapped(
       }
       size += value.byteLength;
       if (size > capBytes) {
-        try {
-          await reader.cancel();
-        } catch {
-          // Preserve the response-size error when stream cancellation itself fails.
-        }
+        // Tee cancellation can wait for another consumer; report the cap immediately.
+        void reader.cancel().catch(() => undefined);
         throw tooLarge();
       }
       chunks.push(value);
