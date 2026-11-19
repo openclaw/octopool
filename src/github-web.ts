@@ -47,20 +47,8 @@ export async function callGitHubWeb(
       await cancelResponseBody(response);
       continue;
     }
-    try {
-      const payload = await web.payload(
-        await readWebBody(response, web.capBytes),
-        response.headers,
-        response.status,
-        responseURL,
-      );
-      if (payload !== undefined) {
-        return { ...payload, backend: web.usesApiQuota ? "github" : "web" };
-      }
-    } catch (error) {
-      rethrowStringRewriteDenial(error);
-      continue;
-    }
+    const payload = await webPayload(web, response, responseURL);
+    if (payload !== undefined) return payload;
   }
   return undefined;
 }
@@ -113,17 +101,28 @@ export async function callAnonymousGitHubAPI(
       ? { rateLimited: true }
       : {};
   }
+  const payload = await webPayload(api, response, responseURL);
+  return payload === undefined ? {} : { response: payload };
+}
+
+async function webPayload(
+  web: WebRequest,
+  response: Response,
+  responseURL: string,
+): Promise<GitHubRelayResponse | undefined> {
   try {
-    const payload = await api.payload(
-      await readWebBody(response, api.capBytes),
+    const payload = await web.payload(
+      await readWebBody(response, web.capBytes),
       response.headers,
       response.status,
       responseURL,
     );
-    return payload === undefined ? {} : { response: { ...payload, backend: "github" } };
+    return payload === undefined
+      ? undefined
+      : { ...payload, backend: web.usesApiQuota ? "github" : "web" };
   } catch (error) {
     rethrowStringRewriteDenial(error);
-    return {};
+    return undefined;
   }
 }
 
