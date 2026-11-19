@@ -15,14 +15,28 @@ export function textMatch(input: string, pattern: RegExp): string | undefined {
 export function stripHTMLTags(value: string): string {
   let text = "";
   let insideTag = false;
+  let quote: string | undefined;
   // An unmatched "<" starts malformed markup; drop that tail instead of returning an active tag.
-  for (const character of value) {
-    if (character === "<") {
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index]!;
+    if (!insideTag) {
+      if (character !== "<") {
+        text += character;
+        continue;
+      }
+      if (value.startsWith("<!--", index)) {
+        const end = value.indexOf("-->", index + 4);
+        if (end === -1) break;
+        index = end + 2;
+        continue;
+      }
       insideTag = true;
-    } else if (character === ">" && insideTag) {
+    } else if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === ">") {
       insideTag = false;
-    } else if (!insideTag) {
-      text += character;
     }
   }
   return text;

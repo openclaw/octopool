@@ -46,4 +46,23 @@ describe("GitHub HTML text extraction", () => {
       "safe text",
     );
   });
+
+  it.each([
+    `<span title="a > b">visible</span>`,
+    `<span title='a > b'>visible</span>`,
+    `<span title="a < b > c" data-note="'">visible</span>`,
+    `<span title='a < b > c' data-note='"'>visible</span>`,
+    `<!-- " > hidden -->visible`,
+    `<!-- <span title='hidden'> -->visible`,
+  ])("ignores angle brackets inside attributes and comments: %s", (html) => {
+    expect(plainHTML(`before ${html} after`)).toBe("before visible after");
+    expect(textMatch(`title: ${html}`, /^title: (.*)$/)).toBe("visible");
+  });
+
+  it.each([`<span title="a > b`, `<span title='a > b`, `<!-- hidden > tail`])(
+    "drops unterminated quoted tags and comments: %s",
+    (tail) => {
+      expect(plainHTML(`safe ${tail}`)).toBe("safe");
+    },
+  );
 });
