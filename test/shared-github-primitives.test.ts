@@ -133,6 +133,31 @@ describe("shared GitHub primitives", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it("rejects an oversized tee branch without waiting for the other branch", async () => {
+    const [body, other] = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+      },
+    }).tee();
+    const failure = new Error("configured cap error");
+    let outcome: unknown;
+    const read = readBodyCapped(new Response(body), 3, () => failure).then(
+      (value) => {
+        outcome = value;
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+    try {
+      await vi.waitFor(() => expect(outcome).toBe(failure));
+      expect(body.locked).toBe(false);
+    } finally {
+      await other.cancel();
+      await read;
+    }
+  });
+
   it.each([false, true])(
     "releases the crossing-chunk reader when cancellation throws: %s",
     async (throws) => {
