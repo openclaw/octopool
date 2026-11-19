@@ -7,10 +7,10 @@ export type GitHubRate = {
 
 export function rateFromHeaders(headers: Record<string, string>): GitHubRate {
   const out: GitHubRate = {};
-  const limit = parseHeaderInt(headers["x-ratelimit-limit"]);
-  const remaining = parseHeaderInt(headers["x-ratelimit-remaining"]);
-  const resetAt = parseHeaderInt(headers["x-ratelimit-reset"]);
-  const retryAfter = parseHeaderInt(headers["retry-after"]);
+  const limit = parseRateHeaderInt(headers["x-ratelimit-limit"]);
+  const remaining = parseRateHeaderInt(headers["x-ratelimit-remaining"]);
+  const resetAt = parseRateHeaderInt(headers["x-ratelimit-reset"]);
+  const retryAfter = parseRateHeaderInt(headers["retry-after"]);
   if (limit !== undefined) {
     out.limit = limit;
   }
@@ -32,7 +32,7 @@ export function rateFromHeaders(headers: Record<string, string>): GitHubRate {
   return out;
 }
 
-function parseHeaderInt(value: string | undefined): number | undefined {
+export function parseRateHeaderInt(value: string | undefined): number | undefined {
   if (value === undefined || value === "" || /[^0-9]/.test(value)) {
     return undefined;
   }
