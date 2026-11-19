@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep quoted HTML attributes and comments out of extracted GitHub titles and text when they contain angle brackets.
+
 - Return response-size errors immediately when cancelling an oversized stream waits for another consumer.
 
 - Merge paginated CLI JSON arrays when the response Content-Type uses mixed case or whitespace.
