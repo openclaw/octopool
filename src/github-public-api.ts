@@ -1,3 +1,4 @@
+import { parseRateHeaderInt } from "./github-rate";
 import { responseCapBytes } from "./github-limits";
 import { timingD1Identity } from "./relay-timing-bindings";
 import { withRelayTiming } from "./relay-timing";
@@ -75,9 +76,9 @@ export async function storePublicAPIRate(
   headers: Headers,
   ctx?: Pick<ExecutionContext, "waitUntil">,
 ): Promise<void> {
-  const limit = headerInt(headers, "x-ratelimit-limit");
-  const remaining = headerInt(headers, "x-ratelimit-remaining");
-  const resetAt = headerInt(headers, "x-ratelimit-reset");
+  const limit = parseRateHeaderInt(headers.get("x-ratelimit-limit") ?? undefined);
+  const remaining = parseRateHeaderInt(headers.get("x-ratelimit-remaining") ?? undefined);
+  const resetAt = parseRateHeaderInt(headers.get("x-ratelimit-reset") ?? undefined);
   if (limit === undefined || remaining === undefined || resetAt === undefined || limit <= 0) {
     return;
   }
@@ -144,13 +145,4 @@ function parsePublicReleaseBody(body: Uint8Array, route: RouteInfo): unknown | u
 
 function releaseDraft(value: unknown): boolean {
   return typeof value === "object" && value !== null && "draft" in value && value.draft === true;
-}
-
-function headerInt(headers: Headers, name: string): number | undefined {
-  const value = headers.get(name);
-  if (value === null || !/^[0-9]+$/.test(value)) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
