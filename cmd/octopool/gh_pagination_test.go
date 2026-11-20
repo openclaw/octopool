@@ -45,6 +45,49 @@ func TestRunGHAPIPaginatesArrayResponse(t *testing.T) {
 	}
 }
 
+func TestRunGHAPIPaginationRejectsChangedShape(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		first, second json.RawMessage
+	}{
+		{"array to object", json.RawMessage(`[{"id":1}]`), json.RawMessage(`{"total_count":1,"items":[{"id":2}]}`)},
+		{"object to array", json.RawMessage(`{"total_count":2,"items":[{"id":1}]}`), json.RawMessage(`[]`)},
+		{"changed collection key", json.RawMessage(`{"total_count":2,"items":[{"id":1}]}`), json.RawMessage(`{"total_count":2,"other":[{"id":2}]}`)},
+	} {
+		for _, slurp := range []bool{false, true} {
+			t.Run(test.name+"/slurp="+strconv.FormatBool(slurp), func(t *testing.T) {
+				requests := 0
+				relayTestServer(t, func(map[string]any) any {
+					requests++
+					if requests == 1 {
+						return test.first
+					}
+					return test.second
+				})
+				t.Setenv("OCTOPOOL_GH_PATH", fakeGH(t))
+				args := []string{"api", "repos/openclaw/octopool/issues?per_page=1", "--paginate"}
+				if slurp {
+					args = append(args, "--slurp")
+				}
+				var out, stderr bytes.Buffer
+				if err := runGH(t.Context(), args, &out, &stderr); err != nil {
+					t.Fatal(err)
+				}
+				if requests != 2 {
+					t.Fatalf("relay requests = %d, want 2", requests)
+				}
+				want := "real-gh:" + strings.Join(args, " ") + "\n"
+				if out.String() != want {
+					t.Fatalf("output = %q, want native fallback without partial relay output %q", out.String(), want)
+				}
+				if !strings.Contains(stderr.String(), "pagination_shape_unsupported") {
+					t.Fatalf("stderr = %q", stderr.String())
+				}
+			})
+		}
+	}
+}
+
 func TestWriteGHAPIPagesPreservesRawBodies(t *testing.T) {
 	for _, test := range []struct {
 		name, encoding, contentType string
