@@ -47,6 +47,11 @@ func TestNormalizeRepoHostQualified(t *testing.T) {
 		{"https://github.com/Acme/Toolkit", "acme/Toolkit"},
 		{"git@github.com:Acme/Toolkit.git", "acme/Toolkit"},
 		{"ssh://git@github.com/Acme/Toolkit.git", "acme/Toolkit"},
+		{"https://github.com/Acme/Toolkit.git/", "acme/Toolkit"},
+		{"ssh://git@github.com/Acme/Toolkit.git/", "acme/Toolkit"},
+		{"git@github.com:Acme/Toolkit.git/", "acme/Toolkit"},
+		{"github.com/Acme/Toolkit.git/", "acme/Toolkit"},
+		{" Acme/Toolkit.git/// ", "acme/Toolkit"},
 		{" /Acme/Toolkit/ ", "acme/Toolkit"},
 		// The shared normalizer also accepts this existing two-part owner/repo.
 		{"github.com/Toolkit", "github.com/Toolkit"},
@@ -568,5 +573,26 @@ func TestParseGHTopOptionsScalarOwnership(t *testing.T) {
 	opts, fallback, err := parseGHTopOptions([]string{"--repo", "acme/old", "-R=acme/repo", "--assignee", "alice", "--assignee=bob,carol", "--author", `"alice"`, "--jq", "(", "--jq=.number"}, topReadSpecs("issue list"))
 	if err != nil || fallback || opts.repo != "acme/repo" || opts.assignee != "bob,carol" || opts.author != `"alice"` || opts.jq != ".number" {
 		t.Fatalf("scalar assignment must not CSV-decode or validate discarded jq: opts=%#v fallback=%v err=%v", opts, fallback, err)
+	}
+}
+
+func TestTopLevelRepoCloneURLTrailingSlash(t *testing.T) {
+	for _, repo := range []string{
+		"https://github.com/Acme/Toolkit.git/",
+		"ssh://git@github.com/Acme/Toolkit.git/",
+		"github.com/Acme/Toolkit.git/",
+	} {
+		t.Run(repo, func(t *testing.T) {
+			var paths []string
+			relayTestServer(t, func(req map[string]any) any {
+				paths = append(paths, req["path"].(string))
+				return map[string]any{"name": "Toolkit"}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"repo", "view", "--repo=" + repo, "--json=name"}, &out)
+			if result.action != ghComplete || result.err != nil || !slices.Equal(paths, []string{"/repos/acme/Toolkit"}) || out.String() != "{\"name\":\"Toolkit\"}\n" {
+				t.Fatalf("action=%v err=%v paths=%v output=%q", result.action, result.err, paths, out.String())
+			}
+		})
 	}
 }
