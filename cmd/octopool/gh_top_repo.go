@@ -99,7 +99,7 @@ func isHex(raw string) bool {
 }
 
 func normalizeRepo(raw string) string {
-	raw = strings.TrimSpace(raw)
+	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
 	if raw == "" {
 		return ""
 	}

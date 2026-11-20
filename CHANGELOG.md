@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Resolve repository clone URLs ending in `.git/` to the correct repository for CLI reads.
+
 - Preserve `__proto__` GraphQL aliases when sanitizing live and cached relay responses.
 
 - Avoid a redundant full-body copy when the CLI reads JSON relay responses.
