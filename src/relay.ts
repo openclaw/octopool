@@ -511,7 +511,13 @@ async function readCacheEntry(
     if (cached !== undefined) recordCacheMiss(state, "unusable");
     return undefined;
   }
-  return cached;
+  return relayCacheStillFresh(state, cached) ? cached : undefined;
+}
+
+function relayCacheStillFresh(state: ActiveRelay, cached: CachedGitHubResponse): boolean {
+  return cachedResponseStillFresh(cached, relayCacheMaxAge(state), (reason) =>
+    recordCacheMiss(state, reason),
+  );
 }
 
 function recordCacheMiss(state: ActiveRelay, reason: CacheMissReason): void {
@@ -2362,8 +2368,15 @@ async function serveFreshIdentityCache(
       recordCacheMiss(state, "unusable");
       continue;
     }
-    state.identity = identity;
+    if (!relayCacheStillFresh(state, cached)) continue;
+    const previousCacheKey = state.cacheKey;
     await switchRelayCacheKey(state, cacheKey);
+    if (!relayCacheStillFresh(state, cached)) {
+      // The previous fill was released. Restore its key, never its old capability.
+      await switchRelayCacheKey(state, previousCacheKey);
+      continue;
+    }
+    state.identity = identity;
     return serveFreshCachedRelayResponse(state, cached);
   }
   return undefined;

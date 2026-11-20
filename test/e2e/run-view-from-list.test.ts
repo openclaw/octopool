@@ -2,6 +2,10 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations } from "cloudflare:test";
 import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { describe, expect, it, vi } from "vitest";
+import worker from "../../src/index";
+import { clearConfigCache } from "../../src/config-cache";
+import type { CacheFillOutcome } from "../../src/cache-fill";
+import type { PublicationOwner } from "../../src/cache-publication";
 import { GITHUB_EDGE_CACHE_NAMESPACE, writeGitHubCache } from "../../src/cache";
 import { bodyPublicationResource } from "../../src/cache-publication";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
@@ -11,7 +15,16 @@ import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";
 import { queries } from "../../src/generated/sql";
 import { exactWorkflowRun } from "../fixtures/exact-workflow-run";
 import { restoreD1Baseline } from "./d1-baseline";
-import { CALLER_TOKEN, POOL, bearer, callWorker, jsonResponse, relay, seedPool } from "./harness";
+import {
+  CALLER_TOKEN,
+  POOL,
+  bearer,
+  callWorker,
+  jsonResponse,
+  relay,
+  runWithContext,
+  seedPool,
+} from "./harness";
 
 const repo = "/repos/openclaw/run-view-fixture";
 const list = `${repo}/actions/runs`;
@@ -392,6 +405,184 @@ describe("exact run views from indexed fresh REST lists", () => {
       },
     });
     expect(await lastAudit()).not.toMatchObject({ fallback_reason: "run_list_superset" });
+  });
+
+  it.each(
+    [false, true].flatMap((identity) =>
+      ["expiry", "caller age", "still fresh"].map((boundary) => ({ identity, boundary })),
+    ),
+  )(
+    "rechecks an exact cache hit after public proof: $boundary, identity=$identity",
+    async ({ identity, boundary }) => {
+      const upstream = await setup(identity);
+      const target = identity ? list : path;
+      const initial = await (await relay(target)).json<{ body: unknown }>();
+      const entries = await env.DB.prepare(
+        "SELECT cache_key, identity_id FROM github_cache_entries",
+      ).all<{
+        cache_key: string;
+        identity_id: string | null;
+      }>();
+      expect(entries.results).toHaveLength(1);
+      expect(entries.results[0]!.identity_id).toBe(identity ? "primary" : null);
+      await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, entries.results[0]!.cache_key);
+      await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+      await deleteEdgeJSON(PUBLIC_PROOF_EDGE_NAMESPACE, "openclaw/run-view-fixture");
+      const created = Date.now() - 1_000;
+      // Keep SQLite's clock behind the controlled expiry, as in the list-reuse regression.
+      let now = Date.now() + 60_000;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+      const timestamp = (value: number) =>
+        new Date(value).toISOString().slice(0, 19).replace("T", " ");
+      await env.DB.prepare("UPDATE github_cache_entries SET created_at = ?, expires_at = ?")
+        .bind(timestamp(created), timestamp(now + (boundary === "expiry" ? 1_000 : 60_000)))
+        .run();
+      let proofReached = false;
+      const updated = { ...run, display_title: "Post-proof observation" };
+      upstream.mockClear();
+      upstream.mockImplementation(async (input, init) => {
+        const requested = new URL(new Request(input, init).url).pathname;
+        if (requested === repo) {
+          if (!proofReached) now += 3_000;
+          proofReached = true;
+          return jsonResponse({ private: false });
+        }
+        return jsonResponse(
+          requested.endsWith("/runs") ? { total_count: 1, workflow_runs: [updated] } : updated,
+        );
+      });
+      try {
+        // An explicit max-age disables SWR so stale reuse cannot mask a fresh-hit bug.
+        const result = await (
+          await relay(target, undefined, {
+            headers: { "cache-control": `max-age=${boundary === "caller age" ? 62 : 120}` },
+          })
+        ).json();
+        expect(proofReached).toBe(true);
+        if (boundary === "still fresh") {
+          expect(result).toMatchObject({ body: initial.body, relay: { cache: "hit" } });
+          expect(upstream).toHaveBeenCalledOnce();
+        } else {
+          expect(result).toMatchObject({
+            body: identity ? { workflow_runs: [updated] } : updated,
+            relay: { cache: "miss" },
+          });
+          expect(
+            upstream.mock.calls.some(
+              ([input, init]) => new URL(new Request(input, init).url).pathname === target,
+            ),
+          ).toBe(true);
+        }
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it("rechecks identity cache freshness after releasing the shared fill", async () => {
+    const upstream = await setup(true);
+    await relay(list);
+    const entry = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries WHERE identity_id = 'primary'",
+    ).first<{ cache_key: string }>();
+    await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, entry!.cache_key);
+    await env.DB.prepare(
+      "UPDATE github_cache_entries SET expires_at = datetime('now', '-600 seconds')",
+    ).run();
+    let now = Date.now() + 60_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const updated = { ...run, display_title: "After owner release" };
+    upstream.mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname === repo) return jsonResponse({ private: false });
+      if (bearer(request) !== "test-primary-token") {
+        // Publish a candidate after the initial cache probe, while the shared fill is owned.
+        await env.DB.prepare("UPDATE github_cache_entries SET expires_at = ? WHERE cache_key = ?")
+          .bind(
+            new Date(now + 1_000).toISOString().slice(0, 19).replace("T", " "),
+            entry!.cache_key,
+          )
+          .run();
+        return jsonResponse({}, 503);
+      }
+      return jsonResponse({ total_count: 1, workflow_runs: [updated] });
+    });
+    const stub = poolCoordinatorStub(env, POOL);
+    let releases = 0;
+    let sharedResource: string | undefined;
+    const namespace = new Proxy(env.POOL_COORDINATOR, {
+      get(target, key) {
+        if (key === "get")
+          return () =>
+            new Proxy(stub, {
+              get(real, method) {
+                if (method === "acquirePublication")
+                  return async (resource: string) => {
+                    const acquired = await real.acquirePublication(resource);
+                    if (
+                      sharedResource === undefined &&
+                      resource.startsWith("cache:") &&
+                      acquired.kind === "owner"
+                    ) {
+                      expect(resource).not.toBe(bodyPublicationResource(entry!.cache_key));
+                      sharedResource = resource;
+                    }
+                    return acquired;
+                  };
+                if (method === "completePublication")
+                  return async (
+                    owner: PublicationOwner,
+                    outcome: CacheFillOutcome,
+                    committed?: number,
+                  ) => {
+                    const result = await real.completePublication(owner, outcome, committed);
+                    if (
+                      owner.resource_key === sharedResource &&
+                      outcome === "failed" &&
+                      releases++ === 0
+                    )
+                      now += 3_000;
+                    return result;
+                  };
+                const value = Reflect.get(real, method, real);
+                return typeof value === "function"
+                  ? (...args: unknown[]) => Reflect.apply(value, real, args)
+                  : value;
+              },
+            });
+        const value = Reflect.get(target, key, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    try {
+      clearConfigCache();
+      const response = await runWithContext((ctx) =>
+        worker.fetch(
+          new Request("https://octopool.dev/v1/github/request", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${CALLER_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              pool: POOL,
+              method: "GET",
+              path: list,
+              headers: { "cache-control": "max-age=120" },
+            }),
+          }),
+          { ...env, POOL_COORDINATOR: namespace },
+          ctx,
+        ),
+      );
+      expect(releases).toBeGreaterThanOrEqual(1);
+      expect(await response.json()).toMatchObject({
+        body: { workflow_runs: [updated] },
+        relay: { cache: "miss" },
+      });
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("rechecks list expiry after a public-proof lookup", async () => {

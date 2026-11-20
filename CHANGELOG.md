@@ -71,6 +71,7 @@
 - Fall back to shared storage when an edge cache response envelope is malformed instead of failing requests or serving invalid body encodings.
 
 - Refetch cached Actions logs with future creation timestamps instead of extending their freshness and retention windows.
+- Recheck exact, identity-backed, and coalesced cache hits after awaited validation and fill handoffs so expired or over-age bodies are not reported as fresh.
 
 - Fall back from public workflow HTML when workflow IDs are malformed instead of returning coerced or nonpositive IDs.
 
