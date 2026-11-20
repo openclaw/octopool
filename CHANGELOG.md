@@ -4,6 +4,8 @@
 
 - Delegate unsupported repository-view and release-list JSON fields to native gh instead of returning fields that the native commands reject.
 
+- Enforce the response byte cap when minting GitHub App installation tokens; cancel oversized bodies and leave them out of the token cache.
+
 - Resolve repository clone URLs ending in `.git/` to the correct repository for CLI reads.
 
 - Preserve `__proto__` GraphQL aliases when sanitizing live and cached relay responses.

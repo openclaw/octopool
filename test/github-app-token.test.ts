@@ -49,6 +49,56 @@ function validBody() {
 }
 
 describe("GitHub App installation token responses", () => {
+  it.each([512, 513])(
+    "enforces the byte cap for a streamed %i-byte token response",
+    async (size) => {
+      const { env, identity } = appCredentials();
+      const body = { ...validBody(), metadata: "é" };
+      const json = JSON.stringify(body);
+      const bytes = new TextEncoder().encode(
+        JSON.stringify({
+          ...body,
+          metadata: body.metadata + "x".repeat(size - new TextEncoder().encode(json).byteLength),
+        }),
+      );
+      expect(bytes.byteLength).toBe(size);
+      const cancel = vi.fn();
+      let sent = false;
+      const response = new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              if (sent) controller.close();
+              else {
+                sent = true;
+                controller.enqueue(bytes);
+              }
+            },
+            cancel,
+          },
+          { highWaterMark: 0 },
+        ),
+      );
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(response)
+        .mockResolvedValueOnce(Response.json(validBody()));
+      vi.stubGlobal("fetch", fetchMock);
+      const cappedEnv = { ...env, MAX_RESPONSE_BYTES: "512" } as unknown as typeof env;
+
+      if (size > 512) {
+        await expect(githubToken(cappedEnv, identity)).rejects.toMatchObject({
+          status: 502,
+          code: "github_app_token_failed",
+        });
+        expect(cancel).toHaveBeenCalledOnce();
+      }
+      await expect(githubToken(cappedEnv, identity)).resolves.toBe("installation-token");
+      await expect(githubToken(cappedEnv, identity)).resolves.toBe("installation-token");
+      expect(fetchMock).toHaveBeenCalledTimes(size > 512 ? 2 : 1);
+    },
+  );
+
   it.each([
     ["invalid JSON", () => new Response("{")],
     ["null", () => Response.json(null)],
