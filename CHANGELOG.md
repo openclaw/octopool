@@ -42,6 +42,7 @@
 - Compile each relay request's authoritative string-protection rules once and reuse the request-local snapshot for outbound checks.
 
 - Load dashboard database panels in one read-only batch for a consistent snapshot and fewer database round trips.
+- Apply the configured byte cap and request deadline while reading GitHub OAuth token responses; reject stalled or oversized bodies before profile lookup.
 - Reuse the session-token hash when updating dashboard session activity after authentication.
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.

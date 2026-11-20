@@ -10,7 +10,8 @@ import { ensureWebCaller } from "./callers";
 import { defaultLoginPool } from "./config";
 import { base64ToBytesSafe, bytesToBase64URL } from "./encoding";
 import { queries } from "./generated/sql";
-import { requestTimeoutMs } from "./github-limits";
+import { requestTimeoutMs, responseCapBytes } from "./github-limits";
+import { readBodyCapped } from "./response-body";
 import { effectiveOrigin } from "./hosts";
 import { HttpError, jsonResponse } from "./http";
 import { sqliteTimestamp } from "./sqlite-time";
@@ -177,7 +178,9 @@ async function exchangeGitHubCode(request: Request, env: Env, code: string): Pro
     throw new HttpError(503, "github_oauth_unconfigured", "GitHub OAuth is not configured");
   }
   let response: Response;
+  let body: unknown;
   try {
+    const signal = AbortSignal.timeout(requestTimeoutMs(env));
     response = await fetch("https://github.com/login/oauth/access_token", {
       method: "POST",
       headers: {
@@ -191,12 +194,18 @@ async function exchangeGitHubCode(request: Request, env: Env, code: string): Pro
         code,
         redirect_uri: `${githubOAuthCallbackOrigin(request, env)}/login/github/callback`,
       }),
-      signal: AbortSignal.timeout(requestTimeoutMs(env)),
+      signal,
     });
+    const bytes = await readBodyCapped(
+      response,
+      responseCapBytes(env),
+      () => new Error("GitHub OAuth response was too large"),
+      signal,
+    );
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new HttpError(502, "github_oauth_failed", "GitHub OAuth token exchange failed");
   }
-  const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok || typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new HttpError(502, "github_oauth_failed", "GitHub OAuth token exchange failed");
   }
