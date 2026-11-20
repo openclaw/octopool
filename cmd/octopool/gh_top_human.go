@@ -48,24 +48,12 @@ func relayHumanPRView(ctx context.Context, stdout io.Writer, repo string, number
 // prHeadLabel qualifies fork branches as owner:branch like gh's HeadLabel.
 func prHeadLabel(pr map[string]any) string {
 	ref := nestedStringValue(pr, "head", "ref")
-	headOwner := headRepoOwner(pr, "head")
-	baseOwner := headRepoOwner(pr, "base")
+	headOwner := nestedStringValue(pr, "head", "repo", "owner", "login")
+	baseOwner := nestedStringValue(pr, "base", "repo", "owner", "login")
 	if headOwner != "" && headOwner != baseOwner {
 		return headOwner + ":" + ref
 	}
 	return ref
-}
-
-func headRepoOwner(pr map[string]any, side string) string {
-	half, _ := pr[side].(map[string]any)
-	if half == nil {
-		return ""
-	}
-	repo, _ := half["repo"].(map[string]any)
-	if repo == nil {
-		return ""
-	}
-	return nestedStringValue(repo, "owner", "login")
 }
 
 func humanPRState(pr map[string]any) string {
