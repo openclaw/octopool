@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-- Reuse public repository and user field filters across relay responses instead of allocating them per request.
-
 - Preserve `__proto__` GraphQL aliases when sanitizing live and cached relay responses.
 
 - Avoid a redundant full-body copy when the CLI reads JSON relay responses.
@@ -47,6 +45,7 @@
 - Select requested issue-list JSON fields before serialization, avoiding an extra encode/decode pass while preserving output formatting.
 
 - Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
+- Reuse public repository and user field filters across relay responses instead of allocating them per request.
 - Read pool statistics in one D1 batch for a consistent report with fewer database round trips.
 
 ### Fixes
