@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 )
 
 func handleGHRun(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
@@ -100,6 +101,10 @@ func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id st
 		headers: map[string]string{"x-octopool-public-shape": publicShapeActionsSummary},
 	}, &run); err != nil {
 		return err
+	}
+	runID, validID := run["id"].(float64)
+	if !validID || runID <= 0 || runID > runExportMaxInteger || strconv.FormatFloat(runID, 'f', -1, 64) != strings.TrimLeft(id, "0") {
+		return errors.New("workflow run response did not match requested run")
 	}
 	attempt, ok := positiveJSONInt(run["run_attempt"])
 	if !ok {

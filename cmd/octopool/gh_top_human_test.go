@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -209,6 +210,58 @@ func TestHumanRunViewExactOutput(t *testing.T) {
 		"View this run on GitHub: https://github.com/openclaw/octopool/actions/runs/29614434370\n"
 	if got := out.String(); got != want {
 		t.Fatalf("output:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestHumanRunViewValidatesRequestedIdentity(t *testing.T) {
+	for _, test := range []struct {
+		name, requested string
+		returned        any
+		valid           bool
+	}{
+		{"mismatched", "42", 43, false},
+		{"missing", "42", nil, false},
+		{"string", "42", "42", false},
+		{"fractional", "42", 42.5, false},
+		{"negative", "42", -42, false},
+		{"zero", "0", 0, false},
+		{"unsafe integer", "9007199254740992", json.Number("9007199254740992"), false},
+		{"rounded integer", "9007199254740992", json.Number("9007199254740993"), false},
+		{"matching", "42", 42, true},
+		{"leading zeroes", "00042", 42, true},
+		{"large ID", "29614434370", json.Number("29614434370"), true},
+		{"largest safe ID", "9007199254740991", json.Number("9007199254740991"), true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setHumanTestSeams(t, time.Time{})
+			var paths []string
+			runPath := "/repos/openclaw/octopool/actions/runs/" + test.requested
+			relayTestServer(t, func(body map[string]any) any {
+				path := body["path"].(string)
+				paths = append(paths, path)
+				if strings.HasSuffix(path, "/jobs") {
+					if path != runPath+"/attempts/1/jobs" {
+						t.Errorf("jobs path = %s", path)
+					}
+					return map[string]any{"total_count": 0, "jobs": []any{}}
+				}
+				run := map[string]any{"run_attempt": 1, "status": "completed", "name": "fixture run"}
+				if test.returned != nil {
+					run["id"] = test.returned
+				}
+				return run
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"run", "view", test.requested, "-R", "openclaw/octopool"}, &out)
+			if test.valid {
+				assertGHComplete(t, result)
+				if len(paths) != 2 || !strings.Contains(out.String(), "fixture run") {
+					t.Fatalf("paths=%v output=%q", paths, out.String())
+				}
+			} else if result.action != ghFail || result.err == nil || len(paths) != 1 || out.Len() != 0 {
+				t.Fatalf("expected rejection before jobs or output: action=%v err=%v paths=%v output=%q", result.action, result.err, paths, out.String())
+			}
+		})
 	}
 }
 
