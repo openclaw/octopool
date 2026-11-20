@@ -80,6 +80,62 @@ describe("cache miss coalescing", () => {
     },
   );
 
+  it.each(
+    ["owner acceptance", "follower acceptance", "owner completion"].flatMap((stage) =>
+      ["expiry", "caller age"].map((boundary) => ({ stage, boundary })),
+    ),
+  )("rejects $boundary crossed during $stage", async ({ stage, boundary }) => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const cached = sharedRead();
+    cached.cached.created_at = new Date(now - 1_000).toISOString();
+    cached.cached.expires_at = new Date(
+      now + (boundary === "expiry" ? 1_000 : 30_000),
+    ).toISOString();
+    const coordinator = fakeCacheFillCoordinator([
+      stage === "follower acceptance"
+        ? { kind: "completed", outcome: "shared" }
+        : { kind: "owner", token: "leader" },
+      { kind: "owner", token: "replacement" },
+    ]);
+    if (stage === "owner completion") {
+      coordinator.completePublication.mockImplementationOnce(async () => {
+        now += 3_000;
+        return true;
+      });
+    }
+    const readShared = vi
+      .fn<() => Promise<GitHubCacheRead | undefined>>()
+      .mockResolvedValueOnce(cached)
+      .mockResolvedValue(undefined);
+    const onMiss = vi.fn();
+    try {
+      const result = await coalesceGitHubCacheMiss({} as Env, coordinator, "cache-key", {
+        readShared,
+        ...(boundary === "caller age" ? { maxAgeSeconds: 2 } : {}),
+        onMiss,
+        acceptCached: async () => {
+          if (stage !== "owner completion") now += 3_000;
+          return true;
+        },
+      });
+      try {
+        expect(result.cached).toBeUndefined();
+        expect(result.owner?.capability.owner_token).toBe(
+          stage === "owner acceptance" ? "leader" : "replacement",
+        );
+        expect(coordinator.acquirePublication).toHaveBeenCalledTimes(
+          stage === "owner acceptance" ? 1 : 2,
+        );
+        expect(onMiss).toHaveBeenCalledWith(boundary === "expiry" ? "expired" : "caller_max_age");
+      } finally {
+        await result.owner?.fail();
+      }
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("rereads the shared cache once after completion", async () => {
     const coordinator = fakeCacheFillCoordinator([{ kind: "completed", outcome: "shared" }]);
     const readShared = vi.fn(async () => sharedRead());
@@ -227,8 +283,8 @@ function sharedRead(): GitHubCacheRead {
       headers: {},
       body: { status: "completed" },
       body_encoding: "json",
-      created_at: "2026-08-09 00:00:00",
-      expires_at: "2026-08-09 01:00:00",
+      created_at: new Date(Date.now() - 1_000).toISOString(),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
     },
   };
 }

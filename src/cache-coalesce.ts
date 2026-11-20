@@ -1,5 +1,6 @@
 import { bodyPublicationResource } from "./cache-publication";
 import {
+  cachedResponseStillFresh,
   readEdgeGitHubCache,
   readGitHubCacheWithSource,
   type CachedGitHubResponse,
@@ -40,6 +41,8 @@ export async function coalesceGitHubCacheMiss(
     options.readEdge ??
     (() => readEdgeGitHubCache(cacheKey, options.maxAgeSeconds, options.onMiss));
   const accepted = options.acceptCached ?? (async () => true);
+  const stillFresh = (cached: CachedGitHubResponse) =>
+    cachedResponseStillFresh(cached, options.maxAgeSeconds, options.onMiss);
 
   for (;;) {
     const acquisition = await acquireOwnedCacheFill(coordinator, bodyPublicationResource(cacheKey));
@@ -47,8 +50,15 @@ export async function coalesceGitHubCacheMiss(
       if (options.maxAgeSeconds === 0) return { owner: acquisition.owner };
       try {
         const rechecked = await readShared();
-        if (rechecked !== undefined && (await accepted(rechecked.cached))) {
+        if (
+          rechecked !== undefined &&
+          (await accepted(rechecked.cached)) &&
+          stillFresh(rechecked.cached)
+        ) {
           await acquisition.owner.complete(rechecked.source === "shared" ? "shared" : "edge_only");
+          // Completion relinquishes ownership and can itself outlast the body.
+          // Reacquire before fetching if that acknowledgement crossed freshness.
+          if (!stillFresh(rechecked.cached)) continue;
           return { cached: rechecked.cached };
         }
         return { owner: acquisition.owner };
@@ -76,7 +86,7 @@ export async function coalesceGitHubCacheMiss(
     } else if (acquisition.kind === "completed" && acquisition.outcome === "edge_only") {
       cached = await readEdge();
     }
-    if (cached !== undefined && (await accepted(cached))) {
+    if (cached !== undefined && (await accepted(cached)) && stillFresh(cached)) {
       return { cached };
     }
     // Failed publication, owner expiry, or an unexpectedly absent completed

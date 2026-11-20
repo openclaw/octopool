@@ -2,6 +2,10 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations } from "cloudflare:test";
 import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { describe, expect, it, vi } from "vitest";
+import worker from "../../src/index";
+import { clearConfigCache } from "../../src/config-cache";
+import type { CacheFillOutcome } from "../../src/cache-fill";
+import type { PublicationOwner } from "../../src/cache-publication";
 import { GITHUB_EDGE_CACHE_NAMESPACE, writeGitHubCache } from "../../src/cache";
 import { bodyPublicationResource } from "../../src/cache-publication";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
@@ -11,7 +15,16 @@ import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";
 import { queries } from "../../src/generated/sql";
 import { exactWorkflowRun } from "../fixtures/exact-workflow-run";
 import { restoreD1Baseline } from "./d1-baseline";
-import { CALLER_TOKEN, POOL, bearer, callWorker, jsonResponse, relay, seedPool } from "./harness";
+import {
+  CALLER_TOKEN,
+  POOL,
+  bearer,
+  callWorker,
+  jsonResponse,
+  relay,
+  runWithContext,
+  seedPool,
+} from "./harness";
 
 const repo = "/repos/openclaw/run-view-fixture";
 const list = `${repo}/actions/runs`;
@@ -465,6 +478,112 @@ describe("exact run views from indexed fresh REST lists", () => {
       }
     },
   );
+
+  it("rechecks identity cache freshness after releasing the shared fill", async () => {
+    const upstream = await setup(true);
+    await relay(list);
+    const entry = await env.DB.prepare(
+      "SELECT cache_key FROM github_cache_entries WHERE identity_id = 'primary'",
+    ).first<{ cache_key: string }>();
+    await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, entry!.cache_key);
+    await env.DB.prepare(
+      "UPDATE github_cache_entries SET expires_at = datetime('now', '-600 seconds')",
+    ).run();
+    let now = Date.now() + 60_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const updated = { ...run, display_title: "After owner release" };
+    upstream.mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname === repo) return jsonResponse({ private: false });
+      if (bearer(request) !== "test-primary-token") {
+        // Publish a candidate after the initial cache probe, while the shared fill is owned.
+        await env.DB.prepare("UPDATE github_cache_entries SET expires_at = ? WHERE cache_key = ?")
+          .bind(
+            new Date(now + 1_000).toISOString().slice(0, 19).replace("T", " "),
+            entry!.cache_key,
+          )
+          .run();
+        return jsonResponse({}, 503);
+      }
+      return jsonResponse({ total_count: 1, workflow_runs: [updated] });
+    });
+    const stub = poolCoordinatorStub(env, POOL);
+    let releases = 0;
+    let sharedResource: string | undefined;
+    const namespace = new Proxy(env.POOL_COORDINATOR, {
+      get(target, key) {
+        if (key === "get")
+          return () =>
+            new Proxy(stub, {
+              get(real, method) {
+                if (method === "acquirePublication")
+                  return async (resource: string) => {
+                    const acquired = await real.acquirePublication(resource);
+                    if (
+                      sharedResource === undefined &&
+                      resource.startsWith("cache:") &&
+                      acquired.kind === "owner"
+                    ) {
+                      expect(resource).not.toBe(bodyPublicationResource(entry!.cache_key));
+                      sharedResource = resource;
+                    }
+                    return acquired;
+                  };
+                if (method === "completePublication")
+                  return async (
+                    owner: PublicationOwner,
+                    outcome: CacheFillOutcome,
+                    committed?: number,
+                  ) => {
+                    const result = await real.completePublication(owner, outcome, committed);
+                    if (
+                      owner.resource_key === sharedResource &&
+                      outcome === "failed" &&
+                      releases++ === 0
+                    )
+                      now += 3_000;
+                    return result;
+                  };
+                const value = Reflect.get(real, method, real);
+                return typeof value === "function"
+                  ? (...args: unknown[]) => Reflect.apply(value, real, args)
+                  : value;
+              },
+            });
+        const value = Reflect.get(target, key, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    try {
+      clearConfigCache();
+      const response = await runWithContext((ctx) =>
+        worker.fetch(
+          new Request("https://octopool.dev/v1/github/request", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${CALLER_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              pool: POOL,
+              method: "GET",
+              path: list,
+              headers: { "cache-control": "max-age=120" },
+            }),
+          }),
+          { ...env, POOL_COORDINATOR: namespace },
+          ctx,
+        ),
+      );
+      expect(releases).toBeGreaterThanOrEqual(1);
+      expect(await response.json()).toMatchObject({
+        body: { workflow_runs: [updated] },
+        relay: { cache: "miss" },
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  });
 
   it("rechecks list expiry after a public-proof lookup", async () => {
     const upstream = await setup();

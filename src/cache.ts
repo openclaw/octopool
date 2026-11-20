@@ -359,8 +359,17 @@ export async function readRunListCacheCandidates(
 export function cachedResponseStillFresh(
   cached: CachedGitHubResponse,
   maxAgeSeconds?: number,
+  onMiss?: CacheMissObserver,
 ): boolean {
-  return freshCachedResponse(cached) && withinRequestedMaxAge(cached, maxAgeSeconds);
+  if (!freshCachedResponse(cached)) {
+    onMiss?.("expired");
+    return false;
+  }
+  if (!withinRequestedMaxAge(cached, maxAgeSeconds)) {
+    onMiss?.("caller_max_age");
+    return false;
+  }
+  return true;
 }
 
 export async function readEdgeGitHubCache(
