@@ -8,6 +8,8 @@
 
 - Enforce the response byte cap when minting GitHub App installation tokens; cancel oversized bodies and leave them out of the token cache.
 
+- Avoid stalling web fallbacks and redirect errors while a discarded response's stream cleanup waits for another consumer.
+
 - Resolve repository clone URLs ending in `.git/` to the correct repository for CLI reads.
 
 - Preserve `__proto__` GraphQL aliases when sanitizing live and cached relay responses.

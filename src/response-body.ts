@@ -1,5 +1,6 @@
 export async function cancelResponseBody(response: Response): Promise<void> {
-  await response.body?.cancel().catch(() => undefined);
+  // Cancel this branch now; tee cleanup can wait for a different consumer.
+  void response.body?.cancel().catch(() => undefined);
 }
 
 export async function readBodyCapped(

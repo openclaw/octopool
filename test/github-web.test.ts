@@ -257,6 +257,32 @@ describe("github web provider", () => {
     ]);
   });
 
+  it("does not wait for another response consumer before the exact API fallback", async () => {
+    const discarded = new Response(new ReadableStream(), { status: 503 });
+    const peer = discarded.clone();
+    const exact = { total_count: 1, workflow_runs: [{ id: 123 }] };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(discarded)
+      .mockResolvedValueOnce(Response.json(exact));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/runs",
+      headers: { "x-octopool-public-shape": "actions-summary-v1" },
+    });
+    const result = callGitHubWeb(env(), request, classifyRoute(request, policy));
+    try {
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      await expect(result).resolves.toMatchObject({ status: 200, body: exact, backend: "github" });
+      expect(discarded.bodyUsed).toBe(true);
+    } finally {
+      await Promise.all([discarded.body?.cancel(), peer.body?.cancel()]);
+      await result;
+    }
+  });
+
   it.each(["anonymous revalidation", "public-page enrichment"] as const)(
     "cancels an unsuccessful response during %s",
     async (entryPoint) => {

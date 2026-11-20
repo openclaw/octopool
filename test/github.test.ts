@@ -38,6 +38,36 @@ describe("github api provider", () => {
     },
   );
 
+  it.each([
+    ["/repos/openclaw/octopool", "github_redirect_denied"],
+    ["/repos/openclaw/octopool/actions/jobs/42/logs", "github_log_redirect_denied"],
+  ])("rejects %s without waiting for another response consumer", async (path, code) => {
+    const discarded = new Response(new ReadableStream(), {
+      status: 302,
+      headers: { location: "https://example.test/denied" },
+    });
+    const peer = discarded.clone();
+    const fetchMock = vi.fn(async () => discarded);
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({ pool: "maintainers", method: "GET", path });
+    let settled = false;
+    const result = callPublicGitHub(env(), request, classifyRoute(request, policy)).catch(
+      (error) => {
+        settled = true;
+        return error;
+      },
+    );
+    try {
+      await vi.waitFor(() => expect(settled).toBe(true));
+      await expect(result).resolves.toMatchObject({ status: 502, code });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(discarded.bodyUsed).toBe(true);
+    } finally {
+      await Promise.all([discarded.body?.cancel(), peer.body?.cancel()]);
+      await result;
+    }
+  });
+
   it("retains secondary-limit feedback from an unsuccessful log existence probe", async () => {
     vi.stubGlobal(
       "fetch",

@@ -650,9 +650,10 @@ object metadata: expired objects are treated as misses and removed, so lifecycle
 timing can never cause stale data to be served. R2 read, write, or probe failures never fail
 a relay request: Octopool uses the existing authenticated redirect-validation path instead.
 
-API and log redirect bodies are released before following an allowed log URL or completing
+API and log redirect bodies are cancelled before following an allowed log URL or completing
 an existence probe. Rejected redirects, including invalid locations and chained downloads,
-also release their bodies. Cleanup failures preserve the original result; the redirect
+also cancel their bodies. Cancellation starts immediately, without waiting for another
+consumer of a cloned response to finish. Cleanup failures preserve the original result; the redirect
 allowlist, credential stripping, quota headers, and log bytes are unchanged.
 
 Operator provisioning is a one-time bucket plus lifecycle setup. The required lifecycle
