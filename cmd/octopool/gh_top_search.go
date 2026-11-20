@@ -13,7 +13,7 @@ var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 func handleGHSearch(ctx context.Context, kind string, opts ghTopOptions, stdout io.Writer) ghResult {
 	if kind == "repos" {
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) || limitOverOnePage(opts) {
+		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoSearchFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		query, ok := plainSearchQuery(opts.positionals)

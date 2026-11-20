@@ -129,6 +129,11 @@ var supportedRepoFields = supportedFields(
 	"pushedAt", "owner",
 )
 
+// Repository search has a different JSON field vocabulary from repo view.
+var supportedRepoSearchFields = supportedFields(
+	"id", "name", "url", "isPrivate", "description", "visibility", "createdAt", "updatedAt", "pushedAt", "owner",
+)
+
 var supportedReleaseFields = supportedFields(
 	"id", "tagName", "name", "url", "isDraft", "isPrerelease", "createdAt", "publishedAt", "body",
 )
