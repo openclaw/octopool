@@ -15,6 +15,8 @@ func TestNativeReadRoutingNotice(t *testing.T) {
 		notice string
 	}{
 		{"pr_gate_bundle", []string{"pr", "view", "7", "-R", "acme/repo", "--json", "title,reviewDecision"}, "JSON fields require native gh for the entire export"},
+		{"repo_rest_field", []string{"repo", "view", "acme/repo", "--json=name,full_name"}, "JSON fields require native gh for the entire export"},
+		{"release_list_view_field", []string{"release", "list", "-R", "acme/repo", "--json=tagName,url"}, "JSON fields require native gh for the entire export"},
 		{"repo_license", []string{"repo", "view", "acme/repo", "--json=licenseInfo"}, "JSON fields require native gh for the entire export"},
 		{"release_assets", []string{"release", "view", "v1.0", "-R", "acme/repo", "--json=assets"}, "JSON fields require native gh for the entire export"},
 		{"issue_comments", []string{"issue", "view", "7", "-R", "acme/repo", "--json=number,comments"}, "JSON fields require native gh for the entire export"},

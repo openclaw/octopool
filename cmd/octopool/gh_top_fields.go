@@ -124,8 +124,8 @@ var supportedRunViewFields = supportedFields(
 )
 
 var supportedRepoFields = supportedFields(
-	"id", "name", "full_name", "nameWithOwner", "url", "isPrivate", "defaultBranchRef", "description",
-	"visibility", "stargazers_count", "forks_count", "open_issues_count", "createdAt", "updatedAt",
+	"id", "name", "nameWithOwner", "url", "isPrivate", "defaultBranchRef", "description",
+	"visibility", "createdAt", "updatedAt",
 	"pushedAt", "owner",
 )
 
@@ -135,7 +135,7 @@ var supportedRepoSearchFields = supportedFields(
 )
 
 var supportedReleaseFields = supportedFields(
-	"id", "tagName", "name", "url", "isDraft", "isPrerelease", "createdAt", "publishedAt", "body",
+	"tagName", "name", "isDraft", "isPrerelease", "createdAt", "publishedAt",
 )
 
 var supportedReleaseViewFields = supportedFields(
