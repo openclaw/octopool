@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"strconv"
 	"testing"
 )
 
@@ -90,4 +91,24 @@ func (w relayBodyTestWriter) Write([]byte) (int, error) { return w.n, w.err }
 
 func quotedBase64(value []byte) []byte {
 	return []byte(`"` + base64.StdEncoding.EncodeToString(value) + `"`)
+}
+
+var benchmarkRelayBody []byte
+
+func BenchmarkDecodeRelayJSONBody(b *testing.B) {
+	for _, size := range []int{1 << 10, 64 << 10, 1 << 20} {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
+			body := append([]byte(`{"data":"`), bytes.Repeat([]byte("x"), size)...)
+			body = append(body, []byte(`"}`)...)
+			envelope := relayEnvelope{BodyEncoding: "json", Body: body}
+			b.ReportAllocs()
+			for b.Loop() {
+				var err error
+				benchmarkRelayBody, err = decodeRelayBody(envelope)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Avoid a redundant full-body copy when the CLI reads JSON relay responses.
+
 - Keep quoted HTML attributes and comments out of extracted GitHub titles and text when they contain angle brackets.
 
 - Return response-size errors immediately when cancelling an oversized stream waits for another consumer.
