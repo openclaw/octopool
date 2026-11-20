@@ -139,6 +139,25 @@ describe("configuration cache", () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
+  it.each(["expiry", "clear"])(
+    "does not join a pending load after %s within the same request",
+    (invalidate) =>
+      withConfigCacheScope(async () => {
+        const clock = vi.spyOn(Date, "now").mockReturnValue(0);
+        const gate = Promise.withResolvers<string>();
+        const old = cachedConfigLookup("policy:fixture", () => gate.promise);
+        if (invalidate === "expiry") clock.mockReturnValue(30_000);
+        else clearConfigCache();
+
+        const load = vi.fn(async () => "replacement");
+        const replacement = cachedConfigLookup("policy:fixture", load);
+        gate.resolve("old");
+        await expect(replacement).resolves.toBe("replacement");
+        await expect(old).resolves.toBe("old");
+        expect(load).toHaveBeenCalledOnce();
+      }),
+  );
+
   it("invalidates only the matching value after asynchronous validation fails", async () => {
     const old = await cachedConfigLookup("caller:fixture", async () => ({ id: "old" }));
     clearConfigCache();
