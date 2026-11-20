@@ -394,6 +394,78 @@ describe("exact run views from indexed fresh REST lists", () => {
     expect(await lastAudit()).not.toMatchObject({ fallback_reason: "run_list_superset" });
   });
 
+  it.each(
+    [false, true].flatMap((identity) =>
+      ["expiry", "caller age", "still fresh"].map((boundary) => ({ identity, boundary })),
+    ),
+  )(
+    "rechecks an exact cache hit after public proof: $boundary, identity=$identity",
+    async ({ identity, boundary }) => {
+      const upstream = await setup(identity);
+      const target = identity ? list : path;
+      const initial = await (await relay(target)).json<{ body: unknown }>();
+      const entries = await env.DB.prepare(
+        "SELECT cache_key, identity_id FROM github_cache_entries",
+      ).all<{
+        cache_key: string;
+        identity_id: string | null;
+      }>();
+      expect(entries.results).toHaveLength(1);
+      expect(entries.results[0]!.identity_id).toBe(identity ? "primary" : null);
+      await deleteEdgeJSON(GITHUB_EDGE_CACHE_NAMESPACE, entries.results[0]!.cache_key);
+      await env.DB.prepare("DELETE FROM github_public_repo_proofs").run();
+      await deleteEdgeJSON(PUBLIC_PROOF_EDGE_NAMESPACE, "openclaw/run-view-fixture");
+      const created = Date.now() - 1_000;
+      // Keep SQLite's clock behind the controlled expiry, as in the list-reuse regression.
+      let now = Date.now() + 60_000;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+      const timestamp = (value: number) =>
+        new Date(value).toISOString().slice(0, 19).replace("T", " ");
+      await env.DB.prepare("UPDATE github_cache_entries SET created_at = ?, expires_at = ?")
+        .bind(timestamp(created), timestamp(now + (boundary === "expiry" ? 1_000 : 60_000)))
+        .run();
+      let proofReached = false;
+      const updated = { ...run, display_title: "Post-proof observation" };
+      upstream.mockClear();
+      upstream.mockImplementation(async (input, init) => {
+        const requested = new URL(new Request(input, init).url).pathname;
+        if (requested === repo) {
+          if (!proofReached) now += 3_000;
+          proofReached = true;
+          return jsonResponse({ private: false });
+        }
+        return jsonResponse(
+          requested.endsWith("/runs") ? { total_count: 1, workflow_runs: [updated] } : updated,
+        );
+      });
+      try {
+        // An explicit max-age disables SWR so stale reuse cannot mask a fresh-hit bug.
+        const result = await (
+          await relay(target, undefined, {
+            headers: { "cache-control": `max-age=${boundary === "caller age" ? 62 : 120}` },
+          })
+        ).json();
+        expect(proofReached).toBe(true);
+        if (boundary === "still fresh") {
+          expect(result).toMatchObject({ body: initial.body, relay: { cache: "hit" } });
+          expect(upstream).toHaveBeenCalledOnce();
+        } else {
+          expect(result).toMatchObject({
+            body: identity ? { workflow_runs: [updated] } : updated,
+            relay: { cache: "miss" },
+          });
+          expect(
+            upstream.mock.calls.some(
+              ([input, init]) => new URL(new Request(input, init).url).pathname === target,
+            ),
+          ).toBe(true);
+        }
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
   it("rechecks list expiry after a public-proof lookup", async () => {
     const upstream = await setup();
     await relay(list);
