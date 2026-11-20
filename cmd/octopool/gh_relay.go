@@ -414,10 +414,11 @@ func (client ghRelayClient) doOnce(ctx context.Context, request ghAPIRequest, bu
 	return envelope, nil
 }
 
+// Returned bytes are read-only and may alias the envelope's JSON body.
 func decodeRelayBody(envelope relayEnvelope) ([]byte, error) {
 	switch envelope.BodyEncoding {
 	case "json":
-		return append([]byte(nil), envelope.Body...), nil
+		return envelope.Body, nil
 	case "text", "base64":
 		if rawJSONIsNull(envelope.Body) {
 			return nil, nil
