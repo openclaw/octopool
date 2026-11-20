@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reuse public repository and user field filters across relay responses instead of allocating them per request.
+
 - Preserve `__proto__` GraphQL aliases when sanitizing live and cached relay responses.
 
 - Avoid a redundant full-body copy when the CLI reads JSON relay responses.
