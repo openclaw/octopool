@@ -73,6 +73,7 @@
 
 - Preserve numeric precision received by the CLI when selecting JSON fields, including workflow IDs and nested values.
 - Reject mismatched or invalid run IDs in human `gh run view` before fetching jobs or printing a mixed run summary.
+- Keep `gh run watch` polling when a rerun starts while jobs are loading, instead of printing the previous attempt and exiting with its result.
 
 - Recheck GitHub organization membership when its stored verification timestamp is in the future instead of extending the authorization window.
 

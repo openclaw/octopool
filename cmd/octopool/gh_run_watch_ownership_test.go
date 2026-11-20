@@ -73,7 +73,7 @@ func TestGHRunWatchRejectsInvalidJobIdentity(t *testing.T) {
 }
 
 func TestGHRunWatchKeepsRelayOwnership(t *testing.T) {
-	for _, phase := range []string{"initial", "poll", "confirmation", "jobs"} {
+	for _, phase := range []string{"initial", "poll", "confirmation", "jobs", "final confirmation"} {
 		for _, reason := range []string{"pagination_exhausted", "relay_overloaded", "repo_not_public", "route_denied"} {
 			if phase == "initial" && reason == "repo_not_public" {
 				continue // The initial private-repository lookup deliberately delegates.
@@ -91,10 +91,14 @@ func TestGHRunWatchKeepsRelayOwnership(t *testing.T) {
 						runCalls++
 					}
 					fail := phase == "initial" || phase == "jobs" && isJobs ||
-						(phase == "poll" || phase == "confirmation") && runCalls > 1
+						(phase == "poll" || phase == "confirmation") && runCalls > 1 ||
+						phase == "final confirmation" && runCalls > 2
 					if fail {
 						failedCalls++
 						return relayFallbackFixture(reason)
+					}
+					if isJobs {
+						return map[string]any{"total_count": 0, "jobs": []any{}}
 					}
 					status := "completed"
 					if phase == "poll" {
@@ -217,6 +221,107 @@ func TestGHRunWatchJobsRetryClearsCollection(t *testing.T) {
 	}
 }
 
+func TestGHRunWatchRerunDuringJobPagination(t *testing.T) {
+	sleeps := recordWatchSleeps(t)
+	rerun := false
+	runCalls, oldPages, newJobs := 0, 0, 0
+	relayTestServer(t, func(request map[string]any) any {
+		path := request["path"].(string)
+		switch path {
+		case "/repos/acme/repo/actions/runs/42":
+			runCalls++
+			if runCalls > 1 && request["headers"].(map[string]any)["cache-control"] != "max-age=0" {
+				t.Error("post-hydration confirmation and resumed poll must be fresh")
+			}
+			run := map[string]any{"id": 42, "status": "completed", "conclusion": "success", "run_attempt": 2, "head_sha": "same-head"}
+			if rerun {
+				run["run_attempt"] = 3
+				run["conclusion"] = "failure"
+				if runCalls == 2 {
+					run["status"], run["conclusion"] = "in_progress", nil
+				}
+			}
+			return relayTestResponse{Body: run, Relay: relayMeta{Cache: "miss"}}
+		case "/repos/acme/repo/actions/runs/42/attempts/2/jobs":
+			oldPages++
+			jobs := []map[string]any{}
+			if request["query"].(map[string]any)["page"] == "1" {
+				for id := 1; id <= relayPageSize; id++ {
+					jobs = append(jobs, map[string]any{"id": id, "name": "old-job", "status": "completed", "conclusion": "success"})
+				}
+			} else {
+				rerun = true
+				jobs = append(jobs, map[string]any{"id": relayPageSize + 1, "name": "old-job", "status": "completed", "conclusion": "success"})
+			}
+			return relayTestResponse{Body: map[string]any{"total_count": relayPageSize + 1, "jobs": jobs}, Relay: relayMeta{Cache: "miss"}}
+		case "/repos/acme/repo/actions/runs/42/attempts/3/jobs":
+			newJobs++
+			return relayTestResponse{Body: map[string]any{"total_count": 1, "jobs": []map[string]any{{"id": 999, "name": "new-job", "status": "completed", "conclusion": "failure"}}}, Relay: relayMeta{Cache: "miss"}}
+		default:
+			t.Errorf("unexpected path %s", path)
+			return relayFallbackFixture("route_denied")
+		}
+	})
+	var out bytes.Buffer
+	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo", "--exit-status"}, &out)
+	assertExitCode(t, result.err, 1)
+	if runCalls != 4 || oldPages != 2 || newJobs != 1 || len(*sleeps) != 1 ||
+		strings.Contains(out.String(), "old-job") || strings.Contains(out.String(), "completed with 'success'") ||
+		!strings.Contains(out.String(), "new-job") || !strings.Contains(out.String(), "completed with 'failure'") {
+		t.Fatalf("runs=%d old pages=%d new jobs=%d sleeps=%v output=%q", runCalls, oldPages, newJobs, *sleeps, out.String())
+	}
+}
+
+func TestGHRunWatchFinalConfirmationDiscardsChangedSnapshot(t *testing.T) {
+	for _, variant := range []string{"attempt", "head", "conclusion", "missing status", "missing attempt", "missing conclusion"} {
+		t.Run(variant, func(t *testing.T) {
+			sleeps := recordWatchSleeps(t)
+			runCalls, jobCalls := 0, 0
+			relayTestServer(t, func(request map[string]any) any {
+				if strings.HasSuffix(request["path"].(string), "/jobs") {
+					jobCalls++
+					return relayTestResponse{Body: map[string]any{"total_count": 1, "jobs": []map[string]any{{"id": jobCalls, "name": fmt.Sprintf("snapshot-%d", jobCalls), "status": "completed", "conclusion": "success"}}}, Relay: relayMeta{Cache: "miss"}}
+				}
+				runCalls++
+				if runCalls > 1 && request["headers"].(map[string]any)["cache-control"] != "max-age=0" {
+					t.Error("confirmation and resumed poll must be fresh")
+				}
+				run := map[string]any{"status": "completed", "run_attempt": 2, "head_sha": "old-head", "conclusion": "success"}
+				if runCalls >= 2 {
+					switch variant {
+					case "attempt":
+						run["run_attempt"] = 3
+					case "head":
+						run["head_sha"] = "new-head"
+					case "conclusion":
+						run["conclusion"] = "failure"
+					case "missing status":
+						delete(run, "status")
+					case "missing attempt":
+						delete(run, "run_attempt")
+					case "missing conclusion":
+						delete(run, "conclusion")
+					}
+				}
+				return relayTestResponse{Body: run, Relay: relayMeta{Cache: "miss"}}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "acme/repo"}, &out)
+			if strings.HasPrefix(variant, "missing") {
+				if result.err == nil || shouldRunRealGH(result.err) || runCalls != 2 || jobCalls != 1 || len(*sleeps) != 0 ||
+					strings.Contains(out.String(), "job ") || strings.Contains(out.String(), "completed with") {
+					t.Fatalf("err=%v runs=%d jobs=%d sleeps=%v output=%q", result.err, runCalls, jobCalls, *sleeps, out.String())
+				}
+				return
+			}
+			if result.err != nil || runCalls != 4 || jobCalls != 2 || len(*sleeps) != 1 ||
+				strings.Contains(out.String(), "snapshot-1") || !strings.Contains(out.String(), "snapshot-2") || strings.Count(out.String(), "completed with") != 1 {
+				t.Fatalf("err=%v runs=%d jobs=%d sleeps=%v output=%q", result.err, runCalls, jobCalls, *sleeps, out.String())
+			}
+		})
+	}
+}
+
 func TestGHRunWatchRerunAttemptAndExitStatus(t *testing.T) {
 	for _, conclusion := range []string{"success", "failure", "cancelled", "timed_out"} {
 		for _, exitStatus := range []bool{false, true} {
@@ -259,7 +364,7 @@ func TestGHRunWatchRerunAttemptAndExitStatus(t *testing.T) {
 				} else if result.action != ghComplete || result.err != nil {
 					t.Fatalf("action=%v err=%v", result.action, result.err)
 				}
-				if runCalls != 2 || jobCalls != 2 || strings.Count(stdout.String(), "job ") != 3 ||
+				if runCalls != 3 || jobCalls != 2 || strings.Count(stdout.String(), "job ") != 3 ||
 					!strings.Contains(stdout.String(), "Run 42 completed with '"+conclusion+"'") {
 					t.Fatalf("runs=%d jobs=%d stdout=%q", runCalls, jobCalls, stdout.String())
 				}
