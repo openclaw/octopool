@@ -53,11 +53,19 @@ func TestRunGHRepoViewNodeID(t *testing.T) {
 }
 
 func TestRunGHRepoViewUnsupportedFieldsDelegate(t *testing.T) {
-	emptyRewriteTestServer(t)
-	var out bytes.Buffer
-	result := runGHTopLevel(t.Context(), []string{"repo", "view", "acme/repo", "--json", "id,diskUsage"}, &out)
-	if result.action != ghDelegate || result.err != nil || out.Len() != 0 {
-		t.Fatalf("action=%v err=%v out=%q", result.action, result.err, out.String())
+	for _, field := range []string{"full_name", "stargazers_count", "forks_count", "open_issues_count", "diskUsage"} {
+		t.Run(field, func(t *testing.T) {
+			calls := 0
+			relayTestServer(t, func(map[string]any) any {
+				calls++
+				return map[string]any{"name": "repo", field: 42}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"repo", "view", "acme/repo", "--json", "name," + field}, &out)
+			if result.action != ghDelegate || result.err != nil || calls != 0 || out.Len() != 0 {
+				t.Fatalf("action=%v err=%v calls=%d out=%q", result.action, result.err, calls, out.String())
+			}
+		})
 	}
 }
 
@@ -116,7 +124,7 @@ func TestRunGHReleaseListRelays(t *testing.T) {
 		return []map[string]any{{
 			"tag_name": "v0.2.5",
 			"name":     "0.2.5",
-			"html_url": "https://github.com/openclaw/octopool/releases/tag/v0.2.5",
+			"draft":    false,
 		}}
 	})
 	var out bytes.Buffer
@@ -124,31 +132,30 @@ func TestRunGHReleaseListRelays(t *testing.T) {
 		"release", "list",
 		"-R", "openclaw/octopool",
 		"--limit", "10",
-		"--json", "tagName,name,url",
+		"--json", "tagName,name,isDraft",
 	}, &out)
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
-	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) || !strings.Contains(got, `"url":"https://github.com/openclaw/octopool/releases/tag/v0.2.5"`) {
+	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) || !strings.Contains(got, `"isDraft":false`) {
 		t.Fatalf("out = %s", got)
 	}
 }
 
-func TestRunGHReleaseListKeepsIDSupport(t *testing.T) {
-	relayTestServer(t, func(body map[string]any) any {
-		return []map[string]any{{"id": 123}}
-	})
-	var out bytes.Buffer
-	result := runGHTopLevel(t.Context(), []string{
-		"release", "list",
-		"-R", "openclaw/octopool",
-		"--json", "id",
-	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
-	if got := out.String(); !strings.Contains(got, `"id":123`) {
-		t.Fatalf("out = %s", got)
+func TestRunGHReleaseListUnsupportedFieldsDelegate(t *testing.T) {
+	for _, field := range []string{"id", "url", "body", "isLatest", "isImmutable"} {
+		t.Run(field, func(t *testing.T) {
+			calls := 0
+			relayTestServer(t, func(map[string]any) any {
+				calls++
+				return []map[string]any{{"name": "release", field: "value"}}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"release", "list", "-R", "acme/repo", "--json", "name," + field}, &out)
+			if result.action != ghDelegate || result.err != nil || calls != 0 || out.Len() != 0 {
+				t.Fatalf("action=%v err=%v calls=%d out=%q", result.action, result.err, calls, out.String())
+			}
+		})
 	}
 }
 
