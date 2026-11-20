@@ -115,8 +115,9 @@ async function authenticateWebSession(
   if (session === undefined || session === "") {
     throw new HttpError(401, "missing_web_session", "Missing web session");
   }
+  const sessionHash = await hashToken(session);
   const row = await env.DB.prepare(queries.getWebSession)
-    .bind(await hashToken(session), env.ALLOWED_GITHUB_ORG)
+    .bind(sessionHash, env.ALLOWED_GITHUB_ORG)
     .first<WebSession>();
   if (row === null) {
     throw new HttpError(401, "invalid_web_session", "Invalid web session");
@@ -126,9 +127,7 @@ async function authenticateWebSession(
   if (grant === null) {
     throw new HttpError(403, "pool_denied", "Web session is not granted for this pool");
   }
-  await env.DB.prepare(queries.touchWebSession)
-    .bind(await hashToken(session))
-    .run();
+  await env.DB.prepare(queries.touchWebSession).bind(sessionHash).run();
   return row;
 }
 

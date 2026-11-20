@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reuse the session-token hash when updating dashboard session activity after authentication.
+
 - Preserve `__proto__` GraphQL aliases when sanitizing live and cached relay responses.
 
 - Avoid a redundant full-body copy when the CLI reads JSON relay responses.
