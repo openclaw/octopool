@@ -13,6 +13,7 @@ import (
 )
 
 type ghAPIPaginationState struct {
+	plainArray     bool
 	objectArrayKey string
 	objectItems    int
 	objectTotal    *int
@@ -285,8 +286,12 @@ func relayPageHasNext(body []byte, perPage int, state *ghAPIPaginationState) (ha
 		if state.objectArrayKey != "" {
 			return false, false, false
 		}
+		state.plainArray = true
 		return len(typed) == perPage, len(typed) == 0, true
 	case map[string]any:
+		if state.plainArray {
+			return false, false, false
+		}
 		totalCount, ok := jsonNumericInt(typed["total_count"])
 		if !ok {
 			return false, false, false
