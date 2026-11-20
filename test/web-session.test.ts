@@ -7,6 +7,38 @@ describe("GitHub OAuth token exchange", () => {
     vi.restoreAllMocks();
   });
 
+  it.each(["oversized", "stalled", "body failure"])(
+    "bounds an OAuth response body that is %s before reading the user profile",
+    async (failure) => {
+      let cancelled = false;
+      const fetchMock = vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                if (failure === "oversized") controller.enqueue(new Uint8Array(97));
+                if (failure === "body failure")
+                  controller.error(new Error("synthetic body failure"));
+              },
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const env = oauthEnv({ MAX_RESPONSE_BYTES: "96", REQUEST_TIMEOUT_MS: "20" });
+      const { request, url } = await signedCallback(env);
+
+      await expect(finishGitHubWebLogin(request, env, url)).rejects.toMatchObject({
+        status: 502,
+        code: "github_oauth_failed",
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      if (failure !== "body failure") expect(cancelled).toBe(true);
+    },
+  );
+
   it("maps a hung GitHub OAuth token exchange to a typed upstream error", async () => {
     const fetchMock = vi.fn<typeof fetch>((_input, init) => {
       return new Promise((_resolve, reject) => {

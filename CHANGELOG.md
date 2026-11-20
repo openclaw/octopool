@@ -4,9 +4,13 @@
 
 - Preserve label creation order, node IDs, and browser URLs in `gh label list` by using native gh for the command.
 
+- Bound GitHub profile response reads during sign-in and user lookup, returning typed upstream errors for oversized or unreadable responses.
+
 - Delegate unsupported repository-view and release-list JSON fields to native gh instead of returning fields that the native commands reject.
 
 - Enforce the response byte cap when minting GitHub App installation tokens; cancel oversized bodies and leave them out of the token cache.
+
+- Avoid stalling web fallbacks and redirect errors while a discarded response's stream cleanup waits for another consumer.
 
 - Resolve repository clone URLs ending in `.git/` to the correct repository for CLI reads.
 
@@ -44,6 +48,7 @@
 - Compile each relay request's authoritative string-protection rules once and reuse the request-local snapshot for outbound checks.
 
 - Load dashboard database panels in one read-only batch for a consistent snapshot and fewer database round trips.
+- Apply the configured byte cap and request deadline while reading GitHub OAuth token responses; reject stalled or oversized bodies before profile lookup.
 - Reuse the session-token hash when updating dashboard session activity after authentication.
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.

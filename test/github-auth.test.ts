@@ -96,6 +96,51 @@ describe("GitHub identity credentials", () => {
     }
   });
 
+  it.each(["token", "login"] as const)(
+    "bounds and validates %s profile responses before accepting an identity",
+    async (kind) => {
+      const limited = { ...env(), MAX_RESPONSE_BYTES: "96" } as unknown as Env;
+      const read = () =>
+        kind === "token"
+          ? githubUserFromToken(limited, "user-token")
+          : githubUserByLogin(limited, "octo");
+      const code = kind === "token" ? "github_auth_failed" : "github_user_lookup_failed";
+      const oversized = JSON.stringify({ id: 42, login: "octo", padding: "x".repeat(96) });
+      for (const failure of ["oversized", "invalid JSON", "body failure"]) {
+        let cancelled = false;
+        vi.stubGlobal(
+          "fetch",
+          vi.fn<typeof fetch>(
+            async () =>
+              new Response(
+                failure === "invalid JSON"
+                  ? "{"
+                  : new ReadableStream<Uint8Array>({
+                      start(controller) {
+                        if (failure === "oversized") {
+                          controller.enqueue(new TextEncoder().encode(oversized));
+                        } else {
+                          controller.error(new Error("synthetic read failure"));
+                        }
+                      },
+                      cancel() {
+                        cancelled = true;
+                      },
+                    }),
+              ),
+          ),
+        );
+        await expect(read()).rejects.toMatchObject({ status: 502, code });
+        if (failure === "oversized") expect(cancelled).toBe(true);
+      }
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () => Response.json({ id: 42, login: "octo" })),
+      );
+      await expect(read()).resolves.toMatchObject({ id: 42, login: "octo" });
+    },
+  );
+
   it("verifies org membership without spending the REST core quota", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
       expect(init).toMatchObject({
