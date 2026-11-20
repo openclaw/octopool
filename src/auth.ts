@@ -115,13 +115,10 @@ export async function githubUserFromToken(
       githubRateLimitDetails(response.headers),
     );
   }
-  const body: unknown = await response.json();
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    throw new HttpError(502, "github_auth_failed", "GitHub user response was invalid");
-  }
-  const login = (body as { login?: unknown }).login;
-  const id = (body as { id?: unknown }).id;
-  const name = (body as { name?: unknown }).name;
+  const body = await readGitHubUserResponse(response, responseCapBytes(env), "github_auth_failed");
+  const login = body.login;
+  const id = body.id;
+  const name = body.name;
   if (typeof login !== "string" || login.trim() === "" || !isGitHubUserId(id)) {
     throw new HttpError(502, "github_auth_failed", "GitHub user response was incomplete");
   }
@@ -130,6 +127,23 @@ export async function githubUserFromToken(
     login,
     ...(typeof name === "string" && name.trim() !== "" ? { name } : {}),
   };
+}
+
+async function readGitHubUserResponse(
+  response: Response,
+  capBytes: number,
+  code: "github_auth_failed" | "github_user_lookup_failed",
+): Promise<Record<string, unknown>> {
+  const invalid = () => new HttpError(502, code, "GitHub user response was invalid");
+  let body: unknown;
+  try {
+    const bytes = await readBodyCapped(response, capBytes, invalid);
+    body = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw invalid();
+  }
+  if (!isRecord(body)) throw invalid();
+  return body;
 }
 
 function githubRateLimitDetails(headers: Headers): Record<string, string> | undefined {
@@ -168,12 +182,13 @@ export async function githubUserByLogin(
       `GitHub user lookup failed with ${response.status}`,
     );
   }
-  const body: unknown = await response.json();
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was invalid");
-  }
-  const resolvedLogin = (body as { login?: unknown }).login;
-  const id = (body as { id?: unknown }).id;
+  const body = await readGitHubUserResponse(
+    response,
+    responseCapBytes(env),
+    "github_user_lookup_failed",
+  );
+  const resolvedLogin = body.login;
+  const id = body.id;
   if (typeof resolvedLogin !== "string" || resolvedLogin.trim() === "" || !isGitHubUserId(id)) {
     throw new HttpError(502, "github_user_lookup_failed", "GitHub user response was incomplete");
   }
