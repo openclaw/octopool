@@ -178,11 +178,12 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 	backoff := newWatchBackoff(opts.interval)
 	previousStatus := ""
 	progressPrinted := false
+	forceFresh := false
 	var meta relayMeta
 	for {
 		var run map[string]any
 		var headers map[string]string
-		if meta.Cache == "stale" {
+		if forceFresh || meta.Cache == "stale" {
 			// Keep the polling cadence, but do not repeatedly accept expired progress.
 			headers = watchFreshHeaders()
 		}
@@ -194,6 +195,7 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 		if err != nil {
 			return runWatchError(err, progressPrinted)
 		}
+		forceFresh = false
 		status := watchSafeText(firstString(run, "status"))
 		if status == "" {
 			return runWatchError(errors.New("workflow run response did not include status"), progressPrinted)
@@ -249,6 +251,28 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			if err != nil {
 				return runWatchError(err, true)
 			}
+			// A rerun can start while paginated jobs are loading. Keep that snapshot
+			// buffered until a fresh run read still confirms its attempt and result.
+			var final map[string]any
+			err = retryWatchTick(ctx, &backoff, func() error {
+				var pollErr error
+				final, meta, pollErr = relayWatchRun(ctx, client, opts.repo, opts.id, watchFreshHeaders())
+				return pollErr
+			})
+			if err != nil {
+				return runWatchError(err, true)
+			}
+			unchanged, err := watchRunSnapshotMatches(final, owner, attempt, conclusion)
+			if err != nil {
+				return runWatchError(err, true)
+			}
+			if !unchanged {
+				forceFresh = true
+				if err := backoff.sleep(ctx); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := printWatchRunJobs(stdout, jobs); err != nil {
 				return err
 			}
@@ -264,6 +288,25 @@ func relayRunWatch(ctx context.Context, stdout io.Writer, opts ghRunWatchOptions
 			return err
 		}
 	}
+}
+
+func watchRunSnapshotMatches(run map[string]any, owner runJobOwner, attempt int, conclusion string) (bool, error) {
+	status := watchSafeText(firstString(run, "status"))
+	if status == "" {
+		return false, errors.New("workflow run final confirmation did not include status")
+	}
+	if status != "completed" {
+		return false, nil
+	}
+	finalAttempt, ok := positiveJSONInt(run["run_attempt"])
+	if !ok {
+		return false, errors.New("workflow run final confirmation did not include run_attempt")
+	}
+	finalConclusion := watchSafeText(firstString(run, "conclusion"))
+	if finalConclusion == "" {
+		return false, errors.New("workflow run final confirmation did not include conclusion")
+	}
+	return finalAttempt == attempt && firstString(run, "head_sha") == owner.headSHA && finalConclusion == conclusion, nil
 }
 
 func watchFreshHeaders() map[string]string {

@@ -27,7 +27,7 @@ func TestGHRunWatchPrintsTransitionsAndValidatesTerminalJobs(t *testing.T) {
 			if headers["x-octopool-public-shape"] != "actions-summary-v1" {
 				t.Fatalf("run headers = %#v", headers)
 			}
-			statuses := []string{"queued", "in_progress", "in_progress", "completed", "completed"}
+			statuses := []string{"queued", "in_progress", "in_progress", "completed", "completed", "completed"}
 			return map[string]any{"status": statuses[runCalls-1], "conclusion": "failure", "run_attempt": 2}
 		case "/repos/openclaw/octopool/actions/runs/42/attempts/2/jobs":
 			jobsCalls++
@@ -70,7 +70,7 @@ func TestGHRunWatchPrintsTransitionsAndValidatesTerminalJobs(t *testing.T) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
 		}
 	}
-	if runCalls != 5 || jobsCalls != 2 {
+	if runCalls != 6 || jobsCalls != 2 {
 		t.Fatalf("run calls=%d jobs calls=%d", runCalls, jobsCalls)
 	}
 	if want := []time.Duration{30 * time.Second, 60 * time.Second, 120 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
@@ -126,7 +126,13 @@ func TestGHRunWatchRefreshesStaleProgressOnNextPoll(t *testing.T) {
 				}
 				index := polls
 				polls++
-				if index >= len(test.caches) {
+				if index == len(test.caches) {
+					if request["headers"].(map[string]any)["cache-control"] != "max-age=0" {
+						t.Error("final confirmation must be fresh")
+					}
+					return relayTestResponse{Body: map[string]any{"status": "completed", "run_attempt": 1, "conclusion": "success"}, Relay: relayMeta{Cache: "miss"}}
+				}
+				if index > len(test.caches) {
 					t.Errorf("unexpected extra run poll %d", polls)
 					return relayFallbackFixture("route_denied")
 				}
@@ -152,7 +158,7 @@ func TestGHRunWatchRefreshesStaleProgressOnNextPoll(t *testing.T) {
 			if len(test.caches) == 3 && !test.firstTerminal {
 				wantSleeps = append(wantSleeps, 60*time.Second)
 			}
-			if polls != len(test.caches) || !reflect.DeepEqual(*sleeps, wantSleeps) {
+			if polls != len(test.caches)+1 || !reflect.DeepEqual(*sleeps, wantSleeps) {
 				t.Fatalf("polls=%d sleeps=%v", polls, *sleeps)
 			}
 		})
@@ -199,7 +205,11 @@ func TestGHRunWatchCompletionProof(t *testing.T) {
 				}
 				if request["headers"].(map[string]any)["cache-control"] == "max-age=0" {
 					fresh++
-					return map[string]any{"status": "completed", "run_attempt": 2, "conclusion": "success"}
+					attempt := test.completedAttempt
+					if test.wantFresh > 0 {
+						attempt = 2
+					}
+					return map[string]any{"status": "completed", "run_attempt": attempt, "conclusion": "success"}
 				}
 				polls++
 				if test.prior && polls == 1 {
@@ -222,7 +232,7 @@ func TestGHRunWatchCompletionProof(t *testing.T) {
 			if test.prior {
 				wantPolls++
 			}
-			if result.action != ghComplete || result.err != nil || fresh != test.wantFresh || polls != wantPolls || len(*sleeps) != wantPolls-1 {
+			if result.action != ghComplete || result.err != nil || fresh != test.wantFresh+1 || polls != wantPolls || len(*sleeps) != wantPolls-1 {
 				t.Fatalf("action=%v err=%v fresh=%d polls=%d sleeps=%v", result.action, result.err, fresh, polls, *sleeps)
 			}
 		})
@@ -921,7 +931,7 @@ func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
 	if !reflect.DeepEqual(jobHeaders, []any{nil, "max-age=0"}) {
 		t.Fatalf("job headers = %v", jobHeaders)
 	}
-	if freshRunReads != 2 {
+	if freshRunReads != 3 {
 		t.Fatalf("fresh run reads = %d, want stale terminal rejected then confirmed", freshRunReads)
 	}
 	if !strings.Contains(out.String(), "completed -> in_progress") || !strings.Contains(out.String(), "Run 42 completed with 'success'") {
@@ -954,7 +964,7 @@ func TestGHRunWatchRejectsCachedPriorAttemptAfterRerun(t *testing.T) {
 					t.Error("stale attempt 1 completion must be confirmed fresh")
 				}
 				return relayTestResponse{Body: map[string]any{"status": "in_progress", "run_attempt": 2}, Relay: relayMeta{Cache: "miss"}}
-			case 4:
+			case 4, 5:
 				return relayTestResponse{Body: map[string]any{"status": "completed", "run_attempt": 2, "conclusion": "success"}, Relay: relayMeta{Cache: "miss"}}
 			default:
 				t.Errorf("unexpected run read %d", len(runHeaders))
@@ -974,7 +984,7 @@ func TestGHRunWatchRejectsCachedPriorAttemptAfterRerun(t *testing.T) {
 	if result.action != ghComplete || result.err != nil || jobCalls != 1 {
 		t.Fatalf("action=%v err=%v jobs=%d out=%q", result.action, result.err, jobCalls, out.String())
 	}
-	if want := []any{nil, nil, "max-age=0", nil}; !reflect.DeepEqual(runHeaders, want) {
+	if want := []any{nil, nil, "max-age=0", nil, "max-age=0"}; !reflect.DeepEqual(runHeaders, want) {
 		t.Fatalf("run headers=%v want=%v", runHeaders, want)
 	}
 	if want := []time.Duration{30 * time.Second, 60 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
