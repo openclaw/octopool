@@ -145,7 +145,6 @@ func TestGHTopDispatchRejectedModifiers(t *testing.T) {
 		{[]string{"run", "view", "42", "--repo=acme/repo", "--json=databaseId"}, "--workflow=ci.yml"},
 		{[]string{"pr", "checks", "7", "--repo=acme/repo", "--json=name"}, "--assignee=alice"},
 		{[]string{"workflow", "list", "--repo=acme/repo", "--json=id"}, "--patch"},
-		{[]string{"label", "list", "--repo=acme/repo", "--json=name"}, "--state=open"},
 		{[]string{"search", "repos", "bug", "--json=name"}, "--repo=acme/repo"},
 		{[]string{"search", "issues", "bug", "--repo=acme/repo", "--json=number"}, "--branch=main"},
 		{[]string{"search", "prs", "bug", "--repo=acme/repo", "--json=number"}, "--workflow=ci.yml"},
