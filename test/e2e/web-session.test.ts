@@ -21,6 +21,39 @@ import {
 const APP = "https://octopool.openclaw.ai";
 
 describe("Worker end-to-end web sessions", () => {
+  it("updates activity only for the authenticated and authorized session", async () => {
+    await seedPool();
+    const session = await seedWebSession();
+    const sessionHash = await hashToken(session);
+    const otherHash = await hashToken("another-web-session");
+    const previous = "2000-01-01 00:00:00";
+    await env.DB.prepare(
+      "INSERT INTO web_sessions (session_hash, caller_id, expires_at, last_seen_at) VALUES (?, 'caller', datetime('now', '+1 day'), ?)",
+    )
+      .bind(otherHash, previous)
+      .run();
+    await env.DB.prepare("UPDATE web_sessions SET last_seen_at = ?").bind(previous).run();
+    const headers = { cookie: `octopool_session=${session}` };
+
+    expect((await callWorker(`${APP}/v1/me`, { headers })).status).toBe(200);
+    const activity = async (hash: string) =>
+      env.DB.prepare("SELECT last_seen_at FROM web_sessions WHERE session_hash = ?")
+        .bind(hash)
+        .first<{ last_seen_at: string }>();
+    expect((await activity(sessionHash))!.last_seen_at).not.toBe(previous);
+    expect((await activity(otherHash))!.last_seen_at).toBe(previous);
+
+    await env.DB.prepare("UPDATE web_sessions SET last_seen_at = ?").bind(previous).run();
+    await env.DB.prepare("DELETE FROM caller_pools WHERE caller_id = 'caller' AND pool_id = ?")
+      .bind(POOL)
+      .run();
+    const denied = await callWorker(`${APP}/v1/me`, { headers });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ error: { code: "pool_denied" } });
+    expect((await activity(sessionHash))!.last_seen_at).toBe(previous);
+    expect((await activity(otherHash))!.last_seen_at).toBe(previous);
+  });
+
   it.each(["%", "%GG", "%E0%A4%A"])(
     "treats malformed cookie encoding %s as a missing session or OAuth state",
     async (malformed) => {

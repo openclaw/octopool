@@ -37,6 +37,7 @@
 - Compile each relay request's authoritative string-protection rules once and reuse the request-local snapshot for outbound checks.
 
 - Load dashboard database panels in one read-only batch for a consistent snapshot and fewer database round trips.
+- Reuse the session-token hash when updating dashboard session activity after authentication.
 
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 - Batch pooled Actions job-aggregate cache reads while preserving candidate validation, projection, and cache-miss reporting.
