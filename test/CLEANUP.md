@@ -45,6 +45,9 @@ rejection, expiry, limiter and signature guards. No releases are part of this wo
   dropping reuse or ignoring the requested age is caught.
   Coalescing owner-cleanup cases require the original error object to survive;
   substituting a generic failure is caught while cleanup checks remain intact.
+  Request-scoped config lookups reject joining pending loads after expiry or a
+  cache clear. Removing either pending-load guard is caught independently;
+  existing cross-request and late-publication cases remain intact.
   SWR refresh capacity is checked across nine distinct clients, independently of
   per-client admission. Raising the isolate cap from eight to nine is caught;
   completed refreshes also release capacity for the previously skipped key.
