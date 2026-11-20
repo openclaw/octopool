@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -358,28 +359,70 @@ func TestRunGHWorkflowViewUsesPublicShape(t *testing.T) {
 	}
 }
 
-func TestRunGHLabelListRelays(t *testing.T) {
-	relayTestServer(t, func(body map[string]any) any {
-		if body["path"] != "/repos/openclaw/octopool/labels" {
-			t.Fatalf("path = %v", body["path"])
-		}
-		headers, ok := body["headers"].(map[string]any)
-		if !ok || headers["x-octopool-public-shape"] != "label-list-v1" {
-			t.Fatalf("headers = %#v", body["headers"])
-		}
-		return []map[string]any{{"name": "bug", "color": "d73a4a", "description": "Bug"}}
-	})
-	var out bytes.Buffer
-	result := runGHTopLevel(t.Context(), []string{
-		"label", "list",
-		"-R", "openclaw/octopool",
-		"--json", "name,color,description",
-	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
+func TestRunGHLabelListDelegates(t *testing.T) {
+	for _, fields := range []string{"name", "id", "url", "id,name,url,color,description"} {
+		t.Run(fields, func(t *testing.T) {
+			calls := 0
+			relayTestServer(t, func(map[string]any) any {
+				calls++
+				// REST orders labels by name, and its IDs and URLs differ from gh's.
+				return []map[string]any{
+					{"id": 2, "node_id": "LA_later", "name": "a-later", "url": "https://api.github.com/repos/acme/repo/labels/a-later"},
+					{"id": 1, "node_id": "LA_first", "name": "z-first", "url": "https://api.github.com/repos/acme/repo/labels/z-first"},
+				}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"label", "list", "-R", "acme/repo", "--limit", "2", "--json", fields}, &out)
+			if result.action != ghDelegate || result.err != nil || calls != 0 || out.Len() != 0 {
+				t.Fatalf("action=%v err=%v calls=%d output=%q", result.action, result.err, calls, out.String())
+			}
+		})
 	}
-	if got := out.String(); !strings.Contains(got, `"name":"bug"`) {
-		t.Fatalf("out = %s", got)
+}
+
+func TestRunGHLabelListNativeHandoff(t *testing.T) {
+	for _, test := range []struct {
+		name, policy, repo string
+		blocked            bool
+	}{
+		{"empty policy", rewriteEmptyTestPolicy, "acme/repo", false},
+		{"active policy", rewriteActiveTestPolicy, "acme/repo", false},
+		{"blocked repository", rewriteActiveTestPolicy, "acme/internal-model", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := 0
+			rewriteTestServer(t, test.policy, func(w http.ResponseWriter, r *http.Request) {
+				data++
+				t.Error("native label list reached relay data")
+				w.WriteHeader(400)
+			})
+			capture := captureRewriteGH(t)
+			t.Setenv("GH_HOST", "")
+			t.Setenv("GH_REPO", "")
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
+			args := []string{"label", "list", "--repo=" + test.repo, "--limit=2", "--json=id,name,url"}
+			var out, stderr bytes.Buffer
+			err := runGH(t.Context(), args, &out, &stderr)
+			if test.blocked {
+				if err != errRewriteBlocked || out.Len() != 0 || data != 0 {
+					t.Fatalf("err=%v out=%q data=%d", err, out.String(), data)
+				}
+				if _, err := os.Stat(capture); !os.IsNotExist(err) {
+					t.Fatal("blocked repository reached native child")
+				}
+				return
+			}
+			if err != nil || data != 0 || out.String() != "child stdout\n" {
+				t.Fatalf("err=%v data=%d out=%q", err, data, out.String())
+			}
+			got := readRewriteCapture(t, capture)
+			if !slices.Equal(got.Args, args) {
+				t.Fatalf("native arguments = %q, want %q", got.Args, args)
+			}
+			if test.policy == rewriteActiveTestPolicy && got.Env["GH_HOST"] != "github.com" {
+				t.Fatalf("guarded native host = %q", got.Env["GH_HOST"])
+			}
+		})
 	}
 }
 

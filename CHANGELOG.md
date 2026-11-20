@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve label creation order, node IDs, and browser URLs in `gh label list` by using native gh for the command.
+
 - Bound GitHub profile response reads during sign-in and user lookup, returning typed upstream errors for oversized or unreadable responses.
 
 - Delegate unsupported repository-view and release-list JSON fields to native gh instead of returning fields that the native commands reject.

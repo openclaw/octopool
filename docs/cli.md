@@ -423,13 +423,16 @@ octopool gh run watch 26360397003 -R openclaw/openclaw --exit-status
 octopool gh repo view openclaw/openclaw --json nameWithOwner,defaultBranchRef,url
 octopool gh workflow list -R openclaw/octopool --json id,name,path,state
 octopool gh workflow view ci.yml -R openclaw/octopool --json id,name,path,state
-octopool gh label list -R openclaw/octopool --json name,color,description
 octopool gh gist view abc123 --json id,url,isPublic
 octopool gh search repos octopool relay --json name,url
 octopool gh release list -R openclaw/octopool --limit 10 --json tagName,name,isDraft
 octopool gh release view v0.3.0 -R openclaw/octopool --json tagName,name,url
 octopool gh api repos/openclaw/octopool/contents/README.md?ref=main --jq .content
 ```
+
+`gh label list` uses native gh to preserve creation-order selection, GraphQL label
+IDs, and browser URLs. It uses the existing native authentication and string-protection
+checks instead of the relay cache.
 
 `pr diff NUMBER --name-only` parses relayed diff headers like native gh: paths retain
 diff order, Git quoting and escapes, and renames use the destination path. Output is
