@@ -1,6 +1,16 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { bearer, jsonResponse, relay, seedPool } from "./harness";
+import worker from "../../src/index";
+import { clearConfigCache } from "../../src/config-cache";
+import {
+  CALLER_TOKEN,
+  POOL,
+  bearer,
+  jsonResponse,
+  relay,
+  runWithContext,
+  seedPool,
+} from "./harness";
 
 type RelayEnvelope = {
   status: number;
@@ -82,37 +92,65 @@ describe("Worker end-to-end GitHub App identity", () => {
     ).toEqual({ count: 2 });
   });
 
-  it("surfaces and audits installation-token exchange failure", async () => {
-    await seedGitHubApp("TEST_APP_KEY", 456);
-    const upstream = vi.fn<typeof fetch>(async (input, init) => {
-      const request = new Request(input, init);
-      const url = new URL(request.url);
-      if (bearer(request) === "test-org-token") {
-        return jsonResponse({ private: false });
-      }
-      expect(request.method).toBe("POST");
-      expect(url.pathname).toBe("/app/installations/456/access_tokens");
-      return jsonResponse({ message: "installation unavailable" }, 503);
-    });
-    vi.stubGlobal("fetch", upstream);
+  it.each(["HTTP failure", "oversized body"])(
+    "surfaces and audits token exchange %s",
+    async (failure) => {
+      await seedGitHubApp("TEST_APP_KEY", 456);
+      clearConfigCache();
+      const upstream = vi.fn<typeof fetch>(async (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        if (bearer(request) === "test-org-token") {
+          return jsonResponse({ private: false });
+        }
+        if (request.method === "POST") {
+          expect(url.pathname).toBe("/app/installations/456/access_tokens");
+          return failure === "HTTP failure"
+            ? jsonResponse({ message: "installation unavailable" }, 503)
+            : jsonResponse({
+                token: "oversized-response-token",
+                expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+                metadata: "x".repeat(512),
+              });
+        }
+        return jsonResponse({ id: 9, full_name: "openclaw/octopool", private: false });
+      });
+      vi.stubGlobal("fetch", upstream);
 
-    const response = await relay("/repos/openclaw/octopool", undefined, {
-      headers: { "if-none-match": '"app-failure"' },
-    });
-    expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({ error: { code: "github_app_token_failed" } });
-    expect(upstream).toHaveBeenCalledTimes(2);
-    expect(
-      await env.DB.prepare(
-        "SELECT identity_id, status, error_code, cache_status FROM audit_events",
-      ).first(),
-    ).toEqual({
-      identity_id: "primary",
-      status: 502,
-      error_code: "github_app_token_failed",
-      cache_status: "bypass",
-    });
-  });
+      const response = await runWithContext((ctx) =>
+        worker.fetch(
+          new Request("https://octopool.dev/v1/github/request", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${CALLER_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              pool: POOL,
+              method: "GET",
+              path: "/repos/openclaw/octopool",
+              headers: { "if-none-match": '"app-failure"' },
+            }),
+          }),
+          { ...env, MAX_RESPONSE_BYTES: "512" } as unknown as Env,
+          ctx,
+        ),
+      );
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({ error: { code: "github_app_token_failed" } });
+      expect(upstream).toHaveBeenCalledTimes(2);
+      expect(
+        await env.DB.prepare(
+          "SELECT identity_id, status, error_code, cache_status FROM audit_events",
+        ).first(),
+      ).toEqual({
+        identity_id: "primary",
+        status: 502,
+        error_code: "github_app_token_failed",
+        cache_status: "bypass",
+      });
+    },
+  );
 });
 
 async function seedGitHubApp(secretRef: string, installationId: number): Promise<void> {

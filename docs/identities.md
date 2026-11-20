@@ -26,6 +26,10 @@ that points at the App's **PKCS#8** private key secret. The Worker:
    `POST /app/installations/{id}/access_tokens`.
 3. Caches the installation token in memory and refreshes it ~60s before expiry.
 
+Installation-token responses are bounded by `MAX_RESPONSE_BYTES` before JSON parsing.
+An oversized response is cancelled, returns `502 github_app_token_failed`, and is
+not cached; the next request can retry the exchange.
+
 The arbitrary repository GraphQL route uses a separate bounded token cache keyed by
 App, installation, secret reference, owner, and repository. Before minting, it verifies
 the installation account and granted permissions, requests `repositories: [name]` with

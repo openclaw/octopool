@@ -188,10 +188,17 @@ async function githubAppInstallationToken(
       `GitHub App token exchange failed with ${response.status}`,
     );
   }
+  const tooLarge = new HttpError(
+    502,
+    "github_app_token_failed",
+    "GitHub App token response was too large",
+  );
   let body: unknown;
   try {
-    body = await response.json();
-  } catch {
+    const bytes = await readBodyCapped(response, responseCapBytes(env), () => tooLarge);
+    body = JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    if (error === tooLarge) throw error;
     throw new HttpError(
       502,
       "github_app_token_failed",
