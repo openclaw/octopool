@@ -391,14 +391,7 @@ func writeGHAPIPages(
 	var output bytes.Buffer
 	switch {
 	case slurp:
-		output.WriteByte('[')
-		for index, body := range bodies {
-			if index > 0 {
-				output.WriteByte(',')
-			}
-			output.Write(body)
-		}
-		output.WriteByte(']')
+		writeRawJSONArray(&output, bodies)
 	case mergedArrayPages(bodies, &output):
 		// real gh coalesces paginated REST array pages into one JSON array.
 	default:
@@ -430,13 +423,17 @@ func mergedArrayPages(bodies [][]byte, output *bytes.Buffer) bool {
 			interiors = append(interiors, interior)
 		}
 	}
+	writeRawJSONArray(output, interiors)
+	return true
+}
+
+func writeRawJSONArray(output *bytes.Buffer, elements [][]byte) {
 	output.WriteByte('[')
-	for index, interior := range interiors {
+	for index, element := range elements {
 		if index > 0 {
 			output.WriteByte(',')
 		}
-		output.Write(interior)
+		output.Write(element)
 	}
 	output.WriteByte(']')
-	return true
 }
