@@ -140,7 +140,7 @@ function stripTokenScopedGitHubFields(value: unknown): unknown {
   if (repoObject && value.private !== false) {
     return null;
   }
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = Object.create(null);
   for (const [key, item] of Object.entries(value)) {
     if (tokenScopedGitHubField(key, repoObject)) {
       continue;

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve `__proto__` GraphQL aliases when sanitizing live and cached relay responses.
+
 - Avoid a redundant full-body copy when the CLI reads JSON relay responses.
 
 - Keep quoted HTML attributes and comments out of extracted GitHub titles and text when they contain angle brackets.

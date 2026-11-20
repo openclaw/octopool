@@ -152,6 +152,26 @@ function upstream(
 }
 
 describe("repository GraphQL relay", () => {
+  it("preserves a __proto__ repository alias in live and cached responses", async () => {
+    const id = await seedApp();
+    const aliasQuery =
+      "query($owner:String!,$name:String!){__proto__:repository(owner:$owner,name:$name){name}}";
+    const body = '{ "data": { "__proto__": { "name": "octopool" } } }';
+    const calls = upstream(id, {
+      graphql: () => new Response(body, { headers: { "content-type": "application/json" } }),
+    });
+    for (const cache of ["miss", "hit"]) {
+      const response = await read({ query: aliasQuery, maxAge: 20 });
+      expect(response.status).toBe(200);
+      expect(await response.json<Envelope>()).toMatchObject({
+        body,
+        body_encoding: "text",
+        relay: { cache },
+      });
+    }
+    expect(calls.queries()).toBe(1);
+  });
+
   it("uses one verified public repo token for every alias and reuses the batch for 20 seconds", async () => {
     const id = await seedApp();
     const body = {

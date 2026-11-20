@@ -4,6 +4,25 @@ import type { RouteInfo } from "../src/types";
 import type { RouteKind } from "../src/route-manifest";
 
 describe("GitHub response sanitizer", () => {
+  it.each(["json", "text"] as const)(
+    "preserves prototype-like field names while sanitizing %s bodies",
+    (encoding) => {
+      const raw =
+        '{"data":{"__proto__":{"name":"octopool","temp_clone_token":"omitted"},"constructor":{"toString":"visible"},"items":[{"__proto__":"nested"}]}}';
+      const sanitized = sanitizeGitHubResponse(route("graphql_read"), {
+        status: 200,
+        headers: {},
+        body: encoding === "text" ? raw : JSON.parse(raw),
+        body_encoding: encoding,
+      });
+      const actual = encoding === "text" ? JSON.parse(sanitized.body as string) : sanitized.body;
+      expect(JSON.stringify(actual)).toBe(
+        '{"data":{"__proto__":{"name":"octopool"},"constructor":{"toString":"visible"},"items":[{"__proto__":"nested"}]}}',
+      );
+      expect(Object.hasOwn(actual.data, "__proto__")).toBe(true);
+    },
+  );
+
   it("preserves public app permissions while stripping repo-token fields", () => {
     const sanitized = sanitizeGitHubResponse(route("commit_check_runs"), {
       status: 200,
