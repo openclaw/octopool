@@ -140,25 +140,6 @@ func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, st
 	}
 }
 
-func handleGHLabel(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
-	if command != "list" || !machineReadable(opts) || !supportedJSONFields(opts, supportedLabelFields) || limitOverOnePage(opts) {
-		return ghDelegated()
-	}
-	repo, ok, err := repoOnly(opts)
-	if err != nil {
-		return ghFailed(err)
-	}
-	if !ok {
-		return ghDelegated()
-	}
-	return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
-		method:  "GET",
-		path:    repoPath(repo, "labels"),
-		query:   listQuery(opts),
-		headers: map[string]string{"x-octopool-public-shape": publicShapeLabelList},
-	}, opts, nil))
-}
-
 func handleGHGist(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
 	switch command {
 	case "list":

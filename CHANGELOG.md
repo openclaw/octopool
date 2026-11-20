@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve label creation order, node IDs, and browser URLs in `gh label list` by using native gh for the command.
+
 - Delegate unsupported repository-view and release-list JSON fields to native gh instead of returning fields that the native commands reject.
 
 - Enforce the response byte cap when minting GitHub App installation tokens; cancel oversized bodies and leave them out of the token cache.

@@ -267,7 +267,6 @@ func TestGHTopListLimitDispatch(t *testing.T) {
 		{"run", []string{"run", "list", "--json", "databaseId"}, "20"},
 		{"release", []string{"release", "list", "--json", "name"}, "30"},
 		{"workflow", []string{"workflow", "list", "--json", "id"}, "50"},
-		{"label", []string{"label", "list", "--json", "name"}, "30"},
 		{"search_issues", []string{"search", "issues", "bug", "--json", "number"}, "30"},
 		{"search_prs", []string{"search", "prs", "bug", "--json", "number"}, "30"},
 		{"search_repos", []string{"search", "repos", "bug", "--json", "name"}, "30"},

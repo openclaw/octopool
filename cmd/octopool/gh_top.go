@@ -35,7 +35,6 @@ var ghTopHandlers = map[string]ghTopHandler{
 	"repo":     handleGHRepo,
 	"release":  handleGHRelease,
 	"workflow": handleGHWorkflow,
-	"label":    handleGHLabel,
 	"gist":     handleGHGist,
 	"search":   handleGHSearch,
 }
