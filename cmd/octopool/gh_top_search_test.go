@@ -89,14 +89,34 @@ func TestRunGHSearchReposUsesRepositorySearchRoute(t *testing.T) {
 		"search", "repos",
 		"octopool",
 		"relay",
-		"--json", "name,nameWithOwner,url",
+		"--json", "name,url",
 		"--limit", "10",
 	}, &out)
 	if result.err != nil || result.action != ghComplete {
 		t.Fatalf("action=%v err=%v", result.action, result.err)
 	}
-	if got := out.String(); !strings.Contains(got, `"nameWithOwner":"openclaw/octopool"`) {
+	if got := out.String(); got != "[{\"name\":\"octopool\",\"url\":\"https://github.com/openclaw/octopool\"}]\n" {
 		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHSearchReposDelegatesUnsupportedJSONFields(t *testing.T) {
+	for _, field := range []string{
+		"nameWithOwner", "defaultBranchRef", "full_name", "stargazers_count", "forks_count", "open_issues_count",
+		"fullName", "defaultBranch", "stargazersCount", "forksCount", "openIssuesCount",
+	} {
+		t.Run(field, func(t *testing.T) {
+			calls := 0
+			relayTestServer(t, func(map[string]any) any {
+				calls++
+				return map[string]any{"items": []any{}}
+			})
+			var out bytes.Buffer
+			result := runGHTopLevel(t.Context(), []string{"search", "repos", "octopool", "--json", "name," + field}, &out)
+			if result.err != nil || result.action != ghDelegate || calls != 0 || out.Len() != 0 {
+				t.Fatalf("action=%v err=%v calls=%d output=%q", result.action, result.err, calls, out.String())
+			}
+		})
 	}
 }
 
@@ -128,7 +148,7 @@ func TestRunGHSearchReposRejectsOperators(t *testing.T) {
 		"octopool",
 		"NOT",
 		"relay",
-		"--json", "name,nameWithOwner,url",
+		"--json", "name,url",
 	}, &out)
 	if result.err != nil || result.action != ghDelegate {
 		t.Fatalf("action=%v err=%v", result.action, result.err)

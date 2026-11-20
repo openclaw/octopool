@@ -46,6 +46,7 @@
 - Batch pooled run-proof cache reads when reusing equivalent Actions job lists, preserving candidate order and current identity checks.
 
 - Select requested issue-list JSON fields before serialization, avoiding an extra encode/decode pass while preserving output formatting.
+- Keep repository-search JSON fields distinct from repo-view fields, delegating unsupported search fields to native gh before making relay requests.
 
 - Avoid redundant response-body copies when processing anonymous GitHub API and public web responses.
 - Read pool statistics in one D1 batch for a consistent report with fewer database round trips.
