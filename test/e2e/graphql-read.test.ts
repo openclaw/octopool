@@ -155,7 +155,7 @@ describe("repository GraphQL relay", () => {
   it("preserves a __proto__ repository alias in live and cached responses", async () => {
     const id = await seedApp();
     const aliasQuery =
-      'query($owner:String!,$name:String!){__proto__:repository(owner:$owner,name:$name){name}}';
+      "query($owner:String!,$name:String!){__proto__:repository(owner:$owner,name:$name){name}}";
     const body = '{ "data": { "__proto__": { "name": "octopool" } } }';
     const calls = upstream(id, {
       graphql: () => new Response(body, { headers: { "content-type": "application/json" } }),
