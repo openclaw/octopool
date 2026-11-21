@@ -114,7 +114,6 @@ func relayHumanRunView(ctx context.Context, stdout io.Writer, repo string, id st
 	if err != nil {
 		return err
 	}
-	run["jobs"] = jobs
 	return renderHumanRunView(stdout, run, jobs)
 }
 
@@ -179,18 +178,10 @@ func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool)
 		if err := json.Unmarshal(rawJob, &job); err != nil {
 			return nil, 0, err
 		}
-		mapped := map[string]any{"databaseId": float64(identity.ID)}
-		for field, path := range map[string][]string{
-			"name":        {"name"},
-			"status":      {"status"},
-			"conclusion":  {"conclusion"},
-			"startedAt":   {"started_at"},
-			"completedAt": {"completed_at"},
-			"url":         {"html_url"},
-		} {
-			if value, ok := valueAtPath(job, path...); ok {
-				mapped[field] = value
-			}
+		mapped := runProgressFields(job)
+		mapped["databaseId"] = float64(identity.ID)
+		if value, ok := job["html_url"]; ok {
+			mapped["url"] = value
 		}
 		if rawSteps, ok := job["steps"].([]any); ok {
 			steps := make([]any, 0, len(rawSteps))
@@ -199,18 +190,9 @@ func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool)
 				if !ok {
 					return nil, 0, errors.New("workflow jobs response included an invalid step")
 				}
-				mappedStep := map[string]any{}
-				for field, path := range map[string][]string{
-					"name":        {"name"},
-					"number":      {"number"},
-					"status":      {"status"},
-					"conclusion":  {"conclusion"},
-					"startedAt":   {"started_at"},
-					"completedAt": {"completed_at"},
-				} {
-					if value, ok := valueAtPath(step, path...); ok {
-						mappedStep[field] = value
-					}
+				mappedStep := runProgressFields(step)
+				if value, ok := step["number"]; ok {
+					mappedStep["number"] = value
 				}
 				steps = append(steps, mappedStep)
 			}
@@ -219,6 +201,19 @@ func runJobsPage(envelope relayEnvelope, owner runJobOwner, seen map[int64]bool)
 		jobs = append(jobs, mapped)
 	}
 	return jobs, total, nil
+}
+
+func runProgressFields(item map[string]any) map[string]any {
+	out := map[string]any{}
+	for field, key := range map[string]string{
+		"name": "name", "status": "status", "conclusion": "conclusion",
+		"startedAt": "started_at", "completedAt": "completed_at",
+	} {
+		if value, ok := item[key]; ok {
+			out[field] = value
+		}
+	}
+	return out
 }
 
 func hasJSONField(fields []string, expected string) bool {
