@@ -41,7 +41,8 @@ import { relayPhase, relayPhasePromise, relayTiming, withRelayTiming } from "./r
 import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";
 import { githubToken, githubRepositoryToken, IdentityCredentialError } from "./github-auth";
 import { graphQLReadCacheable } from "./graphql-read";
-import { storePublicAPIRate, supportsAnonymousGitHubAPI } from "./github-public-api";
+import { supportsAnonymousGitHubAPI } from "./github-public-api";
+import { storePublicAPIRate } from "./github-public-rate";
 import {
   GitHubTransportError,
   isTransientGitHubStatus,

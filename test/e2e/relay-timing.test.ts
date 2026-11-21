@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { RELAY_PHASES } from "../../src/relay-timing";
 import { withTimingBindings } from "../../src/relay-timing-bindings";
-import { storePublicAPIRate } from "../../src/github-public-api";
+import { storePublicAPIRate } from "../../src/github-public-rate";
 import { queries } from "../../src/generated/sql";
 import { observePublicationD1 } from "./publication-d1-observer";
 import { bearer, jsonResponse, relay, seedPool } from "./harness";

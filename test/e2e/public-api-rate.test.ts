@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { expect, it, vi } from "vitest";
-import { storePublicAPIRate } from "../../src/github-public-api";
+import { storePublicAPIRate } from "../../src/github-public-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb } from "../../src/github-web";
 import { withGitHubEgress } from "../../src/github-egress";
 import { queries } from "../../src/generated/sql";
