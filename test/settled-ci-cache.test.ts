@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cacheTTLSeconds, staleCacheSeconds } from "../src/cache";
+import { cacheTTLSeconds, staleCacheSeconds } from "../src/cache-policy";
 import { classifyRoute, defaultPolicy } from "../src/policy";
 
 const now = Date.parse("2026-09-28T12:00:00Z");
