@@ -185,6 +185,34 @@ describe("Git smart HTTP refs", () => {
     ).toHaveLength(2);
   });
 
+  it.each([
+    ["R_kgDOSoyMqw", "REF_kwDOSoyMq69yZWZzL2hlYWRzL21haW4", "REF_kwDOSoyMq7ByZWZzL2hlYWRzL21haW50"],
+    [
+      "MDEwOlJlcG9zaXRvcnkyMTI2MTMwNDk=",
+      "MDM6UmVmMjEyNjEzMDQ5OnJlZnMvaGVhZHMvbWFpbg==",
+      "MDM6UmVmMjEyNjEzMDQ5OnJlZnMvaGVhZHMvbWFpbnQ=",
+    ],
+  ])("preserves each matching ref's node ID for repository %s", (repository, main, maint) => {
+    const refs = new Map([
+      ["refs/heads/maint", gitSHA],
+      ["refs/heads/main", gitSHA],
+    ]);
+    expect(gitRefResponse(refs, repository!, "openclaw", "octopool", "heads", true)).toMatchObject([
+      { ref: "refs/heads/main", node_id: main },
+      { ref: "refs/heads/maint", node_id: maint },
+    ]);
+  });
+
+  it.each(["", "invalid", "R_", "R_wA"])(
+    "requires repository identity only when a ref is selected: %s",
+    (repository) => {
+      const refs = new Map([["refs/heads/main", gitSHA]]);
+      expect(gitRefResponse(refs, repository, "o", "r", "tags", true)).toEqual([]);
+      expect(gitRefResponse(refs, repository, "o", "r", "heads", true)).toBeUndefined();
+      expect(gitRefResponse(refs, repository, "o", "r", "heads/main", false)).toBeUndefined();
+    },
+  );
+
   it("matches GitHub's long-ref node encoding", () => {
     const refs = parseGitUploadPackAdvertisement(
       advertisement([
