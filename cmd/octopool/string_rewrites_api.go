@@ -14,7 +14,6 @@ type rewriteAPIOptions struct {
 	endpoint   string
 	hostname   string
 	method     string
-	cache      string
 	input      string
 	inputSet   bool
 	fields     []rewriteFlag
@@ -83,7 +82,6 @@ func parseRewriteAPI(args []string) (rewriteAPIOptions, error) {
 		case "--hostname":
 			result.hostname = flag.value
 		case "--cache":
-			result.cache = flag.value
 			result.output = append(result.output, "--cache="+flag.value)
 		case "--method":
 			if flag.value == "" {

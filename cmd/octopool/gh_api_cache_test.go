@@ -68,7 +68,7 @@ func TestRunGHAPICacheFlag(t *testing.T) {
 						got := readRewriteCapture(t, capture).Args
 						wantOpts, wantErr := parseRewriteAPI(args[1:])
 						gotOpts, gotErr := parseRewriteAPI(got[1:])
-						if wantErr != nil || gotErr != nil || gotOpts.endpoint != wantOpts.endpoint || gotOpts.cache != wantOpts.cache || gotOpts.method != wantOpts.method {
+						if wantErr != nil || gotErr != nil || gotOpts.endpoint != wantOpts.endpoint || !reflect.DeepEqual(gotOpts.output, wantOpts.output) || gotOpts.method != wantOpts.method {
 							t.Fatalf("native args = %q, want equivalent to %q (parse errors: %v, %v)", got, args, gotErr, wantErr)
 						}
 					}
@@ -88,7 +88,7 @@ func TestRunGHAPICacheFlag(t *testing.T) {
 func TestParseRewriteAPICacheFlag(t *testing.T) {
 	for _, flags := range [][]string{{"--cache", "60s"}, {"--cache=60s"}} {
 		opts, err := parseRewriteAPI(append([]string{"repos/o/r/actions/runs/1/jobs"}, flags...))
-		if err != nil || opts.cache != "60s" || !reflect.DeepEqual(opts.output, []string{"--cache=60s"}) {
+		if err != nil || !reflect.DeepEqual(opts.output, []string{"--cache=60s"}) {
 			t.Fatalf("cache flag not retained: opts=%#v err=%v", opts, err)
 		}
 	}
