@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { routeExample } from "./fixtures/route-manifest";
 import { cachePolicyForRouteKind } from "../src/cache-policy";
 import { isIssueEventRoute, isNativeReadRoute, ROUTES } from "../src/route-manifest";
 
@@ -10,7 +11,8 @@ describe("route manifest", () => {
 
   it("matches every representative path unambiguously", () => {
     for (const route of ROUTES) {
-      const matches = ROUTES.filter((candidate) => candidate.pattern.test(route.example));
+      const example = routeExample(route.template);
+      const matches = ROUTES.filter((candidate) => candidate.pattern.test(example));
       expect(
         matches.map((candidate) => candidate.id),
         route.id,

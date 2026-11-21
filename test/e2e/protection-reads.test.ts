@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../../src/cache";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { isNativeReadRoute, ROUTES } from "../../src/route-manifest";
+import { routeExample } from "../fixtures/route-manifest";
 import { CALLER_TOKEN, callWorker, POOL, relay, seedPool } from "./harness";
 
 const nativeReads = ROUTES.filter(isNativeReadRoute);
@@ -40,7 +41,7 @@ describe("Worker native protection reads", () => {
       { accept: "application/vnd.github.raw" },
     ]) {
       const response = await relay(
-        entry.example,
+        routeExample(entry.template),
         CALLER_TOKEN,
         headers === undefined ? {} : { headers },
       );
@@ -82,7 +83,7 @@ describe("Worker native protection reads", () => {
     const upstream = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", upstream);
     for (const entry of nativeReads) {
-      const request = { pool: POOL, method: "GET", path: entry.example };
+      const request = { pool: POOL, method: "GET", path: routeExample(entry.template) };
       const route = classifyRoute(request, defaultPolicy("openclaw"));
       const key = await githubCacheKey(POOL, request, route);
       // Seed a hypothetical old cache row with a positive TTL. Production native
@@ -104,7 +105,7 @@ describe("Worker native protection reads", () => {
           },
         ),
       ).toBe("shared");
-      const response = await relay(entry.example);
+      const response = await relay(routeExample(entry.template));
       expect(response.status).toBe(424);
       expect(await response.text()).not.toContain("privileged-fixture");
     }
@@ -142,7 +143,7 @@ describe("Worker native protection reads", () => {
       .bind(JSON.stringify({ ...defaultPolicy("other-owner"), allow_public_repos: false }), POOL)
       .run();
     for (const entry of nativeReads) {
-      const response = await relay(entry.example);
+      const response = await relay(routeExample(entry.template));
       expect(response.status).toBe(424);
       expect(await response.json()).toMatchObject({
         error: { code: "fallback_local", details: { reason: "owner_denied" } },
