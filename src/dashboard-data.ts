@@ -1,6 +1,7 @@
 import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
 import { queries } from "./generated/sql";
-import { HttpError, jsonResponse } from "./http";
+import { HttpError } from "./http";
+import { jsonResponse } from "./http-response";
 import {
   normalizeCacheActivity,
   normalizeCacheTotals,

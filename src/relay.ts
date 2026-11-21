@@ -48,7 +48,8 @@ import { callAnonymousGitHubAPI, callGitHubWeb, hasNoQuotaGitHubWebRequest } fro
 import { sanitizeGitHubResponse } from "./github-sanitize";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
-import { HttpError, jsonResponse, requireJsonContentType } from "./http";
+import { HttpError, requireJsonContentType } from "./http";
+import { jsonResponse } from "./http-response";
 import { isRecord } from "./object";
 import {
   createLocalFallbackError,

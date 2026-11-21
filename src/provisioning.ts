@@ -11,7 +11,8 @@ import { ensureCliCaller } from "./callers";
 import { requestedLoginPool } from "./config";
 import { ensurePool } from "./db";
 import { queries } from "./generated/sql";
-import { HttpError, jsonResponse, parseJsonObject, requireString } from "./http";
+import { HttpError, parseJsonObject, requireString } from "./http";
+import { jsonResponse } from "./http-response";
 
 export async function loginGitHubCLI(request: Request, env: Env): Promise<Response> {
   const body = await parseJsonObject(request);

@@ -13,7 +13,8 @@ import { queries } from "./generated/sql";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { readBodyCapped } from "./response-body";
 import { effectiveOrigin } from "./hosts";
-import { HttpError, jsonResponse } from "./http";
+import { HttpError } from "./http";
+import { jsonResponse } from "./http-response";
 import { sqliteTimestamp } from "./sqlite-time";
 import type { WebSession } from "./types";
 

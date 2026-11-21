@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoveryResponse } from "../src/discovery";
 import { PROXY_HOST_HEADER, PROXY_SECRET_HEADER } from "../src/hosts";
-import { errorResponse, HttpError, logUnexpectedWorkerError } from "../src/http";
+import { HttpError } from "../src/http";
+import { errorResponse, logUnexpectedWorkerError } from "../src/http-response";
 import { rootResponse } from "../src/landing";
 import proxyWorker from "../src/openclaw-proxy";
 import { publicWebHostRedirect } from "../src/web-routing";

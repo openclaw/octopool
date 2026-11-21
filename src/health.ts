@@ -1,5 +1,6 @@
 import { queries } from "./generated/sql";
-import { HttpError, jsonResponse } from "./http";
+import { HttpError } from "./http";
+import { jsonResponse } from "./http-response";
 import { poolCoordinatorStub } from "./pool-coordinator";
 
 export async function poolHealth(
