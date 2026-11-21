@@ -1,5 +1,11 @@
 import { isRecord } from "./object";
 
+export class GitHubTransportError extends Error {
+  constructor(readonly failure: unknown) {
+    super("GitHub transport unavailable");
+  }
+}
+
 export const DEFAULT_GITHUB_API_VERSION = "2022-11-28";
 
 const TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524]);

@@ -7,6 +7,7 @@ import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import {
   DEFAULT_GITHUB_API_VERSION,
+  GitHubTransportError,
   githubResponseHeaders,
   isSecondaryRateLimit,
   hasSecondaryRateLimitMessage,
@@ -14,12 +15,6 @@ import {
 import { HttpError } from "./http";
 import { cancelResponseBody, readBodyCapped } from "./response-body";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
-
-export class GitHubTransportError extends Error {
-  constructor(readonly failure: unknown) {
-    super("GitHub transport unavailable");
-  }
-}
 
 export type GitHubLogProbe =
   | { kind: "exists"; status: number; headers: Record<string, string> }
