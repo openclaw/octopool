@@ -33,7 +33,7 @@ func handleGHIssue(ctx context.Context, command string, opts ghTopOptions, stdou
 		if nativeHumanFormat(opts) {
 			return ghCompleted(relayHumanIssueView(ctx, stdout, repo, number))
 		}
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedIssueViewFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts.json, supportedIssueViewFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayIssueView(ctx, stdout, repo, number, opts))
@@ -48,7 +48,7 @@ func handleGHIssue(ctx context.Context, command string, opts ghTopOptions, stdou
 		if !ok || limitOverOnePage(opts) || hasCurrentUserFilter(opts) {
 			return ghDelegated()
 		}
-		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedIssueFields)) {
+		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts.json, supportedIssueFields)) {
 			return ghDelegated()
 		}
 		// This REST representation limit is not a native label setter rule;
@@ -75,7 +75,7 @@ func handleGHIssue(ctx context.Context, command string, opts ghTopOptions, stdou
 			method:  "GET",
 			path:    repoPath(repo, "issues"),
 			query:   query,
-			headers: publicShapeHeaders(opts, supportedPublicIssueListFields, publicShapeIssueList),
+			headers: publicShapeHeaders(opts.json, supportedPublicIssueListFields, publicShapeIssueList),
 		}, opts))
 	default:
 		return ghDelegated()
@@ -86,7 +86,7 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 	request := ghAPIRequest{
 		method:  "GET",
 		path:    repoPath(repo, "issues", number),
-		headers: publicShapeHeaders(opts, supportedPublicIssueViewFields, publicShapeIssueSummary),
+		headers: publicShapeHeaders(opts.json, supportedPublicIssueViewFields, publicShapeIssueSummary),
 	}
 	if hasJSONField(opts.json, "stateReason") {
 		if request.headers == nil {
@@ -131,7 +131,7 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 		}
 		issue["assignees"] = mapped
 	}
-	return writeGHViewFields(ctx, stdout, issue, opts, fieldMapIssue)
+	return writeGHViewFields(ctx, stdout, issue, opts.json, opts.jq, fieldMapIssue)
 }
 
 type issueAssignee struct {

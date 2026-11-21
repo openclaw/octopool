@@ -81,7 +81,7 @@ func nativeReadRoutingNotice(args []string) string {
 			fields = supportedListSearchFields
 		}
 	}
-	if err == nil && !fallback && machineReadable(opts) && !supportedJSONFields(opts, fields) {
+	if err == nil && !fallback && machineReadable(opts) && !supportedJSONFields(opts.json, fields) {
 		return ghNativeJSONNotice
 	}
 	return ""

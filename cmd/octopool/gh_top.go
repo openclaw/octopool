@@ -79,7 +79,7 @@ func ghFailed(err error) ghResult {
 	return ghResult{action: ghFail, err: err}
 }
 
-func relayTop(ctx context.Context, stdout io.Writer, request ghAPIRequest, opts ghTopOptions, fieldMap map[string][]string) error {
+func relayTop(ctx context.Context, stdout io.Writer, request ghAPIRequest, fields []string, jq string, fieldMap map[string][]string) error {
 	if request.query == nil {
 		request.query = map[string]any{}
 	}
@@ -97,16 +97,16 @@ func relayTop(ctx context.Context, stdout io.Writer, request ghAPIRequest, opts 
 	if err != nil {
 		return err
 	}
-	if len(opts.json) == 0 {
-		return writeGHBody(ctx, stdout, envelope, opts.jq)
+	if len(fields) == 0 {
+		return writeGHBody(ctx, stdout, envelope, jq)
 	}
 	body, err := envelopeBodyBytes(envelope)
 	if err != nil {
 		return err
 	}
-	filtered, err := filterJSONFields(body, opts.json, fieldMap)
+	filtered, err := filterJSONFields(body, fields, fieldMap)
 	if err != nil {
 		return err
 	}
-	return writeBytes(ctx, stdout, filtered, opts.jq)
+	return writeBytes(ctx, stdout, filtered, jq)
 }

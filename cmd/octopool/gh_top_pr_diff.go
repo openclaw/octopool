@@ -10,7 +10,7 @@ import (
 
 func relayPRDiffNames(ctx context.Context, stdout io.Writer, request ghAPIRequest) error {
 	var diff bytes.Buffer
-	if err := relayTop(ctx, &diff, request, ghTopOptions{}, nil); err != nil {
+	if err := relayTop(ctx, &diff, request, nil, "", nil); err != nil {
 		return err
 	}
 	return writePRDiffNames(stdout, diff.String())

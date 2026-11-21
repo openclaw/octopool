@@ -16,7 +16,7 @@ func handleGHListSearch(ctx context.Context, stdout io.Writer, kind string, opts
 		fields, fieldMap = supportedPRListSearchFields, fieldMapPR
 	}
 	// Empty --search does not select native's search path or its ordering.
-	if strings.TrimSpace(opts.search) == "" || !machineReadable(opts) || !supportedJSONFields(opts, fields) || limitOverOnePage(opts) {
+	if strings.TrimSpace(opts.search) == "" || !machineReadable(opts) || !supportedJSONFields(opts.json, fields) || limitOverOnePage(opts) {
 		return ghDelegated()
 	}
 	repo, ok, err := repoOnly(opts)
