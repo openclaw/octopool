@@ -1,5 +1,4 @@
 import { encodeOpaqueBytes } from "./encoding";
-import { responseCapBytes } from "./github-limits";
 import { encodedPathSegments } from "./github-path";
 import { decodePathStrict, publicResponseHeaders } from "./github-public-utils";
 import type { WebRequest } from "./github-web-types";
@@ -30,7 +29,7 @@ export function mediaFormat(accept: string | undefined): "diff" | "patch" | unde
 }
 
 export function mediaWebRequest(
-  env: Env,
+  capBytes: number,
   request: RelayRequest,
   route: RouteInfo,
   media: "diff" | "patch",
@@ -46,7 +45,7 @@ export function mediaWebRequest(
   return {
     url,
     headers: { accept: `${contentType}, text/plain, */*`, "user-agent": "octopool" },
-    capBytes: responseCapBytes(env),
+    capBytes,
     usesApiQuota: false,
     payload: (bytes, headers, status) => {
       const { body, encoding } = encodeOpaqueBytes(bytes);

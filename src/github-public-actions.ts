@@ -133,7 +133,7 @@ function actionsRunListRequest(
       ...(workflow === undefined ? [] : ["workflows", decodeURIComponentSafe(workflow)]),
     ])}`,
   );
-  return htmlWebRequest(env, url.toString(), async (body, headers, status) => {
+  return htmlWebRequest(responseCapBytes(env), url.toString(), async (body, headers, status) => {
     const html = new TextDecoder().decode(body);
     const parsed = parseActionsRunListHTML(html, route.owner!, route.repo!);
     if (parsed === undefined) {
@@ -227,7 +227,7 @@ function actionsRunRequest(
     return undefined;
   }
   return htmlWebRequest(
-    env,
+    responseCapBytes(env),
     `https://github.com/${encodedPathSegments([
       route.owner!,
       route.repo!,
