@@ -34,9 +34,7 @@ func TestPRViewGateFieldsRequestLiveRead(t *testing.T) {
 			result := runGHTopLevel(t.Context(), []string{
 				"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number," + field,
 			}, &out)
-			if result.err != nil || result.action != ghComplete {
-				t.Fatalf("action=%v err=%v", result.action, result.err)
-			}
+			assertGHComplete(t, result)
 			if seen["cache-control"] != "max-age=0" {
 				t.Fatalf("%s read headers = %#v, want cache-control max-age=0", field, seen)
 			}
@@ -61,9 +59,7 @@ func TestPRViewStableFieldsStayCached(t *testing.T) {
 	result := runGHTopLevel(t.Context(), []string{
 		"pr", "view", "7", "-R", "openclaw/octopool", "--json", "number,title",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if _, forced := seen["cache-control"]; forced {
 		t.Fatalf("stable-field read headers = %#v, want no cache-control", seen)
 	}

@@ -93,9 +93,7 @@ func TestRunGHPRViewMergeableProjection(t *testing.T) {
 				result := runGHTopLevel(t.Context(), []string{
 					"pr", "view", "7", "--repo", "openclaw/octopool", "--json", fields,
 				}, &out)
-				if result.err != nil || result.action != ghComplete {
-					t.Fatalf("action=%v err=%v", result.action, result.err)
-				}
+				assertGHComplete(t, result)
 				checkPRMergeableProjection(t, out.String(), fields, test.want)
 				if calls != 1 {
 					t.Errorf("PR requests = %d, want 1", calls)

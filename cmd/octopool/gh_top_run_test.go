@@ -121,9 +121,7 @@ func TestRunGHRunViewComposesJobs(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "databaseId,status,conclusion,headSha,jobs",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	var got map[string]any
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -159,9 +157,7 @@ func TestRunGHRunViewUsesRequestedAttempt(t *testing.T) {
 	result := runGHTopLevel(t.Context(), []string{
 		"run", "view", "27398328238", "--attempt", "1", "-R", "openclaw/octopool", "--json", "attempt,jobs",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got, want := strings.Join(paths, "\n"), strings.Join([]string{
 		"/repos/openclaw/octopool/actions/runs/27398328238/attempts/1",
 		"/repos/openclaw/octopool/actions/runs/27398328238/attempts/1/jobs",
@@ -211,9 +207,7 @@ func TestRunGHRunListMapsDisplayTitle(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "databaseId,displayTitle,number",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got := out.String(); !strings.Contains(got, `"displayTitle":"feat: preserve anonymous quota"`) || !strings.Contains(got, `"number":80`) {
 		t.Fatalf("out = %s", got)
 	}

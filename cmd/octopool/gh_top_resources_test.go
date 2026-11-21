@@ -135,9 +135,7 @@ func TestRunGHReleaseListRelays(t *testing.T) {
 		"--limit", "10",
 		"--json", "tagName,name,isDraft",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) || !strings.Contains(got, `"isDraft":false`) {
 		t.Fatalf("out = %s", got)
 	}
@@ -181,9 +179,7 @@ func TestRunGHReleaseViewRelaysTag(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "tagName,name",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) {
 		t.Fatalf("out = %s", got)
 	}
@@ -215,9 +211,7 @@ func TestRunGHReleaseViewPreservesRawBody(t *testing.T) {
 					}
 					var out bytes.Buffer
 					result := runGHTopLevel(t.Context(), append([]string{"release"}, args...), &out)
-					if result.err != nil || result.action != ghComplete {
-						t.Fatalf("action=%v err=%v", result.action, result.err)
-					}
+					assertGHComplete(t, result)
 					var got string
 					if projection == "jq" {
 						if err := json.Unmarshal(out.Bytes(), &got); err != nil {
@@ -276,9 +270,7 @@ func TestRunGHReleaseViewTagRouting(t *testing.T) {
 				"release", "view", test.tag,
 				"-R", "openclaw/octopool", "--json", "tagName",
 			}, &out)
-			if result.err != nil || result.action != ghComplete {
-				t.Fatalf("action=%v err=%v", result.action, result.err)
-			}
+			assertGHComplete(t, result)
 			if got := out.String(); !strings.Contains(got, test.output) {
 				t.Fatalf("out = %s", got)
 			}
@@ -320,9 +312,7 @@ func TestRunGHWorkflowListRelays(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "id,name,path,state",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got := out.String(); !strings.Contains(got, `"name":"CI"`) {
 		t.Fatalf("out = %s", got)
 	}
@@ -354,9 +344,7 @@ func TestRunGHWorkflowViewUsesPublicShape(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "id,name,path,state",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 }
 
 func TestRunGHLabelListDelegates(t *testing.T) {
@@ -439,9 +427,7 @@ func TestRunGHGistViewRelaysPublicGist(t *testing.T) {
 		"abc123",
 		"--json", "id,url,isPublic",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got := out.String(); !strings.Contains(got, `"isPublic":true`) || !strings.Contains(got, `"url":"https://gist.github.com/abc123"`) {
 		t.Fatalf("out = %s", got)
 	}
