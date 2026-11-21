@@ -390,18 +390,6 @@ export function parseCommitPatchSHA(patch: string, abbreviation: string): string
   return sha;
 }
 
-export function parseActionsJobGroupsJSON(
-  value: unknown,
-  owner: string,
-  repo: string,
-  runID: number,
-): ActionsJobSummary[] | undefined {
-  const page = parseActionsJobGroupsPageJSON(value, owner, repo, runID);
-  return page !== undefined && !page.hasMore && page.groupCount === page.totalCount
-    ? page.jobs
-    : undefined;
-}
-
 export function parseActionsJobGroupsPageJSON(
   value: unknown,
   owner: string,

@@ -3,7 +3,6 @@ import { URL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withGitHubEgress } from "../src/github-egress";
 import {
-  parseActionsJobGroupsJSON,
   parseActionsJobGroupsPageJSON,
   parseActionsJobHTML,
   parseActionsRunHTML,
@@ -617,14 +616,18 @@ describe("current GitHub Actions markup", () => {
     expect(projectLargerRunListPage(response)).toBeUndefined();
   });
 
-  it("rejects incomplete job-group JSON and aggregates only complete pages", () => {
-    expect(parseActionsJobGroupsJSON(firstBatch, "openclaw", "openclaw", runID)).toBeUndefined();
+  it("preserves pagination evidence and rejects duplicate job groups", () => {
+    expect(parseActionsJobGroupsPageJSON(firstBatch, "openclaw", "openclaw", runID)).toMatchObject({
+      hasMore: true,
+      groupCount: 1,
+      totalCount: 2,
+    });
     const combined = { ...lastBatch, jobGroups: [...firstBatch.jobGroups, ...lastBatch.jobGroups] };
+    const complete = parseActionsJobGroupsPageJSON(combined, "openclaw", "openclaw", runID);
+    expect(complete).toMatchObject({ hasMore: false, groupCount: 2, totalCount: 2 });
+    expect(complete?.jobs.map((job) => job.id)).toEqual([106218103310, 106218103534]);
     expect(
-      parseActionsJobGroupsJSON(combined, "openclaw", "openclaw", runID)?.map((job) => job.id),
-    ).toEqual([106218103310, 106218103534]);
-    expect(
-      parseActionsJobGroupsJSON(
+      parseActionsJobGroupsPageJSON(
         { ...combined, jobGroups: [firstBatch.jobGroups[0], firstBatch.jobGroups[0]] },
         "openclaw",
         "openclaw",

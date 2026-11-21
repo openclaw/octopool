@@ -15,10 +15,9 @@ import {
   parseIssueListHTML,
   parseLabelListHTML,
   parsePullRequestHTML,
-  parseReleaseMetadataHTML,
-  parseWorkflowListHTML,
-  parseWorkflowPageCount,
-} from "./github-html";
+} from "./github-html-embedded";
+import { parseReleaseMetadataHTML } from "./github-html-releases";
+import { parseWorkflowListHTML, parseWorkflowPageCount } from "./github-html-workflows";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { fetchPublicPage } from "./github-web-transport";
 import type { GitHubEgressEnv } from "./github-egress";
