@@ -1,6 +1,6 @@
 import { encodeOpaqueBytes } from "./encoding";
-import { encodedPathSegments } from "./github-path";
-import { decodePathStrict, publicResponseHeaders } from "./github-public-utils";
+import { decodePathStrict, encodedPathSegments } from "./github-path";
+import { publicResponseHeaders } from "./github-public-utils";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
