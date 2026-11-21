@@ -101,6 +101,7 @@ export function gitRefResponse(
     return undefined;
   }
   const response: Record<string, unknown>[] = [];
+  let encodeNodeID: ((ref: string) => string | undefined) | undefined;
   for (const ref of selected) {
     const sha = refs.get(ref)!;
     const type = ref.startsWith("refs/heads/")
@@ -111,7 +112,8 @@ export function gitRefResponse(
     if (type === undefined) {
       return undefined;
     }
-    const nodeID = gitRefNodeID(repositoryNodeID, ref);
+    encodeNodeID ??= gitRefNodeIDEncoder(repositoryNodeID);
+    const nodeID = encodeNodeID?.(ref);
     if (nodeID === undefined) {
       return undefined;
     }
@@ -143,12 +145,14 @@ export function gitRefResponse(
   return matching ? response : response[0];
 }
 
-function gitRefNodeID(repositoryNodeID: string, ref: string): string | undefined {
+function gitRefNodeIDEncoder(
+  repositoryNodeID: string,
+): ((ref: string) => string | undefined) | undefined {
   const oldBytes = base64ToBytesSafe(repositoryNodeID);
   const oldValue = oldBytes === undefined ? undefined : new TextDecoder().decode(oldBytes);
   const oldMatch = /^010:Repository([0-9]+)$/.exec(oldValue ?? "");
   if (oldMatch !== null) {
-    return bytesToBase64(new TextEncoder().encode(`03:Ref${oldMatch[1]}:${ref}`));
+    return (ref) => bytesToBase64(new TextEncoder().encode(`03:Ref${oldMatch[1]}:${ref}`));
   }
   if (!repositoryNodeID.startsWith("R_")) {
     return undefined;
@@ -157,15 +161,17 @@ function gitRefNodeID(repositoryNodeID: string, ref: string): string | undefined
   if (repositoryBytes === undefined || repositoryBytes[0] !== 0x92) {
     return undefined;
   }
-  const encodedRef = messagePackString(ref);
-  if (encodedRef === undefined) {
-    return undefined;
-  }
-  const bytes = new Uint8Array(repositoryBytes.byteLength + encodedRef.byteLength);
-  bytes.set(repositoryBytes);
-  bytes[0] = 0x93;
-  bytes.set(encodedRef, repositoryBytes.byteLength);
-  return `REF_${bytesToBase64URL(bytes)}`;
+  repositoryBytes[0] = 0x93;
+  return (ref) => {
+    const encodedRef = messagePackString(ref);
+    if (encodedRef === undefined) {
+      return undefined;
+    }
+    const bytes = new Uint8Array(repositoryBytes.byteLength + encodedRef.byteLength);
+    bytes.set(repositoryBytes);
+    bytes.set(encodedRef, repositoryBytes.byteLength);
+    return `REF_${bytesToBase64URL(bytes)}`;
+  };
 }
 
 function messagePackString(value: string): Uint8Array | undefined {
