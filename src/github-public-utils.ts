@@ -1,7 +1,6 @@
 import { responseCapBytes } from "./github-limits";
 import { githubResponseHeaders } from "./github-response";
-import type { WebRequest } from "./github-web-types";
-import type { GitHubRelayResponse } from "./types";
+import type { WebPayload, WebRequest } from "./github-web-types";
 
 export function scalarQuery(
   query: Record<string, string | string[]> | undefined,
@@ -70,13 +69,12 @@ export function publicJSONResponse(
   status: number,
   body: unknown,
   bodyEncoding: "json" | "text" = "json",
-): GitHubRelayResponse {
+): WebPayload {
   return {
     status,
     headers: publicResponseHeaders(headers, "application/json"),
     body,
     body_encoding: bodyEncoding,
-    backend: "web",
   };
 }
 

@@ -1,5 +1,7 @@
 import type { GitHubRelayResponse } from "./types";
 
+export type WebPayload = Omit<GitHubRelayResponse, "backend">;
+
 export type WebRequest = {
   url: string;
   headers: Record<string, string>;
@@ -10,5 +12,5 @@ export type WebRequest = {
     headers: Headers,
     status: number,
     responseURL: string,
-  ) => GitHubRelayResponse | undefined | Promise<GitHubRelayResponse | undefined>;
+  ) => WebPayload | undefined | Promise<WebPayload | undefined>;
 };
