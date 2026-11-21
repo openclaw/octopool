@@ -177,49 +177,49 @@ func renderStats(w io.Writer, stats statsResponse) error {
 	}
 	lines = append(lines,
 		fmt.Sprintf(
-			"recorded relay requests: %s (%s service errors, %s local fallbacks)",
-			intFmt(stats.PoolUsage.Requests),
-			intFmt(stats.PoolUsage.ServiceErrors),
-			intFmt(stats.PoolUsage.Fallbacks),
+			"recorded relay requests: %d (%d service errors, %d local fallbacks)",
+			stats.PoolUsage.Requests,
+			stats.PoolUsage.ServiceErrors,
+			stats.PoolUsage.Fallbacks,
 		),
 		fmt.Sprintf(
-			"cache: %s body reuse (%s hits, %s stale, %s misses, %s bypass, %s unknown)",
+			"cache: %s body reuse (%d hits, %d stale, %d misses, %d bypass, %d unknown)",
 			percent(stats.PoolUsage.CacheHitRate),
-			intFmt(stats.PoolUsage.CacheHits),
-			intFmt(stats.PoolUsage.CacheStale),
-			intFmt(stats.PoolUsage.CacheMisses),
-			intFmt(stats.PoolUsage.CacheBypass),
-			intFmt(stats.PoolUsage.CacheUnknown),
+			stats.PoolUsage.CacheHits,
+			stats.PoolUsage.CacheStale,
+			stats.PoolUsage.CacheMisses,
+			stats.PoolUsage.CacheBypass,
+			stats.PoolUsage.CacheUnknown,
 		),
 		fmt.Sprintf(
-			"eligible: %s/%s requests, %s body reuse",
-			intFmt(stats.PoolUsage.EligibleRequests),
-			intFmt(stats.PoolUsage.Requests),
+			"eligible: %d/%d requests, %s body reuse",
+			stats.PoolUsage.EligibleRequests,
+			stats.PoolUsage.Requests,
 			percent(stats.PoolUsage.EligibleHitRate),
 		),
-		fmt.Sprintf("coalesced: %s duplicate misses", intFmt(stats.PoolUsage.Coalesced)),
+		fmt.Sprintf("coalesced: %d duplicate misses", stats.PoolUsage.Coalesced),
 		fmt.Sprintf(
-			"outcomes: %s cache-served, %s uncached",
-			intFmt(poolCached),
-			intFmt(poolUncached),
+			"outcomes: %d cache-served, %d uncached",
+			poolCached,
+			poolUncached,
 		),
 		fmt.Sprintf(
-			"caller: %s requests, %s body reuse",
-			intFmt(stats.CallerUsage.Requests),
+			"caller: %d requests, %s body reuse",
+			stats.CallerUsage.Requests,
 			percent(stats.CallerUsage.CacheHitRate),
 		),
 		fmt.Sprintf(
-			"%s: %s requests, %s cache-served, %s uncached",
+			"%s: %d requests, %d cache-served, %d uncached",
 			clientUsageLabel,
-			intFmt(stats.ClientUsage.Requests),
-			intFmt(clientCached),
-			intFmt(clientUncached),
+			stats.ClientUsage.Requests,
+			clientCached,
+			clientUncached,
 		),
 		fmt.Sprintf(
-			"entries: %s fresh / %s total, %s expired, %s",
-			intFmt(stats.Cache.FreshEntries),
-			intFmt(stats.Cache.TotalEntries),
-			intFmt(stats.Cache.ExpiredEntries),
+			"entries: %d fresh / %d total, %d expired, %s",
+			stats.Cache.FreshEntries,
+			stats.Cache.TotalEntries,
+			stats.Cache.ExpiredEntries,
 			byteFmt(stats.Cache.BodyBytes),
 		),
 	)
@@ -239,15 +239,15 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		for _, route := range stats.Routes {
 			if _, err := fmt.Fprintf(
 				w,
-				"  %s: %s req, %s eligible body reuse, %s stale, %s miss, %s bypass, %s errors, %s fallback\n",
+				"  %s: %d req, %s eligible body reuse, %d stale, %d miss, %d bypass, %d errors, %d fallback\n",
 				route.RouteKind,
-				intFmt(route.Requests),
+				route.Requests,
 				percent(route.EligibleHitRate),
-				intFmt(route.CacheStale),
-				intFmt(route.CacheMisses),
-				intFmt(route.CacheBypass),
-				intFmt(route.ServiceErrors),
-				intFmt(route.Fallbacks),
+				route.CacheStale,
+				route.CacheMisses,
+				route.CacheBypass,
+				route.ServiceErrors,
+				route.Fallbacks,
 			); err != nil {
 				return err
 			}
@@ -260,13 +260,13 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		for _, backend := range stats.Backends {
 			if _, err := fmt.Fprintf(
 				w,
-				"  %s / %s: %s req, %s miss, %s bypass, %s revalidated\n",
+				"  %s / %s: %d req, %d miss, %d bypass, %d revalidated\n",
 				backend.Backend,
 				backend.RouteKind,
-				intFmt(backend.Requests),
-				intFmt(backend.CacheMisses),
-				intFmt(backend.CacheBypass),
-				intFmt(backend.Revalidated),
+				backend.Requests,
+				backend.CacheMisses,
+				backend.CacheBypass,
+				backend.Revalidated,
 			); err != nil {
 				return err
 			}
@@ -279,10 +279,10 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		for _, fallback := range stats.FallbackReasons {
 			if _, err := fmt.Fprintf(
 				w,
-				"  %s / %s: %s req\n",
+				"  %s / %s: %d req\n",
 				fallback.Reason,
 				fallback.RouteKind,
-				intFmt(fallback.Requests),
+				fallback.Requests,
 			); err != nil {
 				return err
 			}
@@ -299,12 +299,12 @@ func renderStats(w io.Writer, stats statsResponse) error {
 		cached, uncached := client.statsAggregate.cacheOutcomes()
 		if _, err := fmt.Fprintf(
 			w,
-			"  %s: %s req, %s cache-served, %s uncached, %s fallback\n",
+			"  %s: %d req, %d cache-served, %d uncached, %d fallback\n",
 			client.ClientName,
-			intFmt(client.Requests),
-			intFmt(cached),
-			intFmt(uncached),
-			intFmt(client.Fallbacks),
+			client.Requests,
+			cached,
+			uncached,
+			client.Fallbacks,
 		); err != nil {
 			return err
 		}
@@ -317,10 +317,6 @@ func percent(value *float64) string {
 		return "n/a"
 	}
 	return fmt.Sprintf("%.1f%%", *value*100)
-}
-
-func intFmt(value int) string {
-	return fmt.Sprintf("%d", value)
 }
 
 func byteFmt(value int64) string {

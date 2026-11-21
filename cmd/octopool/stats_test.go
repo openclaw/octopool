@@ -113,25 +113,39 @@ func TestRenderStats(t *testing.T) {
 	if err := renderStats(&out, stats); err != nil {
 		t.Fatal(err)
 	}
-	got := out.String()
-	for _, want := range []string{
-		"pool: maintainers",
-		"operator: steipete",
-		"client: steipete-mbp",
-		"cache: 62.5% body reuse (5 hits, 2 stale, 3 misses, 4 bypass, 0 unknown)",
-		"eligible: 8/12 requests, 62.5% body reuse",
-		"coalesced: 2 duplicate misses",
-		"outcomes: 7 cache-served, 7 uncached",
-		"this client: 5 requests, 4 cache-served, 1 uncached",
-		"entries: 7 fresh / 9 total, 2 expired, 1.5 KiB",
-		"  pr_view: 6 req, 62.5% eligible body reuse, 1 stale, 1 miss, 2 bypass, 0 errors, 1 fallback",
-		"backend-attributed relay outcomes:\n  github_web / pr_view: 3 req, 3 miss, 0 bypass, 0 revalidated",
-		"fallback reasons:\n  identity_pool_depleted / pr_view: 1 req",
-		"clients:\n  steipete-mbp: 5 req, 4 cache-served, 1 uncached, 0 fallback",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected %q in:\n%s", want, got)
-		}
+	want := `pool: maintainers
+window: 24h
+operator: steipete
+client: steipete-mbp
+recorded relay requests: 12 (1 service errors, 2 local fallbacks)
+cache: 62.5% body reuse (5 hits, 2 stale, 3 misses, 4 bypass, 0 unknown)
+eligible: 8/12 requests, 62.5% body reuse
+coalesced: 2 duplicate misses
+outcomes: 7 cache-served, 7 uncached
+caller: 8 requests, 62.5% body reuse
+this client: 5 requests, 4 cache-served, 1 uncached
+entries: 7 fresh / 9 total, 2 expired, 1.5 KiB
+top routes:
+  pr_view: 6 req, 62.5% eligible body reuse, 1 stale, 1 miss, 2 bypass, 0 errors, 1 fallback
+backend-attributed relay outcomes:
+  github_web / pr_view: 3 req, 3 miss, 0 bypass, 0 revalidated
+fallback reasons:
+  identity_pool_depleted / pr_view: 1 req
+clients:
+  steipete-mbp: 5 req, 4 cache-served, 1 uncached, 0 fallback
+`
+	if out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
+	}
+	stats.PoolUsage.Requests, stats.PoolUsage.ServiceErrors = -12, -1
+	out.Reset()
+	if err := renderStats(&out, stats); err != nil {
+		t.Fatal(err)
+	}
+	want = strings.ReplaceAll(want, "12", "-12")
+	want = strings.ReplaceAll(want, "(1 service errors", "(-1 service errors")
+	if out.String() != want {
+		t.Fatalf("negative counts: got %q, want %q", out.String(), want)
 	}
 }
 
