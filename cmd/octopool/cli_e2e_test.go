@@ -328,18 +328,7 @@ func cliRelayServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 
 func writeCLIEnvelope(t *testing.T, w http.ResponseWriter, body any) {
 	t.Helper()
-	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Errorf("marshal CLI envelope: %v", err)
-		http.Error(w, "invalid fixture body", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(relayEnvelope{
-		Status: 200, Body: raw, BodyEncoding: "json",
-	}); err != nil {
-		t.Errorf("write CLI envelope: %v", err)
-	}
+	writeRawCLIEnvelope(t, w, 200, "json", body)
 }
 
 func writeCLIFallback(t *testing.T, w http.ResponseWriter, reason string) {
