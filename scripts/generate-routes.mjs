@@ -46,15 +46,15 @@ const lines = [
     route.queryKeys === undefined
       ? []
       : [
-          `\t{regexp.MustCompile(\`${patterns[index]}\`), map[string]bool{${route.queryKeys.map((key) => `${JSON.stringify(key)}: true`).join(", ")}}},`,
+          `\t{relayQueryPathPatterns[${index}], map[string]bool{${route.queryKeys.map((key) => `${JSON.stringify(key)}: true`).join(", ")}}},`,
         ],
   ),
   "}",
   "",
   "var nativeReadPathPatterns = []*regexp.Regexp{",
-  ...patterns
-    .filter((_pattern, index) => isNativeReadRoute(ROUTES[index]))
-    .map((pattern) => `\tregexp.MustCompile(\`${pattern}\`),`),
+  ...ROUTES.flatMap((route, index) =>
+    isNativeReadRoute(route) ? [`\trelayQueryPathPatterns[${index}],`] : [],
+  ),
   "}",
   "",
   "// Only these manifest-owned native reads allow an encoded slash inside a branch parameter.",
