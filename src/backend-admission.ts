@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { queries } from "./generated/sql";
-import { BACKEND_DEADLINE_MS, BACKEND_LEASE_MS } from "./backend-work";
+import { BACKEND_DEADLINE_MS, BACKEND_LEASE_MS } from "./backend-admission-contract";
 
 export function backendAdmissionStub(env: Env, pool: string): DurableObjectStub<BackendAdmission> {
   return env.BACKEND_ADMISSION.get(env.BACKEND_ADMISSION.idFromName(`pool:${pool}`), {

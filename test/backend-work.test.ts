@@ -1,14 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   BackendWork,
-  BACKEND_DEADLINE_MS,
-  BACKEND_LEASE_MS,
   admitBackendWork,
   assertBackendWorkActive,
   backendWorkSignal,
   cancelBackendWork,
   withBackendWorkSignal,
 } from "../src/backend-work";
+import { BACKEND_DEADLINE_MS, BACKEND_LEASE_MS } from "../src/backend-admission-contract";
 import { HttpError } from "../src/http";
 
 beforeEach(() => vi.useFakeTimers());

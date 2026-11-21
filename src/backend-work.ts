@@ -2,17 +2,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { relayPhase, withRelayTiming } from "./relay-timing";
 import { HttpError, parsePositiveInt } from "./http";
 import { createLocalFallbackError } from "./local-fallback";
+import { BACKEND_DEADLINE_MS, BACKEND_LEASE_MS } from "./backend-admission-contract";
+import type { Admission } from "./backend-admission-contract";
 
-export const BACKEND_LEASE_MS = 30_000;
-export const BACKEND_DEADLINE_MS = 60_000;
 export const BACKEND_RENEW_MS = 10_000;
 const BACKEND_RELEASE_WAIT_MS = 1_000;
-
-type Admission = {
-  acquire(id: string, client: string, limit: number): Promise<boolean>;
-  renew(id: string): Promise<boolean>;
-  release(id: string): Promise<void>;
-};
 
 // Pending work belongs only to this relay invocation, never another request.
 const scope = new AsyncLocalStorage<Pick<BackendWork, "signal" | "enter" | "check" | "cancel">>();
