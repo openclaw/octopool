@@ -173,24 +173,24 @@ var relayQueryRules = []struct {
 	path *regexp.Regexp
 	keys map[string]bool
 }{
-	{regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/check-suites/(?:[0-9]+)$`), map[string]bool{}},
-	{regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/check-suites/(?:[0-9]+)/check-runs$`), map[string]bool{"check_name": true, "status": true, "filter": true, "per_page": true, "page": true}},
+	{relayQueryPathPatterns[51], map[string]bool{}},
+	{relayQueryPathPatterns[52], map[string]bool{"check_name": true, "status": true, "filter": true, "per_page": true, "page": true}},
 }
 
 var nativeReadPathPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/enforce_admins$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/required_status_checks$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/required_status_checks/contexts$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/required_pull_request_reviews$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/required_signatures$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/restrictions$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/restrictions/apps$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/restrictions/teams$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/branches/(?:[^/?#]+)/protection/restrictions/users$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/rulesets$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/rulesets/(?:[0-9]+)$`),
-	regexp.MustCompile(`^/repos/(?:[A-Za-z0-9_.-]+)/(?:[A-Za-z0-9_.-]+)/rules/branches/(?:[^/?#]+)$`),
+	relayQueryPathPatterns[85],
+	relayQueryPathPatterns[86],
+	relayQueryPathPatterns[87],
+	relayQueryPathPatterns[88],
+	relayQueryPathPatterns[89],
+	relayQueryPathPatterns[90],
+	relayQueryPathPatterns[91],
+	relayQueryPathPatterns[92],
+	relayQueryPathPatterns[93],
+	relayQueryPathPatterns[94],
+	relayQueryPathPatterns[95],
+	relayQueryPathPatterns[96],
+	relayQueryPathPatterns[97],
 }
 
 // Only these manifest-owned native reads allow an encoded slash inside a branch parameter.
