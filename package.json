@@ -28,15 +28,15 @@
     "types": "wrangler types"
   },
   "dependencies": {
-    "graphql": "17.0.2",
-    "parse5": "8.0.1",
-    "re2js": "2.8.6"
+    "graphql": "17.1.0",
+    "parse5": "8.1.1",
+    "re2js": "2.10.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@types/node": "^26.6.6",
-    "oxfmt": "^0.71.0",
-    "oxlint": "^1.86.0",
+    "oxfmt": "^0.78.0",
+    "oxlint": "^1.93.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12",
     "wrangler": "^4.147.0"
