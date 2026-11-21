@@ -55,7 +55,6 @@ export function mediaWebRequest(
         headers: publicResponseHeaders(headers, contentType),
         body,
         body_encoding: encoding,
-        backend: "web",
       };
     },
   };
