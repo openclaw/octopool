@@ -36,8 +36,7 @@ func verifiedPRCheckMetadata(ctx context.Context, client ghRelayClient, repo, sh
 		if err != nil {
 			return err
 		}
-		for _, raw := range runs {
-			run := raw.(map[string]any)
+		for _, run := range runs {
 			if firstString(run, "head_sha") != sha {
 				return localFallbackError{Reason: "workflow run response did not match pull request head"}
 			}
@@ -97,8 +96,7 @@ func relayPRCheckWorkflowNames(ctx context.Context, client ghRelayClient, repo s
 		return nil, err
 	}
 	names := make(map[int64]string, len(workflows))
-	for _, raw := range workflows {
-		workflow := raw.(map[string]any)
+	for _, workflow := range workflows {
 		id, _ := prCheckID(workflow["id"])
 		names[id] = firstString(workflow, "name")
 	}

@@ -93,7 +93,7 @@ func resolveRunListWorkflowNames(ctx context.Context, client ghRelayClient, repo
 	}
 	err := relayCollectionPages(ctx, client, ghAPIRequest{
 		method: "GET", path: repoPath(repo, "actions", "workflows"),
-	}, "workflows", func(items []any) (bool, error) {
+	}, "workflows", func(items []map[string]any) (bool, error) {
 		for _, item := range items {
 			raw, err := json.Marshal(item)
 			if err != nil {

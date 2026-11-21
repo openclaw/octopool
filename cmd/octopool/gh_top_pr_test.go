@@ -402,7 +402,7 @@ func TestRunGHPRChecksFreshUsesCurrentHead(t *testing.T) {
 }
 
 func TestStatusItemsMapLegacyContexts(t *testing.T) {
-	var rawItems []any
+	var rawItems []map[string]any
 	if err := json.Unmarshal([]byte(`[{"id":1,"context":"ci/external","state":"success","target_url":"https://example.test","created_at":"2026-05-27T00:00:00Z","updated_at":"2026-05-27T00:01:00Z"}]`), &rawItems); err != nil {
 		t.Fatal(err)
 	}

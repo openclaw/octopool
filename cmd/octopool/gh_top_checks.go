@@ -171,7 +171,7 @@ func readPRCheckItems(ctx context.Context, client ghRelayClient, repo, sha strin
 }
 
 func prCheckContextsForSHA(ctx context.Context, client ghRelayClient, repo, sha string, headers map[string]string) ([]prCheckContext, error) {
-	var checks, statuses []any
+	var checks, statuses []map[string]any
 	err := relayReadPair(ctx, func(ctx context.Context) error {
 		var err error
 		checks, err = relayCompleteCollection(ctx, client, ghAPIRequest{
@@ -190,15 +190,15 @@ func prCheckContextsForSHA(ctx context.Context, client ghRelayClient, repo, sha 
 	}
 	items := make([]prCheckContext, 0, len(checks)+len(statuses))
 	for _, raw := range checks {
-		items = append(items, prCheckContext{raw: raw.(map[string]any)})
+		items = append(items, prCheckContext{raw: raw})
 	}
 	return append(items, statusItems(statuses)...), nil
 }
 
-func statusItems(items []any) []prCheckContext {
+func statusItems(items []map[string]any) []prCheckContext {
 	out := make([]prCheckContext, 0, len(items))
 	for _, raw := range items {
-		out = append(out, prCheckContext{raw: raw.(map[string]any), isStatus: true})
+		out = append(out, prCheckContext{raw: raw, isStatus: true})
 	}
 	return out
 }
