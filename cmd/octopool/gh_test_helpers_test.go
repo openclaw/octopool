@@ -84,6 +84,13 @@ func relayTestServer(t *testing.T, responseBody func(map[string]any) any) {
 	t.Setenv("OCTOPOOL_URL", server.URL)
 }
 
+func assertGHComplete(t *testing.T, result ghResult) {
+	t.Helper()
+	if result.action != ghComplete || result.err != nil {
+		t.Fatalf("action=%v err=%v", result.action, result.err)
+	}
+}
+
 // Explicitly emulate the authoritative empty deployment policy for legacy
 // dispatch fixtures. This is an HTTP route, never a production/test bypass.
 func serveEmptyRewritePolicy(t *testing.T, w http.ResponseWriter, r *http.Request, token, pool string) bool {

@@ -54,9 +54,7 @@ func TestGHRunWatchPrintsTransitionsAndValidatesTerminalJobs(t *testing.T) {
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
 	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	wantLines := []string{
 		"Watching run 42 in openclaw/octopool (status: queued)",
 		"run 42: queued -> in_progress",
@@ -95,9 +93,7 @@ func TestGHRunWatchRequestedIntervalStartsAt45Seconds(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool", "-i", "45"}, &bytes.Buffer{})
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if want := []time.Duration{45 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
 		t.Fatalf("sleeps=%v want=%v", *sleeps, want)
 	}
@@ -374,9 +370,7 @@ func TestGHRunWatchFloorsRequestedInterval(t *testing.T) {
 	})
 	sleeps := recordWatchSleeps(t)
 	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool", "-i", "5"}, &bytes.Buffer{})
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if want := []time.Duration{30 * time.Second}; !reflect.DeepEqual(*sleeps, want) {
 		t.Fatalf("sleeps=%v want=%v", *sleeps, want)
 	}
@@ -425,9 +419,7 @@ func TestGHPRChecksWatchPendingToDone(t *testing.T) {
 	sleeps := recordWatchSleeps(t)
 	var out bytes.Buffer
 	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	for _, want := range []string{
 		"checks: 1 pending, 1 pass, 0 fail, 0 cancel",
 		"checks: 0 pending, 2 pass, 0 fail, 0 cancel",
@@ -504,9 +496,7 @@ func TestGHPRChecksWatchFailFastIgnoresCancelled(t *testing.T) {
 	// Cancelled is terminal but not failed: the watch must keep polling the
 	// pending check instead of fail-fasting, and cancelled-only results exit 0
 	// exactly like real gh (Failed then Pending counts decide the exit code).
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if len(*sleeps) == 0 || !strings.Contains(out.String(), "checks: 1 pending, 0 pass, 0 fail, 1 cancel") {
 		t.Fatalf("sleeps=%v out=%q", *sleeps, out.String())
 	}
@@ -885,9 +875,7 @@ func TestGHPRChecksWatchRevalidatesHeadBeforeTerminal(t *testing.T) {
 	recordWatchSleeps(t)
 	var out bytes.Buffer
 	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	// tick(oldsha) -> terminal confirm rejects on fresh head; tick(newsha) ->
 	// terminal -> fresh confirm sweep re-reads newsha's checks.
 	if len(checkFetches) != 3 || checkFetches[0] != "oldsha" || checkFetches[1] != "newsha" || checkFetches[2] != "newsha" {
@@ -925,9 +913,7 @@ func TestGHRunWatchConfirmsTerminalWithFreshRead(t *testing.T) {
 	recordWatchSleeps(t)
 	var out bytes.Buffer
 	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool", "--exit-status"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if !reflect.DeepEqual(jobHeaders, []any{nil, "max-age=0"}) {
 		t.Fatalf("job headers = %v", jobHeaders)
 	}
@@ -1020,9 +1006,7 @@ func TestGHPRChecksWatchConfirmsRerunSameHead(t *testing.T) {
 	recordWatchSleeps(t)
 	var out bytes.Buffer
 	result := runGHTopLevel(t.Context(), []string{"pr", "checks", "7", "-R", "openclaw/octopool", "--watch"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if freshCheckReads != 2 {
 		t.Fatalf("fresh check reads = %d, want rerun detected then confirmed", freshCheckReads)
 	}
@@ -1068,9 +1052,7 @@ func TestGHRunWatchPaginatesCompletedRunJobs(t *testing.T) {
 	recordWatchSleeps(t)
 	var out bytes.Buffer
 	result := runGHTopLevel(t.Context(), []string{"run", "watch", "42", "-R", "openclaw/octopool"}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if !reflect.DeepEqual(jobsRequests, []string{"1", "2", "1", "2"}) {
 		t.Fatalf("jobs pages requested = %v", jobsRequests)
 	}

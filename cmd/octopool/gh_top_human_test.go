@@ -585,13 +585,6 @@ func setHumanTestSeams(t *testing.T, now time.Time) {
 	})
 }
 
-func assertGHComplete(t *testing.T, result ghResult) {
-	t.Helper()
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
-}
-
 func TestPRChecksNativeHumanPresentation(t *testing.T) {
 	for _, row := range []struct {
 		name, conclusion string

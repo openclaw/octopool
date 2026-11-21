@@ -175,9 +175,7 @@ func TestRunGHPRViewLifecycleProjection(t *testing.T) {
 							result := runGHTopLevel(t.Context(), []string{
 								"pr", "view", "1025", "--repo", "openclaw/clawsweeper", "--json", fields,
 							}, &out)
-							if result.err != nil || result.action != ghComplete {
-								t.Fatalf("action=%v err=%v", result.action, result.err)
-							}
+							assertGHComplete(t, result)
 							var got map[string]any
 							if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 								t.Fatal(err)
@@ -232,9 +230,7 @@ func TestRunGHPRViewLifecycleJQ(t *testing.T) {
 				result := runGHTopLevel(t.Context(), []string{
 					"pr", "view", "1025", "--repo", "openclaw/clawsweeper", "--json", fields, "--jq", jq,
 				}, &out)
-				if result.err != nil || result.action != ghComplete {
-					t.Fatalf("action=%v err=%v", result.action, result.err)
-				}
+				assertGHComplete(t, result)
 				want := "OPEN\n"
 				switch jq {
 				case ".":
@@ -290,9 +286,7 @@ func TestRunGHPRStatePreservesOtherContracts(t *testing.T) {
 			}
 			out.Reset()
 			result := runGHTopLevel(t.Context(), []string{"search", "prs", "cache", "-R", "openclaw/clawsweeper", "--json", "state"}, &out)
-			if result.err != nil || result.action != ghComplete {
-				t.Fatalf("action=%v err=%v", result.action, result.err)
-			}
+			assertGHComplete(t, result)
 			if want := "[{\"state\":\"" + state + "\"}]\n"; out.String() != want {
 				t.Errorf("search = %q, want %q", out.String(), want)
 			}

@@ -56,9 +56,7 @@ func TestRunGHPRViewHydratesFiles(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "number,files",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if prCalls != 2 || fileCalls != 1 {
 		t.Fatalf("PR calls=%d file calls=%d, want initial head, files, final head", prCalls, fileCalls)
 	}
@@ -320,9 +318,7 @@ func TestRunGHPRChecksUsesCacheableRequests(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "name,state",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got := out.String(); !strings.Contains(got, `"name":"CI"`) {
 		t.Fatalf("out = %s", got)
 	}

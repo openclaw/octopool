@@ -66,9 +66,7 @@ func TestRunGHIssueViewStateProjection(t *testing.T) {
 						})
 						var out bytes.Buffer
 						result := runGHTopLevel(t.Context(), []string{"issue", "view", "5", "-R", "openclaw/octopool", "--json", fields}, &out)
-						if result.action != ghComplete || result.err != nil {
-							t.Fatalf("action=%v err=%v", result.action, result.err)
-						}
+						assertGHComplete(t, result)
 						all := map[string]any{
 							"number": float64(5), "title": "Issue fixture", "state": strings.ToUpper(state),
 							"closedAt": fixture["closed_at"], "url": fixture["html_url"], "author": fixture["user"],
@@ -145,9 +143,7 @@ func TestRunGHIssueListStateProjection(t *testing.T) {
 			})
 			var out bytes.Buffer
 			result := runGHTopLevel(t.Context(), []string{"issue", "list", "-R", "openclaw/octopool", "--state", "all", "--limit", "2", "--json", fields}, &out)
-			if result.action != ghComplete || result.err != nil {
-				t.Fatalf("action=%v err=%v", result.action, result.err)
-			}
+			assertGHComplete(t, result)
 			var got []map[string]any
 			if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 				t.Fatal(err)

@@ -38,9 +38,7 @@ func TestRunGHSearchIssuesUsesScopedSearchRoute(t *testing.T) {
 		"--json", "number,title,url",
 		"--limit", "10",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	got := out.String()
 	if !strings.Contains(got, `"number":1`) {
 		t.Fatalf("out = %s", got)
@@ -62,9 +60,7 @@ func TestRunGHSearchUsesTokenFreeShapeForExactRESTFields(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "number,title,body",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 }
 
 func TestRunGHSearchReposUsesRepositorySearchRoute(t *testing.T) {
@@ -92,9 +88,7 @@ func TestRunGHSearchReposUsesRepositorySearchRoute(t *testing.T) {
 		"--json", "name,url",
 		"--limit", "10",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 	if got := out.String(); got != "[{\"name\":\"octopool\",\"url\":\"https://github.com/openclaw/octopool\"}]\n" {
 		t.Fatalf("out = %s", got)
 	}
@@ -171,9 +165,7 @@ func TestRunGHSearchUsesExplicitStateOnly(t *testing.T) {
 		"--state", "open",
 		"--json", "number,title,url",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 }
 
 func TestRunGHSearchFallsBackForInvalidStateAll(t *testing.T) {
@@ -219,9 +211,7 @@ func TestRunGHSearchRelaysQualifiedQuery(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "number,title,url",
 	}, &out)
-	if result.action != ghComplete || result.err != nil {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 }
 
 func TestRunGHSearchFallsBackForUnsupportedTerm(t *testing.T) {
@@ -256,9 +246,7 @@ func TestRunGHSearchRelaysPhraseArgument(t *testing.T) {
 		"-R", "openclaw/octopool",
 		"--json", "number,title,url",
 	}, &out)
-	if result.err != nil || result.action != ghComplete {
-		t.Fatalf("action=%v err=%v", result.action, result.err)
-	}
+	assertGHComplete(t, result)
 }
 
 func TestRunGHSearchPRsFallsBackForUnavailableFields(t *testing.T) {
