@@ -1,7 +1,7 @@
 import { parseRateHeaderInt } from "./github-rate";
 import { timingD1Identity } from "./relay-timing-bindings";
 import { withRelayTiming } from "./relay-timing";
-import { isLandingGraphQLRoute } from "./github-landing";
+import { isLandingGraphQLRoute } from "./github-public-shapes";
 import { appendRelayQuery, scalarQuery } from "./github-path";
 import { publicJSONResponse, parseJSONBytes } from "./github-public-utils";
 import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-response";

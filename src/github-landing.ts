@@ -2,7 +2,7 @@ import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "./github-public-shapes";
 import { defaultGitHubJSONAccept } from "./github-response";
 import { HttpError } from "./http";
 import { isRecord } from "./object";
-import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";
+import type { GitHubRelayResponse, RelayRequest } from "./types";
 
 export function landingGraphQLRequest(
   request: RelayRequest,
@@ -48,10 +48,6 @@ export function landingGraphQLRequest(
       ...(typeof cursor === "string" ? { cursor } : {}),
     },
   };
-}
-
-export function isLandingGraphQLRoute(route: RouteInfo): boolean {
-  return route.kind === "pr_view" && route.resource === "graphql";
 }
 
 export function landingGraphQLCacheable(response: GitHubRelayResponse): boolean {

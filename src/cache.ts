@@ -7,8 +7,8 @@ import {
 } from "./cache-publication";
 import { hashToken } from "./encoding";
 import {
-  type CacheFreshStrategy,
-  cachePolicyForRouteKind,
+  cacheTTLSeconds,
+  staleCacheSeconds,
   cacheResponseEligible,
   isMutableCIRoute,
   isStateAwarePRRoute,
@@ -17,8 +17,12 @@ import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-response";
 import { scalarQuery } from "./github-path";
-import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "./github-public-shapes";
-import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
+import {
+  GITHUB_LANDING_QUERIES,
+  PUBLIC_SHAPES,
+  isLandingGraphQLRoute,
+} from "./github-public-shapes";
+import { landingGraphQLCacheable } from "./github-landing";
 import { graphQLReadCacheable, stableGraphQLVariables } from "./graphql-read";
 import { isRecord } from "./object";
 import { exactRunListQuery } from "./run-view-superset";
@@ -27,8 +31,6 @@ import { isIssueEventRoute } from "./route-manifest";
 import type { CacheFillOutcome } from "./cache-fill";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "./types";
 
-const TERMINAL_CI_TTL_SECONDS = 21_600;
-const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
 export const GITHUB_EDGE_CACHE_NAMESPACE = `github-${CACHE_PUBLICATION_EPOCH}`;
 const EDGE_CACHE_NAMESPACE = GITHUB_EDGE_CACHE_NAMESPACE;
 // Megabyte-class bodies (paged run lists, check-run sweeps) are the dominant D1
@@ -512,19 +514,6 @@ function staleGitHubCacheResponse(
   return cached !== undefined && withinRequestedMaxAge(cached, maxAgeSeconds) ? cached : undefined;
 }
 
-export function staleCacheSeconds(route: RouteInfo, freshTtlSeconds?: number): number {
-  if (isLandingGraphQLRoute(route)) return 0;
-  const policy = cachePolicyForRouteKind(route.kind);
-  if (
-    policy.terminalStaleSeconds !== undefined &&
-    freshTtlSeconds !== undefined &&
-    freshTtlSeconds >= TERMINAL_CI_TTL_DETECTION_SECONDS
-  ) {
-    return policy.terminalStaleSeconds;
-  }
-  return policy.staleSeconds;
-}
-
 function cacheRowResponse(row: CacheRow | null): CachedGitHubResponse | undefined {
   if (
     row === null ||
@@ -726,50 +715,6 @@ function writeEdgeCachedResponse(cacheKey: string, cached: CachedGitHubResponse)
   );
 }
 
-export function cacheTTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
-  if (isLandingGraphQLRoute(route)) return 60;
-  const policy = cachePolicyForRouteKind(route.kind);
-  const seconds = freshTTLSeconds(policy.fresh, route, response);
-  return policy.freshCapSeconds === undefined ? seconds : Math.min(policy.freshCapSeconds, seconds);
-}
-
-function freshTTLSeconds(
-  strategy: CacheFreshStrategy,
-  route: RouteInfo,
-  response?: GitHubRelayResponse,
-): number {
-  switch (strategy.kind) {
-    case "static":
-      return strategy.seconds;
-    case "pr":
-      if (isRecord(response?.body) && typeof response.body.merged_at === "string") return 3_600;
-      return ageScaledTTLSeconds(
-        response,
-        120,
-        isRecord(response?.body) && response.body.state === "closed" ? 3_600 : 300,
-      );
-    case "issue":
-      return closedIssue(response) ? 3_600 : 300;
-    case "run":
-      if (!completedResponse(response)) return 60;
-      return route.run_attempt !== undefined
-        ? TERMINAL_CI_TTL_SECONDS
-        : ageScaledTTLSeconds(response, 60, 600);
-    case "run_list":
-      return completedCollection(response, "workflow_runs") ? 120 : 60;
-    case "jobs":
-      return route.run_attempt_completed === true && completedCollection(response, "jobs")
-        ? TERMINAL_CI_TTL_SECONDS
-        : 60;
-    case "mutable_ci":
-      return settledCITTLSeconds(route, response);
-    case "job":
-      return completedResponse(response) ? TERMINAL_CI_TTL_SECONDS : 60;
-    case "pr_state":
-      return stateAwarePRSubresource(route, response) ? 300 : 60;
-  }
-}
-
 function cacheVaryHeaders(headers: RelayRequest["headers"]): Record<string, string> {
   const out: Record<string, string> = {};
   const accept = headers?.accept;
@@ -831,112 +776,10 @@ function defaultQueryValue(key: string, value: string | string[]): boolean {
   return (key === "page" && value === "1") || (key === "per_page" && value === "30");
 }
 
-function ageScaledTTLSeconds(
-  response: GitHubRelayResponse | undefined,
-  minimum: number,
-  maximum: number,
-): number {
-  const updatedAt = isRecord(response?.body) ? response.body.updated_at : undefined;
-  return ageScaledTimestampTTLSeconds(updatedAt, minimum, maximum);
-}
-
-function ageScaledTimestampTTLSeconds(
-  updatedAt: unknown,
-  minimum: number,
-  maximum: number,
-): number {
-  const updatedAtMs = typeof updatedAt === "string" ? Date.parse(updatedAt) : NaN;
-  if (!Number.isFinite(updatedAtMs)) return minimum;
-  // Re-runs, reopened PRs, and new edits remain possible; cap reuse even for old objects.
-  const ageSeconds = (Date.now() - updatedAtMs) / 1_000;
-  return Math.max(minimum, Math.min(maximum, Math.floor(ageSeconds * 0.1)));
-}
-
-function settledCITTLSeconds(route: RouteInfo, response?: GitHubRelayResponse): number {
-  const body = response?.body;
-  let items: unknown;
-  let checks = false;
-  switch (route.kind) {
-    case "commit_check_runs":
-    case "commit_check_runs_ref":
-    case "check_suite_check_runs":
-      items = isRecord(body) ? body.check_runs : undefined;
-      checks = true;
-      break;
-    case "commit_check_suites":
-    case "commit_check_suites_ref":
-      items = isRecord(body) ? body.check_suites : undefined;
-      checks = true;
-      break;
-    case "check_suite_view":
-      items = [body];
-      checks = true;
-      break;
-    case "commit_status":
-    case "commit_status_ref":
-      if (!isRecord(body) || !settledStatus(body.state)) return 60;
-      items = body.statuses;
-      break;
-    default:
-      items = body;
-  }
-  if (!Array.isArray(items) || items.length === 0) return 60;
-  let newest = -Infinity;
-  for (const item of items) {
-    if (!isRecord(item) || (checks ? item.status !== "completed" : !settledStatus(item.state)))
-      return 60;
-    const timestamps = [item.completed_at, item.updated_at].filter(
-      (value) => value !== undefined && value !== null,
-    );
-    if (timestamps.length === 0) return 60;
-    for (const timestamp of timestamps) {
-      const parsed = typeof timestamp === "string" ? Date.parse(timestamp) : NaN;
-      if (!Number.isFinite(parsed)) return 60;
-      newest = Math.max(newest, parsed);
-    }
-  }
-  // New checks and reruns remain possible for the same SHA or suite after completion.
-  return ageScaledTimestampTTLSeconds(new Date(newest).toISOString(), 60, 300);
-}
-
-function settledStatus(state: unknown): boolean {
-  return state === "success" || state === "failure" || state === "error";
-}
-
-function closedIssue(response?: GitHubRelayResponse): boolean {
-  return (
-    isRecord(response?.body) &&
-    (response.body.state === "closed" || response.body.state === "CLOSED")
-  );
-}
-
-function completedResponse(response?: GitHubRelayResponse): boolean {
-  return isRecord(response?.body) && response.body.status === "completed";
-}
-
-function completedCollection(response: GitHubRelayResponse | undefined, key: string): boolean {
-  if (!isRecord(response?.body) || !Array.isArray(response.body[key])) {
-    return false;
-  }
-  const items = response.body[key];
-  return items.length > 0 && items.every((item) => isRecord(item) && item.status === "completed");
-}
-
-function stateAwarePRSubresource(route: RouteInfo, response?: GitHubRelayResponse): boolean {
-  if (!isRecord(response?.body) && !Array.isArray(response?.body)) {
-    return false;
-  }
-  return routeStateHint(route) !== undefined && route.state_hint_source === "live";
-}
-
 function cacheStateDiscriminator(route: RouteInfo): string | undefined {
   if (!isStateAwarePRRoute(route.kind)) {
     return undefined;
   }
-  return routeStateHint(route);
-}
-
-function routeStateHint(route: RouteInfo): string | undefined {
   return route.state_hint;
 }
 

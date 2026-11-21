@@ -1,3 +1,5 @@
+import type { RouteInfo } from "./types";
+
 export const PUBLIC_SHAPES = {
   actionsSummary: "actions-summary-v1",
   actionsJobs: "actions-jobs-v1",
@@ -86,4 +88,8 @@ export function isPublicIssueSearchQuery(
     terms++;
   }
   return repoMatches === 1 && typeMatches === 1 && stateMatches <= 1 && terms >= 1;
+}
+
+export function isLandingGraphQLRoute(route: RouteInfo): boolean {
+  return route.kind === "pr_view" && route.resource === "graphql";
 }

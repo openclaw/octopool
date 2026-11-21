@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashToken } from "../src/encoding";
 import { CACHE_PUBLICATION_EPOCH } from "../src/cache-publication";
 import {
-  cacheTTLSeconds,
   cachedGitHubCreatedAt,
   githubCacheRevalidationHeaders,
   githubCacheKey,
@@ -12,9 +11,9 @@ import {
   readStaleGitHubCache,
   requestCacheMaxAgeSeconds,
   shouldUseGitHubCache,
-  staleCacheSeconds,
   writeGitHubCache,
 } from "../src/cache";
+import { cacheTTLSeconds, staleCacheSeconds } from "../src/cache-policy";
 import { parseIssueHTML } from "../src/github-html-embedded";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import type { GitHubRelayResponse } from "../src/types";
