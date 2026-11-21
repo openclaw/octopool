@@ -1,5 +1,5 @@
 import type { RouteKind } from "./route-manifest";
-import type { GraphQLRead } from "./graphql-read";
+import type { GraphQLRead } from "./graphql-payload";
 
 export type JsonObject = Record<string, unknown>;
 

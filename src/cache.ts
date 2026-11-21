@@ -23,7 +23,7 @@ import {
   isLandingGraphQLRoute,
 } from "./github-public-shapes";
 import { landingGraphQLCacheable } from "./github-landing";
-import { graphQLReadCacheable, stableGraphQLVariables } from "./graphql-read";
+import { graphQLReadCacheable, stableGraphQLVariables } from "./graphql-payload";
 import { isRecord } from "./object";
 import { exactRunListQuery } from "./run-view-superset";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";

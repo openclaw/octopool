@@ -40,7 +40,7 @@ import { insertAudit, scheduleRelayAudit, loadIdentities, loadPoolPolicy } from 
 import { relayPhase, relayPhasePromise, relayTiming, withRelayTiming } from "./relay-timing";
 import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";
 import { githubToken, githubRepositoryToken, IdentityCredentialError } from "./github-auth";
-import { graphQLReadCacheable } from "./graphql-read";
+import { graphQLReadCacheable } from "./graphql-payload";
 import { supportsAnonymousGitHubAPI } from "./github-public-api";
 import { storePublicAPIRate } from "./github-public-rate";
 import {
