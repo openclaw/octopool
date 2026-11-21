@@ -1,11 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { backendAdmissionStub } from "../src/backend-admission";
+import { scheduleCacheRefresh } from "../src/cache-swr";
 import {
-  scheduleCacheRefresh,
+  cachePolicyForRouteKind,
   supportsStaleWhileRevalidate,
   withinSWRWindow,
-} from "../src/cache-swr";
-import type { RouteKind } from "../src/route-manifest";
+} from "../src/cache-policy";
+import { ROUTES, type RouteKind } from "../src/route-manifest";
 import { fakeCacheFillCoordinator, fixtureOwner } from "./cache-fill-test-support";
 
 vi.mock("../src/backend-admission", () => ({ backendAdmissionStub: vi.fn() }));
@@ -71,7 +72,7 @@ it("bounds SWR strictly to the minute after fresh expiry", () => {
   expect(withinSWRWindow("invalid")).toBe(false);
 });
 
-it.each<RouteKind>([
+const swrKinds = new Set<RouteKind>([
   "run_view",
   "run_jobs",
   "run_list",
@@ -92,8 +93,12 @@ it.each<RouteKind>([
   "issue_comment_list",
   "pr_view",
   "contents",
-])("permits SWR for %s", (kind) => expect(supportsStaleWhileRevalidate(kind)).toBe(true));
+]);
 
-it.each<RouteKind>(["graphql_read", "job_logs", "ref_statuses"])("excludes %s from SWR", (kind) =>
-  expect(supportsStaleWhileRevalidate(kind)).toBe(false),
+it.each([...new Set<RouteKind>([...ROUTES.map((route) => route.kind), "graphql_read"])])(
+  "keeps the explicit SWR policy for %s without exposing private metadata",
+  (kind) => {
+    expect(supportsStaleWhileRevalidate(kind)).toBe(swrKinds.has(kind));
+    expect(cachePolicyForRouteKind(kind)).not.toHaveProperty("swr");
+  },
 );

@@ -31,11 +31,15 @@ import {
   writeGitHubCache,
 } from "./cache";
 import { coalesceGitHubCacheMiss } from "./cache-coalesce";
-import { cacheResponseEligible } from "./cache-policy";
+import {
+  cacheResponseEligible,
+  supportsStaleWhileRevalidate,
+  withinSWRWindow,
+} from "./cache-policy";
 import { projectRunListItem, runViewListLookup } from "./run-view-superset";
 import { workflowListItem, workflowViewListLookup } from "./workflow-view-superset";
 import { startOwnedCacheFill, type CacheFillOutcome, type OwnedCacheFill } from "./cache-fill";
-import { scheduleCacheRefresh, supportsStaleWhileRevalidate, withinSWRWindow } from "./cache-swr";
+import { scheduleCacheRefresh } from "./cache-swr";
 import { insertAudit, scheduleRelayAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { relayPhase, relayPhasePromise, relayTiming, withRelayTiming } from "./relay-timing";
 import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";

@@ -1,7 +1,10 @@
 import { isLandingGraphQLRoute } from "./github-public-shapes";
 import { isRecord } from "./object";
+import { parseSQLiteTimestamp } from "./sqlite-time";
 import type { GitHubRelayResponse, RouteInfo } from "./types";
 import type { RouteKind } from "./route-manifest";
+
+export const SWR_WINDOW_SECONDS = 60;
 
 const TERMINAL_CI_TTL_SECONDS = 21_600;
 const TERMINAL_CI_TTL_DETECTION_SECONDS = 1_800;
@@ -40,11 +43,17 @@ type RouteCachePolicy = {
 };
 
 export function cachePolicyForRouteKind(kind: RouteKind): RouteCachePolicy {
-  return {
-    ...routeCachePolicy(kind),
-    ...(refNamedCommitRoute(kind) ? { freshCapSeconds: 120 } : {}),
-    ...(terminalCIRoute(kind) ? { terminalStaleSeconds: 86_400 } : {}),
-  };
+  const { swr: _swr, ...policy } = routeCachePolicy(kind);
+  return policy;
+}
+
+export function supportsStaleWhileRevalidate(kind: RouteKind): boolean {
+  return routeCachePolicy(kind).swr === true;
+}
+
+export function withinSWRWindow(expiresAt: string): boolean {
+  const expiredFor = Date.now() - parseSQLiteTimestamp(expiresAt);
+  return expiredFor >= 0 && expiredFor < SWR_WINDOW_SECONDS * 1000;
 }
 
 export function isStateAwarePRRoute(kind: RouteKind): boolean {
@@ -55,7 +64,7 @@ export function isMutableCIRoute(kind: RouteKind): boolean {
   return routeCachePolicy(kind).fresh.kind === "mutable_ci";
 }
 
-function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
+function routeCachePolicy(kind: RouteKind): RouteCachePolicy & { swr?: true } {
   switch (kind) {
     case "user_view":
     case "user_org_list":
@@ -76,7 +85,6 @@ function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
     case "gitignore_template_list":
     case "gitignore_template_view":
     case "repo_readme":
-    case "contents":
     case "release_view":
     case "tag_list":
     case "repo_languages":
@@ -95,6 +103,8 @@ function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
     case "repo_stats_participation":
     case "repo_stats_punch_card":
       return { fresh: staticCache(3_600), staleSeconds: 7_200 };
+    case "contents":
+      return { fresh: staticCache(3_600), staleSeconds: 7_200, swr: true };
     case "repo_view":
       return { fresh: staticCache(600), staleSeconds: 7_200 };
     case "org_repo_list":
@@ -125,8 +135,6 @@ function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
     case "pr_requested_reviewers":
     case "commit_comments":
     case "repo_comment":
-    case "issue_comments":
-    case "issue_comment_list":
     case "issue_comment_view":
     case "issue_events":
     case "issue_event_list":
@@ -143,6 +151,9 @@ function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
     case "assignee_list":
     case "assignee_view":
       return { fresh: staticCache(300), staleSeconds: 3_600 };
+    case "issue_comments":
+    case "issue_comment_list":
+      return { fresh: staticCache(300), staleSeconds: 3_600, swr: true };
     case "commit_view":
     case "git_blob":
     case "git_commit":
@@ -150,7 +161,7 @@ function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
     case "git_tree":
       return { fresh: staticCache(86_400), staleSeconds: 86_400 };
     case "pr_view":
-      return { fresh: { kind: "pr" }, staleSeconds: 3_600 };
+      return { fresh: { kind: "pr" }, staleSeconds: 3_600, swr: true };
     case "pr_list":
     case "issue_list":
       return { fresh: staticCache(60), staleSeconds: 600 };
@@ -159,33 +170,42 @@ function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
     case "branch_list":
     case "branch_view":
       return { fresh: staticCache(120), staleSeconds: 7_200 };
+    // Ref-named commits re-resolve when refs move; cap freshness and omit terminal stale reuse.
     case "commit_view_ref":
+      return { fresh: staticCache(120), staleSeconds: 300, freshCapSeconds: 120 };
     case "git_ref":
     case "git_matching_refs":
       return { fresh: staticCache(120), staleSeconds: 300 };
     case "run_view":
-      return { fresh: { kind: "run" }, staleSeconds: 300 };
+      return { fresh: { kind: "run" }, staleSeconds: 300, terminalStaleSeconds: 86_400, swr: true };
     case "run_list":
     case "workflow_run_list":
-      return { fresh: { kind: "run_list" }, staleSeconds: 300 };
+      return { fresh: { kind: "run_list" }, staleSeconds: 300, swr: true };
     case "run_jobs":
-      return { fresh: { kind: "jobs" }, staleSeconds: 300 };
+      return {
+        fresh: { kind: "jobs" },
+        staleSeconds: 300,
+        terminalStaleSeconds: 86_400,
+        swr: true,
+      };
     case "commit_check_runs":
-    case "commit_check_runs_ref":
     case "commit_check_suites":
-    case "commit_check_suites_ref":
     case "check_suite_view":
     case "check_suite_check_runs":
     case "commit_status":
-    case "commit_status_ref":
     case "commit_statuses":
+      return { fresh: { kind: "mutable_ci" }, staleSeconds: 300, swr: true };
+    case "commit_check_runs_ref":
+    case "commit_check_suites_ref":
+    case "commit_status_ref":
     case "commit_statuses_ref":
+      return { fresh: { kind: "mutable_ci" }, staleSeconds: 300, freshCapSeconds: 120, swr: true };
     case "ref_statuses":
       return { fresh: { kind: "mutable_ci" }, staleSeconds: 300 };
     case "job_view":
-      return { fresh: { kind: "job" }, staleSeconds: 300 };
+      return { fresh: { kind: "job" }, staleSeconds: 300, terminalStaleSeconds: 86_400, swr: true };
     case "pr_files":
-      return { fresh: { kind: "pr_state" }, staleSeconds: 3_600 };
+      return { fresh: { kind: "pr_state" }, staleSeconds: 3_600, swr: true };
     case "search_issues":
     case "search_code":
     case "search_commits":
@@ -205,33 +225,6 @@ function routeCachePolicy(kind: RouteKind): RouteCachePolicy {
       return { fresh: staticCache(0), staleSeconds: 0 };
     default:
       return assertNever(kind);
-  }
-}
-
-// Ref-named commit routes re-resolve to a new SHA whenever the ref moves, so
-// even "completed" CI payloads stay fresh for at most two minutes and never
-// earn the terminal long-stale window.
-function refNamedCommitRoute(kind: RouteKind): boolean {
-  switch (kind) {
-    case "commit_view_ref":
-    case "commit_check_runs_ref":
-    case "commit_check_suites_ref":
-    case "commit_status_ref":
-    case "commit_statuses_ref":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function terminalCIRoute(kind: RouteKind): boolean {
-  switch (kind) {
-    case "run_view":
-    case "run_jobs":
-    case "job_view":
-      return true;
-    default:
-      return false;
   }
 }
 
