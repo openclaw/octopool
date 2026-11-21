@@ -33,6 +33,8 @@
 
 - Bound the fallback CLI shim-content probe to 8 KiB plus one byte instead of loading whole candidate executables.
 
+- Retire the pre-publication cache-fill RPCs and their local SQL/timer machinery. Deployment requires old Worker routing and in-flight requests to be drained first; existing legacy tables are left intact.
+
 - Batch pooled larger Actions run-list cache reads while preserving candidate order, access checks, small-page projection, and cache-miss reporting.
 - Preserve null entries in pull-request list JSON output and jq expressions when projecting selected fields.
 
