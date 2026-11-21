@@ -219,6 +219,22 @@ func TestRunGHRunListMapsDisplayTitle(t *testing.T) {
 	}
 }
 
+func TestRunJobsProjectionPreservesFieldPresence(t *testing.T) {
+	envelope := relayEnvelope{BodyEncoding: "json", Body: []byte(`{"total_count":1,"jobs":[{"id":7,"name":null,"status":"","started_at":null,"completedAt":"ignored","url":"ignored","number":9,"steps":[{"name":null,"status":"","started_at":null,"completedAt":"ignored","html_url":"ignored","number":null},{}]}]}`)}
+	jobs, total, err := runJobsPage(envelope, runJobOwner{id: "42"}, map[int64]bool{})
+	if err != nil || total != 1 {
+		t.Fatalf("total=%d err=%v", total, err)
+	}
+	raw, err := json.Marshal(jobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"databaseId":7,"name":null,"startedAt":null,"status":"","steps":[{"name":null,"number":null,"startedAt":null,"status":""},{}]}]`
+	if string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+}
+
 func TestRunJobsIdentityAndOwnership(t *testing.T) {
 	for _, test := range []struct {
 		name, jobs, head string
