@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cacheTTLSeconds, githubCacheKey, staleCacheSeconds } from "../src/cache";
+import { githubCacheKey } from "../src/cache";
+import { cacheTTLSeconds, staleCacheSeconds } from "../src/cache-policy";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import type { RelayRequest } from "../src/types";
 

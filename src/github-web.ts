@@ -1,6 +1,6 @@
 import { relayPhase } from "./relay-timing";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
-import { isLandingGraphQLRoute } from "./github-landing";
+import { isLandingGraphQLRoute } from "./github-public-shapes";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { publicAPIRequest, storePublicAPIRate } from "./github-public-api";
 import { actionsPageRequest } from "./github-public-actions";

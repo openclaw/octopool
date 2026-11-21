@@ -50,8 +50,8 @@ import {
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb, hasNoQuotaGitHubWebRequest } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
-import { PUBLIC_SHAPES } from "./github-public-shapes";
-import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
+import { PUBLIC_SHAPES, isLandingGraphQLRoute } from "./github-public-shapes";
+import { landingGraphQLCacheable } from "./github-landing";
 import { HttpError, requireJsonContentType } from "./http";
 import { jsonResponse } from "./http-response";
 import { isRecord } from "./object";

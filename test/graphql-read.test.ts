@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { URL } from "node:url";
 import { parseGraphQLRead } from "../src/graphql-read";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
-import { cachedResponseStillFresh, cacheTTLSeconds, githubCacheKey } from "../src/cache";
+import { cachedResponseStillFresh, githubCacheKey } from "../src/cache";
+import { cacheTTLSeconds } from "../src/cache-policy";
 import { compileStringRewriteRules, guardStringRewriteRead } from "../src/string-rewrites";
 
 const root = (fields: string) => `{ repository(owner:"openclaw", name:"octopool") { ${fields} } }`;
