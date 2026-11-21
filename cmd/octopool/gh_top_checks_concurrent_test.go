@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -15,48 +14,6 @@ import (
 	"testing"
 	"time"
 )
-
-type prCheckReadResult struct {
-	err            error
-	stdout, stderr string
-}
-
-func startPRCheckRead(ctx context.Context, args []string) <-chan prCheckReadResult {
-	done := make(chan prCheckReadResult, 1)
-	go func() {
-		defer close(done)
-		var stdout, stderr bytes.Buffer
-		err := runGH(ctx, args, &stdout, &stderr)
-		done <- prCheckReadResult{err, stdout.String(), stderr.String()}
-	}()
-	return done
-}
-
-func prCheckReadTransport(t *testing.T, respond func(*http.Request, map[string]any) (*http.Response, error)) *atomic.Int64 {
-	t.Helper()
-	_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
-	t.Setenv("OCTOPOOL_NO_FALLBACK", "")
-	original := http.DefaultTransport
-	useRewritePolicyTestTransport(t, func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/v1/github/request" {
-			return original.RoundTrip(request)
-		}
-		defer request.Body.Close()
-		var body map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			return nil, err
-		}
-		return respond(request, body)
-	})
-	return policies
-}
-
-func prCheckReadResponse(t *testing.T, body any) *http.Response {
-	t.Helper()
-	w := httptest.NewRecorder()
-	writeCLIEnvelope(t, w, body)
-	return w.Result()
-}
 
 func TestPRCheckCollectionsOverlap(t *testing.T) {
 	for _, test := range []struct{ command, phase string }{
@@ -79,7 +36,8 @@ func TestPRCheckCollectionsOverlap(t *testing.T) {
 			entered := make(chan string, 2)
 			release := make(chan struct{})
 			unblock := sync.OnceFunc(func() { close(release) })
-			policies := prCheckReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			policies := concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				path := body["path"].(string)
 				query, _ := body["query"].(map[string]any)
 				if (strings.HasSuffix(path, firstPath) || strings.HasSuffix(path, secondPath)) && query["page"] == "1" {
@@ -90,7 +48,7 @@ func TestPRCheckCollectionsOverlap(t *testing.T) {
 						return nil, request.Context().Err()
 					}
 				}
-				return prCheckReadResponse(t, f.response(t, body)), nil
+				return concurrentReadResponse(t, f.response(t, body)), nil
 			})
 			field := "name"
 			if test.phase == "metadata" {
@@ -100,7 +58,7 @@ func TestPRCheckCollectionsOverlap(t *testing.T) {
 				field = "statusCheckRollup"
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			done := startPRCheckRead(ctx, []string{"pr", test.command, "7", "-R", "acme/repo", "--json", field})
+			done := startConcurrentRead(ctx, []string{"pr", test.command, "7", "-R", "acme/repo", "--json", field})
 			defer func() { cancel(); unblock(); <-done }()
 			seen := map[string]bool{}
 			for range 2 {
@@ -164,7 +122,8 @@ func TestPRCheckCollectionsDenialOverridesEarlierFailure(t *testing.T) {
 				f.runs[0].(map[string]any)["head_sha"] = strings.Repeat("f", 40)
 			}
 			firstReturned := make(chan struct{})
-			prCheckReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				switch path := body["path"].(string); {
 				case strings.HasSuffix(path, firstPath):
 					defer close(firstReturned)
@@ -174,7 +133,7 @@ func TestPRCheckCollectionsDenialOverridesEarlierFailure(t *testing.T) {
 					} else if failure == "run-identity" {
 						value = f.response(t, body)
 					}
-					return prCheckReadResponse(t, value), nil
+					return concurrentReadResponse(t, value), nil
 				case strings.HasSuffix(path, secondPath):
 					select {
 					case <-firstReturned:
@@ -183,7 +142,7 @@ func TestPRCheckCollectionsDenialOverridesEarlierFailure(t *testing.T) {
 					}
 					return &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"string_rewrite_denied"}}`))}, nil
 				default:
-					return prCheckReadResponse(t, f.response(t, body)), nil
+					return concurrentReadResponse(t, f.response(t, body)), nil
 				}
 			})
 			capture := captureRewriteGH(t)
@@ -215,10 +174,11 @@ func TestPRCheckCollectionsCancelAndJoin(t *testing.T) {
 			release := make(chan struct{})
 			unblock := sync.OnceFunc(func() { close(release) })
 			var settled atomic.Int64
-			prCheckReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				path := body["path"].(string)
 				if !strings.HasSuffix(path, firstPath) && !strings.HasSuffix(path, secondPath) {
-					return prCheckReadResponse(t, f.response(t, body)), nil
+					return concurrentReadResponse(t, f.response(t, body)), nil
 				}
 				if mode != "caller" && strings.HasSuffix(path, firstPath) {
 					select {
@@ -237,14 +197,14 @@ func TestPRCheckCollectionsCancelAndJoin(t *testing.T) {
 			})
 			capture := captureRewriteGH(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-			done := make(chan prCheckReadResult, 1)
+			done := make(chan concurrentReadResult, 1)
 			var settledAtReturn int64
 			go func() {
 				defer close(done)
 				var stdout, stderr bytes.Buffer
 				err := runGH(ctx, []string{"pr", "checks", "7", "-R", "acme/repo", "--json", "name,workflow"}, &stdout, &stderr)
 				settledAtReturn = settled.Load()
-				done <- prCheckReadResult{err, stdout.String(), stderr.String()}
+				done <- concurrentReadResult{err, stdout.String(), stderr.String()}
 			}()
 			defer func() { cancel(); unblock(); <-done }()
 			wantCanceled := 1
@@ -305,9 +265,10 @@ func TestPRCheckCollectionsKeepDenialBeforePolicyCancellation(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := newPRChecksFixture()
 			policyStarted := make(chan struct{})
-			prCheckReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+			t.Setenv("OCTOPOOL_NO_FALLBACK", "")
+			concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				if strings.HasSuffix(body["path"].(string), "/pulls/7") {
-					return prCheckReadResponse(t, f.response(t, body)), nil
+					return concurrentReadResponse(t, f.response(t, body)), nil
 				}
 				select {
 				case <-policyStarted:
