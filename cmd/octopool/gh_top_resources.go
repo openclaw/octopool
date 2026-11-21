@@ -11,7 +11,7 @@ import (
 func handleGHRepo(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
 	switch command {
 	case "view":
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts.json, supportedRepoFields) {
 			return ghDelegated()
 		}
 		if opts.repo == "" && len(opts.positionals) == 1 {
@@ -80,16 +80,16 @@ func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, std
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseFields) || limitOverOnePage(opts) {
+		if !ok || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedReleaseFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "releases"), query: listQuery(opts)}, opts, fieldMapRelease))
+		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "releases"), query: listQuery(opts)}, opts.json, opts.jq, fieldMapRelease))
 	case "view":
 		repo, ok, err := repoFromOptionOrCurrent(opts.repo)
 		if err != nil {
 			return ghFailed(err)
 		}
-		if !ok || !machineReadable(opts) || !supportedJSONFields(opts, supportedReleaseViewFields) {
+		if !ok || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedReleaseViewFields) {
 			return ghDelegated()
 		}
 		path := repoPath(repo, "releases", "latest")
@@ -99,14 +99,14 @@ func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, std
 			return ghDelegated()
 		}
 		shape := publicShapeReleaseSummary
-		if supportedJSONFields(opts, supportedReleaseMetadataFields) {
+		if supportedJSONFields(opts.json, supportedReleaseMetadataFields) {
 			shape = publicShapeReleaseMetadata
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    path,
 			headers: map[string]string{"x-octopool-public-shape": shape},
-		}, opts, fieldMapRelease))
+		}, opts.json, opts.jq, fieldMapRelease))
 	default:
 		return ghDelegated()
 	}
@@ -122,19 +122,19 @@ func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, st
 	}
 	switch command {
 	case "list":
-		if len(opts.positionals) != 0 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || limitOverOnePage(opts) {
+		if len(opts.positionals) != 0 || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedWorkflowFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayWorkflowList(ctx, stdout, repo, opts))
 	case "view":
-		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
+		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedWorkflowFields) || !supportedWorkflowRef(opts.positionals[0]) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "actions", "workflows", opts.positionals[0]),
 			headers: map[string]string{"x-octopool-public-shape": publicShapeWorkflowView},
-		}, opts, nil))
+		}, opts.json, opts.jq, nil))
 	default:
 		return ghDelegated()
 	}
@@ -145,10 +145,10 @@ func handleGHGist(ctx context.Context, command string, opts ghTopOptions, stdout
 	case "list":
 		return ghDelegated()
 	case "view":
-		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts, supportedGistFields) || !isHex(opts.positionals[0]) {
+		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedGistFields) || !isHex(opts.positionals[0]) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: "/gists/" + opts.positionals[0]}, opts, fieldMapGist))
+		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: "/gists/" + opts.positionals[0]}, opts.json, opts.jq, fieldMapGist))
 	default:
 		return ghDelegated()
 	}

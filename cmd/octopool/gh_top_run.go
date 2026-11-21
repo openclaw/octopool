@@ -57,7 +57,7 @@ func handleGHRun(ctx context.Context, command string, opts ghTopOptions, stdout 
 		if nativeHumanFormat(opts) {
 			return ghCompleted(relayHumanRunList(ctx, stdout, request))
 		}
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRunListFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts.json, supportedRunListFields) {
 			return ghDelegated()
 		}
 		request.headers = nil
@@ -73,7 +73,7 @@ func handleGHRun(ctx context.Context, command string, opts ghTopOptions, stdout 
 		if !ok {
 			return ghDelegated()
 		}
-		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedRunViewFields)) {
+		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts.json, supportedRunViewFields)) {
 			return ghDelegated()
 		}
 		if nativeHumanFormat(opts) {

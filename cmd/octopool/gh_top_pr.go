@@ -46,7 +46,7 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 		if nativeHumanFormat(opts) {
 			return ghCompleted(relayHumanPRView(ctx, stdout, repo, number))
 		}
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedPRFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts.json, supportedPRFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayPRView(ctx, stdout, repo, number, opts))
@@ -72,14 +72,14 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 				query:  query,
 			}))
 		}
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedPRListFields) {
+		if !machineReadable(opts) || !supportedJSONFields(opts.json, supportedPRListFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayPRList(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    repoPath(repo, "pulls"),
 			query:   query,
-			headers: publicShapeHeaders(opts, supportedPublicPRListFields, publicShapePullRequestList),
+			headers: publicShapeHeaders(opts.json, supportedPublicPRListFields, publicShapePullRequestList),
 		}, opts))
 	case "diff":
 		repo, number, ok, err := repoNumber(opts)
@@ -102,7 +102,7 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 		if nameOnly {
 			return ghCompleted(relayPRDiffNames(ctx, stdout, request))
 		}
-		return ghCompleted(relayTop(ctx, stdout, request, ghTopOptions{}, nil))
+		return ghCompleted(relayTop(ctx, stdout, request, nil, "", nil))
 	case "checks":
 		repo, number, ok, err := repoNumber(opts)
 		if err != nil {
@@ -111,7 +111,7 @@ func handleGHPR(ctx context.Context, command string, opts ghTopOptions, stdout i
 		if !ok {
 			return ghDelegated()
 		}
-		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts, supportedCheckRunFields)) {
+		if !nativeHumanFormat(opts) && (!machineReadable(opts) || !supportedJSONFields(opts.json, supportedCheckRunFields)) {
 			return ghDelegated()
 		}
 		return ghCompleted(relayPRChecks(ctx, stdout, repo, number, opts))
@@ -409,7 +409,7 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			return localFallbackError{Reason: "pr_comment_viewer_changed"}
 		}
 	}
-	return writeGHViewFields(ctx, stdout, pr, opts, fieldMapPR)
+	return writeGHViewFields(ctx, stdout, pr, opts.json, opts.jq, fieldMapPR)
 }
 
 func relayPRViewBody(ctx context.Context, client ghRelayClient, request ghAPIRequest) (map[string]any, error) {

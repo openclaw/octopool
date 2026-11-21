@@ -13,7 +13,7 @@ var allowedSearchTerm = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 func handleGHSearch(ctx context.Context, kind string, opts ghTopOptions, stdout io.Writer) ghResult {
 	if kind == "repos" {
-		if !machineReadable(opts) || !supportedJSONFields(opts, supportedRepoSearchFields) || limitOverOnePage(opts) {
+		if !machineReadable(opts) || !supportedJSONFields(opts.json, supportedRepoSearchFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
 		query, ok := plainSearchQuery(opts.positionals)
@@ -40,12 +40,12 @@ func handleGHSearch(ctx context.Context, kind string, opts ghTopOptions, stdout 
 	opts.positionals = nil
 	switch kind {
 	case "issues":
-		if !supportedJSONFields(opts, supportedIssueSearchFields) {
+		if !supportedJSONFields(opts.json, supportedIssueSearchFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relaySearchIssues(ctx, stdout, repo, query, opts))
 	case "prs":
-		if !supportedJSONFields(opts, supportedPRSearchFields) {
+		if !supportedJSONFields(opts.json, supportedPRSearchFields) {
 			return ghDelegated()
 		}
 		return ghCompleted(relaySearchPRs(ctx, stdout, repo, query, opts))

@@ -35,14 +35,14 @@ func writeBytes(ctx context.Context, stdout io.Writer, data []byte, jq string) e
 }
 
 // Keep native nested struct field order and literal HTML characters in gh exports.
-func writeGHViewFields(ctx context.Context, stdout io.Writer, value map[string]any, opts ghTopOptions, fieldMap map[string][]string) error {
+func writeGHViewFields(ctx context.Context, stdout io.Writer, value map[string]any, fields []string, jq string, fieldMap map[string][]string) error {
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(filterJSONValue(value, opts.json, fieldMap)); err != nil {
+	if err := encoder.Encode(filterJSONValue(value, fields, fieldMap)); err != nil {
 		return err
 	}
-	return writeGHViewJSON(ctx, stdout, out.Bytes(), opts.jq)
+	return writeGHViewJSON(ctx, stdout, out.Bytes(), jq)
 }
 
 func writeGHViewJSON(ctx context.Context, stdout io.Writer, data []byte, jq string) error {
@@ -95,8 +95,8 @@ func writeGHViewJSON(ctx context.Context, stdout io.Writer, data []byte, jq stri
 	}
 }
 
-func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {
-	for _, field := range opts.json {
+func supportedJSONFields(fields []string, supported map[string]bool) bool {
+	for _, field := range fields {
 		if !supported[field] {
 			return false
 		}
@@ -104,12 +104,12 @@ func supportedJSONFields(opts ghTopOptions, supported map[string]bool) bool {
 	return true
 }
 
-func publicShapeHeaders(opts ghTopOptions, supported map[string]bool, shape string) map[string]string {
+func publicShapeHeaders(fields []string, supported map[string]bool, shape string) map[string]string {
 	headers := map[string]string{}
-	if supportedJSONFields(opts, supported) {
+	if supportedJSONFields(fields, supported) {
 		headers["x-octopool-public-shape"] = shape
 	}
-	if needsLivePRRead(opts.json) || freshReadRequested() {
+	if needsLivePRRead(fields) || freshReadRequested() {
 		headers["cache-control"] = "max-age=0"
 	}
 	if len(headers) == 0 {
