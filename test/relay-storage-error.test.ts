@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GitHubTransportError } from "../src/github";
+import { GitHubTransportError } from "../src/github-response";
 import { HttpError } from "../src/http";
 import { isTransientRelayStorageError } from "../src/relay-storage-error";
 

@@ -2,8 +2,8 @@ import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-public-utils";
 import { isRecord } from "./object";
 import { rethrowStringRewriteDenial } from "./github-egress";
-import { GitHubTransportError } from "./github";
 import {
+  GitHubTransportError,
   defaultGitHubJSONAccept,
   isTransientGitHubStatus,
   transformedGitHubHeaders,

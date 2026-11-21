@@ -38,11 +38,15 @@ import { startOwnedCacheFill, type CacheFillOutcome, type OwnedCacheFill } from 
 import { scheduleCacheRefresh, supportsStaleWhileRevalidate, withinSWRWindow } from "./cache-swr";
 import { insertAudit, scheduleRelayAudit, loadIdentities, loadPoolPolicy } from "./db";
 import { relayPhase, relayPhasePromise, relayTiming, withRelayTiming } from "./relay-timing";
-import { callGitHub, callPublicGitHub, GitHubTransportError, probeGitHubLog } from "./github";
+import { callGitHub, callPublicGitHub, probeGitHubLog } from "./github";
 import { githubToken, githubRepositoryToken, IdentityCredentialError } from "./github-auth";
 import { graphQLReadCacheable } from "./graphql-read";
 import { storePublicAPIRate, supportsAnonymousGitHubAPI } from "./github-public-api";
-import { isTransientGitHubStatus, transformedGitHubHeaders } from "./github-response";
+import {
+  GitHubTransportError,
+  isTransientGitHubStatus,
+  transformedGitHubHeaders,
+} from "./github-response";
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb, hasNoQuotaGitHubWebRequest } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
