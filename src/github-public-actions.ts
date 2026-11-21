@@ -169,7 +169,7 @@ function actionsRunListRequest(
       const runs = await Promise.all(
         parsed.workflow_runs.slice(0, query.perPage).map(async (run) => {
           const complete = needsRunEnrichment(run)
-            ? await enrichActionsRun(env, route, run, enrichmentSignal)
+            ? await enrichActionsRun(env, route.owner!, route.repo!, run, enrichmentSignal)
             : run;
           if (complete === undefined) throw new Error("Incomplete Actions run enrichment");
           return complete;
@@ -245,7 +245,9 @@ function actionsRunRequest(
         attempt === undefined ? undefined : Number(attempt),
       );
       const complete =
-        parsed === undefined ? undefined : await completeActionsRunSHA(env, route, parsed);
+        parsed === undefined
+          ? undefined
+          : await completeActionsRunSHA(env, route.owner!, route.repo!, parsed);
       return complete === undefined ? undefined : publicJSONResponse(headers, status, complete);
     },
   );
@@ -391,31 +393,26 @@ function actionsJobsQuery(
 
 async function enrichActionsRun(
   env: GitHubEgressEnv,
-  route: RouteInfo,
+  owner: string,
+  repo: string,
   run: Record<string, unknown>,
   signal: AbortSignal,
 ): Promise<Record<string, unknown> | undefined> {
-  if (
-    route.owner === undefined ||
-    route.repo === undefined ||
-    typeof run.id !== "number" ||
-    !Number.isInteger(run.id)
-  ) {
+  if (typeof run.id !== "number" || !Number.isInteger(run.id)) {
     return undefined;
   }
   const page = await fetchPublicPage(
-    `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions", "runs", String(run.id)])}`,
+    `https://github.com/${encodedPathSegments([owner, repo, "actions", "runs", String(run.id)])}`,
     responseCapBytes(env),
     env,
     "text/html",
     { signal, timeoutMs: Math.min(requestTimeoutMs(env), 5000) },
   );
-  const parsed =
-    page === undefined ? undefined : parseActionsRunHTML(page, route.owner, route.repo, run.id);
+  const parsed = page === undefined ? undefined : parseActionsRunHTML(page, owner, repo, run.id);
   if (parsed === undefined || (typeof run.event === "string" && run.event !== parsed.event)) {
     return undefined;
   }
-  const complete = await completeActionsRunSHA(env, route, { ...run, ...parsed }, signal);
+  const complete = await completeActionsRunSHA(env, owner, repo, { ...run, ...parsed }, signal);
   if (
     complete === undefined ||
     (typeof run.head_sha === "string" &&
@@ -429,23 +426,19 @@ async function enrichActionsRun(
 
 async function completeActionsRunSHA(
   env: GitHubEgressEnv,
-  route: RouteInfo,
+  owner: string,
+  repo: string,
   run: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<Record<string, unknown> | undefined> {
   if (isFullGitSHA(run.head_sha)) {
     return run;
   }
-  if (
-    route.owner === undefined ||
-    route.repo === undefined ||
-    typeof run.head_sha !== "string" ||
-    !/^[0-9A-Fa-f]{7,39}$/.test(run.head_sha)
-  ) {
+  if (typeof run.head_sha !== "string" || !/^[0-9A-Fa-f]{7,39}$/.test(run.head_sha)) {
     return undefined;
   }
   const patch = await fetchPublicPage(
-    `https://github.com/${encodedPathSegments([route.owner, route.repo, "commit", `${run.head_sha}.patch`])}`,
+    `https://github.com/${encodedPathSegments([owner, repo, "commit", `${run.head_sha}.patch`])}`,
     responseCapBytes(env),
     env,
     "text/plain",
