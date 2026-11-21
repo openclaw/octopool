@@ -1,6 +1,6 @@
 import { defaultLoginPool } from "./config";
 import { APP_ORIGIN, PUBLIC_HOST, effectiveHost, effectiveOrigin } from "./hosts";
-import { jsonResponse } from "./http";
+import { jsonResponse } from "./http-response";
 
 const DISCOVERY_VERSION = 1;
 const MIN_CLI_VERSION = "0.2.2";

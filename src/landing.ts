@@ -1,4 +1,4 @@
-import { jsonResponse } from "./http";
+import { jsonResponse } from "./http-response";
 import { APP_ORIGIN, isPublicRequest } from "./hosts";
 import { wantsJson } from "./web-error";
 

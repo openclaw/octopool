@@ -1,4 +1,4 @@
-import { errorResponse, logExpectedWorkerError, logUnexpectedWorkerError } from "./http";
+import { errorResponse, logExpectedWorkerError, logUnexpectedWorkerError } from "./http-response";
 import { runScheduledMaintenance } from "./maintenance";
 import { PoolCoordinator } from "./pool-coordinator";
 import { routeRequest } from "./router";

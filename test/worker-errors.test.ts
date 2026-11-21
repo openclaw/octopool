@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HttpError, logExpectedWorkerError } from "../src/http";
+import { HttpError } from "../src/http";
+import { logExpectedWorkerError } from "../src/http-response";
 
 afterEach(() => vi.restoreAllMocks());
 

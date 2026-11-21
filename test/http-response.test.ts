@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jsonResponse } from "../src/http";
+import { jsonResponse } from "../src/http-response";
 
 const forms: { name: string; make: (entries: [string, string][]) => HeadersInit }[] = [
   { name: "record", make: Object.fromEntries },
