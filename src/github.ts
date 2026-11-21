@@ -2,7 +2,7 @@ import { relayPhase, relayPhasePromise } from "./relay-timing";
 import { encodeOpaqueBytes } from "./encoding";
 import type { GitHubEgressEnv } from "./github-egress";
 import { landingGraphQLRequest } from "./github-landing";
-import { graphQLReadBody } from "./graphql-read";
+import { graphQLReadBody } from "./graphql-payload";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import {
