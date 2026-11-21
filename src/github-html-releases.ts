@@ -1,5 +1,5 @@
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
-import { decodePathStrict } from "./github-public-utils";
+import { decodePathStrict } from "./github-path";
 
 type Node = DefaultTreeAdapterTypes.Node;
 type Element = DefaultTreeAdapterTypes.Element;

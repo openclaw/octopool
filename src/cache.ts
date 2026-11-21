@@ -16,7 +16,7 @@ import {
 import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
 import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-response";
-import { scalarQuery } from "./github-public-utils";
+import { scalarQuery } from "./github-path";
 import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "./github-public-shapes";
 import { isLandingGraphQLRoute, landingGraphQLCacheable } from "./github-landing";
 import { graphQLReadCacheable, stableGraphQLVariables } from "./graphql-read";

@@ -1,8 +1,8 @@
 import { responseCapBytes } from "./github-limits";
 import { gitRefResponse, parseGitUploadPackAdvertisement } from "./github-git";
-import { encodedPathSegments, safeRelativePath } from "./github-path";
+import { decodePathStrict, encodedPathSegments, safeRelativePath } from "./github-path";
 import { defaultGitHubJSONAccept } from "./github-response";
-import { decodePathStrict, publicJSONResponse } from "./github-public-utils";
+import { publicJSONResponse } from "./github-public-utils";
 import { parseRepositoryNodeIDHTML } from "./github-html-embedded";
 import { fetchPublicPage } from "./github-web-transport";
 import type { GitHubEgressEnv } from "./github-egress";

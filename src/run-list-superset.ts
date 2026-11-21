@@ -1,5 +1,5 @@
 import { PUBLIC_SHAPES } from "./github-public-shapes";
-import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-public-utils";
+import { boundedPageSize, firstPageQuery, validScalarQuery } from "./github-path";
 import { transformedGitHubHeaders } from "./github-response";
 import { isRecord } from "./object";
 import type { GitHubRelayResponse, RelayRequest, RouteInfo } from "./types";

@@ -1,15 +1,14 @@
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { escapeRegex } from "./github-html-utils";
-import { decodeURIComponentSafe, encodedPathSegments } from "./github-path";
 import {
   boundedPageSize,
+  decodeURIComponentSafe,
+  encodedPathSegments,
   firstPageQuery,
-  htmlWebRequest,
-  parseJSONBytes,
-  publicJSONResponse,
   scalarQuery,
   validScalarQuery,
-} from "./github-public-utils";
+} from "./github-path";
+import { htmlWebRequest, parseJSONBytes, publicJSONResponse } from "./github-public-utils";
 import { defaultGitHubJSONAccept } from "./github-response";
 import {
   actionsJobHTMLProvesCompleted,

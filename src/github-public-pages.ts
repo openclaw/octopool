@@ -1,14 +1,13 @@
 import { responseCapBytes } from "./github-limits";
-import { encodedPathSegments } from "./github-path";
 import {
   boundedPageSize,
   decodePathStrict,
+  encodedPathSegments,
   firstPageQuery,
-  htmlWebRequest,
-  publicJSONResponse,
   scalarQuery,
   validScalarQuery,
-} from "./github-public-utils";
+} from "./github-path";
+import { htmlWebRequest, publicJSONResponse } from "./github-public-utils";
 import { defaultGitHubJSONAccept, transformedGitHubHeaders } from "./github-response";
 import {
   parseIssueHTML,
