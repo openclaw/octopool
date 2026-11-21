@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -360,4 +363,45 @@ func (f *runExportFixture) paths() []string {
 		paths = append(paths, req["path"].(string))
 	}
 	return paths
+}
+
+type concurrentReadResult struct {
+	err            error
+	stdout, stderr string
+}
+
+func startConcurrentRead(ctx context.Context, args []string) <-chan concurrentReadResult {
+	done := make(chan concurrentReadResult, 1)
+	go func() {
+		defer close(done)
+		var stdout, stderr bytes.Buffer
+		err := runGH(ctx, args, &stdout, &stderr)
+		done <- concurrentReadResult{err, stdout.String(), stderr.String()}
+	}()
+	return done
+}
+
+func concurrentReadTransport(t *testing.T, respond func(*http.Request, map[string]any) (*http.Response, error)) *atomic.Int64 {
+	t.Helper()
+	_, policies := rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
+	original := http.DefaultTransport
+	useRewritePolicyTestTransport(t, func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path != "/v1/github/request" {
+			return original.RoundTrip(request)
+		}
+		defer request.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		return respond(request, body)
+	})
+	return policies
+}
+
+func concurrentReadResponse(t *testing.T, body any) *http.Response {
+	t.Helper()
+	w := httptest.NewRecorder()
+	writeCLIEnvelope(t, w, body)
+	return w.Result()
 }

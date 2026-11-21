@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -16,46 +15,22 @@ import (
 	"time"
 )
 
-func runMetadataTransport(t *testing.T, respond func(*http.Request, map[string]any) (*http.Response, error)) {
-	t.Helper()
-	rewriteTestServer(t, rewriteEmptyTestPolicy, nil)
-	original := http.DefaultTransport
-	useRewritePolicyTestTransport(t, func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/v1/github/request" {
-			return original.RoundTrip(request)
-		}
-		defer request.Body.Close()
-		var body map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			return nil, err
-		}
-		return respond(request, body)
-	})
-}
-
-func runMetadataResponse(t *testing.T, body any) *http.Response {
-	t.Helper()
-	w := httptest.NewRecorder()
-	writeCLIEnvelope(t, w, body)
-	return w.Result()
-}
-
 func TestRunViewMetadataReadsOverlap(t *testing.T) {
 	fixture := newRunExportFixture()
 	started := make(chan string, 2)
 	release := make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
 	var requests atomic.Int64
-	runMetadataTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+	concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 		requests.Add(1)
 		path := body["path"].(string)
 		if path == "/repos/acme/repo/actions/runs/42" {
-			return runMetadataResponse(t, fixture.run), nil
+			return concurrentReadResponse(t, fixture.run), nil
 		}
 		if strings.HasSuffix(path, "/jobs") {
 			query := body["query"].(map[string]any)
 			if query["page"] == "2" {
-				return runMetadataResponse(t, map[string]any{"total_count": 101, "jobs": []any{runExportJob(101)}}), nil
+				return concurrentReadResponse(t, map[string]any{"total_count": 101, "jobs": []any{runExportJob(101)}}), nil
 			}
 		}
 		started <- path
@@ -69,25 +44,15 @@ func TestRunViewMetadataReadsOverlap(t *testing.T) {
 			for i := range jobs {
 				jobs[i] = runExportJob(i + 1)
 			}
-			return runMetadataResponse(t, map[string]any{"total_count": 101, "jobs": jobs}), nil
+			return concurrentReadResponse(t, map[string]any{"total_count": 101, "jobs": jobs}), nil
 		}
 		if path != "/repos/acme/repo/actions/workflows/9" {
 			t.Errorf("unexpected metadata path %s", path)
 		}
-		return runMetadataResponse(t, fixture.lookups["9"]), nil
+		return concurrentReadResponse(t, fixture.lookups["9"]), nil
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	type result struct {
-		err            error
-		stdout, stderr string
-	}
-	done := make(chan result, 1)
-	go func() {
-		defer close(done)
-		var stdout, stderr bytes.Buffer
-		err := runGH(ctx, runExportArgs("view", "headSha,jobs,workflowName"), &stdout, &stderr)
-		done <- result{err, stdout.String(), stderr.String()}
-	}()
+	done := startConcurrentRead(ctx, runExportArgs("view", "headSha,jobs,workflowName"))
 	defer func() { cancel(); unblock(); <-done }()
 	seen := map[string]bool{}
 	for range 2 {
@@ -132,10 +97,10 @@ func TestRunViewMetadataDenialCancelsSibling(t *testing.T) {
 			fixture := newRunExportFixture()
 			started := make(chan struct{})
 			var settled atomic.Bool
-			runMetadataTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+			concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				path := body["path"].(string)
 				if path == "/repos/acme/repo/actions/runs/42" {
-					return runMetadataResponse(t, fixture.run), nil
+					return concurrentReadResponse(t, fixture.run), nil
 				}
 				if strings.HasSuffix(path, denied) {
 					select {

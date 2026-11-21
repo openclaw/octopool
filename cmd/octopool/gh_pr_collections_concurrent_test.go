@@ -26,7 +26,7 @@ func TestPRViewCollectionsOverlap(t *testing.T) {
 				unblock := sync.OnceFunc(func() { close(release) })
 				var requests, heads atomic.Int64
 				var filesDone, checksDone atomic.Bool
-				runMetadataTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+				concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 					requests.Add(1)
 					path := body["path"].(string)
 					if path == "/repos/acme/repo/pulls/7" {
@@ -35,10 +35,10 @@ func TestPRViewCollectionsOverlap(t *testing.T) {
 								t.Error("head verification ran before both collections finished")
 							}
 							if moved {
-								return runMetadataResponse(t, map[string]any{"head": map[string]any{"sha": strings.Repeat("b", 40)}}), nil
+								return concurrentReadResponse(t, map[string]any{"head": map[string]any{"sha": strings.Repeat("b", 40)}}), nil
 							}
 						}
-						return runMetadataResponse(t, prDetailExportResponse(t, checks, body)), nil
+						return concurrentReadResponse(t, prDetailExportResponse(t, checks, body)), nil
 					}
 					files := strings.HasSuffix(path, "/files")
 					page, _ := body["query"].(map[string]any)
@@ -64,26 +64,16 @@ func TestPRViewCollectionsOverlap(t *testing.T) {
 						for i := start; i < end; i++ {
 							items = append(items, map[string]any{"filename": fmt.Sprintf("file%03d.go", i), "status": "added", "additions": 1, "deletions": 0})
 						}
-						return runMetadataResponse(t, items), nil
+						return concurrentReadResponse(t, items), nil
 					}
 					if strings.HasSuffix(path, "/actions/workflows") {
 						checksDone.Store(true)
 					}
-					return runMetadataResponse(t, prDetailExportResponse(t, checks, body)), nil
+					return concurrentReadResponse(t, prDetailExportResponse(t, checks, body)), nil
 				})
 				t.Setenv("OCTOPOOL_NO_FALLBACK", "1")
 				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-				type result struct {
-					err            error
-					stdout, stderr string
-				}
-				done := make(chan result, 1)
-				go func() {
-					defer close(done)
-					var out, stderr bytes.Buffer
-					err := runGH(ctx, []string{"pr", "view", "7", "-R", "acme/repo", "--json", fields}, &out, &stderr)
-					done <- result{err, out.String(), stderr.String()}
-				}()
+				done := startConcurrentRead(ctx, []string{"pr", "view", "7", "-R", "acme/repo", "--json", fields})
 				defer func() { cancel(); unblock(); <-done }()
 				seen := map[string]bool{}
 				for range 2 {
@@ -134,10 +124,10 @@ func TestPRViewCollectionDenialCancelsSibling(t *testing.T) {
 			checks := newPRChecksFixture()
 			started := make(chan struct{})
 			var settled atomic.Bool
-			runMetadataTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
+			concurrentReadTransport(t, func(request *http.Request, body map[string]any) (*http.Response, error) {
 				path := body["path"].(string)
 				if !strings.HasSuffix(path, "/files") && !strings.HasSuffix(path, "/check-runs") {
-					return runMetadataResponse(t, prDetailExportResponse(t, checks, body)), nil
+					return concurrentReadResponse(t, prDetailExportResponse(t, checks, body)), nil
 				}
 				if strings.HasSuffix(path, denied) {
 					select {
