@@ -84,10 +84,13 @@ function upstream(
   } = {},
 ) {
   const minted: string[] = [];
+  const requests: { method: string; host: string; pathname: string }[] = [];
   let queries = 0;
   const mock = vi.fn<typeof fetch>(async (input, init) => {
     const request = new Request(input, init);
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
+    requests.push({ method: request.method, host: url.host, pathname: path });
     if (path.startsWith("/repos/openclaw/")) {
       expect(bearer(request)).toBe("test-org-token");
       return jsonResponse({ private: options.visibility ?? false });
@@ -148,7 +151,7 @@ function upstream(
     );
   });
   vi.stubGlobal("fetch", mock);
-  return { mock, minted, queries: () => queries };
+  return { mock, minted, queries: () => queries, requests };
 }
 
 describe("repository GraphQL relay", () => {
@@ -271,7 +274,7 @@ describe("repository GraphQL relay", () => {
       expect(await response.json()).toMatchObject({
         error: { code: "fallback_local", details: { reason: "repo_not_public" } },
       });
-      expect(calls.mock).toHaveBeenCalledTimes(1);
+      expect(calls.mock, JSON.stringify(calls.requests)).toHaveBeenCalledTimes(1);
       expect(calls.minted).toEqual([]);
       expect(calls.queries()).toBe(0);
       expect(
