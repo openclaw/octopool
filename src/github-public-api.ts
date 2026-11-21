@@ -1,5 +1,4 @@
 import { parseRateHeaderInt } from "./github-rate";
-import { responseCapBytes } from "./github-limits";
 import { timingD1Identity } from "./relay-timing-bindings";
 import { withRelayTiming } from "./relay-timing";
 import { isLandingGraphQLRoute } from "./github-landing";
@@ -21,7 +20,7 @@ export function clearPublicAPIRateSnapshots(): void {
 }
 
 export function publicAPIRequest(
-  env: Env,
+  capBytes: number,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -41,7 +40,7 @@ export function publicAPIRequest(
   return {
     url: url.toString(),
     headers: publicAPIHeaders(request),
-    capBytes: responseCapBytes(env),
+    capBytes,
     usesApiQuota: true,
     payload: (body, headers, status) => {
       if (release) {

@@ -125,7 +125,7 @@ export function summaryPageRequest(
     url = new URL(
       `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions"])}`,
     );
-    return htmlWebRequest(env, url.toString(), async (body, headers, status) => {
+    return htmlWebRequest(responseCapBytes(env), url.toString(), async (body, headers, status) => {
       const html = new TextDecoder().decode(body);
       const workflows = await completeWorkflowList(env, route, html);
       if (workflows === undefined) {
@@ -150,7 +150,7 @@ export function summaryPageRequest(
   } else {
     return undefined;
   }
-  return htmlWebRequest(env, url.toString(), (body, headers, status) => {
+  return htmlWebRequest(responseCapBytes(env), url.toString(), (body, headers, status) => {
     const parsed = parse(new TextDecoder().decode(body));
     return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed);
   });
@@ -265,7 +265,7 @@ function compareStrings(left: string, right: string): number {
 }
 
 export function releaseMetadataPageRequest(
-  env: Env,
+  capBytes: number,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -289,7 +289,7 @@ export function releaseMetadataPageRequest(
     suffix = `tag/${encodeURIComponent(tag)}`;
   } else if (route.kind !== "release_latest") return undefined;
   const url = `https://github.com/${encodedPathSegments([route.owner, route.repo, "releases"])}/${suffix}`;
-  return htmlWebRequest(env, url, (body, headers, status, responseURL) => {
+  return htmlWebRequest(capBytes, url, (body, headers, status, responseURL) => {
     const parsed = parseReleaseMetadataHTML(
       new TextDecoder().decode(body),
       route.owner!,

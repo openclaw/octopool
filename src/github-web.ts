@@ -1,5 +1,5 @@
 import { relayPhase } from "./relay-timing";
-import { requestTimeoutMs } from "./github-limits";
+import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { isLandingGraphQLRoute } from "./github-landing";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { publicAPIRequest, storePublicAPIRate } from "./github-public-api";
@@ -139,15 +139,16 @@ function conditionalHeaders(headers: Record<string, string> | undefined): Record
 
 function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteInfo): WebRequest[] {
   if (isLandingGraphQLRoute(route)) return [];
+  const capBytes = responseCapBytes(env);
   const media = mediaFormat(request.headers?.accept);
   if (media !== undefined) {
-    const mediaRequest = mediaWebRequest(env, request, route, media);
+    const mediaRequest = mediaWebRequest(capBytes, request, route, media);
     return mediaRequest === undefined ? [] : [mediaRequest];
   }
-  const publicApi = publicAPIRequest(env, request, route);
+  const publicApi = publicAPIRequest(capBytes, request, route);
   // Try quota-free sources before the exact anonymous API fallback.
   return [
-    releaseMetadataPageRequest(env, request, route),
+    releaseMetadataPageRequest(capBytes, request, route),
     gitRefRequest(env, request, route),
     summaryPageRequest(env, request, route),
     actionsPageRequest(env, request, route),

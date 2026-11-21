@@ -1,4 +1,3 @@
-import { responseCapBytes } from "./github-limits";
 import { githubResponseHeaders } from "./github-response";
 import type { WebRequest } from "./github-web-types";
 import type { GitHubRelayResponse } from "./types";
@@ -80,11 +79,15 @@ export function publicJSONResponse(
   };
 }
 
-export function htmlWebRequest(env: Env, url: string, payload: WebRequest["payload"]): WebRequest {
+export function htmlWebRequest(
+  capBytes: number,
+  url: string,
+  payload: WebRequest["payload"],
+): WebRequest {
   return {
     url,
     headers: { accept: "text/html", "user-agent": "octopool" },
-    capBytes: responseCapBytes(env),
+    capBytes,
     usesApiQuota: false,
     payload,
   };
