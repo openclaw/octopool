@@ -374,25 +374,14 @@ const fakeGHArgvPrefix = "octopool-fake-gh-argv:"
 
 func fakeGHExit(t *testing.T, exitCode int) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is Unix-only")
-	}
-	path := filepath.Join(t.TempDir(), executableName("fake-gh"))
 	content := `#!/bin/sh
 printf '` + fakeGHArgvPrefix + `%s\n' "$*"
 exit ` + strconv.Itoa(exitCode) + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return writeFakeGH(t, content)
 }
 
 func fakeGHAuthStatus(t *testing.T, graphqlValid bool) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is Unix-only")
-	}
-	path := filepath.Join(t.TempDir(), executableName("fake-gh"))
 	graphqlExit := "exit 1"
 	if graphqlValid {
 		graphqlExit = "printf 'monalisa\\n'; exit 0"
@@ -407,10 +396,7 @@ if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
 fi
 exit 2
 `
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return writeFakeGH(t, content)
 }
 
 func executableName(name string) string {

@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -81,16 +78,9 @@ func TestGHWithTokenLoginPreservesSuccessfulRealGH(t *testing.T) {
 
 func fakeGHLogin(t *testing.T, rateLimited bool) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is Unix-only")
-	}
-	path := filepath.Join(t.TempDir(), "fake-gh")
 	body := "test -z \"${GITHUB_TOKEN:-}\" || exit 9\ncat >/dev/null\nprintf 'stored\\n'\n"
 	if rateLimited {
 		body = "test -z \"${GITHUB_TOKEN:-}\" || exit 9\ncat >/dev/null\nprintf 'error validating token: HTTP 403: API rate limit exceeded' >&2\nexit 1\n"
 	}
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
+	return writeFakeGH(t, "#!/bin/sh\n"+body)
 }

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -184,7 +183,7 @@ func TestCLIEndToEndRelayProtocol(t *testing.T) {
 	})
 
 	t.Run("real gh exit code passes through", func(t *testing.T) {
-		fake := fakeGHWithExit(t, 7)
+		fake := writeFakeGH(t, "#!/bin/sh\nexit 7\n")
 		server := cliRelayServer(t, func(w http.ResponseWriter, r *http.Request) { t.Error("unexpected relay dispatch") })
 		result := runCLI(t, bin, server.URL, map[string]string{"OCTOPOOL_GH_PATH": fake},
 			"gh", "alias", "list",
@@ -338,19 +337,6 @@ func writeRawCLIEnvelope(
 	}); err != nil {
 		t.Errorf("write CLI envelope: %v", err)
 	}
-}
-
-func fakeGHWithExit(t *testing.T, code int) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture is Unix-only")
-	}
-	path := filepath.Join(t.TempDir(), executableName("fake-gh-exit"))
-	content := "#!/bin/sh\nexit " + strconv.Itoa(code) + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }
 
 func TestGHShimProtocolRewritePolicyDiagnostics(t *testing.T) {
