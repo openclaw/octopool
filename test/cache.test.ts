@@ -1,6 +1,6 @@
 import { fixtureOwner } from "./cache-fill-test-support";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hashToken } from "../src/auth";
+import { hashToken } from "../src/encoding";
 import { CACHE_PUBLICATION_EPOCH } from "../src/cache-publication";
 import {
   cacheTTLSeconds,

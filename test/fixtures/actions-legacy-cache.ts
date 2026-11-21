@@ -1,4 +1,4 @@
-import { hashToken } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import type { RelayRequest, RouteInfo } from "../../src/types";
 
 // Freeze the pre-fix key layout independently of the production key generator.

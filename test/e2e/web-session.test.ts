@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { hashToken } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import { captureD1Baseline } from "./d1-baseline";
 import {
   concurrentEnrollments,

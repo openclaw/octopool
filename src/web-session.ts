@@ -2,13 +2,12 @@ import {
   ensureFreshOrgMembership,
   envSecret,
   githubUserFromToken,
-  hashToken,
   newToken,
   verifyGitHubOrgMember,
 } from "./auth";
 import { ensureWebCaller } from "./callers";
 import { defaultLoginPool } from "./config";
-import { base64ToBytesSafe, bytesToBase64URL } from "./encoding";
+import { base64ToBytesSafe, bytesToBase64URL, hashToken } from "./encoding";
 import { queries } from "./generated/sql";
 import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { readBodyCapped } from "./response-body";

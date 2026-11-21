@@ -2,7 +2,7 @@ import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { hashToken } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import { captureD1Baseline, restoreD1Baseline } from "./d1-baseline";
 import { loginClient, mockEnrollmentAccount, type Enrollment } from "./enrollment-support";
 import { callWorker, POOL } from "./harness";

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { authenticateCaller, hashToken } from "../../src/auth";
+import { authenticateCaller } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import { insertAudit } from "../../src/db";
 import {
   loginClient,

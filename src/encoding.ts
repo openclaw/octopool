@@ -61,3 +61,9 @@ export function base64ToBytesSafe(value: string): Uint8Array | undefined {
 function binaryToBytes(value: string): Uint8Array {
   return Uint8Array.from(value, (character) => character.charCodeAt(0));
 }
+
+export async function hashToken(token: string): Promise<string> {
+  const bytes = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return bytesToBase64URL(new Uint8Array(digest));
+}

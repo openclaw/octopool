@@ -7,7 +7,7 @@ import {
 import { expect, vi } from "vitest";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import worker from "../../src/index";
-import { hashToken } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import { clearConfigCache } from "../../src/config-cache";
 import type { RelayRequest } from "../../src/types";
 import { ownedWork } from "./owned-work";
