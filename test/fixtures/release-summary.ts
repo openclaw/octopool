@@ -1,4 +1,4 @@
-import { hashToken } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import type { RelayRequest, RouteInfo } from "../../src/types";
 
 export const releaseMarkdown =

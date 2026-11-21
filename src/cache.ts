@@ -5,7 +5,7 @@ import {
   publicationBinding,
   type PublicationOwner,
 } from "./cache-publication";
-import { hashToken } from "./auth";
+import { hashToken } from "./encoding";
 import {
   type CacheFreshStrategy,
   cachePolicyForRouteKind,

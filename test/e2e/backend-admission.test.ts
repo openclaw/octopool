@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterEach, expect, it, vi } from "vitest";
-import { hashToken } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import { backendAdmissionStub } from "../../src/backend-admission";
 import { BackendWork, backendWorkSignal } from "../../src/backend-work";
 import { GITHUB_EDGE_CACHE_NAMESPACE, readEdgeGitHubCache } from "../../src/cache";

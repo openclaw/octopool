@@ -2,7 +2,8 @@ import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { authenticateCaller, hashToken } from "../../src/auth";
+import { authenticateCaller } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import { requireDashboardAdmin } from "../../src/web-session";
 import { restoreD1Baseline } from "./d1-baseline";
 import {

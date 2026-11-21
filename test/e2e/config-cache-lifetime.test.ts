@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { expect, it } from "vitest";
-import { hashToken } from "../../src/auth";
+import { hashToken } from "../../src/encoding";
 import { CALLER_TOKEN, POOL, seedPool } from "./harness";
 
 it("loads independently after another native request leaves an unresolved config lookup", async () => {

@@ -1,4 +1,4 @@
-import { bytesToBase64URL } from "./encoding";
+import { bytesToBase64URL, hashToken } from "./encoding";
 import { relayPhase } from "./relay-timing";
 import { cachedConfigLookup, invalidateConfigValue } from "./config-cache";
 import { normalizeClientName } from "./client-name";
@@ -81,12 +81,6 @@ export async function authenticateAdmin(request: Request, env: Env): Promise<voi
   if (!ok) {
     throw new HttpError(401, "invalid_admin_auth", "Invalid admin token");
   }
-}
-
-export async function hashToken(token: string): Promise<string> {
-  const bytes = new TextEncoder().encode(token);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return bytesToBase64URL(new Uint8Array(digest));
 }
 
 export function newToken(prefix: string): string {
