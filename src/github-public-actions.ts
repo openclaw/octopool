@@ -12,14 +12,14 @@ import {
 } from "./github-public-utils";
 import { defaultGitHubJSONAccept } from "./github-response";
 import {
+  actionsJobHTMLProvesCompleted,
   parseActionsJobGroupsPageJSON,
   parseActionsJobHTML,
   parseActionsRunHTML,
   parseActionsRunListHTML,
   parseCommitPatchSHA,
-} from "./github-html";
+} from "./github-html-actions";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
-import { actionsJobHTMLProvesCompleted } from "./github-html-actions";
 import { fetchPublicPage, fetchWebResponse, readWebBody } from "./github-web-transport";
 import { cancelResponseBody } from "./response-body";
 import { transformedGitHubHeaders } from "./github-response";
