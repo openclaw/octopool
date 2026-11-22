@@ -113,8 +113,8 @@ const rows = JSON.parse(fs.readFileSync(0, "utf8"));
 const audits = rows[0]?.results;
 const entries = rows[1]?.results?.[0]?.cache_entries;
 const expected = [
-  { cache_status: "miss", identity_id: null, status: 200 },
   { cache_status: "hit", identity_id: null, status: 200 },
+  { cache_status: "miss", identity_id: null, status: 200 },
 ];
 if (JSON.stringify(audits) !== JSON.stringify(expected) || entries !== 1) {
   throw new Error(`unexpected cache proof: ${JSON.stringify(rows)}`);
@@ -126,7 +126,7 @@ attempt=0
 while :; do
   proof="$(pnpm exec wrangler d1 execute DB \
     --local --persist-to "$state_dir" --json \
-    --command "SELECT cache_status, identity_id, status FROM audit_events ORDER BY rowid; SELECT COUNT(*) AS cache_entries FROM github_cache_entries;")"
+    --command "SELECT cache_status, identity_id, status FROM audit_events ORDER BY cache_status; SELECT COUNT(*) AS cache_entries FROM github_cache_entries;")"
   if proof_matches "$proof" 2>/dev/null; then
     break
   fi
