@@ -9,28 +9,21 @@ import (
 )
 
 func handleGHRepo(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
-	switch command {
-	case "view":
-		if !machineReadable(opts) || !supportedJSONFields(opts.json, supportedRepoFields) {
-			return ghDelegated()
-		}
-		if opts.repo == "" && len(opts.positionals) == 1 {
-			opts.repo = opts.positionals[0]
-			opts.positionals = nil
-		}
-		repo, ok, err := repoOnly(opts)
-		if err != nil {
-			return ghFailed(err)
-		}
-		if !ok {
-			return ghDelegated()
-		}
-		return ghCompleted(relayRepoView(ctx, stdout, repo, opts))
-	case "list":
-		return ghDelegated()
-	default:
+	if command != "view" || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedRepoFields) {
 		return ghDelegated()
 	}
+	if opts.repo == "" && len(opts.positionals) == 1 {
+		opts.repo = opts.positionals[0]
+		opts.positionals = nil
+	}
+	repo, ok, err := repoOnly(opts)
+	if err != nil {
+		return ghFailed(err)
+	}
+	if !ok {
+		return ghDelegated()
+	}
+	return ghCompleted(relayRepoView(ctx, stdout, repo, opts))
 }
 
 func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTopOptions) error {
@@ -141,17 +134,10 @@ func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, st
 }
 
 func handleGHGist(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
-	switch command {
-	case "list":
-		return ghDelegated()
-	case "view":
-		if len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedGistFields) || !isHex(opts.positionals[0]) {
-			return ghDelegated()
-		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: "/gists/" + opts.positionals[0]}, opts.json, opts.jq, fieldMapGist))
-	default:
+	if command != "view" || len(opts.positionals) != 1 || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedGistFields) || !isHex(opts.positionals[0]) {
 		return ghDelegated()
 	}
+	return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: "/gists/" + opts.positionals[0]}, opts.json, opts.jq, fieldMapGist))
 }
 
 func relayWorkflowList(ctx context.Context, stdout io.Writer, repo string, opts ghTopOptions) error {
