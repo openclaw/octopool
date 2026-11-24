@@ -139,117 +139,52 @@ func TestParseGHAPIArgsFallsBackForSensitiveHeaders(t *testing.T) {
 }
 
 func TestSafeRelayRequest(t *testing.T) {
-	request, fallback, err := parseGHAPIArgs([]string{"/repos/openclaw/openclaw/pulls/1"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if !safeRelayRequest(request) {
-		t.Fatal("expected supported PR path")
-	}
-
-	for _, path := range []string{
-		"/users/openperf",
-		"/users/dependabot%5Bbot%5D",
-		"/users/dependabot[bot]",
-		"/repos/openclaw/octopool",
-		"/repos/openclaw/octopool/pulls?state=open",
-		"/repos/openclaw/octopool/pulls/1/commits",
-		"/repos/openclaw/octopool/commits/main",
-		"/repos/openclaw/octopool/commits/v1.2.3",
-		"/repos/openclaw/octopool/commits/main/check-runs",
-		"/repos/openclaw/octopool/commits/main/check-suites",
-		"/repos/openclaw/octopool/commits/main/status",
-		"/repos/openclaw/octopool/commits/main/statuses",
-		"/repos/openclaw/octopool/issues?state=open",
-		"/repos/openclaw/octopool/issues/1/events",
-		"/repos/openclaw/octopool/contents/README.md?ref=main",
-		"/repos/openclaw/octopool/compare/main...feature",
-		"/repos/openclaw/octopool/actions/workflows/ci.yml",
-		"/repos/openclaw/octopool/actions/workflows/ci.yml/runs",
-		"/repos/openclaw/octopool/releases",
-		"/repos/openclaw/octopool/releases/latest",
-		"/repos/openclaw/octopool/releases/tags/v0.2.5",
-		"/repos/openclaw/octopool/releases/123",
+	for _, tc := range []struct {
+		path  string
+		relay bool
+	}{
+		{"/repos/openclaw/openclaw/pulls/1", true},
+		{"/users/openperf", true},
+		{"/users/dependabot%5Bbot%5D", true},
+		{"/users/dependabot[bot]", true},
+		{"/repos/openclaw/octopool", true},
+		{"/repos/openclaw/octopool/pulls?state=open", true},
+		{"/repos/openclaw/octopool/pulls/1/commits", true},
+		{"/repos/openclaw/octopool/commits/main", true},
+		{"/repos/openclaw/octopool/commits/v1.2.3", true},
+		{"/repos/openclaw/octopool/commits/main/check-runs", true},
+		{"/repos/openclaw/octopool/commits/main/check-suites", true},
+		{"/repos/openclaw/octopool/commits/main/status", true},
+		{"/repos/openclaw/octopool/commits/main/statuses", true},
+		{"/repos/openclaw/octopool/issues?state=open", true},
+		{"/repos/openclaw/octopool/issues/1/events", true},
+		{"/repos/openclaw/octopool/contents/README.md?ref=main", true},
+		{"/repos/openclaw/octopool/compare/main...feature", true},
+		{"/repos/openclaw/octopool/actions/workflows/ci.yml", true},
+		{"/repos/openclaw/octopool/actions/workflows/ci.yml/runs", true},
+		{"/repos/openclaw/octopool/releases", true},
+		{"/repos/openclaw/octopool/releases/latest", true},
+		{"/repos/openclaw/octopool/releases/tags/v0.2.5", true},
+		{"/repos/openclaw/octopool/releases/123", true},
+		{"/search/issues?q=repo:openclaw/openclaw", true},
+		{"/search/issues", true},
+		{"/gitignore/templates/C%2B%2B", true},
+		{"/search/repositories?q=octopool+relay", true},
+		{"/search/repositories?q=language:go", false},
+		{"/repos/cli/cli/pulls/1", true},
+		{"/repos/openclaw/openclaw/pulls/1?access_token=x", false},
+		{"/repos/openclaw/openclaw/pulls/1?client_secret=x", false},
+		{"/repos/openclaw/openclaw/contents/../secret?ref=main", false},
 	} {
-		request, fallback, err = parseGHAPIArgs([]string{path})
-		if err != nil || fallback {
-			t.Fatalf("parse %s fallback=%v err=%v", path, fallback, err)
-		}
-		if !safeRelayRequest(request) {
-			t.Fatalf("expected supported path %s", path)
-		}
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/search/issues?q=repo:openclaw/openclaw"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if !safeRelayRequest(request) {
-		t.Fatal("search read can ask octopool for a policy decision")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/search/issues"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if !safeRelayRequest(request) {
-		t.Fatal("queryless unknown read can ask octopool for a fallback decision")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/gitignore/templates/C%2B%2B"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if !safeRelayRequest(request) {
-		t.Fatal("encoded gitignore template names can ask octopool for a policy decision")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/search/repositories?q=octopool+relay"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if !safeRelayRequest(request) {
-		t.Fatal("plain repository search can ask octopool for a policy decision")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/search/repositories?q=language:go"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if safeRelayRequest(request) {
-		t.Fatal("qualified repository search should stay local")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/repos/cli/cli/pulls/1"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if !safeRelayRequest(request) {
-		t.Fatal("owner policy should be decided by octopool")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/repos/openclaw/openclaw/pulls/1?access_token=x"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if safeRelayRequest(request) {
-		t.Fatal("token query should fall back")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/repos/openclaw/openclaw/pulls/1?client_secret=x"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if safeRelayRequest(request) {
-		t.Fatal("secret query should fall back")
-	}
-
-	request, fallback, err = parseGHAPIArgs([]string{"/repos/openclaw/openclaw/contents/../secret?ref=main"})
-	if err != nil || fallback {
-		t.Fatalf("parse fallback=%v err=%v", fallback, err)
-	}
-	if safeRelayRequest(request) {
-		t.Fatal("canonicalizing path should stay local")
+		t.Run(tc.path, func(t *testing.T) {
+			request, fallback, err := parseGHAPIArgs([]string{tc.path})
+			if err != nil || fallback {
+				t.Fatalf("parse fallback=%v err=%v", fallback, err)
+			}
+			if got := safeRelayRequest(request); got != tc.relay {
+				t.Fatalf("safeRelayRequest = %v, want %v", got, tc.relay)
+			}
+		})
 	}
 }
 
