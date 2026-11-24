@@ -2039,72 +2039,48 @@ describe("github web provider", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 123, body: "review" })));
     vi.stubGlobal("fetch", fetchMock);
     const requests = [
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      {
         path: "/users/openperf/followers",
         query: { per_page: "1" },
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/users/openperf/events",
         query: { per_page: "1" },
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/repos/openclaw/octopool/issues/comments",
         query: { per_page: "1" },
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/networks/openclaw/octopool/events",
         query: { per_page: "1" },
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/repos/openclaw/octopool/commits/ac49d8e2295a093f168baa45312e1e29238c0351/check-suites",
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/repos/openclaw/octopool/stats/code_frequency",
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/meta",
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/licenses",
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/orgs/openclaw/public_members",
         query: { per_page: "1" },
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/repos/openclaw/octopool/pulls/12/requested_reviewers",
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/repos/openclaw/octopool/statuses/ac49d8e2295a093f168baa45312e1e29238c0351",
-      }),
-      validateRelayRequest({
-        pool: "maintainers",
-        method: "GET",
+      },
+      {
         path: "/repos/openclaw/octopool/pulls/comments/123",
-      }),
-    ];
+      },
+    ].map((request) => validateRelayRequest({ pool: "maintainers", method: "GET", ...request }));
 
     for (const request of requests) {
       await expect(
