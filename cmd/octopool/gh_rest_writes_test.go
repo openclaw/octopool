@@ -65,10 +65,6 @@ func TestRESTPRWriteGrammar(t *testing.T) {
 	}
 }
 
-type restWriteTransport func(*http.Request) (*http.Response, error)
-
-func (f restWriteTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 type restWriteRequest struct {
 	method, path string
 	body         map[string]string
@@ -86,7 +82,7 @@ func restWriteFixture(t *testing.T, policy string, handler func(*http.Request) (
 		t.Setenv(key, value)
 	}
 	previous := http.DefaultTransport
-	http.DefaultTransport = restWriteTransport(func(r *http.Request) (*http.Response, error) {
+	useRewritePolicyTestTransport(t, func(r *http.Request) (*http.Response, error) {
 		if r.URL.Host != "api.github.com" {
 			return previous.RoundTrip(r)
 		}
@@ -98,7 +94,6 @@ func restWriteFixture(t *testing.T, policy string, handler func(*http.Request) (
 		}
 		return handler(r)
 	})
-	t.Cleanup(func() { http.DefaultTransport = previous })
 	// Let fake native gh's merge-state GET use this same fake GitHub transport.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Scheme, r.URL.Host = "https", "api.github.com"
