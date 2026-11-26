@@ -1,5 +1,5 @@
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
-import { decodeURIComponentSafe } from "./github-path";
+import { decodePathStrict, decodeURIComponentSafe } from "./github-path";
 import { escapeRegex } from "./github-html-utils";
 import { isRecord } from "./object";
 
@@ -24,6 +24,10 @@ export function parseActionsRunListHTML(
   const document = actionsDocument(html);
   if (document === undefined) return undefined;
   const elements = actionsElements(document);
+  const apps = elements.filter(
+    (element) => element.tagName === "react-app" && attribute(element, "app-name") === "repo",
+  );
+  if (apps.length > 0) return reactActionsRunList(apps, owner, repo);
   const totalElements = elements.filter(
     (element) => element.tagName === "strong" && /workflow runs?/.test(actionsText(element)),
   );
@@ -128,6 +132,159 @@ export function parseActionsRunListHTML(
   }
   if (!capped && runs.length > total) return undefined;
   return { total_count: total, capped, workflow_runs: runs };
+}
+
+function reactActionsRunList(
+  apps: ActionsElement[],
+  owner: string,
+  repo: string,
+): ReturnType<typeof parseActionsRunListHTML> {
+  const app = onlyElement(apps);
+  const prefix = `/${owner}/${repo}`;
+  const path = attribute(app, "initial-path");
+  if (
+    app === undefined ||
+    !disjointRegions([app]) ||
+    path === undefined ||
+    !new RegExp(`^${escapeRegex(prefix)}/actions(?:/workflows/[^/?#]+)?$`).test(path)
+  )
+    return undefined;
+  const scripts = app.childNodes.filter(
+    (node): node is ActionsElement =>
+      "tagName" in node &&
+      node.tagName === "script" &&
+      attribute(node, "data-target") === "react-app.embeddedData",
+  );
+  const script = onlyElement(scripts);
+  if (
+    script === undefined ||
+    attribute(script, "type") !== "application/json" ||
+    !disjointRegions([script]) ||
+    ownedElements(app, (element) => element !== script) === undefined ||
+    script.childNodes.some((node) => !("value" in node))
+  )
+    return undefined;
+  let data: unknown;
+  try {
+    data = JSON.parse(
+      script.childNodes.map((node) => ("value" in node ? node.value : "")).join(""),
+    );
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(data) || !isRecord(data.payload)) return undefined;
+  const all = path === `${prefix}/actions`;
+  const route = data.payload[all ? "allWorkflowRunsRoute" : "workflowRunsRoute"];
+  if (
+    !isRecord(route) ||
+    !Number.isSafeInteger(route.totalCount) ||
+    (route.totalCount as number) < 0 ||
+    !Number.isSafeInteger(route.totalPages) ||
+    (route.totalPages as number) < 1 ||
+    !Array.isArray(route.workflowRuns) ||
+    route.workflowRuns.length > 25 ||
+    route.workflowRuns.length > (route.totalCount as number) ||
+    (route.totalCount !== 0 && route.workflowRuns.length === 0) ||
+    (all && typeof route.countIsCapped !== "boolean") ||
+    (!all && route.workflowExists !== true) ||
+    (route.countIsCapped !== undefined && typeof route.countIsCapped !== "boolean")
+  )
+    return undefined;
+  const runs: Record<string, unknown>[] = [];
+  for (const raw of route.workflowRuns) {
+    if (!isRecord(raw)) return undefined;
+    const run = reactActionsRun(raw, prefix);
+    if (run === undefined || runs.some((existing) => existing.id === run.id)) return undefined;
+    runs.push(run);
+  }
+  return {
+    total_count: route.totalCount as number,
+    capped: route.countIsCapped === true,
+    workflow_runs: runs,
+  };
+}
+
+function reactActionsRun(
+  row: Record<string, unknown>,
+  prefix: string,
+): Record<string, unknown> | undefined {
+  const id = typeof row.id === "string" && /^[1-9][0-9]*$/.test(row.id) ? Number(row.id) : NaN;
+  const state = isRecord(row.state) ? row.state : undefined;
+  const status =
+    typeof state?.status === "string"
+      ? /^WORKFLOW_RUN_STATUS_(COMPLETED|IN_PROGRESS|QUEUED|WAITING|PENDING)$/
+          .exec(state.status)?.[1]
+          ?.toLowerCase()
+      : undefined;
+  const conclusion =
+    typeof state?.conclusion === "string"
+      ? /^WORKFLOW_RUN_CONCLUSION_(SUCCESS|FAILURE|CANCELLED|TIMED_OUT|ACTION_REQUIRED|NEUTRAL|SKIPPED|STALE|STARTUP_FAILURE)$/
+          .exec(state.conclusion)?.[1]
+          ?.toLowerCase()
+      : undefined;
+  const createdAt = isRecord(row.createdAt) ? row.createdAt.timestamp : undefined;
+  if (
+    !Number.isSafeInteger(id) ||
+    !Number.isSafeInteger(row.runNumber) ||
+    (row.runNumber as number) <= 0 ||
+    typeof row.workflowName !== "string" ||
+    typeof row.title !== "string" ||
+    row.runUrl !== `https://github.com${prefix}/actions/runs/${id}` ||
+    status === undefined ||
+    (status === "completed" ? conclusion === undefined : state?.conclusion !== undefined) ||
+    typeof createdAt !== "string" ||
+    !Number.isFinite(Date.parse(createdAt)) ||
+    !isRecord(row.description) ||
+    !isRecord(row.timing)
+  )
+    return undefined;
+  let branch: string | null = null;
+  if (row.branch !== undefined) {
+    if (
+      !isRecord(row.branch) ||
+      typeof row.branch.name !== "string" ||
+      typeof row.branch.url !== "string"
+    )
+      return undefined;
+    const ref = /^refs\/(?:heads|tags)\/(.+)$/.exec(row.branch.name)?.[1];
+    if (
+      ref === undefined ||
+      decodePathStrict(row.branch.url) !== `${prefix}/tree/${row.branch.name}`
+    )
+      return undefined;
+    branch = ref;
+  }
+  let sha: string | null = null;
+  let event: string | null = null;
+  if (row.description.primaryText === "Commit" && row.description.action === "pushed") {
+    if (typeof row.description.linkUrl !== "string") return undefined;
+    const match = new RegExp(`^${escapeRegex(prefix)}/commit/([0-9a-fA-F]{7,40})$`).exec(
+      row.description.linkUrl,
+    );
+    if (match === null) return undefined;
+    sha = match[1]!.toLowerCase();
+    event = "push";
+  }
+  const duration =
+    row.timing.kind === "WORKFLOW_RUN_TIMING_KIND_DURATION" && typeof row.timing.text === "string"
+      ? row.timing.text
+      : undefined;
+  const updatedAt = addDuration(createdAt, duration);
+  if (status === "completed" && updatedAt === undefined) return undefined;
+  return {
+    id,
+    name: row.workflowName,
+    display_title: row.title,
+    run_number: row.runNumber,
+    status,
+    conclusion: conclusion ?? null,
+    html_url: row.runUrl,
+    head_branch: branch,
+    head_sha: sha,
+    event,
+    created_at: createdAt,
+    updated_at: updatedAt ?? createdAt,
+  };
 }
 
 export function parseActionsRunHTML(

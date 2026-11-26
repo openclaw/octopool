@@ -39,3 +39,9 @@ The live job page also contains parallel/background-step UI support, including
 `data-parallel-group-child-visible`. Step display order is not proof of sequential
 execution. Timing guards validate each step's interval and the enclosing job bounds,
 without requiring successive steps' timestamps to increase.
+
+`react-list.json` is a synthetic minimal fixture for the repository React app's
+`allWorkflowRunsRoute` shape observed on public Actions list pages on 2026-11-27.
+It retains the count, run identity, branch, state, timestamp, and trigger fields
+used by the parser. One push row carries a commit; one manual row requires the
+existing bounded run-page enrichment. Live channel metadata is omitted.

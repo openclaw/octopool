@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore token-free Actions run lists for GitHub’s current embedded JSON pages, retaining bounded metadata enrichment and conservative API fallback.
+
 - Return an empty string for repositories without a description in `repo view --json` and `search repos --json`, matching native gh and preserving jq string operations.
 
 - Show dashboard activity ages in the correct timezone when timestamps come from SQLite.
