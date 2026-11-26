@@ -1262,6 +1262,8 @@ describe("github web provider", () => {
   it.each([
     ["Sign in <code>fails</code>", "Sign in fails"],
     ["Bad &#1114112; <code>&#x110000;</code> title", "Bad \uFFFD \uFFFD title"],
+    ["<b>Price &#128;</b> and &#x82;quote&#x82;", "Price € and ‚quote‚"],
+    ["Invalid &#0; and &#xd800;", "Invalid \uFFFD and \uFFFD"],
   ])("prefers complete embedded issue and PR lists with title %s", async (titleHtml, title) => {
     const issueNode = {
       __typename: "Issue",
@@ -1279,7 +1281,7 @@ describe("github web provider", () => {
     const prNode = {
       __typename: "PullRequest",
       number: 11,
-      titleHTML: "Clarify login",
+      titleHTML: titleHtml,
       pullRequestState: "MERGED",
       isDraft: false,
       createdAt: "2026-06-03T18:13:12Z",
@@ -1340,6 +1342,7 @@ describe("github web provider", () => {
     expect(prResponse?.body).toMatchObject([
       {
         number: 11,
+        title,
         state: "MERGED",
         merged_at: "2026-06-10T00:52:44Z",
       },
