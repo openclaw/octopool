@@ -86,6 +86,10 @@ func relaySearchRepos(ctx context.Context, stdout io.Writer, rawQuery string, op
 		return err
 	}
 	items, _ := response["items"].([]any)
+	for _, item := range items {
+		repository, _ := item.(map[string]any)
+		normalizeRepoDescription(repository, opts.json)
+	}
 	var output any = items
 	if len(opts.json) > 0 && items != nil {
 		output = filterJSONValue(items, opts.json, fieldMapRepo)

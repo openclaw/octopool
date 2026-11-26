@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Return an empty string for repositories without a description in `repo view --json` and `search repos --json`, matching native gh and preserving jq string operations.
+
 - Show dashboard activity ages in the correct timezone when timestamps come from SQLite.
 
 - Preserve large integer results from `--jq` when viewing issues and pull requests instead of rounding them through floating point.

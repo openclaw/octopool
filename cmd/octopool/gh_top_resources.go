@@ -39,6 +39,7 @@ func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTo
 	if err := client.readJSON(ctx, request, &repository); err != nil {
 		return err
 	}
+	normalizeRepoDescription(repository, opts.json)
 	if hasJSONField(opts.json, "id") {
 		nodeID := firstString(repository, "node_id")
 		if strings.TrimSpace(nodeID) == "" {
@@ -64,6 +65,12 @@ func relayRepoView(ctx context.Context, stdout io.Writer, repo string, opts ghTo
 		}
 	}
 	return writeJSONValue(ctx, stdout, filterJSONValue(repository, opts.json, fieldMapRepo), opts.jq)
+}
+
+func normalizeRepoDescription(repository map[string]any, fields []string) {
+	if repository != nil && hasJSONField(fields, "description") && repository["description"] == nil {
+		repository["description"] = ""
+	}
 }
 
 func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {
