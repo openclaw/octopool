@@ -131,6 +131,7 @@ func relayIssueView(ctx context.Context, stdout io.Writer, repo string, number s
 		}
 		issue["assignees"] = mapped
 	}
+	normalizeIssueBody(issue, opts.json)
 	return writeGHViewFields(ctx, stdout, issue, opts.json, opts.jq, fieldMapIssue)
 }
 
@@ -162,6 +163,12 @@ func normalizeIssueJSONState(issue map[string]any) {
 	// Normalize only the decoded CLI copy; REST and public-page cache values stay intact.
 	if state, ok := issue["state"].(string); ok {
 		issue["state"] = strings.ToUpper(state)
+	}
+}
+
+func normalizeIssueBody(issue map[string]any, fields []string) {
+	if issue != nil && hasJSONField(fields, "body") && issue["body"] == nil {
+		issue["body"] = ""
 	}
 }
 
@@ -204,6 +211,7 @@ func relayIssueList(ctx context.Context, stdout io.Writer, request ghAPIRequest,
 	projected := make([]any, 0, len(filtered))
 	for _, issue := range filtered {
 		normalizeIssueJSONState(issue)
+		normalizeIssueBody(issue, opts.json)
 		projected = append(projected, filterJSONValue(issue, opts.json, fieldMapIssue))
 	}
 	return writeJSONValue(ctx, stdout, projected, opts.jq)

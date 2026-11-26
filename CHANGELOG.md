@@ -10,6 +10,8 @@
 
 - Return empty strings for unnamed releases and missing release notes in release JSON output, preserving native gh string operations.
 
+- Return empty strings for issues and pull requests without a body in list and view JSON output, matching search exports and native gh.
+
 - Show dashboard activity ages in the correct timezone when timestamps come from SQLite.
 
 - Preserve large integer results from `--jq` when viewing issues and pull requests instead of rounding them through floating point.
