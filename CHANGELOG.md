@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore token-free issue summaries for GitHub’s current embedded page data while preserving Markdown bodies, author identities, and complete labels.
+
 - Restore token-free workflow lists and workflow views for GitHub’s current embedded JSON catalogues, falling back when the catalogue is incomplete.
 
 - Restore token-free Actions run lists for GitHub’s current embedded JSON pages, retaining bounded metadata enrichment and conservative API fallback.
