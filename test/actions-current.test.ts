@@ -51,7 +51,174 @@ async function readWeb(routePath = path, query?: Record<string, string>) {
   );
 }
 
+function reactListData() {
+  return JSON.parse(fixture("react-list.json"));
+}
+
+function reactListPage(data: unknown = reactListData()): string {
+  return `<react-app app-name="repo" initial-path="/openclaw/openclaw/actions">
+    <script type="application/json" data-target="react-app.embeddedData">${JSON.stringify(data).replaceAll("<", "\\u003c")}</script>
+  </react-app>`;
+}
+
 describe("current GitHub Actions markup", () => {
+  it("projects owned React run rows without decoding their text as HTML", () => {
+    const parsed = parseActionsRunListHTML(reactListPage(), "openclaw", "openclaw");
+    expect(parsed).toMatchObject({ total_count: 2, capped: false });
+    expect(parsed?.workflow_runs).toMatchObject([
+      {
+        id: 7,
+        name: "CI",
+        display_title: "Push <literal>",
+        run_number: 3,
+        status: "completed",
+        conclusion: "success",
+        event: "push",
+        head_sha: "a".repeat(40),
+        head_branch: "v1.0.0",
+        updated_at: "2026-09-21T07:52:16Z",
+      },
+      { id: 35575007986, status: "queued", conclusion: null, event: null, head_sha: null },
+    ]);
+  });
+
+  it("reads workflow-specific React counts and preserves capped all-workflow counts", () => {
+    const data = reactListData();
+    const route = data.payload.allWorkflowRunsRoute;
+    route.totalCount = 2500;
+    route.totalPages = 101;
+    route.countIsCapped = true;
+    expect(parseActionsRunListHTML(reactListPage(data), "openclaw", "openclaw")).toMatchObject({
+      total_count: 2500,
+      capped: true,
+    });
+    data.payload = {
+      workflowRunsRoute: {
+        ...route,
+        totalCount: 2,
+        workflowExists: true,
+        countIsCapped: undefined,
+      },
+    };
+    const html = reactListPage(data).replace(
+      'initial-path="/openclaw/openclaw/actions"',
+      'initial-path="/openclaw/openclaw/actions/workflows/ci.yml"',
+    );
+    expect(parseActionsRunListHTML(html, "openclaw", "openclaw")).toMatchObject({
+      total_count: 2,
+      capped: false,
+    });
+  });
+
+  it.each([
+    "unknown payload",
+    "missing count",
+    "fractional count",
+    "missing pages",
+    "missing capped flag",
+    "duplicate ID",
+    "unsafe ID",
+    "foreign run",
+    "foreign commit",
+    "foreign branch",
+    "unknown state",
+    "partial row",
+    "completed without duration",
+  ])("rejects React list with %s", (variant) => {
+    const data = reactListData();
+    const route = data.payload.allWorkflowRunsRoute;
+    const row = route.workflowRuns[0];
+    if (variant === "unknown payload") data.payload = {};
+    if (variant === "missing count") delete route.totalCount;
+    if (variant === "fractional count") route.totalCount = 2.5;
+    if (variant === "missing pages") delete route.totalPages;
+    if (variant === "missing capped flag") delete route.countIsCapped;
+    if (variant === "duplicate ID") route.workflowRuns[1] = row;
+    if (variant === "unsafe ID") row.id = "9007199254740992";
+    if (variant === "foreign run") row.runUrl = "https://github.com/other/repo/actions/runs/7";
+    if (variant === "foreign commit")
+      row.description.linkUrl = `/other/repo/commit/${"a".repeat(40)}`;
+    if (variant === "foreign branch") row.branch.url = "/other/repo/tree/refs/tags/v1.0.0";
+    if (variant === "unknown state") row.state.status = "WORKFLOW_RUN_STATUS_UNKNOWN";
+    if (variant === "partial row") delete row.title;
+    if (variant === "completed without duration") row.timing = {};
+    expect(parseActionsRunListHTML(reactListPage(data), "openclaw", "openclaw")).toBeUndefined();
+  });
+
+  it.each(["duplicate app", "duplicate script", "wrong path", "unclosed app", "malformed JSON"])(
+    "rejects ambiguous or incomplete React ownership: %s",
+    (variant) => {
+      let html = reactListPage();
+      if (variant === "duplicate app") html += html;
+      if (variant === "duplicate script")
+        html = html.replace(
+          "</react-app>",
+          '<script type="application/json" data-target="react-app.embeddedData">{}</script></react-app>',
+        );
+      if (variant === "wrong path")
+        html = html.replace(
+          'initial-path="/openclaw/openclaw/actions"',
+          'initial-path="/other/repo/actions"',
+        );
+      if (variant === "unclosed app") html = html.replace("</react-app>", "");
+      if (variant === "malformed JSON") html = html.replace('{"payload":', '{"payload"');
+      expect(parseActionsRunListHTML(html, "openclaw", "openclaw")).toBeUndefined();
+    },
+  );
+
+  it("uses existing bounded run enrichment for React rows without commit/event metadata", async () => {
+    const manual = readFileSync(
+      new URL("./fixtures/actions-list-hydration/manual-queued.html.txt", import.meta.url),
+      "utf8",
+    );
+    const upstream = vi.fn(async (url: string) => {
+      if (url === "https://github.com/openclaw/openclaw/actions")
+        return new Response(reactListPage());
+      expect(url).toBe("https://github.com/openclaw/openclaw/actions/runs/35575007986");
+      return new Response(manual);
+    });
+    vi.stubGlobal("fetch", upstream);
+    const response = await readWeb("/repos/openclaw/openclaw/actions/runs", { per_page: "2" });
+    expect(response).toMatchObject({
+      backend: "web",
+      body: {
+        total_count: 2,
+        workflow_runs: [
+          { id: 7, event: "push", head_sha: "a".repeat(40) },
+          {
+            id: 35575007986,
+            event: "workflow_dispatch",
+            head_sha: "f045c72eb2049e9e6e121b2e3fe2e25da98cbbcd",
+          },
+        ],
+      },
+    });
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the existing whole-page enrichment limit for React rows", async () => {
+    const data = reactListData();
+    const route = data.payload.allWorkflowRunsRoute;
+    const manual = route.workflowRuns[1];
+    route.totalCount = 9;
+    route.workflowRuns = Array.from({ length: 9 }, (_, index) => ({
+      ...manual,
+      id: String(index + 1),
+      runUrl: `https://github.com/openclaw/openclaw/actions/runs/${index + 1}`,
+    }));
+    const upstream = vi.fn(async (url: string) => {
+      if (url === "https://github.com/openclaw/openclaw/actions")
+        return new Response(reactListPage(data));
+      expect(url).toBe("https://api.github.com/repos/openclaw/openclaw/actions/runs?per_page=1");
+      return Response.json({ exact: true });
+    });
+    vi.stubGlobal("fetch", upstream);
+    expect(await readWeb("/repos/openclaw/openclaw/actions/runs", { per_page: "1" })).toMatchObject(
+      { backend: "github", body: { exact: true } },
+    );
+    expect(upstream).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["missing element", "missing datetime"])(
     "rejects an owned active-job header without timing: %s",
     (variant) => {

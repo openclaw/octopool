@@ -1,0 +1,62 @@
+{
+  "payload": {
+    "allWorkflowRunsRoute": {
+      "totalCount": 2,
+      "totalPages": 1,
+      "countIsCapped": false,
+      "workflowRuns": [
+        {
+          "id": "7",
+          "runNumber": 3,
+          "workflowName": "CI",
+          "title": "Push <literal>",
+          "runUrl": "https://github.com/openclaw/openclaw/actions/runs/7",
+          "state": {
+            "status": "WORKFLOW_RUN_STATUS_COMPLETED",
+            "conclusion": "WORKFLOW_RUN_CONCLUSION_SUCCESS"
+          },
+          "createdAt": {
+            "timestamp": "2026-09-21T07:52:14Z"
+          },
+          "timing": {
+            "kind": "WORKFLOW_RUN_TIMING_KIND_DURATION",
+            "text": "2s"
+          },
+          "branch": {
+            "name": "refs/tags/v1.0.0",
+            "url": "/openclaw/openclaw/tree/refs/tags/v1.0.0"
+          },
+          "description": {
+            "primaryText": "Commit",
+            "action": "pushed",
+            "linkUrl": "/openclaw/openclaw/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "id": "35575007986",
+          "runNumber": 4,
+          "workflowName": "CI",
+          "title": "Manual run",
+          "runUrl": "https://github.com/openclaw/openclaw/actions/runs/35575007986",
+          "state": {
+            "status": "WORKFLOW_RUN_STATUS_QUEUED"
+          },
+          "createdAt": {
+            "timestamp": "2026-09-21T07:52:14Z"
+          },
+          "timing": {
+            "kind": "WORKFLOW_RUN_TIMING_KIND_START_TIME",
+            "text": "now"
+          },
+          "branch": {
+            "name": "refs/heads/main",
+            "url": "/openclaw/openclaw/tree/refs/heads/main"
+          },
+          "description": {
+            "primaryText": "Manually run"
+          }
+        }
+      ]
+    }
+  }
+}
