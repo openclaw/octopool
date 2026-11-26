@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,6 +103,58 @@ func TestGHViewNativeNumericJQ(t *testing.T) {
 	}
 	if err != nil || !bytes.Equal(out.Bytes(), want) {
 		t.Fatalf("err=%v got=%q want=%q", err, out.String(), want)
+	}
+}
+
+func TestGHViewJQIntegerPrecision(t *testing.T) {
+	if !jqAvailable() {
+		t.Skip("jq unavailable")
+	}
+	for _, kind := range []string{"issue", "pr"} {
+		for _, tc := range []struct{ name, expr, want string }{
+			{"above int64", "9223372036854775809", ""},
+			{"max uint64", "18446744073709551615", ""},
+			{"below int64", "-9223372036854775809", ""},
+			{"negative", "-7", "-7\n"},
+			{"zero", "0", "0\n"},
+			{"fraction", "1/3", "0.33\n"},
+			{"exponent", "1e20", "100000000000000000000\n"},
+			{"nested integer", "[9223372036854775809]", ""},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				want := tc.want
+				if want == "" {
+					// Preserve the installed jq's output, even if an older build
+					// rounded the literal before the CLI received it.
+					raw, err := exec.Command("jq", "-cn", "--", tc.expr).Output()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if strings.ContainsAny(string(raw), ".eE") {
+						t.Skip("installed jq emits this literal as a decimal or exponent, not an integer token")
+					}
+					// Go renders LF regardless of jq's platform line ending.
+					want = strings.TrimRight(string(raw), "\r\n") + "\n"
+				}
+				requests := 0
+				relayTestServer(t, func(request map[string]any) any {
+					requests++
+					resource := "issues"
+					if kind == "pr" {
+						resource = "pulls"
+					}
+					if request["path"] != "/repos/openclaw/octopool/"+resource+"/7" {
+						t.Errorf("unexpected request: %v", request)
+					}
+					return map[string]any{"title": "synthetic"}
+				})
+				var out bytes.Buffer
+				err := runGH(t.Context(), []string{kind, "view", "7", "-R", "openclaw/octopool", "--json", "title", "--jq", tc.expr}, &out, io.Discard)
+				if err != nil || requests != 1 || out.String() != want {
+					t.Fatalf("err=%v requests=%d output=%q; want one request and %q", err, requests, out.String(), want)
+				}
+			})
+		}
 	}
 }
 

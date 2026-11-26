@@ -8,7 +8,7 @@ import (
 	"io"
 	"math"
 	"os/exec"
-	"strconv"
+	"strings"
 	"time"
 )
 
@@ -75,7 +75,7 @@ func writeGHViewJSON(ctx context.Context, stdout io.Writer, data []byte, jq stri
 		case string:
 			_, err = fmt.Fprintln(stdout, value)
 		case json.Number:
-			if _, integerErr := strconv.ParseInt(string(value), 10, 64); integerErr == nil {
+			if !strings.ContainsAny(string(value), ".eE") {
 				_, err = fmt.Fprintln(stdout, value)
 			} else if number, floatErr := value.Float64(); floatErr == nil {
 				if math.Trunc(number) == number {
