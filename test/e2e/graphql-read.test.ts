@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { githubToken } from "../../src/github-auth";
 import { withGitHubEgress } from "../../src/github-egress";
+import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
+import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
+import { writeEdgeJSON } from "../../src/edge-cache";
+import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";
+import { sqliteTimestamp } from "../../src/sqlite-time";
+import { ownedWork } from "./owned-work";
 import {
   bearer,
   callWorker,
@@ -74,6 +80,7 @@ function upstream(
   id: number,
   options: {
     visibility?: boolean;
+    visibilityResponse?: () => Response | Promise<Response>;
     installationStatus?: number;
     mintStatus?: number;
     issued?: Record<string, unknown>;
@@ -93,7 +100,9 @@ function upstream(
     requests.push({ method: request.method, host: url.host, pathname: path });
     if (path.startsWith("/repos/openclaw/")) {
       expect(bearer(request)).toBe("test-org-token");
-      return jsonResponse({ private: options.visibility ?? false });
+      return (
+        options.visibilityResponse?.() ?? jsonResponse({ private: options.visibility ?? false })
+      );
     }
     if (path === `/app/installations/${id}`) {
       expect(request.method).toBe("GET");
@@ -265,21 +274,111 @@ describe("repository GraphQL relay", () => {
   });
 
   it.each([query, batchQuery])(
-    "refuses private repositories before token exchange or query execution: %s",
+    "rejects a fresh negative proof before App token or query work: %s",
     async (query) => {
       const id = await seedApp();
+      await writeEdgeJSON(
+        PUBLIC_PROOF_EDGE_NAMESPACE,
+        "openclaw/octopool",
+        {
+          protocol_epoch: CACHE_PUBLICATION_EPOCH,
+          is_public: false,
+          checked_at: sqliteTimestamp(Date.now()),
+          expires_at: sqliteTimestamp(Date.now() + 60_000),
+          publication_id: 1,
+          publication_token: "synthetic-proof",
+        },
+        60,
+      );
       const calls = upstream(id, { visibility: true });
       const response = await read({ query });
       expect(response.status).toBe(424);
       expect(await response.json()).toMatchObject({
         error: { code: "fallback_local", details: { reason: "repo_not_public" } },
       });
-      expect(calls.mock, JSON.stringify(calls.requests)).toHaveBeenCalledTimes(1);
+      expect(
+        calls.requests.some(
+          ({ pathname }) => pathname.startsWith("/app/") || pathname === "/graphql",
+        ),
+        JSON.stringify(calls.requests),
+      ).toBe(false);
       expect(calls.minted).toEqual([]);
       expect(calls.queries()).toBe(0);
       expect(
         await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
       ).toEqual({ count: 0 });
+    },
+  );
+
+  it.each([query, batchQuery])(
+    "discards a speculative query response when the held public proof resolves private: %s",
+    async (query) => {
+      const id = await seedApp();
+      const guardStarted = ownedWork.gate();
+      const queryStarted = ownedWork.gate();
+      const guard = ownedWork.gate();
+      const cache = caches.default;
+      const put = vi.fn(cache.put.bind(cache));
+      vi.stubGlobal("caches", {
+        default: { put, match: cache.match.bind(cache), delete: cache.delete.bind(cache) },
+      });
+      const privateBody = JSON.stringify({ data: { privateMarker: "private-graphql-body" } });
+      const calls = upstream(id, {
+        visibilityResponse: async () => {
+          guardStarted.release();
+          await guard.promise;
+          return jsonResponse({ private: true });
+        },
+        graphql: () => {
+          queryStarted.release();
+          return new Response(privateBody, {
+            headers: { "content-type": "application/json", etag: '"private-graphql-etag"' },
+          });
+        },
+      });
+      let settled = false;
+      const pending = read({ query }).then((response) => {
+        settled = true;
+        return response;
+      });
+      try {
+        await Promise.race([
+          Promise.all([guardStarted.promise, queryStarted.promise]),
+          pending.then(() => {
+            throw new Error("GraphQL relay settled before the held public proof");
+          }),
+        ]);
+        expect(settled).toBe(false);
+        expect(calls.minted).toEqual(["octopool"]);
+        expect(calls.queries()).toBe(1);
+        expect(
+          await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
+        ).toEqual({ count: 0 });
+        guard.release();
+        const response = await pending;
+        expect(response.status).toBe(424);
+        const text = await response.text();
+        expect(JSON.parse(text)).toMatchObject({
+          error: { code: "fallback_local", details: { reason: "repo_not_public" } },
+        });
+        expect(text).not.toContain("private-graphql-body");
+        expect(text).not.toContain("private-graphql-etag");
+        expect(response.headers.has("etag")).toBe(false);
+        expect(
+          await env.DB.prepare("SELECT COUNT(*) AS count FROM github_cache_entries").first(),
+        ).toEqual({ count: 0 });
+        expect(
+          await env.DB.prepare("SELECT COUNT(*) AS count FROM cache_publication_owners").first(),
+        ).toEqual({ count: 0 });
+        expect(
+          put.mock.calls.some(([request]) =>
+            new URL(new Request(request).url).pathname.includes(GITHUB_EDGE_CACHE_NAMESPACE),
+          ),
+        ).toBe(false);
+      } finally {
+        guard.release();
+        await pending;
+      }
     },
   );
 
