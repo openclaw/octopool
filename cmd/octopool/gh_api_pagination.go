@@ -181,6 +181,8 @@ func relayNextLink(header string) (string, bool) {
 					return strings.TrimSpace(entry[open+1 : closeIndex]), true
 				}
 			}
+			// RFC 8288: ignore later rel parameters in the same link-value.
+			break
 		}
 	}
 	return "", false
