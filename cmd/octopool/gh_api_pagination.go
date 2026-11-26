@@ -85,9 +85,8 @@ func relayPaginatedGHAPI(
 			if suiteChecks && hasNext != linkHasNext {
 				return localFallbackError{Reason: "pagination_incomplete"}
 			}
-			// Every Link-followed page is one real gh would fetch and emit —
-			// even an empty terminal page. Probe suppression is only for the
-			// header-less heuristic, whose extra fetch real gh never makes.
+			// Emit every Link-backed page, even an empty terminal page. Probe
+			// suppression applies only to the header-less heuristic's extra fetch.
 			pages = append(pages, envelope)
 			if !linkHasNext {
 				return writeGHAPIPages(ctx, stdout, pages, request)
@@ -157,7 +156,7 @@ func relayResponseHeader(headers map[string]string, name string) (string, bool) 
 }
 
 func relayNextLink(header string) (string, bool) {
-	for _, entry := range splitRelayLinkHeader(header) {
+	for _, entry := range splitRelayLinkValue(header, ',') {
 		open := strings.IndexByte(entry, '<')
 		if open < 0 {
 			continue
@@ -167,7 +166,7 @@ func relayNextLink(header string) (string, bool) {
 			continue
 		}
 		closeIndex := open + 1 + closeOffset
-		for _, parameter := range strings.Split(entry[closeIndex+1:], ";") {
+		for _, parameter := range splitRelayLinkValue(entry[closeIndex+1:], ';') {
 			key, value, ok := strings.Cut(parameter, "=")
 			if !ok || !strings.EqualFold(strings.TrimSpace(key), "rel") {
 				continue
@@ -188,14 +187,14 @@ func relayNextLink(header string) (string, bool) {
 	return "", false
 }
 
-func splitRelayLinkHeader(header string) []string {
+func splitRelayLinkValue(value string, delimiter byte) []string {
 	entries := make([]string, 0, 4)
 	start := 0
 	inAngle := false
 	inQuote := false
 	escaped := false
-	for index := 0; index < len(header); index++ {
-		character := header[index]
+	for index := 0; index < len(value); index++ {
+		character := value[index]
 		if inQuote {
 			if escaped {
 				escaped = false
@@ -215,14 +214,14 @@ func splitRelayLinkHeader(header string) []string {
 			inAngle = false
 		case '"':
 			inQuote = true
-		case ',':
+		case delimiter:
 			if !inAngle {
-				entries = append(entries, strings.TrimSpace(header[start:index]))
+				entries = append(entries, strings.TrimSpace(value[start:index]))
 				start = index + 1
 			}
 		}
 	}
-	entries = append(entries, strings.TrimSpace(header[start:]))
+	entries = append(entries, strings.TrimSpace(value[start:]))
 	return entries
 }
 
