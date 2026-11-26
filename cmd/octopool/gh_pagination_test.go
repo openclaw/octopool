@@ -195,6 +195,46 @@ func TestRunGHAPIPaginatesThroughAuthoritativeLinkHeader(t *testing.T) {
 	}
 }
 
+func TestRunGHAPIPaginationUsesFirstRelationParameter(t *testing.T) {
+	const page2 = `<https://api.github.com/repos/openclaw/octopool/issues?page=2>`
+	const page3 = `<https://api.github.com/repos/openclaw/octopool/issues?page=3>`
+	for _, tc := range []struct {
+		name     string
+		link     string
+		want     string
+		requests int
+	}{
+		{"ignore later next", page2 + `; rel="prev"; rel="next"`, "[1]\n", 1},
+		{"keep first next", page2 + `; rel="next"; rel="prev"`, "[1,2]\n", 2},
+		{"find separate next link", page2 + `; rel="prev"; rel="next", ` + page3 + `; rel="next"`, "[1,3]\n", 2},
+		{"keep multiple first relations", page2 + `; rel="prev next"; rel="last"`, "[1,2]\n", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			relayTestServer(t, func(body map[string]any) any {
+				requests++
+				page, err := strconv.Atoi(body["query"].(map[string]any)["page"].(string))
+				if err != nil {
+					t.Errorf("invalid page query: %v", err)
+				}
+				link := `<https://api.github.com/repos/openclaw/octopool/issues?page=1>; rel="prev"`
+				if page == 1 {
+					link = tc.link
+				}
+				return relayTestResponse{Body: []int{page}, Headers: map[string]string{"Link": link}}
+			})
+
+			var out bytes.Buffer
+			if err := runGH(t.Context(), []string{"api", "repos/openclaw/octopool/issues", "--paginate"}, &out, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if requests != tc.requests || out.String() != tc.want {
+				t.Fatalf("requests=%d output=%q; want requests=%d output=%q", requests, out.String(), tc.requests, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunGHAPILinkContinuesAfterSparsePage(t *testing.T) {
 	requests := 0
 	relayTestServer(t, func(map[string]any) any {

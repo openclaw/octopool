@@ -4,6 +4,8 @@
 
 - Decode numeric HTML references in GitHub issue and pull-request titles using HTML character rules, including euro signs and replacement characters for invalid code points.
 
+- Ignore duplicate Link relation parameters during CLI pagination, preserving the first relation and separate next-page links.
+
 ## 0.10.0 - 2026-11-26
 
 **Highlights:** Improve CLI response fidelity and upstream error handling, reduce redundant cache and API work, and strengthen release validation across supported platforms.
