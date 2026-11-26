@@ -141,6 +141,7 @@ func relayPRList(ctx context.Context, stdout io.Writer, request ghAPIRequest, op
 			continue
 		}
 		normalizePRViewState(pr)
+		normalizeIssueBody(pr, opts.json)
 		projected[i] = filterJSONValue(pr, opts.json, fieldMapPR)
 	}
 	return writeJSONValue(ctx, stdout, projected, opts.jq)
@@ -409,6 +410,7 @@ func relayPRView(ctx context.Context, stdout io.Writer, repo string, number stri
 			return localFallbackError{Reason: "pr_comment_viewer_changed"}
 		}
 	}
+	normalizeIssueBody(pr, opts.json)
 	return writeGHViewFields(ctx, stdout, pr, opts.json, opts.jq, fieldMapPR)
 }
 

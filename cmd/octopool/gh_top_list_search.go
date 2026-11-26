@@ -74,7 +74,7 @@ func mapListSearchItem(ctx context.Context, client ghRelayClient, item map[strin
 			item["state"] = strings.ToUpper(state)
 		case "body":
 			if value == nil {
-				item["body"] = ""
+				normalizeIssueBody(item, fields)
 			} else if _, ok := value.(string); !ok {
 				return localFallbackError{Reason: "unsupported_list_search_body"}
 			}
@@ -139,9 +139,7 @@ func mapTopSearchItem(item map[string]any, fields []string) error {
 			key := fieldMapIssue[field][0]
 			item[key] = ghCheckTimestamp(item, key)
 		case "body":
-			if item["body"] == nil {
-				item["body"] = ""
-			}
+			normalizeIssueBody(item, fields)
 		}
 	}
 	return nil
