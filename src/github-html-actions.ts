@@ -1,4 +1,16 @@
-import { parse, type DefaultTreeAdapterTypes } from "parse5";
+import {
+  parseHTMLDocument as actionsDocument,
+  htmlElements as actionsElements,
+  htmlText as actionsText,
+  elementAttribute as attribute,
+  onlyElement,
+  disjointRegions,
+  ownedElements,
+  repositoryAppData,
+  HTML_NAMESPACE,
+  type HTMLTreeElement as ActionsElement,
+  type HTMLTreeNode as ActionsNode,
+} from "./github-html-document";
 import { decodePathStrict, decodeURIComponentSafe } from "./github-path";
 import { escapeRegex } from "./github-html-utils";
 import { isRecord } from "./object";
@@ -24,10 +36,9 @@ export function parseActionsRunListHTML(
   const document = actionsDocument(html);
   if (document === undefined) return undefined;
   const elements = actionsElements(document);
-  const apps = elements.filter(
-    (element) => element.tagName === "react-app" && attribute(element, "app-name") === "repo",
-  );
-  if (apps.length > 0) return reactActionsRunList(apps, owner, repo);
+  const app = repositoryAppData(elements);
+  if (app.kind === "invalid") return undefined;
+  if (app.kind === "present") return reactActionsRunList(app.path, app.payload, owner, repo);
   const totalElements = elements.filter(
     (element) => element.tagName === "strong" && /workflow runs?/.test(actionsText(element)),
   );
@@ -135,46 +146,16 @@ export function parseActionsRunListHTML(
 }
 
 function reactActionsRunList(
-  apps: ActionsElement[],
+  path: string,
+  payload: Record<string, unknown>,
   owner: string,
   repo: string,
 ): ReturnType<typeof parseActionsRunListHTML> {
-  const app = onlyElement(apps);
   const prefix = `/${owner}/${repo}`;
-  const path = attribute(app, "initial-path");
-  if (
-    app === undefined ||
-    !disjointRegions([app]) ||
-    path === undefined ||
-    !new RegExp(`^${escapeRegex(prefix)}/actions(?:/workflows/[^/?#]+)?$`).test(path)
-  )
+  if (!new RegExp(`^${escapeRegex(prefix)}/actions(?:/workflows/[^/?#]+)?$`).test(path))
     return undefined;
-  const scripts = app.childNodes.filter(
-    (node): node is ActionsElement =>
-      "tagName" in node &&
-      node.tagName === "script" &&
-      attribute(node, "data-target") === "react-app.embeddedData",
-  );
-  const script = onlyElement(scripts);
-  if (
-    script === undefined ||
-    attribute(script, "type") !== "application/json" ||
-    !disjointRegions([script]) ||
-    ownedElements(app, (element) => element !== script) === undefined ||
-    script.childNodes.some((node) => !("value" in node))
-  )
-    return undefined;
-  let data: unknown;
-  try {
-    data = JSON.parse(
-      script.childNodes.map((node) => ("value" in node ? node.value : "")).join(""),
-    );
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(data) || !isRecord(data.payload)) return undefined;
   const all = path === `${prefix}/actions`;
-  const route = data.payload[all ? "allWorkflowRunsRoute" : "workflowRunsRoute"];
+  const route = payload[all ? "allWorkflowRunsRoute" : "workflowRunsRoute"];
   if (
     !isRecord(route) ||
     !Number.isSafeInteger(route.totalCount) ||
@@ -843,118 +824,6 @@ export function parseActionsJobHTML(
   };
 }
 
-type ActionsElement = DefaultTreeAdapterTypes.Element;
-type ActionsNode = DefaultTreeAdapterTypes.Node;
-
-const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
-const ambiguousAttributes = new WeakSet<ActionsElement>();
-const INERT_ELEMENTS = new Set([
-  "script",
-  "style",
-  "template",
-  "textarea",
-  "title",
-  "xmp",
-  "iframe",
-  "noembed",
-  "noframes",
-  "noscript",
-  "plaintext",
-]);
-
-function actionsDocument(html: string): DefaultTreeAdapterTypes.Document | undefined {
-  let invalid = false;
-  let missingDoctype = false;
-  const duplicateOffsets: number[] = [];
-  const document = parse(html, {
-    scriptingEnabled: true,
-    sourceCodeLocationInfo: true,
-    onParseError(error) {
-      if (error.code === "missing-doctype") missingDoctype = true;
-      // GitHub emits duplicate attributes in unrelated dialog controls. Reject
-      // duplicates on retained evidence below, not the entire document.
-      else if (error.code === "duplicate-attribute") duplicateOffsets.push(error.startOffset);
-      else invalid = true;
-    },
-  });
-  const elements = actionsElements(document);
-  for (const element of elements) {
-    const tag = element.sourceCodeLocation?.startTag;
-    if (
-      tag !== undefined &&
-      duplicateOffsets.some((offset) => offset >= tag.startOffset && offset < tag.endOffset)
-    )
-      ambiguousAttributes.add(element);
-  }
-  // Fragments have an implicit document scaffold; full documents must declare their mode.
-  if (
-    missingDoctype &&
-    elements.some(
-      (element) =>
-        ["html", "head", "body"].includes(element.tagName) &&
-        element.sourceCodeLocation !== null &&
-        element.sourceCodeLocation !== undefined,
-    )
-  )
-    invalid = true;
-  // HTML accepts names such as `scr<!--x--` without a parse error. They are not
-  // GitHub elements and cannot provide an ownership boundary, even as ancestors.
-  if (
-    elements.some(
-      (element) =>
-        element.namespaceURI === HTML_NAMESPACE && !/^[a-z][a-z0-9-]*$/.test(element.tagName),
-    )
-  )
-    invalid = true;
-  return invalid ? undefined : document;
-}
-
-function actionsElements(
-  root: ActionsNode | undefined,
-  exclude?: (element: ActionsElement) => boolean,
-): ActionsElement[] {
-  const elements: ActionsElement[] = [];
-  const pending = root !== undefined && "childNodes" in root ? [...root.childNodes].reverse() : [];
-  while (pending.length > 0) {
-    const node = pending.pop()!;
-    if (!("tagName" in node)) continue;
-    if (exclude?.(node)) continue;
-    elements.push(node);
-    // Keep SVG status icons, but never traverse foreign or inert content for ownership.
-    if (node.namespaceURI === HTML_NAMESPACE && !INERT_ELEMENTS.has(node.tagName)) {
-      for (let index = node.childNodes.length - 1; index >= 0; index--)
-        pending.push(node.childNodes[index]!);
-    }
-  }
-  return elements;
-}
-
-function actionsText(root: ActionsNode | undefined): string {
-  const parts: string[] = [];
-  const pending = root === undefined ? [] : [root];
-  while (pending.length > 0) {
-    const node = pending.pop()!;
-    if ("value" in node) parts.push(node.value);
-    else if (
-      "childNodes" in node &&
-      !(
-        "tagName" in node &&
-        (node.namespaceURI !== HTML_NAMESPACE || INERT_ELEMENTS.has(node.tagName))
-      )
-    ) {
-      for (let index = node.childNodes.length - 1; index >= 0; index--)
-        pending.push(node.childNodes[index]!);
-    }
-  }
-  return parts.join("").replace(/\s+/g, " ").trim();
-}
-
-function attribute(element: ActionsElement | undefined, name: string): string | undefined {
-  return element?.attrs.find(
-    (attribute) => attribute.name === name && attribute.namespace === undefined,
-  )?.value;
-}
-
 function hasClass(element: ActionsElement, name: string): boolean {
   return (
     attribute(element, "class")
@@ -980,10 +849,6 @@ function selectedJobRegion(elements: ActionsElement[]): ActionsElement | undefin
         hasClass(element, "js-selected-check-run"),
     ),
   );
-}
-
-function onlyElement(elements: ActionsElement[]): ActionsElement | undefined {
-  return elements.length === 1 ? elements[0] : undefined;
 }
 
 function responsiveElement(
@@ -1030,51 +895,6 @@ function adjacentNode(
     if (node.nodeName !== "#comment" && !("value" in node && node.value.trim() === "")) return node;
   }
   return undefined;
-}
-
-function disjointRegions(regions: ActionsElement[]): boolean {
-  const ordered = [...regions].sort(
-    (left, right) =>
-      (left.sourceCodeLocation?.startOffset ?? 0) - (right.sourceCodeLocation?.startOffset ?? 0),
-  );
-  return ordered.every((region, index) => {
-    const location = region.sourceCodeLocation;
-    return (
-      region.namespaceURI === HTML_NAMESPACE &&
-      !ambiguousAttributes.has(region) &&
-      location?.endTag !== undefined &&
-      (index === 0 || ordered[index - 1]!.sourceCodeLocation!.endOffset <= location.startOffset)
-    );
-  });
-}
-
-function ownedElements(
-  region: ActionsElement,
-  exclude?: (element: ActionsElement) => boolean,
-): ActionsElement[] | undefined {
-  if (!disjointRegions([region])) return undefined;
-  const elements = actionsElements(region, exclude);
-  // parse5 can repair nesting without emitting an error. Do not use inferred closures
-  // or reparented nodes inside an ownership region as evidence.
-  for (const element of elements) {
-    const location = element.sourceCodeLocation;
-    const parent = element.parentNode;
-    const parentLocation =
-      parent !== null && "tagName" in parent ? parent.sourceCodeLocation : undefined;
-    if (
-      ambiguousAttributes.has(element) ||
-      location === undefined ||
-      location === null ||
-      parentLocation?.startTag === undefined ||
-      location.startOffset < parentLocation.startTag.endOffset ||
-      location.endOffset > (parentLocation.endTag?.startOffset ?? parentLocation.endOffset) ||
-      (element.childNodes.length > 0 &&
-        element.namespaceURI === HTML_NAMESPACE &&
-        location.endTag === undefined)
-    )
-      return undefined;
-  }
-  return elements;
 }
 
 function isHTMLAnchor(element: ActionsElement): boolean {

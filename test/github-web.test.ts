@@ -1,3 +1,4 @@
+import { parseWorkflowPageHTML } from "../src/github-html-workflows";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   callAnonymousGitHubAPI,
@@ -1448,6 +1449,111 @@ describe("github web provider", () => {
     });
   });
 
+  it("reads complete React workflow catalogues including dynamic and disabled workflows", () => {
+    expect(parseWorkflowPageHTML(reactWorkflowPage(), "openclaw", "octopool")).toEqual({
+      kind: "complete",
+      workflows: reactWorkflowData().payload.workflowsLayoutRoute.workflows,
+    });
+    const empty = reactWorkflowData();
+    empty.payload.workflowsLayoutRoute.workflows = [];
+    empty.payload.workflowsLayoutRoute.totalCount = 0;
+    expect(parseWorkflowPageHTML(reactWorkflowPage(empty), "openclaw", "octopool")).toEqual({
+      kind: "complete",
+      workflows: [],
+    });
+  });
+
+  it.each([
+    "partial",
+    "excess rows",
+    "missing count",
+    "duplicate ID",
+    "string ID",
+    "unsafe ID",
+    "unknown state",
+    "foreign path",
+    "missing name",
+  ])("rejects incomplete or invalid React workflow catalogues: %s", (variant) => {
+    const data = reactWorkflowData();
+    const route = data.payload.workflowsLayoutRoute;
+    const row = route.workflows[0]!;
+    if (variant === "partial") route.totalCount = 4;
+    if (variant === "excess rows") route.totalCount = 2;
+    if (variant === "missing count") Reflect.deleteProperty(route, "totalCount");
+    if (variant === "duplicate ID") route.workflows[1]!.id = row.id;
+    if (variant === "string ID") Object.assign(row, { id: "7" });
+    if (variant === "unsafe ID") row.id = Number.MAX_SAFE_INTEGER + 1;
+    if (variant === "unknown state") row.state = "unknown";
+    if (variant === "foreign path") row.path = "other/workflows/ci.yml";
+    if (variant === "missing name") Reflect.deleteProperty(row, "name");
+    // Invalid modern evidence must not fall through to otherwise usable legacy rows.
+    const html = reactWorkflowPage(data) + workflowPage([[42, "Legacy", "legacy.yml"]], 1);
+    expect(parseWorkflowPageHTML(html, "openclaw", "octopool")).toBeUndefined();
+  });
+
+  it.each(["foreign app", "duplicate app", "unclosed app"])(
+    "rejects ambiguous React workflow ownership: %s",
+    (variant) => {
+      let html = reactWorkflowPage();
+      if (variant === "foreign app")
+        html = html.replace("/openclaw/octopool/actions", "/other/repo/actions");
+      if (variant === "duplicate app") html += html;
+      if (variant === "unclosed app") html = html.replace("</react-app>", "");
+      expect(parseWorkflowPageHTML(html, "openclaw", "octopool")).toBeUndefined();
+    },
+  );
+
+  it.each(["list", "numeric view", "file view"])(
+    "serves a complete React workflow catalogue through the %s boundary",
+    async (kind) => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(new Response(reactWorkflowPage()));
+      vi.stubGlobal("fetch", fetchMock);
+      const list = kind === "list";
+      const request = validateRelayRequest({
+        pool: "maintainers",
+        method: "GET",
+        path: `/repos/openclaw/octopool/actions/workflows${list ? "" : kind === "numeric view" ? "/7" : "/ci.yml"}`,
+        query: list ? { per_page: "1" } : undefined,
+        headers: { "x-octopool-public-shape": list ? "workflow-list-v1" : "workflow-view-v1" },
+      });
+      const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
+      const ci = { id: 7, name: "CI", path: ".github/workflows/ci.yml", state: "active" };
+      expect(response?.body).toEqual(list ? { total_count: 3, workflows: [ci] } : ci);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://github.com/openclaw/octopool/actions",
+        expect.any(Object),
+      );
+    },
+  );
+
+  it("falls back to the API for a partial React catalogue", async () => {
+    const data = reactWorkflowData();
+    data.payload.workflowsLayoutRoute.totalCount = 4;
+    const apiBody = { total_count: 4, workflows: [{ id: 42, name: "API workflow" }] };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(reactWorkflowPage(data)))
+      .mockResolvedValueOnce(Response.json(apiBody));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = validateRelayRequest({
+      pool: "maintainers",
+      method: "GET",
+      path: "/repos/openclaw/octopool/actions/workflows",
+      headers: { "x-octopool-public-shape": "workflow-list-v1" },
+    });
+    expect(await callGitHubWeb(env(), request, classifyRoute(request, policy))).toMatchObject({
+      backend: "github",
+      body: apiBody,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://api.github.com/repos/openclaw/octopool/actions/workflows",
+      expect.any(Object),
+    );
+  });
+
   it("paginates token-free workflow HTML and preserves workflow state/order", async () => {
     const fetchMock = vi
       .fn()
@@ -2309,6 +2415,30 @@ function connection(nodes: Record<string, unknown>[]): Record<string, unknown> {
     edges: nodes.map((node) => ({ node })),
     pageInfo: { hasNextPage: false },
   };
+}
+
+function reactWorkflowData() {
+  return {
+    payload: {
+      workflowsLayoutRoute: {
+        totalCount: 3,
+        workflows: [
+          { id: 9, name: "pages", path: "dynamic/pages/pages-build-deployment", state: "active" },
+          {
+            id: 8,
+            name: "Paused",
+            path: ".github/workflows/paused.yml",
+            state: "disabled_manually",
+          },
+          { id: 7, name: "CI", path: ".github/workflows/ci.yml", state: "active" },
+        ],
+      },
+    },
+  };
+}
+
+function reactWorkflowPage(data = reactWorkflowData()): string {
+  return `<react-app app-name="repo" initial-path="/openclaw/octopool/actions"><script type="application/json" data-target="react-app.embeddedData">${JSON.stringify(data).replaceAll("<", "\\u003c")}</script></react-app>`;
 }
 
 function workflowPage(
