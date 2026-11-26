@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"slices"
@@ -50,6 +51,95 @@ func TestRunGHRepoViewNodeID(t *testing.T) {
 				t.Fatalf("action=%v err=%v out=%q want=%q", result.action, result.err, out.String(), test.want)
 			}
 		})
+	}
+}
+
+func TestRunGHRepoDescription(t *testing.T) {
+	for _, command := range []string{"view", "search"} {
+		for _, tc := range []struct {
+			name        string
+			present     bool
+			description any
+			want        string
+		}{
+			{"missing", false, nil, ""},
+			{"null", true, nil, ""},
+			{"empty", true, "", ""},
+			{"text", true, "A repository", "A repository"},
+		} {
+			for _, format := range []string{"json", "jq value", "jq type", "unselected"} {
+				t.Run(command+"/"+tc.name+"/"+format, func(t *testing.T) {
+					if strings.HasPrefix(format, "jq") && !jqAvailable() {
+						t.Skip("jq unavailable")
+					}
+					requests := 0
+					relayTestServer(t, func(request map[string]any) any {
+						requests++
+						path := "/repos/acme/repo"
+						if command == "search" {
+							path = "/search/repositories"
+						}
+						if request["path"] != path {
+							t.Errorf("path = %v", request["path"])
+						}
+						repository := map[string]any{"name": "repo"}
+						if tc.present {
+							repository["description"] = tc.description
+						}
+						if command == "search" {
+							return map[string]any{"items": []any{repository}}
+						}
+						return repository
+					})
+					args := []string{"repo", "view", "acme/repo", "--json", "description"}
+					selector := ".description"
+					if command == "search" {
+						args = []string{"search", "repos", "synthetic", "--json", "description"}
+						selector = ".[0].description"
+					}
+					want := fmt.Sprintf("{\"description\":%q}\n", tc.want)
+					switch format {
+					case "jq value":
+						args = append(args, "--jq", selector)
+						want = tc.want + "\n"
+					case "jq type":
+						args = append(args, "--jq", selector+" | type")
+						want = "string\n"
+					case "unselected":
+						args[len(args)-1] = "name"
+						want = "{\"name\":\"repo\"}\n"
+					}
+					if command == "search" && !strings.HasPrefix(format, "jq") {
+						want = "[" + strings.TrimSuffix(want, "\n") + "]\n"
+					}
+					var out bytes.Buffer
+					err := runGH(t.Context(), args, &out, io.Discard)
+					if err != nil || requests != 1 || out.String() != want {
+						t.Fatalf("err=%v requests=%d output=%q; want one request and %q", err, requests, out.String(), want)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestRunGHRepoViewNullResponse(t *testing.T) {
+	relayTestServer(t, func(map[string]any) any { return nil })
+	var out bytes.Buffer
+	err := runGH(t.Context(), []string{"repo", "view", "acme/repo", "--json", "description"}, &out, io.Discard)
+	if err != nil || out.String() != "{}\n" {
+		t.Fatalf("err=%v output=%q", err, out.String())
+	}
+}
+
+func TestRunGHSearchReposPreservesUnrelatedValues(t *testing.T) {
+	relayTestServer(t, func(map[string]any) any {
+		return map[string]any{"items": []any{nil, 42, "synthetic", map[string]any{"description": true}}}
+	})
+	var out bytes.Buffer
+	err := runGH(t.Context(), []string{"search", "repos", "synthetic", "--json", "description"}, &out, io.Discard)
+	if err != nil || out.String() != "[null,42,\"synthetic\",{\"description\":true}]\n" {
+		t.Fatalf("err=%v output=%q", err, out.String())
 	}
 }
 
