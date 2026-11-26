@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve GitHub response formats when Accept parameters contain quoted media-type text by leaving negotiation to the API.
+
 - Keep quoted Link metadata from changing CLI pagination, including titles containing semicolons or escaped quotes.
 
 - Decode numeric HTML references in GitHub issue and pull-request titles using HTML character rules, including euro signs and replacement characters for invalid code points.

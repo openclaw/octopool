@@ -108,7 +108,11 @@ describe("github web provider", () => {
     "application/vnd.github.patch;q=0, application/json;q=1",
     "application/vnd.github.diff;q=1, application/vnd.github.patch;q=0.1",
     "application/vnd.github.v3.patch; charset=utf-8; Q=0",
-  ])("delegates weighted media negotiation to the API: %s", async (accept) => {
+    'application/json; note=",application/vnd.github.diff,"',
+    'application/vnd.github.diff; note=",application/vnd.github.patch,"',
+    'application/json; note="escaped \\",application/vnd.github.diff,"',
+    'application/vnd.github.diff; charset="utf-8"',
+  ])("delegates complex media negotiation to the API: %s", async (accept) => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const request = validateRelayRequest({
@@ -124,14 +128,19 @@ describe("github web provider", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("keeps custom-media PR diffs on their single public candidate", async () => {
+  it.each([
+    "application/vnd.github.diff",
+    "application/vnd.github.v3.diff",
+    "application/vnd.github.v3+diff",
+    "APPLICATION/VND.GITHUB.V3+DIFF; charset=utf-8",
+  ])("keeps custom-media PR diffs on their single public candidate: %s", async (accept) => {
     const fetchMock = vi.fn(async () => new Response("diff --git a/README.md b/README.md\n"));
     vi.stubGlobal("fetch", fetchMock);
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
       path: "/repos/openclaw/octopool/pulls/12",
-      headers: { accept: "application/vnd.github.v3.diff" },
+      headers: { accept },
     });
 
     const response = await callGitHubWeb(env(), request, classifyRoute(request, policy));
