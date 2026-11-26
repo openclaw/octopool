@@ -21,6 +21,7 @@ const issue = {
 
 describe.each([
   { name: "view", path: "/repos/openclaw/octopool/issues/7", shape: "issue-summary-v1" },
+  { name: "current view", path: "/repos/openclaw/octopool/issues/7", shape: "issue-summary-v1" },
   { name: "list", path: "/repos/openclaw/octopool/issues", shape: "issue-list-v1" },
 ])("public issue $name HTML", ({ name, path, shape }) => {
   beforeEach(async () => {
@@ -42,7 +43,7 @@ describe.each([
     const envelope = await first.json<{ body: unknown; relay: { cache: string } }>();
     const firstIssue = Array.isArray(envelope.body) ? envelope.body[0] : envelope.body;
     expect(firstIssue).toMatchObject({ number: 7, title, labels: [], state: "OPEN" });
-    if (name === "view") expect(firstIssue).toHaveProperty("body", issue.body);
+    if (name !== "list") expect(firstIssue).toHaveProperty("body", issue.body);
     expect(firstIssue).not.toHaveProperty("assignees");
     expect(firstIssue).not.toHaveProperty("milestone");
     expect(envelope.relay.cache).toBe("miss");
@@ -115,6 +116,24 @@ it("preserves literal entity text in public issue-list titles and cache hits", a
 });
 
 function issuePage(kind: string, node: Record<string, unknown>): string {
+  if (kind === "current view") {
+    const payload = {
+      issueViewerRoute: {
+        queryOperation: { name: "IssueViewerPage" },
+        data: {
+          repository: {
+            id: "R_fixture",
+            issue: {
+              ...node,
+              __isIssueOrPullRequest: "Issue",
+              repository: { id: "R_fixture", name: "octopool", nameWithOwner: "openclaw/octopool" },
+            },
+          },
+        },
+      },
+    };
+    return `<react-app app-name="repo" initial-path="/openclaw/octopool/issues/7"><script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({ payload }).replaceAll("<", "\\u003c")}</script></react-app>`;
+  }
   const queryName = kind === "view" ? "IssueViewerViewQuery" : "IssueIndexPageQuery";
   const repository =
     kind === "view"

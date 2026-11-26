@@ -1,3 +1,4 @@
+import { htmlElements, parseHTMLDocument, repositoryAppData } from "./github-html-document";
 import { base64ToBytesSafe } from "./encoding";
 import { plainHTML } from "./github-html-utils";
 import { isRecord } from "./object";
@@ -8,7 +9,7 @@ export function parseIssueHTML(
   repo: string,
   number: number,
 ): Record<string, unknown> | undefined {
-  const issue = recordValue(preloadedRepository(html, "IssueViewerViewQuery")?.issue);
+  const issue = issueFromHTML(html, owner, repo, number);
   if (
     issue === undefined ||
     issue.__typename === "PullRequest" ||
@@ -41,6 +42,42 @@ export function parseIssueHTML(
     updated_at: issue.updatedAt,
     labels,
   };
+}
+
+function issueFromHTML(
+  html: string,
+  owner: string,
+  repo: string,
+  number: number,
+): Record<string, unknown> | undefined {
+  const document = parseHTMLDocument(html);
+  if (document === undefined) return undefined;
+  const app = repositoryAppData(htmlElements(document));
+  if (app.kind === "invalid") return undefined;
+  if (app.kind === "absent") {
+    const payload = recordValue(embeddedAppJSON(html)?.payload);
+    // A current payload without its owned app cannot be rescued by legacy data.
+    if (payload !== undefined && Object.hasOwn(payload, "issueViewerRoute")) return undefined;
+    return recordValue(preloadedRepositoryData(payload, "IssueViewerViewQuery")?.issue);
+  }
+  if (app.path !== `/${owner}/${repo}/issues/${number}`) return undefined;
+  if (!Object.hasOwn(app.payload, "issueViewerRoute"))
+    return recordValue(preloadedRepositoryData(app.payload, "IssueViewerViewQuery")?.issue);
+  const route = recordValue(app.payload.issueViewerRoute);
+  const operation = recordValue(route?.queryOperation);
+  const repository = recordValue(recordValue(route?.data)?.repository);
+  const issue = recordValue(repository?.issue);
+  const issueRepository = recordValue(issue?.repository);
+  if (
+    operation?.name !== "IssueViewerPage" ||
+    issue?.__isIssueOrPullRequest !== "Issue" ||
+    typeof repository?.id !== "string" ||
+    issueRepository?.id !== repository.id ||
+    issueRepository?.name !== repo ||
+    issueRepository?.nameWithOwner !== `${owner}/${repo}`
+  )
+    return undefined;
+  return issue;
 }
 
 export function parseIssueListHTML(
@@ -227,6 +264,13 @@ export function parseLabelListHTML(
 function preloadedRepository(html: string, queryName: string): Record<string, unknown> | undefined {
   const embedded = embeddedAppJSON(html);
   const payload = embedded === undefined ? undefined : recordValue(embedded.payload);
+  return preloadedRepositoryData(payload, queryName);
+}
+
+function preloadedRepositoryData(
+  payload: Record<string, unknown> | undefined,
+  queryName: string,
+): Record<string, unknown> | undefined {
   const queries = payload === undefined ? undefined : arrayValue(payload.preloadedQueries);
   if (queries === undefined) {
     return undefined;

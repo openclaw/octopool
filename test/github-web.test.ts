@@ -1,3 +1,4 @@
+import { parseIssueHTML } from "../src/github-html-embedded";
 import { parseWorkflowPageHTML } from "../src/github-html-workflows";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -1101,6 +1102,97 @@ describe("github web provider", () => {
       expect(fetchMock).toHaveBeenCalledOnce();
     });
   });
+
+  it("projects current owned issue data without changing Markdown or literal title text", () => {
+    expect(parseIssueHTML(currentIssuePage(), "openclaw", "octopool", 5)).toEqual({
+      number: 5,
+      title: "Keep &lt; literal",
+      body: "# Raw Markdown\r\n\r\n- item\r\n",
+      state: "OPEN",
+      html_url: "https://github.com/openclaw/octopool/issues/5",
+      user: { id: "U_fixture", login: "fixture-user", name: "Fixture User", is_bot: false },
+      created_at: "2026-09-01T00:00:00Z",
+      updated_at: "2026-09-02T00:00:00Z",
+      labels: [{ id: "LA_fixture", name: "bug", description: null, color: "d73a4a" }],
+    });
+  });
+
+  it.each(["bare", "wrapped"])("retains %s legacy issue data", (kind) => {
+    const issue = currentIssueData().issueViewerRoute.data.repository.issue;
+    const legacy = {
+      preloadedQueries: [
+        { queryName: "IssueViewerViewQuery", result: { data: { repository: { issue } } } },
+      ],
+    };
+    const html =
+      kind === "bare" ? embeddedPage("IssueViewerViewQuery", { issue }) : currentIssuePage(legacy);
+    expect(parseIssueHTML(html, "openclaw", "octopool", 5)).toEqual(
+      parseIssueHTML(currentIssuePage(), "openclaw", "octopool", 5),
+    );
+  });
+
+  it.each([
+    "null route",
+    "wrong operation",
+    "foreign repository",
+    "mismatched repository ID",
+    "wrong number",
+    "foreign URL",
+    "pull request",
+    "missing body",
+    "partial labels",
+  ])("rejects invalid current issue data without legacy rescue: %s", (variant) => {
+    const data = currentIssueData();
+    const issue = data.issueViewerRoute.data.repository.issue;
+    const legacyIssue = structuredClone(issue);
+    Object.assign(data, {
+      preloadedQueries: [
+        {
+          queryName: "IssueViewerViewQuery",
+          result: { data: { repository: { issue: legacyIssue } } },
+        },
+      ],
+    });
+    if (variant === "null route") Object.assign(data, { issueViewerRoute: null });
+    if (variant === "wrong operation") data.issueViewerRoute.queryOperation.name = "OtherPage";
+    if (variant === "foreign repository") issue.repository.nameWithOwner = "other/octopool";
+    if (variant === "mismatched repository ID") issue.repository.id = "R_other";
+    if (variant === "wrong number") issue.number = 6;
+    if (variant === "foreign URL") issue.url = "https://github.com/other/octopool/issues/5";
+    if (variant === "pull request") issue.__isIssueOrPullRequest = "PullRequest";
+    if (variant === "missing body") Reflect.deleteProperty(issue, "body");
+    if (variant === "partial labels") issue.labels.pageInfo.hasNextPage = true;
+    expect(parseIssueHTML(currentIssuePage(data), "openclaw", "octopool", 5)).toBeUndefined();
+  });
+
+  it.each(["wrong path", "duplicate app", "unclosed app", "inert app", "bare modern"])(
+    "rejects invalid current issue ownership: %s",
+    (variant) => {
+      const data = currentIssueData();
+      Object.assign(data, {
+        preloadedQueries: [
+          {
+            queryName: "IssueViewerViewQuery",
+            result: {
+              data: {
+                repository: { issue: structuredClone(data.issueViewerRoute.data.repository.issue) },
+              },
+            },
+          },
+        ],
+      });
+      let html = currentIssuePage(data);
+      if (variant === "wrong path") html = html.replace("/octopool/issues/5", "/octopool/issues/6");
+      if (variant === "duplicate app") html += html;
+      if (variant === "unclosed app") html = html.replace("</react-app>", "");
+      if (variant === "inert app") html = `<template>${html}</template>`;
+      if (variant === "bare modern")
+        html = html
+          .replace('<react-app app-name="repo" initial-path="/openclaw/octopool/issues/5">', "")
+          .replace("</react-app>", "");
+      expect(parseIssueHTML(html, "openclaw", "octopool", 5)).toBeUndefined();
+    },
+  );
 
   it("prefers embedded issue data for shaped issue views", async () => {
     const fetchMock = vi
@@ -2358,6 +2450,44 @@ function actionsListHTML(title: string): string {
       <a class="branch-name" title="main" href="/openclaw/octopool/tree/refs/heads/main">main</a>
     </div>
   `;
+}
+
+function currentIssueData() {
+  return {
+    issueViewerRoute: {
+      queryOperation: { name: "IssueViewerPage" },
+      data: {
+        repository: {
+          id: "R_fixture",
+          issue: {
+            __isIssueOrPullRequest: "Issue",
+            number: 5,
+            repository: { id: "R_fixture", name: "octopool", nameWithOwner: "openclaw/octopool" },
+            title: "Keep &lt; literal",
+            body: "# Raw Markdown\r\n\r\n- item\r\n",
+            state: "OPEN",
+            url: "https://github.com/openclaw/octopool/issues/5",
+            createdAt: "2026-09-01T00:00:00Z",
+            updatedAt: "2026-09-02T00:00:00Z",
+            author: {
+              __typename: "User",
+              id: "U_fixture",
+              login: "fixture-user",
+              name: "Fixture User",
+            },
+            labels: {
+              nodes: [{ id: "LA_fixture", name: "bug", description: null, color: "d73a4a" }],
+              pageInfo: { hasNextPage: false },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+function currentIssuePage(payload: Record<string, unknown> = currentIssueData()): string {
+  return `<react-app app-name="repo" initial-path="/openclaw/octopool/issues/5"><script type="application/json" data-target="react-app.embeddedData">${JSON.stringify({ payload }).replaceAll("<", "\\u003c")}</script></react-app>`;
 }
 
 function embeddedPage(queryName: string, repository: Record<string, unknown>): string {
