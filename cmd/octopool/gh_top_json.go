@@ -143,6 +143,14 @@ func envelopeBodyBytes(envelope relayEnvelope) ([]byte, error) {
 }
 
 func filterJSONFields(raw []byte, fields []string, fieldMap map[string][]string) ([]byte, error) {
+	value, err := decodeJSONValue(raw)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(filterJSONValue(value, fields, fieldMap))
+}
+
+func decodeJSONValue(raw []byte) (any, error) {
 	var value any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -155,8 +163,7 @@ func filterJSONFields(raw []byte, fields []string, fieldMap map[string][]string)
 		}
 		return nil, err
 	}
-	filtered := filterJSONValue(value, fields, fieldMap)
-	return json.Marshal(filtered)
+	return value, nil
 }
 
 func filterJSONValue(value any, fields []string, fieldMap map[string][]string) any {

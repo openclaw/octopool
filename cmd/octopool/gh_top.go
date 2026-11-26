@@ -80,20 +80,7 @@ func ghFailed(err error) ghResult {
 }
 
 func relayTop(ctx context.Context, stdout io.Writer, request ghAPIRequest, fields []string, jq string, fieldMap map[string][]string) error {
-	if request.query == nil {
-		request.query = map[string]any{}
-	}
-	if request.headers == nil {
-		request.headers = map[string]string{}
-	}
-	if !safeRelayRequest(request) {
-		return errors.New("internal error: top-level gh command built an unsupported relay request")
-	}
-	client, err := newGHRelayClient()
-	if err != nil {
-		return err
-	}
-	envelope, err := client.do(ctx, request)
+	envelope, err := relayTopResponse(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -109,4 +96,21 @@ func relayTop(ctx context.Context, stdout io.Writer, request ghAPIRequest, field
 		return err
 	}
 	return writeBytes(ctx, stdout, filtered, jq)
+}
+
+func relayTopResponse(ctx context.Context, request ghAPIRequest) (relayEnvelope, error) {
+	if request.query == nil {
+		request.query = map[string]any{}
+	}
+	if request.headers == nil {
+		request.headers = map[string]string{}
+	}
+	if !safeRelayRequest(request) {
+		return relayEnvelope{}, errors.New("internal error: top-level gh command built an unsupported relay request")
+	}
+	client, err := newGHRelayClient()
+	if err != nil {
+		return relayEnvelope{}, err
+	}
+	return client.do(ctx, request)
 }
