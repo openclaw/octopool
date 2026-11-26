@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore token-free workflow lists and workflow views for GitHub’s current embedded JSON catalogues, falling back when the catalogue is incomplete.
+
 - Restore token-free Actions run lists for GitHub’s current embedded JSON pages, retaining bounded metadata enrichment and conservative API fallback.
 
 - Return an empty string for repositories without a description in `repo view --json` and `search repos --json`, matching native gh and preserving jq string operations.

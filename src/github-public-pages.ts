@@ -16,7 +16,7 @@ import {
   parsePullRequestHTML,
 } from "./github-html-embedded";
 import { parseReleaseMetadataHTML } from "./github-html-releases";
-import { parseWorkflowListHTML, parseWorkflowPageCount } from "./github-html-workflows";
+import { parseWorkflowListHTML, parseWorkflowPageHTML } from "./github-html-workflows";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
 import { fetchPublicPage } from "./github-web-transport";
 import type { GitHubEgressEnv } from "./github-egress";
@@ -159,12 +159,11 @@ async function completeWorkflowList(
   route: RouteInfo,
   html: string,
 ): Promise<Record<string, unknown>[] | undefined> {
-  const pageCount = parseWorkflowPageCount(html);
-  const workflows = parseWorkflowListHTML(html, route.owner!, route.repo!);
-  // Missing pagination metadata cannot prove the first page is complete.
-  if (pageCount === undefined || pageCount > MAX_PUBLIC_WORKFLOW_PAGES || workflows === undefined) {
-    return undefined;
-  }
+  const first = parseWorkflowPageHTML(html, route.owner!, route.repo!);
+  if (first === undefined) return undefined;
+  const { workflows } = first;
+  const pageCount = first.kind === "complete" ? 1 : first.pageCount;
+  if (pageCount > MAX_PUBLIC_WORKFLOW_PAGES) return undefined;
   for (let page = 2; page <= pageCount; page++) {
     const next = await fetchPublicPage(
       `https://github.com/${encodedPathSegments([
