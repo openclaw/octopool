@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep quoted Link metadata from changing CLI pagination, including titles containing semicolons or escaped quotes.
+
 - Decode numeric HTML references in GitHub issue and pull-request titles using HTML character rules, including euro signs and replacement characters for invalid code points.
 
 - Ignore duplicate Link relation parameters during CLI pagination, preserving the first relation and separate next-page links.

@@ -195,7 +195,7 @@ func TestRunGHAPIPaginatesThroughAuthoritativeLinkHeader(t *testing.T) {
 	}
 }
 
-func TestRunGHAPIPaginationUsesFirstRelationParameter(t *testing.T) {
+func TestRunGHAPIPaginationLinkRelations(t *testing.T) {
 	const page2 = `<https://api.github.com/repos/openclaw/octopool/issues?page=2>`
 	const page3 = `<https://api.github.com/repos/openclaw/octopool/issues?page=3>`
 	for _, tc := range []struct {
@@ -208,6 +208,12 @@ func TestRunGHAPIPaginationUsesFirstRelationParameter(t *testing.T) {
 		{"keep first next", page2 + `; rel="next"; rel="prev"`, "[1,2]\n", 2},
 		{"find separate next link", page2 + `; rel="prev"; rel="next", ` + page3 + `; rel="next"`, "[1,3]\n", 2},
 		{"keep multiple first relations", page2 + `; rel="prev next"; rel="last"`, "[1,2]\n", 2},
+		{"ignore quoted next", page2 + `; title="x; rel=next; x"; rel="prev"`, "[1]\n", 1},
+		{"ignore quoted prev", page2 + `; title="x; rel=prev; x"; rel="next"`, "[1,2]\n", 2},
+		{"escaped quote in title", page2 + `; title="x\"; rel=prev; x"; rel="next"`, "[1,2]\n", 2},
+		{"escaped backslash before closing quote", page2 + `; title="x\\"; rel="next"`, "[1,2]\n", 2},
+		{"quoted comma and semicolon", page2 + `; title="x,y; rel=prev; x"; rel="next"`, "[1,2]\n", 2},
+		{"find next after quoted false relation", page2 + `; title="x; rel=next; x"; rel="prev", ` + page3 + `; rel="next"`, "[1,3]\n", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requests := 0
