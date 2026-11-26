@@ -83,7 +83,7 @@ func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, std
 		if !ok || !machineReadable(opts) || !supportedJSONFields(opts.json, supportedReleaseFields) || limitOverOnePage(opts) {
 			return ghDelegated()
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "releases"), query: listQuery(opts)}, opts.json, opts.jq, fieldMapRelease))
+		return ghCompleted(relayRelease(ctx, stdout, ghAPIRequest{method: "GET", path: repoPath(repo, "releases"), query: listQuery(opts)}, opts.json, opts.jq))
 	case "view":
 		repo, ok, err := repoFromOptionOrCurrent(opts.repo)
 		if err != nil {
@@ -102,14 +102,48 @@ func handleGHRelease(ctx context.Context, command string, opts ghTopOptions, std
 		if supportedJSONFields(opts.json, supportedReleaseMetadataFields) {
 			shape = publicShapeReleaseMetadata
 		}
-		return ghCompleted(relayTop(ctx, stdout, ghAPIRequest{
+		return ghCompleted(relayRelease(ctx, stdout, ghAPIRequest{
 			method:  "GET",
 			path:    path,
 			headers: map[string]string{"x-octopool-public-shape": shape},
-		}, opts.json, opts.jq, fieldMapRelease))
+		}, opts.json, opts.jq))
 	default:
 		return ghDelegated()
 	}
+}
+
+func relayRelease(ctx context.Context, stdout io.Writer, request ghAPIRequest, fields []string, jq string) error {
+	envelope, err := relayTopResponse(ctx, request)
+	if err != nil {
+		return err
+	}
+	if len(fields) == 0 {
+		return writeGHBody(ctx, stdout, envelope, jq)
+	}
+	body, err := envelopeBodyBytes(envelope)
+	if err != nil {
+		return err
+	}
+	value, err := decodeJSONValue(body)
+	if err != nil {
+		return err
+	}
+	releases, ok := value.([]any)
+	if !ok {
+		releases = []any{value}
+	}
+	for _, item := range releases {
+		release, ok := item.(map[string]any)
+		if !ok || release == nil {
+			continue
+		}
+		for _, field := range []string{"name", "body"} {
+			if hasJSONField(fields, field) && release[field] == nil {
+				release[field] = ""
+			}
+		}
+	}
+	return writeJSONValue(ctx, stdout, filterJSONValue(value, fields, fieldMapRelease), jq)
 }
 
 func handleGHWorkflow(ctx context.Context, command string, opts ghTopOptions, stdout io.Writer) ghResult {

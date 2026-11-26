@@ -203,6 +203,87 @@ func TestRunGHRepoViewNodeIDFallback(t *testing.T) {
 	}
 }
 
+func TestRunGHReleaseText(t *testing.T) {
+	for _, surface := range []struct{ command, field string }{{"list", "name"}, {"view", "name"}, {"view", "body"}} {
+		for _, tc := range []struct {
+			name    string
+			present bool
+			value   any
+			want    string
+		}{
+			{"missing", false, nil, ""},
+			{"null", true, nil, ""},
+			{"empty", true, "", ""},
+			{"text", true, "\r\n# Notes\r\n\nKeep `code` and café.\n", "\r\n# Notes\r\n\nKeep `code` and café.\n"},
+		} {
+			for _, format := range []string{"json", "jq value", "jq type", "unselected"} {
+				t.Run(surface.command+"/"+surface.field+"/"+tc.name+"/"+format, func(t *testing.T) {
+					if strings.HasPrefix(format, "jq") && !jqAvailable() {
+						t.Skip("jq unavailable")
+					}
+					requests := 0
+					relayTestServer(t, func(request map[string]any) any {
+						requests++
+						path := "/repos/acme/repo/releases"
+						if surface.command == "view" {
+							path += "/tags/v1"
+						}
+						if request["path"] != path {
+							t.Errorf("path = %v, want %s", request["path"], path)
+						}
+						release := map[string]any{"tag_name": "v1"}
+						if tc.present {
+							release[surface.field] = tc.value
+						}
+						if surface.command == "list" {
+							return []any{release}
+						}
+						return release
+					})
+					args := []string{"release", surface.command}
+					if surface.command == "view" {
+						args = append(args, "v1")
+					}
+					args = append(args, "-R", "acme/repo", "--json", surface.field)
+					selector := "." + surface.field
+					if surface.command == "list" {
+						selector = ".[0]" + selector
+					}
+					wantFields := map[string]string{surface.field: tc.want}
+					var want string
+					switch format {
+					case "jq value":
+						args = append(args, "--jq", selector)
+						want = tc.want + "\n"
+					case "jq type":
+						args = append(args, "--jq", selector+" | type")
+						want = "string\n"
+					case "unselected":
+						args[len(args)-1] = "tagName"
+						wantFields = map[string]string{"tagName": "v1"}
+					}
+					if !strings.HasPrefix(format, "jq") {
+						var expected any = wantFields
+						if surface.command == "list" {
+							expected = []any{wantFields}
+						}
+						raw, err := json.Marshal(expected)
+						if err != nil {
+							t.Fatal(err)
+						}
+						want = string(raw) + "\n"
+					}
+					var out bytes.Buffer
+					err := runGH(t.Context(), args, &out, io.Discard)
+					if err != nil || requests != 1 || out.String() != want {
+						t.Fatalf("err=%v requests=%d output=%q; want one request and %q", err, requests, out.String(), want)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestRunGHReleaseListRelays(t *testing.T) {
 	relayTestServer(t, func(body map[string]any) any {
 		if body["path"] != "/repos/openclaw/octopool/releases" {
@@ -228,6 +309,45 @@ func TestRunGHReleaseListRelays(t *testing.T) {
 	assertGHComplete(t, result)
 	if got := out.String(); !strings.Contains(got, `"tagName":"v0.2.5"`) || !strings.Contains(got, `"isDraft":false`) {
 		t.Fatalf("out = %s", got)
+	}
+}
+
+func TestRunGHReleasePreservesOtherValues(t *testing.T) {
+	for _, tc := range []struct{ name, command, raw, want string }{
+		{"null object", "view", `null`, "null\n"},
+		{"scalar", "view", `42`, "42\n"},
+		{"large number", "view", `{"name":18446744073709551615}`, "{\"name\":18446744073709551615}\n"},
+		{"mixed list", "list", `[null,42,"text",{"name":true},{"name":9007199254740993}]`, "[null,42,\"text\",{\"name\":true},{\"name\":9007199254740993}]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			relayTestServer(t, func(map[string]any) any { return json.RawMessage(tc.raw) })
+			var out bytes.Buffer
+			err := runGH(t.Context(), []string{"release", tc.command, "-R", "acme/repo", "--json", "name"}, &out, io.Discard)
+			if err != nil || out.String() != tc.want {
+				t.Fatalf("err=%v output=%q, want %q", err, out.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestReleaseRelayWithoutFieldsPreservesRawJSON(t *testing.T) {
+	for _, release := range []bool{false, true} {
+		t.Run(fmt.Sprint(release), func(t *testing.T) {
+			relayTestServer(t, func(map[string]any) any {
+				return map[string]any{"name": nil, "body": "raw\r\n"}
+			})
+			var out bytes.Buffer
+			request := ghAPIRequest{method: "GET", path: "/repos/acme/repo/releases/latest"}
+			var err error
+			if release {
+				err = relayRelease(t.Context(), &out, request, nil, "")
+			} else {
+				err = relayTop(t.Context(), &out, request, nil, "", nil)
+			}
+			if err != nil || out.String() != "{\"body\":\"raw\\r\\n\",\"name\":null}\n" {
+				t.Fatalf("err=%v output=%q", err, out.String())
+			}
+		})
 	}
 }
 
