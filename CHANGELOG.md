@@ -4,6 +4,8 @@
 
 - Show dashboard activity ages in the correct timezone when timestamps come from SQLite.
 
+- Preserve large integer results from `--jq` when viewing issues and pull requests instead of rounding them through floating point.
+
 - Preserve GitHub response formats when Accept parameters contain quoted media-type text by leaving negotiation to the API.
 
 - Keep quoted Link metadata from changing CLI pagination, including titles containing semicolons or escaped quotes.
