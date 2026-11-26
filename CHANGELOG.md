@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.10.0 - 2026-11-26
+
+**Highlights:** Improve CLI response fidelity and upstream error handling, reduce redundant cache and API work, and strengthen release validation across supported platforms.
+
 - Preserve label creation order, node IDs, and browser URLs in `gh label list` by using native gh for the command.
 
 - Bound GitHub profile response reads during sign-in and user lookup, returning typed upstream errors for oversized or unreadable responses.
@@ -123,16 +127,12 @@
 
 - Avoid copying Git advertisement packet bytes while parsing public ref listings.
 
-## 0.9.11 - 2026-10-26
+- Warn when a protected immediate PR merge targets an already-merged PR, matching native gh's successful stderr warning and skipped remote deletion without repeating the merge PUT.
+- Distinguish unmodeled protected content command shapes from unsafe-input blocks with a fixed diagnostic pointing to native `ghx`, preserving policy failures and existing delegation.
 
 ### Performance
 
 - Skip the redundant organization profile lookup when PR views already contain the head owner's type, node ID, and login, preserving user names and incomplete-identity validation.
-
-### Fixes
-
-- Warn when a protected immediate PR merge targets an already-merged PR, matching native gh's successful stderr warning and skipped remote deletion without repeating the merge PUT.
-- Distinguish unmodeled protected content command shapes from unsafe-input blocks with a fixed diagnostic pointing to native `ghx`, preserving policy failures and existing delegation.
 
 ## 0.9.10 - 2026-10-24
 
