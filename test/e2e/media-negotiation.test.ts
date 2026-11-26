@@ -1,8 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, relay, seedPool } from "./harness";
 
-describe("weighted media negotiation", () => {
+describe("complex media negotiation", () => {
   it.each([
+    {
+      accept: 'application/json; note=",application/vnd.github.diff,"',
+      contentType: "application/json",
+      body: { number: 12, title: "API-selected representation" },
+      encoding: "json",
+    },
+    {
+      accept: 'application/vnd.github.diff; note=",application/vnd.github.patch,"',
+      contentType: "text/x-diff",
+      body: "diff --git a/README.md b/README.md\n",
+      encoding: "text",
+    },
+    {
+      accept: 'application/json; note="escaped \\",application/vnd.github.diff,"',
+      contentType: "application/json",
+      body: { number: 12, title: "API-selected representation" },
+      encoding: "json",
+    },
     {
       accept: "application/vnd.github.patch;q=0, application/json;q=1",
       contentType: "application/json",

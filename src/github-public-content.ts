@@ -16,8 +16,8 @@ const MEDIA_PATCH = new Set([
 ]);
 
 export function mediaFormat(accept: string | undefined): "diff" | "patch" | undefined {
-  // Preserve weighted negotiation at the API instead of overriding it with a web format.
-  if (/(?:^|;)\s*q\s*=/i.test(accept ?? "")) return undefined;
+  // Let the API negotiate weighted or quoted values instead of guessing a web format.
+  if (accept?.includes('"') || /(?:^|;)\s*q\s*=/i.test(accept ?? "")) return undefined;
   const values = (accept ?? "")
     .toLowerCase()
     .split(",")
