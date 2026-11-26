@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show dashboard activity ages in the correct timezone when timestamps come from SQLite.
+
 - Preserve GitHub response formats when Accept parameters contain quoted media-type text by leaving negotiation to the API.
 
 - Keep quoted Link metadata from changing CLI pagination, including titles containing semicolons or escaped quotes.

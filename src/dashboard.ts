@@ -356,7 +356,11 @@ function bytes(value) {
 }
 function rel(value) {
   if (!value) return "";
-  const d = new Date(value);
+  // SQLite timestamps are UTC even though they do not carry a timezone.
+  const timestamp = /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.][0-9]+)?$/.test(value)
+    ? value.replace(" ", "T") + "Z"
+    : value;
+  const d = new Date(timestamp);
   if (Number.isNaN(d.getTime())) return String(value);
   const seconds = Math.round((Date.now() - d.getTime()) / 1000);
   if (seconds < 60) return seconds + "s ago";
