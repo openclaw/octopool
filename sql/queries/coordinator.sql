@@ -28,13 +28,6 @@ CREATE TABLE IF NOT EXISTS cooldowns (
   PRIMARY KEY (identity_id, route_key)
 );
 
--- name: CreateCacheFillsTable :exec
-CREATE TABLE IF NOT EXISTS cache_fills (
-  cache_key TEXT PRIMARY KEY,
-  owner_token TEXT NOT NULL,
-  expires_at INTEGER NOT NULL
-);
-
 -- name: GetLease :one
 SELECT identity_id, expires_at
 FROM leases
@@ -57,16 +50,6 @@ WHERE route_key IN (
 DELETE FROM cooldowns
 WHERE (identity_id, route_key) IN (
   SELECT old.identity_id, old.route_key FROM cooldowns AS old WHERE old.expires_at <= ?1
-  ORDER BY old.expires_at LIMIT 16
-);
-
--- name: CreateLegacyCacheFillExpiryIndex :exec
-CREATE INDEX IF NOT EXISTS cache_fills_expiry ON cache_fills(expires_at);
-
--- name: DrainExpiredLegacyCacheFills :exec
-DELETE FROM cache_fills
-WHERE cache_key IN (
-  SELECT old.cache_key FROM cache_fills AS old WHERE old.expires_at <= ?1
   ORDER BY old.expires_at LIMIT 16
 );
 
@@ -130,28 +113,3 @@ SELECT expires_at
 FROM cooldowns
 WHERE identity_id = ?
   AND route_key = ?;
-
--- name: GetCacheFill :one
-SELECT owner_token, expires_at
-FROM cache_fills
-WHERE cache_key = ?;
-
--- name: UpsertCacheFill :exec
-INSERT INTO cache_fills (cache_key, owner_token, expires_at)
-VALUES (?1, ?2, ?3)
-ON CONFLICT(cache_key) DO UPDATE SET
-  owner_token = excluded.owner_token,
-  expires_at = excluded.expires_at;
-
--- name: RenewCacheFill :exec
-UPDATE cache_fills
-SET expires_at = ?3
-WHERE cache_key = ?1
-  AND owner_token = ?2
-  AND expires_at > ?4;
-
--- name: CompleteCacheFill :exec
-DELETE FROM cache_fills
-WHERE cache_key = ?1
-  AND owner_token = ?2
-  AND expires_at > ?3;

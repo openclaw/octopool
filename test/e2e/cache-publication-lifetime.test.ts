@@ -361,8 +361,11 @@ it("measures a real renewable fill through DO RPC and native SQL", async () => {
   }
 });
 
-it("drains only expired legacy fills in the contacted DO during mixed deployment", async () => {
+it("leaves retired cache-fill storage and identity leases intact", async () => {
   await runInDurableObject(coordinator(), (_instance, state) => {
+    state.storage.sql.exec(
+      "CREATE TABLE cache_fills (cache_key TEXT PRIMARY KEY, owner_token TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+    );
     for (let i = 0; i < 18; i++)
       state.storage.sql.exec("INSERT INTO cache_fills VALUES (?, 'old', 0)", `old-${i}`);
     state.storage.sql.exec(
@@ -374,12 +377,13 @@ it("drains only expired legacy fills in the contacted DO during mixed deployment
       Date.now() + 60_000,
     );
   });
+  await evictDurableObject(coordinator());
   await coordinator().tryAcquirePublication("cache:new");
   const snapshot = await runInDurableObject(coordinator(), (_instance, state) => ({
     fills: state.storage.sql.exec("SELECT cache_key FROM cache_fills").toArray(),
     leases: state.storage.sql.exec("SELECT * FROM leases").toArray(),
   }));
-  expect(snapshot.fills).toHaveLength(3);
+  expect(snapshot.fills).toHaveLength(19);
   expect(snapshot.fills).toContainEqual({ cache_key: "live" });
   expect(snapshot.leases).toHaveLength(1);
 });
