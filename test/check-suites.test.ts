@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../src/cache";
 import { cacheTTLSeconds, staleCacheSeconds } from "../src/cache-policy";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import type { RelayRequest } from "../src/types";
 
 const base = "/repos/openclaw/octopool/check-suites/42";

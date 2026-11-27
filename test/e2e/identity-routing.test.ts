@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { loadIdentities } from "../../src/db";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { bearer, githubUpstream, jsonResponse, POOL, relay, seedPool } from "./harness";
 import { issueEventCases } from "../fixtures/issue-event-visibility";

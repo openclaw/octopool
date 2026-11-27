@@ -9,7 +9,8 @@ import {
 import { withGitHubEgress } from "../../src/github-egress";
 import { queries } from "../../src/generated/sql";
 import { publicProofCoordinatorStub } from "../../src/pool-coordinator";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { ensurePublicGitHubRepo, storePublicRepoProof } from "../../src/public-repos";
 import { sqliteTimestamp } from "../../src/sqlite-time";
 import { ownedWork } from "./owned-work";

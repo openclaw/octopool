@@ -3,7 +3,8 @@ import { callPublicGitHub, probeGitHubLog } from "../src/github";
 import { sanitizeGitHubResponse } from "../src/github-sanitize";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
 import { responseCapBytes } from "../src/github-limits";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { envelopeBytes, opaqueBytes } from "./fixtures/opaque-bytes";
 
 describe("github api provider", () => {

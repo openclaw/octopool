@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { githubCacheKey } from "../src/cache";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 
 // Keys from phase one (20dd274), including pooled-identity variants.
 const prior = [

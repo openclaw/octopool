@@ -10,7 +10,8 @@ import { fetchPublicPage } from "../src/github-web-transport";
 import { releaseMarkdown } from "./fixtures/release-summary";
 import { contentsKinds, contentsLinks } from "./fixtures/contents-links";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import {
   completeGitAdvertisement,
   exactGitRefs,

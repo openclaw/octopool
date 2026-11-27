@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { exactRunListQuery, projectRunListItem, runViewListLookup } from "../src/run-view-superset";
-import { classifyRoute, defaultPolicy } from "../src/policy";
+import { classifyRoute } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { sanitizeGitHubResponse } from "../src/github-sanitize";
 import type { CachedGitHubResponse } from "../src/cache";
 import type { RelayRequest } from "../src/types";

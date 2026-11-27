@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { githubCacheKey } from "../src/cache";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { issueEventCases, legacyIssueEventKey } from "./fixtures/issue-event-visibility";
 
 describe("public issue-event cache generation", () => {

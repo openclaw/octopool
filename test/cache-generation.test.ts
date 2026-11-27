@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { githubCacheKey } from "../src/cache";
 import { gitRefRequest } from "../src/github-public-git";
 import { withGitHubEgress } from "../src/github-egress";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { gitCacheKeys } from "./fixtures/git-cache-keys";
 import { contentsCacheKeys } from "./fixtures/contents-cache-keys";
 

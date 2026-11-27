@@ -11,7 +11,8 @@ import { CACHE_PUBLICATION_EPOCH, bodyPublicationResource } from "../../src/cach
 import { loadIdentities } from "../../src/db";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "../../src/edge-cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import { bearer, jsonResponse, POOL, rateHeaders, relay, seedPool } from "./harness";
 import { ownedWork } from "./owned-work";

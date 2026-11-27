@@ -4,7 +4,8 @@ import { queries } from "../src/generated/sql";
 import { withGitHubEgress } from "../src/github-egress";
 import { callGitHubWeb } from "../src/github-web";
 import { completedJobPageProof } from "../src/github-public-actions";
-import { classifyRoute, defaultPolicy } from "../src/policy";
+import { classifyRoute } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import {
   terminalLogCacheKey,
   terminalLogCacheProof,

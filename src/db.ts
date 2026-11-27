@@ -1,7 +1,7 @@
 import { cachedConfigLookup } from "./config-cache";
 import { relayTiming, relayPhasePromise, withRelayTiming } from "./relay-timing";
 import type { CacheMissReason } from "./cache";
-import { defaultPolicy, parsePolicy } from "./policy";
+import { defaultPolicy, parsePolicy } from "./config";
 import { queries } from "./generated/sql";
 import type { AuditBackend, Identity, PoolPolicy, RouteInfo } from "./types";
 

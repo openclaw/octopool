@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withGitHubEgress, type GitHubEgressEnv } from "../src/github-egress";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { verifyPRStateHint, verifyPRStateHintLive } from "../src/pr-state";
 import {
   matchingPRMetadata,

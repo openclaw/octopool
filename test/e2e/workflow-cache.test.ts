@@ -10,7 +10,8 @@ import { requestWithEnv } from "./identity-routing-support";
 import { observePublicationD1 } from "./publication-d1-observer";
 
 import { loadIdentities } from "../../src/db";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import type { RelayRequest } from "../../src/types";
 

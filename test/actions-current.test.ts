@@ -9,7 +9,8 @@ import {
   parseActionsRunListHTML,
 } from "../src/github-html-actions";
 import { callGitHubWeb } from "../src/github-web";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import {
   filterRunListSuperset,
   projectLargerRunListPage,
