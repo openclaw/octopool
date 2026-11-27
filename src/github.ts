@@ -7,6 +7,7 @@ import { requestTimeoutMs, responseCapBytes } from "./github-limits";
 import { appendRelayQuery } from "./github-path";
 import {
   DEFAULT_GITHUB_API_VERSION,
+  conditionalHeaders,
   GitHubTransportError,
   githubResponseHeaders,
   isSecondaryRateLimit,
@@ -238,11 +239,8 @@ function githubHeaders(
     "x-github-api-version",
     input?.["x-github-api-version"] ?? DEFAULT_GITHUB_API_VERSION,
   );
-  if (input?.["if-none-match"] !== undefined) {
-    headers.set("if-none-match", input["if-none-match"]);
-  }
-  if (input?.["if-modified-since"] !== undefined) {
-    headers.set("if-modified-since", input["if-modified-since"]);
+  for (const [key, value] of Object.entries(conditionalHeaders(input))) {
+    headers.set(key, value);
   }
   return headers;
 }

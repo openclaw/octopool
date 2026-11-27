@@ -1,6 +1,10 @@
 import { decodePathStrict, encodedPathSegments, scalarQuery, simplePageQuery } from "./github-path";
 import { htmlWebRequest, publicJSONResponse } from "./github-public-utils";
-import { defaultGitHubJSONAccept, transformedGitHubHeaders } from "./github-response";
+import {
+  defaultGitHubJSONAccept,
+  hasConditionalRequestHeaders,
+  transformedGitHubHeaders,
+} from "./github-response";
 import {
   parseIssueHTML,
   parseIssueListHTML,
@@ -165,8 +169,7 @@ export function releaseMetadataPageRequest(
     request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.releaseMetadata ||
     !defaultGitHubJSONAccept(request.headers?.accept) ||
     Object.keys(request.query ?? {}).length !== 0 ||
-    request.headers?.["if-none-match"] !== undefined ||
-    request.headers?.["if-modified-since"] !== undefined
+    hasConditionalRequestHeaders(request.headers)
   )
     return undefined;
   let tag: string | undefined;
