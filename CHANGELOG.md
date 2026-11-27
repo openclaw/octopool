@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve the null body of empty Actions job logs when serving them from cache.
+
 - Sort labels case-insensitively in human issue and pull request views, matching native gh while preserving label order in JSON and issue lists.
 
 - Match native gh reviewer summaries in human PR views: show the latest review state, sort completed reviews before requests, and keep team and user names distinct.

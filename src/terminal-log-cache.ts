@@ -276,6 +276,9 @@ function decodeLogBytes(bytes: Uint8Array, encoding: "json" | "text" | "base64")
   if (encoding === "base64") {
     return bytesToBase64(bytes);
   }
+  if (encoding === "text" && bytes.length === 0) {
+    return null;
+  }
   const text = new TextDecoder().decode(bytes);
   if (encoding !== "json") {
     return text;

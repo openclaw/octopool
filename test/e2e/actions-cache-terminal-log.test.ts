@@ -465,7 +465,7 @@ describe("terminal Actions log cache", () => {
     );
   });
 
-  it.each([opaqueBytes[0], opaqueBytes[2], opaqueBytes[5], opaqueBytes[6]])(
+  it.each([opaqueBytes[0], opaqueBytes[2], opaqueBytes[5], opaqueBytes[6], opaqueBytes[8]])(
     "stores literal $name bytes in native R2 and reuses their completion proof",
     async (fixture) => {
       const upstream = terminalLogUpstream("completed", new Uint8Array(fixture.bytes));
@@ -476,6 +476,7 @@ describe("terminal Actions log cache", () => {
         expect(response.status).toBe(200);
         const wire = await response.json<RelayEnvelope>();
         expect.soft(envelopeBytes(wire)).toEqual(fixture.bytes);
+        if (fixture.bytes.length === 0) expect.soft(wire.body).toBeNull();
         expect.soft(wire).toMatchObject({
           status: 200,
           body_encoding: fixture.encoding,
