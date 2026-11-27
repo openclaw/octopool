@@ -4,7 +4,6 @@ import {
   CACHE_PUBLICATION_EPOCH,
   PUBLICATION_LEASE_MS,
   publicationBinding,
-  tryPublicationOwner,
   type PublicationOwner,
 } from "./cache-publication";
 import { queries } from "./generated/sql";
@@ -52,6 +51,27 @@ type PublicationWaiterGroup = {
   promise: Promise<CacheFillAcquisition>;
   timer?: ReturnType<typeof setTimeout>;
 };
+
+export async function tryPublicationOwner(
+  env: Env,
+  resource: string,
+): Promise<PublicationOwner | undefined> {
+  const result = await env.DB.prepare(queries.acquirePublicationOwner)
+    .bind(CACHE_PUBLICATION_EPOCH, resource, crypto.randomUUID(), PUBLICATION_LEASE_MS)
+    .all<PublicationOwner>();
+  const owner = result.results[0];
+  if (
+    owner !== undefined &&
+    (!Number.isSafeInteger(owner.id) ||
+      owner.id < 1 ||
+      owner.protocol_epoch !== CACHE_PUBLICATION_EPOCH ||
+      owner.resource_key !== resource)
+  ) {
+    throw new Error("Invalid publication grant");
+  }
+  // No capability escapes until the acquisition statement committed.
+  return owner;
+}
 
 export class PoolCoordinator extends DurableObject<Env> {
   private readonly cacheFillWaiters = new Map<string, CacheFillWaiterGroup>();
