@@ -1,4 +1,5 @@
 import { relayPhase, relayTiming } from "./relay-timing";
+import { assertBackendWorkActive, withBackendWorkSignal } from "./backend-work";
 import { base64ToBytes, bytesToBase64 } from "./encoding";
 import type { CacheMissObserver } from "./cache";
 import { CACHE_PUBLICATION_EPOCH } from "./cache-publication";
@@ -12,6 +13,9 @@ import { classifyRoute } from "./policy";
 import { observeAnonymousPublicRepo } from "./public-repos";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "./sqlite-time";
 import type { GitHubRelayResponse, PoolPolicy, RelayRequest, RouteInfo } from "./types";
+
+const MAX_DEFERRED_TERMINAL_LOG_PROOFS = 4;
+let deferredTerminalLogProofs = 0;
 
 const LOG_TTL_SECONDS = 7 * 24 * 60 * 60;
 const LOG_REVALIDATE_SECONDS = 60 * 60;
@@ -195,26 +199,87 @@ export async function readTerminalLogCache(
   }
 }
 
-export async function writeTerminalLogCache(
+export async function publishTerminalLogCache(
   env: Env,
   key: string,
   response: GitHubRelayResponse,
 ): Promise<void> {
-  if (response.status !== 200) {
-    return;
+  using _phase = relayPhase("body_publish");
+  try {
+    if (response.status !== 200) {
+      return;
+    }
+    const encoding = response.body_encoding ?? "json";
+    const createdAt = sqliteTimestamp(new Date());
+    await env.ACTIONS_LOGS.put(key, encodeLogBody(response.body, encoding), {
+      httpMetadata: {
+        contentType: response.headers["content-type"] ?? "application/octet-stream",
+      },
+      customMetadata: {
+        [CREATED_AT_METADATA]: createdAt,
+        [BODY_ENCODING_METADATA]: encoding,
+        [BODY_CODEC_METADATA]: BODY_CODEC,
+      },
+    });
+  } catch (error) {
+    console.error("actions log cache write failed", error);
   }
-  const encoding = response.body_encoding ?? "json";
-  const createdAt = sqliteTimestamp(new Date());
-  await env.ACTIONS_LOGS.put(key, encodeLogBody(response.body, encoding), {
-    httpMetadata: {
-      contentType: response.headers["content-type"] ?? "application/octet-stream",
-    },
-    customMetadata: {
-      [CREATED_AT_METADATA]: createdAt,
-      [BODY_ENCODING_METADATA]: encoding,
-      [BODY_CODEC_METADATA]: BODY_CODEC,
-    },
-  });
+}
+
+export async function proveAndPublishTerminalLog(
+  context: {
+    env: GitHubEgressEnv;
+    ctx: ExecutionContext;
+    request: RelayRequest;
+    route: RouteInfo;
+    policy: PoolPolicy;
+  },
+  response: GitHubRelayResponse,
+): Promise<boolean> {
+  if (deferredTerminalLogProofs >= MAX_DEFERRED_TERMINAL_LOG_PROOFS) {
+    recordTerminalLogProof(context.request, "deferred_skipped", true);
+    return false;
+  }
+  let proven = false;
+  // Leave time to record the miss within the HTTP waitUntil lifetime (30s).
+  const signal = AbortSignal.timeout(20_000);
+  const expired = Promise.withResolvers<void>();
+  const expire = () => expired.resolve();
+  signal.addEventListener("abort", expire, { once: true });
+  if (signal.aborted) expire();
+  deferredTerminalLogProofs++;
+  const work = withBackendWorkSignal(signal, async () => {
+    const proof = await terminalLogCacheProof(
+      context.env,
+      context.ctx,
+      context.request,
+      context.route,
+      context.policy,
+      { deferred: true },
+    );
+    if (proof === undefined) return;
+    assertBackendWorkActive();
+    // R2 puts cannot be cancelled. Keep proven cacheability even if a started
+    // write outlives the scope; expired proof may never start a new write.
+    proven = true;
+    await publishTerminalLogCache(context.env, proof.key, response);
+  })
+    .catch((error: unknown) => {
+      if (!signal.aborted) console.error("deferred actions log completion proof failed", error);
+    })
+    .finally(() => {
+      // Count non-abortable storage until it settles, even after the audit deadline.
+      deferredTerminalLogProofs--;
+    });
+  context.ctx.waitUntil(work);
+  try {
+    await Promise.race([work, expired.promise]);
+    if (signal.aborted)
+      console.error("deferred actions log completion proof failed", signal.reason);
+  } finally {
+    signal.removeEventListener("abort", expire);
+  }
+  return proven;
 }
 
 async function fetchFreshMetadata(

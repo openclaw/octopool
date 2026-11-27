@@ -6,7 +6,6 @@ import {
   admitBackendWork,
   assertBackendWorkActive,
   cancelBackendWork,
-  withBackendWorkSignal,
 } from "./backend-work";
 import {
   withCompiledGitHubEgress,
@@ -110,11 +109,11 @@ import {
   readTerminalLogCache,
   recordTerminalLogProof,
   terminalLogCacheKey,
-  terminalLogCacheProof,
   terminalLogJobID,
   terminalLogNeedsRevalidation,
   type CachedTerminalLog,
-  writeTerminalLogCache,
+  publishTerminalLogCache,
+  proveAndPublishTerminalLog,
 } from "./terminal-log-cache";
 import type {
   AuditBackend,
@@ -127,9 +126,6 @@ import type {
   SelectionLeaseReason,
   SelectionRequest,
 } from "./types";
-
-const MAX_DEFERRED_TERMINAL_LOG_PROOFS = 4;
-let deferredTerminalLogProofs = 0;
 
 type RelayBase = {
   env: GitHubEgressEnv;
@@ -1265,7 +1261,16 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
   if (state.terminalLogProofDeferred && clientResponse.status === 200) {
     const timing = relayTiming();
     state.deferredTerminalLog = async () => {
-      const proven = await proveAndPublishTerminalLog(state, clientResponse);
+      const proven = await proveAndPublishTerminalLog(
+        {
+          env: state.env,
+          ctx: state.ctx,
+          request: state.request,
+          route: state.route,
+          policy: state.policy,
+        },
+        clientResponse,
+      );
       withRelayTiming(timing, () =>
         scheduleRelayAudit(state.env, state.ctx, {
           ...audit,
@@ -2058,69 +2063,6 @@ async function publishGitHubCache(
     console.error("github cache write failed", error);
     return "failed";
   }
-}
-
-async function publishTerminalLogCache(
-  env: Env,
-  key: string,
-  response: GitHubRelayResponse,
-): Promise<void> {
-  using _phase = relayPhase("body_publish");
-  try {
-    await writeTerminalLogCache(env, key, response);
-  } catch (error) {
-    console.error("actions log cache write failed", error);
-  }
-}
-
-async function proveAndPublishTerminalLog(
-  state: ActiveRelay,
-  response: GitHubRelayResponse,
-): Promise<boolean> {
-  if (deferredTerminalLogProofs >= MAX_DEFERRED_TERMINAL_LOG_PROOFS) {
-    recordTerminalLogProof(state.request, "deferred_skipped", true);
-    return false;
-  }
-  let proven = false;
-  // Leave time to record the miss within the HTTP waitUntil lifetime (30s).
-  const signal = AbortSignal.timeout(20_000);
-  const expired = Promise.withResolvers<void>();
-  const expire = () => expired.resolve();
-  signal.addEventListener("abort", expire, { once: true });
-  if (signal.aborted) expire();
-  deferredTerminalLogProofs++;
-  const work = withBackendWorkSignal(signal, async () => {
-    const proof = await terminalLogCacheProof(
-      state.env,
-      state.ctx,
-      state.request,
-      state.route,
-      state.policy,
-      { deferred: true },
-    );
-    if (proof === undefined) return;
-    assertBackendWorkActive();
-    // R2 puts cannot be cancelled. Keep proven cacheability even if a started
-    // write outlives the scope; expired proof may never start a new write.
-    proven = true;
-    await publishTerminalLogCache(state.env, proof.key, response);
-  })
-    .catch((error: unknown) => {
-      if (!signal.aborted) console.error("deferred actions log completion proof failed", error);
-    })
-    .finally(() => {
-      // Count non-abortable storage until it settles, even after the audit deadline.
-      deferredTerminalLogProofs--;
-    });
-  state.ctx.waitUntil(work);
-  try {
-    await Promise.race([work, expired.promise]);
-    if (signal.aborted)
-      console.error("deferred actions log completion proof failed", signal.reason);
-  } finally {
-    signal.removeEventListener("abort", expire);
-  }
-  return proven;
 }
 
 async function revalidateCachedTerminalLog(
