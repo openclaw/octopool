@@ -83,3 +83,14 @@ export function safeRelativePath(value: string, maxLength: number): boolean {
     value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
   );
 }
+
+export function simplePageQuery(
+  query: Record<string, string | string[]> | undefined,
+  allowed = new Set(["per_page", "page"]),
+): { perPage: number } | undefined {
+  if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
+    return undefined;
+  }
+  const perPage = boundedPageSize(query?.per_page, { defaultValue: 30 });
+  return perPage === undefined ? undefined : { perPage };
+}

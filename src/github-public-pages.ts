@@ -1,12 +1,4 @@
-import { responseCapBytes } from "./github-limits";
-import {
-  boundedPageSize,
-  decodePathStrict,
-  encodedPathSegments,
-  firstPageQuery,
-  scalarQuery,
-  validScalarQuery,
-} from "./github-path";
+import { decodePathStrict, encodedPathSegments, scalarQuery, simplePageQuery } from "./github-path";
 import { htmlWebRequest, publicJSONResponse } from "./github-public-utils";
 import { defaultGitHubJSONAccept, transformedGitHubHeaders } from "./github-response";
 import {
@@ -16,17 +8,12 @@ import {
   parsePullRequestHTML,
 } from "./github-html-embedded";
 import { parseReleaseMetadataHTML } from "./github-html-releases";
-import { parseWorkflowListHTML, parseWorkflowPageHTML } from "./github-html-workflows";
 import { PUBLIC_SHAPES } from "./github-public-shapes";
-import { fetchPublicPage } from "./github-web-transport";
-import type { GitHubEgressEnv } from "./github-egress";
 import type { WebRequest } from "./github-web-types";
 import type { RelayRequest, RouteInfo } from "./types";
 
-const MAX_PUBLIC_WORKFLOW_PAGES = 10;
-
 export function summaryPageRequest(
-  env: GitHubEgressEnv,
+  capBytes: number,
   request: RelayRequest,
   route: RouteInfo,
 ): WebRequest | undefined {
@@ -100,93 +87,13 @@ export function summaryPageRequest(
       const items = parseLabelListHTML(html, route.owner!, route.repo!);
       return items === undefined ? undefined : items.slice(0, query.perPage);
     };
-  } else if (
-    (route.kind === "workflow_list" && shape === PUBLIC_SHAPES.workflowList) ||
-    (route.kind === "workflow_view" && shape === PUBLIC_SHAPES.workflowView)
-  ) {
-    const query =
-      route.kind === "workflow_list"
-        ? simplePageQuery(request.query)
-        : Object.keys(request.query ?? {}).length === 0
-          ? { perPage: 100 }
-          : undefined;
-    if (query === undefined) {
-      return undefined;
-    }
-    const workflowRef =
-      route.kind === "workflow_view"
-        ? decodePathStrict(/\/actions\/workflows\/([^/?#]+)$/.exec(request.path)?.[1] ?? "")
-        : undefined;
-    if (route.kind === "workflow_view" && workflowRef === undefined) {
-      return undefined;
-    }
-    url = new URL(
-      `https://github.com/${encodedPathSegments([route.owner, route.repo, "actions"])}`,
-    );
-    return htmlWebRequest(responseCapBytes(env), url.toString(), async (body, headers, status) => {
-      const html = new TextDecoder().decode(body);
-      const workflows = await completeWorkflowList(env, route, html);
-      if (workflows === undefined) {
-        return undefined;
-      }
-      const bodyValue =
-        route.kind === "workflow_view"
-          ? workflows.find(
-              (workflow) =>
-                String(workflow.id) === workflowRef ||
-                workflow.path === `.github/workflows/${workflowRef}`,
-            )
-          : {
-              total_count: workflows.length,
-              workflows: workflows.slice(0, query.perPage),
-            };
-      if (bodyValue === undefined) {
-        return undefined;
-      }
-      return publicJSONResponse(headers, status, bodyValue);
-    });
   } else {
     return undefined;
   }
-  return htmlWebRequest(responseCapBytes(env), url.toString(), (body, headers, status) => {
+  return htmlWebRequest(capBytes, url.toString(), (body, headers, status) => {
     const parsed = parse(new TextDecoder().decode(body));
     return parsed === undefined ? undefined : publicJSONResponse(headers, status, parsed);
   });
-}
-
-async function completeWorkflowList(
-  env: GitHubEgressEnv,
-  route: RouteInfo,
-  html: string,
-): Promise<Record<string, unknown>[] | undefined> {
-  const first = parseWorkflowPageHTML(html, route.owner!, route.repo!);
-  if (first === undefined) return undefined;
-  const { workflows } = first;
-  const pageCount = first.kind === "complete" ? 1 : first.pageCount;
-  if (pageCount > MAX_PUBLIC_WORKFLOW_PAGES) return undefined;
-  for (let page = 2; page <= pageCount; page++) {
-    const next = await fetchPublicPage(
-      `https://github.com/${encodedPathSegments([
-        route.owner!,
-        route.repo!,
-        "actions",
-        "workflows_partial",
-      ])}?query=&page=${page}`,
-      responseCapBytes(env),
-      env,
-    );
-    const parsed =
-      next === undefined ? undefined : parseWorkflowListHTML(next, route.owner!, route.repo!);
-    if (parsed === undefined) {
-      return undefined;
-    }
-    workflows.push(...parsed);
-  }
-  const unique = new Set(workflows.map((workflow) => workflow.id));
-  if (unique.size !== workflows.length) {
-    return undefined;
-  }
-  return workflows.sort((left, right) => compareStrings(String(left.path), String(right.path)));
 }
 
 function issueListPageQuery(
@@ -233,17 +140,6 @@ function issueListPageQuery(
   return { perPage: pageQuery.perPage, search: qualifiers.join(" ") };
 }
 
-function simplePageQuery(
-  query: Record<string, string | string[]> | undefined,
-  allowed = new Set(["per_page", "page"]),
-): { perPage: number } | undefined {
-  if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
-    return undefined;
-  }
-  const perPage = boundedPageSize(query?.per_page, { defaultValue: 30 });
-  return perPage === undefined ? undefined : { perPage };
-}
-
 function searchQualifier(key: string, value: string): string | undefined {
   if (
     value === "" ||
@@ -255,10 +151,6 @@ function searchQualifier(key: string, value: string): string | undefined {
     return undefined;
   }
   return `${key}:"${value}"`;
-}
-
-function compareStrings(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 export function releaseMetadataPageRequest(
