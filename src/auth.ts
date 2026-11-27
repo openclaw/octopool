@@ -12,17 +12,6 @@ import { isRecord } from "./object";
 import { hasSecondaryRateLimitMessage } from "./github-response";
 import type { Caller } from "./types";
 
-type CallerRow = {
-  id: string;
-  name: string;
-  github_login: string;
-  github_user_id: number | null;
-  org_login: string;
-  org_verified_at: string | null;
-  caller_token_id: string;
-  client_name: string;
-};
-
 type CallerAuthentication = { caller: Caller; membershipKey: string };
 
 export async function authenticateCaller(
@@ -38,7 +27,7 @@ export async function authenticateCaller(
   const authentication = await cachedConfigLookup<CallerAuthentication>(key, async () => {
     const row = await env.DB.prepare(queries.authenticateCaller)
       .bind(tokenHash, pool)
-      .first<CallerRow>();
+      .first<Caller>();
     if (row === null) {
       throw new HttpError(401, "invalid_auth", "Invalid caller token");
     }
@@ -470,7 +459,7 @@ function parseOrgMembershipPage(
 
 export async function ensureFreshOrgMembership(
   env: Env,
-  caller: CallerRow,
+  caller: Caller,
   egress?: GitHubEgressEnv["githubEgress"],
 ): Promise<void> {
   // A timestamp alone must never authorize credentials with no enrolled account.
