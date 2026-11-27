@@ -1,4 +1,4 @@
-import { htmlElements, parseHTMLDocument, repositoryAppData } from "./github-html-document";
+import { parseHTMLElements, repositoryAppData } from "./github-html-document";
 import { isRecord } from "./object";
 import { decodeURIComponentSafe } from "./github-path";
 import { decodeHTML, htmlAttribute, textMatch } from "./github-html-utils";
@@ -12,9 +12,9 @@ export function parseWorkflowPageHTML(
   owner: string,
   repo: string,
 ): WorkflowPage | undefined {
-  const document = parseHTMLDocument(html);
-  if (document === undefined) return undefined;
-  const app = repositoryAppData(htmlElements(document));
+  const elements = parseHTMLElements(html);
+  if (elements === undefined) return undefined;
+  const app = repositoryAppData(elements);
   if (app.kind === "invalid") return undefined;
   if (app.kind === "absent") {
     const workflows = parseWorkflowListHTML(html, owner, repo);

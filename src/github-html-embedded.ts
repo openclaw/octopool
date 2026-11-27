@@ -1,4 +1,4 @@
-import { htmlElements, parseHTMLDocument, repositoryAppData } from "./github-html-document";
+import { parseHTMLElements, repositoryAppData } from "./github-html-document";
 import { base64ToBytesSafe } from "./encoding";
 import { plainHTML } from "./github-html-utils";
 import { isRecord } from "./object";
@@ -50,9 +50,9 @@ function issueFromHTML(
   repo: string,
   number: number,
 ): Record<string, unknown> | undefined {
-  const document = parseHTMLDocument(html);
-  if (document === undefined) return undefined;
-  const app = repositoryAppData(htmlElements(document));
+  const elements = parseHTMLElements(html);
+  if (elements === undefined) return undefined;
+  const app = repositoryAppData(elements);
   if (app.kind === "invalid") return undefined;
   if (app.kind === "absent") {
     const payload = recordValue(embeddedAppJSON(html)?.payload);
