@@ -57,7 +57,7 @@ import {
 import { rateFromHeaders, type GitHubRate } from "./github-rate";
 import { callAnonymousGitHubAPI, callGitHubWeb, hasNoQuotaGitHubWebRequest } from "./github-web";
 import { sanitizeGitHubResponse } from "./github-sanitize";
-import { PUBLIC_SHAPES, isLandingGraphQLRoute } from "./github-public-shapes";
+import { isLandingGraphQLRoute } from "./github-public-shapes";
 import { landingGraphQLCacheable } from "./github-landing";
 import { HttpError, requireJsonContentType } from "./http";
 import { jsonResponse } from "./http-response";
@@ -68,6 +68,7 @@ import {
   localFallbackError,
 } from "./local-fallback";
 import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy";
+import { proveRunAttemptCompleted } from "./run-attempt-proof";
 import { loadStringRewritePolicy } from "./string-rewrite-policy";
 import { readStringRewriteJSON } from "./string-rewrite-json";
 import { guardStringRewriteRead, STRING_REWRITE_LIMITS } from "./string-rewrites";
@@ -1186,7 +1187,18 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     throw createLocalFallbackError("pagination_exhausted");
   }
   if (completedCollection(result.github, "jobs")) {
-    state.route = await proveRunAttemptCompleted(state);
+    state.route = await proveRunAttemptCompleted(
+      {
+        env: state.env,
+        ctx: state.ctx,
+        request: state.request,
+        route: state.route,
+        policy: state.policy,
+        maxAgeSeconds: state.maxAgeSeconds,
+        anonymousRateLimited: state.anonymousRateLimited,
+      },
+      cachedResponseAvailable,
+    );
   }
   const cacheKey = state.cacheKey;
   if (cacheKey !== undefined) {
@@ -2135,115 +2147,6 @@ function rejectIncompleteRunJobs(state: ActiveRelay, response: GitHubRelayRespon
     recordCacheMiss(state, "unusable");
     throw createLocalFallbackError("pagination_exhausted");
   }
-}
-
-async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> {
-  if (state.route.kind !== "run_jobs" || state.route.run_attempt === undefined) {
-    return state.route;
-  }
-  const path = state.request.path.replace(/\/jobs$/, "");
-  const request: RelayRequest = {
-    pool: state.request.pool,
-    method: "GET",
-    path,
-    headers: {
-      "x-octopool-public-shape": PUBLIC_SHAPES.actionsSummary,
-      ...(state.request.headers?.["x-github-api-version"] === undefined
-        ? {}
-        : { "x-github-api-version": state.request.headers["x-github-api-version"] }),
-    },
-  };
-  const route: RouteInfo = {
-    ...state.route,
-    kind: "run_view",
-    routeKey: state.route.routeKey.replace(/\/jobs$/, ""),
-  };
-  if (await cachedRunAttemptCompleted(state, request)) {
-    return { ...state.route, run_attempt_completed: true };
-  }
-  try {
-    const response = await callGitHubWeb(state.env, request, route, {
-      skipAnonymousAPI: state.anonymousRateLimited,
-      ctx: state.ctx,
-    });
-    if (runAttemptCompleted(response, state.route.run_attempt, path)) {
-      return { ...state.route, run_attempt_completed: true };
-    }
-  } catch (error) {
-    rethrowStringRewriteDenial(error);
-    // The proof only enables a longer TTL; failure keeps the conservative default.
-  }
-  return state.route;
-}
-
-async function cachedRunAttemptCompleted(
-  state: ActiveRelay,
-  attemptRequest: RelayRequest,
-): Promise<boolean> {
-  if (state.maxAgeSeconds === 0 || hasConditionalRequestHeaders(state.request.headers))
-    return false;
-  try {
-    const headers = { ...attemptRequest.headers };
-    if (state.request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.actionsJobs) {
-      delete headers["x-octopool-public-shape"];
-    }
-    const views = [attemptRequest.path.replace(/\/attempts\/\d+$/, ""), attemptRequest.path].map(
-      (path) => {
-        const request = { ...attemptRequest, path, headers };
-        return { request, route: classifyRoute(request, state.policy) };
-      },
-    );
-    const probe = async (
-      read: (key: string) => Promise<CachedGitHubResponse | undefined>,
-      identity?: Identity,
-    ) => {
-      // Both run-view forms can prove completion, but only for the jobs' exact attempt.
-      for (const { request, route } of views) {
-        const key = await githubCacheKey(request.pool, request, route, identity);
-        const cached = await read(key);
-        if (
-          cached !== undefined &&
-          runAttemptCompleted(cached, state.route.run_attempt, attemptRequest.path) &&
-          (await cachedResponseAvailable(state.env, request.pool, route, cached, identity))
-        ) {
-          return true;
-        }
-      }
-      return false;
-    };
-    if (await probe((key) => readGitHubCache(state.env, key, state.ctx, state.maxAgeSeconds)))
-      return true;
-    const identities = await loadIdentities(state.env, state.request.pool, state.route);
-    const keys = await Promise.all(
-      identities.flatMap((identity) =>
-        views.map(({ request, route }) => githubCacheKey(request.pool, request, route, identity)),
-      ),
-    );
-    const read = createGitHubCacheCandidateReader(state.env, keys, state.ctx, state.maxAgeSeconds);
-    for (const identity of identities) {
-      if (await probe(read, identity)) return true;
-    }
-  } catch (error) {
-    rethrowStringRewriteDenial(error);
-    // Cache/proof lookup failure still permits the existing live metadata check.
-  }
-  return false;
-}
-
-function runAttemptCompleted(
-  response: GitHubRelayResponse | undefined,
-  attempt: number | undefined,
-  path: string,
-): boolean {
-  return (
-    response !== undefined &&
-    response.status >= 200 &&
-    response.status < 300 &&
-    isRecord(response.body) &&
-    response.body.status === "completed" &&
-    response.body.run_attempt === attempt &&
-    String(response.body.id) === /\/runs\/([0-9]+)\//.exec(path)?.[1]
-  );
 }
 
 async function switchToExactRunList(state: ActiveRelay): Promise<void> {
