@@ -8,15 +8,15 @@ const entries = [];
 for (const file of (await readdir(queriesDir)).sort()) {
   if (!file.endsWith(".sql")) continue;
   const body = await readFile(path.join(queriesDir, file), "utf8");
-  const blocks = body.split(/(?=^-- name:\s+)/m).filter((block) => block.trim() !== "");
+  const blocks = splitQueryBlocks(body).filter((block) => block.trim() !== "");
   for (const block of blocks) {
-    const match = /^-- name:\s+([A-Za-z0-9_]+)\s+:\w+/m.exec(block);
+    const match = /^-- name:\s+([A-Za-z0-9_]+)\s+:\w+/.exec(block);
     if (match === null) {
       throw new Error(`${file}: SQL block is missing a sqlc name annotation`);
     }
     const name = lowerFirst(match[1]);
     const sql = block
-      .replace(/^-- name:.*\n/, "")
+      .replace(/^-- name:.*\r?\n/, "")
       .trim()
       .replace(/;$/, "")
       .trim();
@@ -47,4 +47,18 @@ await writeFile(outFile, lines.join("\n"));
 
 function lowerFirst(value) {
   return value.slice(0, 1).toLowerCase() + value.slice(1);
+}
+
+function splitQueryBlocks(body) {
+  const starts = [0];
+  // Consume SQL quotes and comments before recognizing annotation line boundaries.
+  const tokens =
+    /'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[[^\]]*\]|\/\*[\s\S]*?\*\/|--[^\r\n]*/g;
+  for (const match of body.matchAll(tokens)) {
+    const index = match.index;
+    if (index > 0 && body[index - 1] === "\n" && /^-- name:\s+/.test(match[0])) {
+      starts.push(index);
+    }
+  }
+  return starts.map((start, index) => body.slice(start, starts[index + 1]));
 }
