@@ -8,18 +8,13 @@ import {
   compileStringRewriteRules,
   hasExactKeys,
   invalidStringRewritePolicy,
+  stringRewritePolicyUnavailable,
   STRING_REWRITE_LIMITS,
   utf8Size,
   type CompiledStringRewriteRule,
   type StringRewriteRule,
+  type StringRewritePolicy,
 } from "./string-rewrites";
-
-export type StringRewritePolicy = {
-  schema_version: 1;
-  revision: number;
-  updated_at: string;
-  rules: StringRewriteRule[];
-};
 
 export const POLICY_SNAPSHOT_MAX_AGE_MS = 60_000;
 
@@ -28,20 +23,6 @@ type Snapshot = {
   compiled: CompiledStringRewriteRule[];
   loadedAt: number;
 };
-
-export function stringRewritePolicyUnavailable(): HttpError {
-  return new HttpError(
-    503,
-    "string_rewrite_policy_unavailable",
-    "String protection policy unavailable",
-  );
-}
-
-export function policyCoordinatorStub(env: Env): DurableObjectStub<PolicyCoordinator> {
-  // This name is an authority boundary: every pool, reader and writer uses it.
-  const id = env.POLICY_COORDINATOR.idFromName("string-rewrite-policy");
-  return env.POLICY_COORDINATOR.get(id, { locationHint: "wnam" });
-}
 
 export class PolicyCoordinator extends DurableObject<Env> {
   private snapshot: Snapshot | undefined;

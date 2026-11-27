@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
-import { policyCoordinatorStub } from "../../src/policy-coordinator";
+import { policyCoordinatorStub } from "../../src/string-rewrite-policy";
 import { observePolicyD1 } from "./policy-d1-observer";
 import { describe, expect, it, vi } from "vitest";
 import {

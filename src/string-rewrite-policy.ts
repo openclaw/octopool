@@ -1,11 +1,12 @@
 import { relayPhase } from "./relay-timing";
 import { HttpError } from "./http";
+import type { PolicyCoordinator } from "./policy-coordinator";
 import {
-  policyCoordinatorStub,
+  compileStringRewriteRules,
+  invalidStringRewritePolicy,
   stringRewritePolicyUnavailable,
   type StringRewritePolicy,
-} from "./policy-coordinator";
-import { compileStringRewriteRules, invalidStringRewritePolicy } from "./string-rewrites";
+} from "./string-rewrites";
 
 export async function loadStringRewritePolicy(env: Env) {
   using _phase = relayPhase("rewrite_policy");
@@ -51,4 +52,10 @@ async function policyRequest(request: Request, env: Env): Promise<Response> {
       );
   }
   throw stringRewritePolicyUnavailable();
+}
+
+export function policyCoordinatorStub(env: Env): DurableObjectStub<PolicyCoordinator> {
+  // This name is an authority boundary: every pool, reader and writer uses it.
+  const id = env.POLICY_COORDINATOR.idFromName("string-rewrite-policy");
+  return env.POLICY_COORDINATOR.get(id, { locationHint: "wnam" });
 }

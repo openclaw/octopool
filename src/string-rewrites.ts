@@ -15,10 +15,25 @@ export const STRING_REWRITE_LIMITS = {
 
 export type StringRewriteRule = { pattern: string; replacement: string };
 export type CompiledStringRewriteRule = StringRewriteRule & { regex: RE2JS };
+export type StringRewritePolicy = {
+  schema_version: 1;
+  revision: number;
+  updated_at: string;
+  rules: StringRewriteRule[];
+};
+
 const encoder = new TextEncoder();
 
 export function invalidStringRewritePolicy(): HttpError {
   return new HttpError(400, "invalid_string_rewrite_policy", "Invalid string rewrite policy");
+}
+
+export function stringRewritePolicyUnavailable(): HttpError {
+  return new HttpError(
+    503,
+    "string_rewrite_policy_unavailable",
+    "String protection policy unavailable",
+  );
 }
 
 function denied(): HttpError {

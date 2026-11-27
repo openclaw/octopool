@@ -1,7 +1,7 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
-import { policyCoordinatorStub } from "../../src/policy-coordinator";
+import { policyCoordinatorStub } from "../../src/string-rewrite-policy";
 import { describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readEdgeGitHubCache } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
