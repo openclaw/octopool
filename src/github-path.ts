@@ -31,10 +31,10 @@ export function scalarQuery(
 
 export function validScalarQuery(
   query: Record<string, string | string[]> | undefined,
-  allowed: ReadonlySet<string>,
+  allowed: readonly string[],
 ): boolean {
   return !Object.entries(query ?? {}).some(
-    ([key, value]) => !allowed.has(key) || Array.isArray(value) || value === "",
+    ([key, value]) => !allowed.includes(key) || Array.isArray(value) || value === "",
   );
 }
 
@@ -86,7 +86,7 @@ export function safeRelativePath(value: string, maxLength: number): boolean {
 
 export function simplePageQuery(
   query: Record<string, string | string[]> | undefined,
-  allowed = new Set(["per_page", "page"]),
+  allowed: readonly string[] = ["per_page", "page"],
 ): { perPage: number } | undefined {
   if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
     return undefined;

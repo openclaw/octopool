@@ -39,7 +39,7 @@ export function rawRunJobsSupersetView(
   }
   const query = request.query ?? {};
   if (
-    !validScalarQuery(query, new Set(["filter", "page", "per_page"])) ||
+    !validScalarQuery(query, ["filter", "page", "per_page"]) ||
     !firstPageQuery(query) ||
     (query.filter !== undefined && query.filter !== "latest")
   ) {
@@ -71,7 +71,7 @@ export function rawRunJobsAttemptLookup(request: RelayRequest, route: RouteInfo)
       request.path,
     );
   if (
-    !validScalarQuery(query, new Set(["filter", "page", "per_page"])) ||
+    !validScalarQuery(query, ["filter", "page", "per_page"]) ||
     (query.filter !== undefined && query.filter !== "latest") ||
     typeof page !== "string" ||
     !/^[1-9][0-9]*$/.test(page) ||
@@ -223,7 +223,7 @@ export function runJobsSupersetView(
     return undefined;
   }
   const query = request.query ?? {};
-  const allowed = new Set(["filter", "page", "per_page"]);
+  const allowed = ["filter", "page", "per_page"];
   if (
     !validScalarQuery(query, allowed) ||
     !firstPageQuery(query) ||
