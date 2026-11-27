@@ -5,7 +5,7 @@ import { backendWorkSignal, backendAdmissionStub } from "../../src/backend-work"
 import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
 import { writeEdgeJSON } from "../../src/edge-cache";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";
 import { sqliteTimestamp } from "../../src/sqlite-time";
 import { bearer, jsonResponse, POOL, rateHeaders, relay, seedPool } from "./harness";

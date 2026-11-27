@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { expect } from "vitest";
-import { poolCoordinatorStub, publicProofCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub, publicProofCoordinatorStub } from "../../src/pool-coordinator-client";
 import { clearConfigCache } from "../../src/config-cache";
 import worker from "../../src/index";
 import type { RelayRequest } from "../../src/types";

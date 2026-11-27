@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../../src/index";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import type { RecordResult } from "../../src/types";
 import {
   bearer,

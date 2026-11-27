@@ -7,7 +7,7 @@ import { GITHUB_EDGE_CACHE_NAMESPACE, readEdgeGitHubCache } from "../../src/cach
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { queries } from "../../src/generated/sql";
 import worker from "../../src/index";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import {
   CALLER_TOKEN,
   POOL,

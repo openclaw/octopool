@@ -8,7 +8,7 @@ import {
   type CacheTotalsRow,
   type UsageAggregateRow,
 } from "./metrics";
-import { poolCoordinatorStub } from "./pool-coordinator";
+import { poolCoordinatorStub } from "./pool-coordinator-client";
 import { requireDashboardAdmin } from "./web-session";
 
 type IdentityRow = {

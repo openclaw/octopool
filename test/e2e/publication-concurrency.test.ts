@@ -3,11 +3,8 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { PUBLICATION_LEASE_MS, type PublicationOwner } from "../../src/cache-publication";
 import { queries } from "../../src/generated/sql";
-import {
-  poolCoordinatorStub,
-  publicProofCoordinatorStub,
-  type PoolCoordinator,
-} from "../../src/pool-coordinator";
+import type { PoolCoordinator } from "../../src/pool-coordinator";
+import { poolCoordinatorStub, publicProofCoordinatorStub } from "../../src/pool-coordinator-client";
 import { ownedWork } from "./owned-work";
 import { observePublicationD1 } from "./publication-d1-observer";
 

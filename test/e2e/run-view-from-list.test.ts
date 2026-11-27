@@ -8,7 +8,7 @@ import type { CacheFillOutcome } from "../../src/cache-fill";
 import type { PublicationOwner } from "../../src/cache-publication";
 import { GITHUB_EDGE_CACHE_NAMESPACE, writeGitHubCache } from "../../src/cache";
 import { bodyPublicationResource } from "../../src/cache-publication";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import { deleteEdgeJSON } from "../../src/edge-cache";

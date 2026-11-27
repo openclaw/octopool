@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../../src/cache";
 import { acquireOwnedCacheFill } from "../../src/cache-fill";
 import { bodyPublicationResource } from "../../src/cache-publication";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute, validateRelayRequest } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";

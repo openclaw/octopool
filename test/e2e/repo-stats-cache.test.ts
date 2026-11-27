@@ -10,7 +10,7 @@ import {
 import { CACHE_PUBLICATION_EPOCH, bodyPublicationResource } from "../../src/cache-publication";
 import { loadIdentities } from "../../src/db";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "../../src/edge-cache";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";

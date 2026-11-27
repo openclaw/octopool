@@ -7,7 +7,7 @@ import { clearConfigCache } from "../../src/config-cache";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
 import { deleteEdgeJSON } from "../../src/edge-cache";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import { terminalLogCacheKey } from "../../src/terminal-log-cache";

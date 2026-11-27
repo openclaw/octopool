@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { queries } from "../../src/generated/sql";
 import { HttpError } from "../../src/http";
 import worker from "../../src/index";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import {
   CALLER_TOKEN,
   POOL,

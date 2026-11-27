@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bearer, jsonResponse, rateHeaders, relay, seedPool } from "./harness";
 import { loadIdentities } from "../../src/db";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { historicalHead, runPage } from "../fixtures/actions-ownership";
 import { GITHUB_EDGE_CACHE_NAMESPACE, githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";

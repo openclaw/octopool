@@ -8,7 +8,7 @@ import { ensurePool, loadPoolPolicy } from "../../src/db";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import { malformedStoredPolicies, restrictivePolicy } from "../fixtures/stored-policy";
 import {

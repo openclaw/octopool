@@ -4,7 +4,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { PoolCoordinator } from "../../src/index";
 import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import type { CoordinatorSnapshot } from "../../src/types";
 import {
   bearer,
