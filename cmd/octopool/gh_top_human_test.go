@@ -74,6 +74,105 @@ func TestHumanPRViewExactOutputAndLatestReviewWins(t *testing.T) {
 	}
 }
 
+func TestHumanPRViewReviewerSummary(t *testing.T) {
+	review := func(login, state string) map[string]any {
+		return map[string]any{"user": map[string]any{"login": login}, "state": state}
+	}
+	for _, tt := range []struct {
+		name      string
+		reviews   []map[string]any
+		requested []map[string]any
+		teams     []map[string]any
+		want      string
+	}{
+		{name: "empty"},
+		{
+			name: "completed states and name ordering",
+			reviews: []map[string]any{
+				review("zeta", "CHANGES_REQUESTED"), review("alpha", "DISMISSED"),
+				review("Beta", "COMMENTED"), review("gamma", "APPROVED"),
+			},
+			want: "Beta (Commented), alpha (Commented), gamma (Approved), zeta (Changes requested)",
+		},
+		{
+			name:    "latest pending hides previous approval",
+			reviews: []map[string]any{review("alpha", "APPROVED"), review("alpha", "PENDING")},
+		},
+		{
+			name:    "latest approval replaces pending",
+			reviews: []map[string]any{review("alpha", "PENDING"), review("alpha", "APPROVED")},
+			want:    "alpha (Approved)",
+		},
+		{
+			name: "requests override reviews and follow completed",
+			reviews: []map[string]any{
+				review("aardvark", "APPROVED"), review("aardvark", "PENDING"),
+				review("zeta", "APPROVED"), review("Beta", "COMMENTED"), review("author", "APPROVED"),
+			},
+			requested: []map[string]any{{"login": "aardvark"}, {"login": "Zoo"}},
+			want:      "Beta (Commented), zeta (Approved), Zoo (Requested), aardvark (Requested)",
+		},
+		{
+			name:      "same name user and team stay distinct",
+			reviews:   []map[string]any{review("reviewers", "APPROVED")},
+			requested: []map[string]any{{"login": "reviewers"}},
+			teams:     []map[string]any{{"slug": "reviewers", "organization": map[string]any{"login": "acme"}}},
+			want:      "acme/reviewers (Requested), reviewers (Requested)",
+		},
+		{
+			name:  "team without organization retains fallback",
+			teams: []map[string]any{{"slug": "team"}, {"name": "fallback"}},
+			want:  "fallback (Requested), team (Requested)",
+		},
+		{
+			name:    "author exclusion and terminal sanitization",
+			reviews: []map[string]any{review("author", "COMMENTED"), review("alice\x1b[31m", "APPROVED")},
+			teams:   []map[string]any{{"slug": "team\nname", "organization": map[string]any{"login": "acme"}}},
+			want:    "alice[31m (Approved), acme/teamname (Requested)",
+		},
+		{
+			name:    "unknown state retains existing fallback",
+			reviews: []map[string]any{review("alpha", "FUTURE_STATE"), review("beta", "")},
+			want:    "alpha (Future State), beta",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setHumanTestSeams(t, time.Time{})
+			var paths []string
+			relayTestServer(t, func(body map[string]any) any {
+				path, _ := body["path"].(string)
+				paths = append(paths, path)
+				switch path {
+				case "/repos/acme/repo/pulls/7":
+					return map[string]any{
+						"number": 7, "title": "Reviewer fixture", "state": "open", "body": "Body",
+						"user": map[string]any{"login": "author"}, "html_url": "https://github.com/acme/repo/pull/7",
+						"additions": 0, "deletions": 0, "requested_reviewers": tt.requested, "requested_teams": tt.teams,
+					}
+				case "/repos/acme/repo/pulls/7/reviews":
+					return tt.reviews
+				default:
+					t.Errorf("unexpected relay path %q", path)
+					return nil
+				}
+			})
+			var out, stderr bytes.Buffer
+			if err := runGH(t.Context(), []string{"pr", "view", "7", "-R", "acme/repo"}, &out, &stderr); err != nil {
+				t.Fatalf("runGH: %v, stderr=%q", err, stderr.String())
+			}
+			want := "title:\tReviewer fixture\nstate:\tOPEN\nauthor:\tauthor\nlabels:\t\nassignees:\t\n" +
+				"reviewers:\t" + tt.want + "\nprojects:\t\nmilestone:\t\nnumber:\t7\n" +
+				"url:\thttps://github.com/acme/repo/pull/7\nadditions:\t0\ndeletions:\t0\nauto-merge:\tdisabled\n--\nBody\n"
+			if out.String() != want || stderr.Len() != 0 {
+				t.Fatalf("output=%q stderr=%q, want=%q", out.String(), stderr.String(), want)
+			}
+			if got := strings.Join(paths, ","); got != "/repos/acme/repo/pulls/7,/repos/acme/repo/pulls/7/reviews" {
+				t.Fatalf("requests=%q", got)
+			}
+		})
+	}
+}
+
 func TestHumanPRListExactOutput(t *testing.T) {
 	setHumanTestSeams(t, time.Time{})
 	relayTestServer(t, func(body map[string]any) any {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Match native gh reviewer summaries in human PR views: show the latest review state, sort completed reviews before requests, and keep team and user names distinct.
+
 - Preserve SQL literals and comments containing query annotation text when generating Worker queries.
 
 - Restore token-free issue summaries for GitHub’s current embedded page data while preserving Markdown bodies, author identities, and complete labels.

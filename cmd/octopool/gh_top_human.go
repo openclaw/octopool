@@ -365,20 +365,7 @@ func joinedObjectStrings(raw any, key string) string {
 }
 
 func latestReviewers(pr map[string]any, reviews []any) string {
-	type review struct {
-		login string
-		state string
-	}
-	ordered := []review{}
-	positions := map[string]int{}
-	upsert := func(login string, state string) {
-		if index, ok := positions[login]; ok {
-			ordered[index].state = state
-			return
-		}
-		positions[login] = len(ordered)
-		ordered = append(ordered, review{login: login, state: state})
-	}
+	states := map[string]string{}
 	author := nestedStringValue(pr, "user", "login")
 	for _, raw := range reviews {
 		item, ok := raw.(map[string]any)
@@ -386,12 +373,11 @@ func latestReviewers(pr map[string]any, reviews []any) string {
 			continue
 		}
 		login := watchSafeText(nestedStringValue(item, "user", "login"))
-		// real gh omits the author's own comment reviews and unsubmitted
-		// PENDING drafts from the reviewer summary.
-		if login == "" || login == author || strings.EqualFold(firstString(item, "state"), "PENDING") {
+		// The author's own reviews do not belong in the reviewer summary.
+		if login == "" || login == author {
 			continue
 		}
-		upsert(login, reviewStateTitle(firstString(item, "state")))
+		states[login] = firstString(item, "state")
 	}
 	// Outstanding requests (including re-requests) override any prior
 	// submitted state, matching real gh's reviewer summary.
@@ -402,7 +388,7 @@ func latestReviewers(pr map[string]any, reviews []any) string {
 				continue
 			}
 			if login := watchSafeText(firstString(item, "login")); login != "" {
-				upsert(login, "Requested")
+				states[login] = "REQUESTED"
 			}
 		}
 	}
@@ -413,22 +399,47 @@ func latestReviewers(pr map[string]any, reviews []any) string {
 				continue
 			}
 			if slug := watchSafeText(firstString(item, "slug", "name")); slug != "" {
-				upsert(slug, "Requested")
+				if org := watchSafeText(nestedStringValue(item, "organization", "login")); org != "" {
+					slug = org + "/" + slug
+				}
+				states[slug] = "REQUESTED"
 			}
 		}
 	}
-	values := make([]string, 0, len(ordered))
-	for _, item := range ordered {
-		if item.state == "" {
-			values = append(values, item.login)
+	// Only the final state matters: a later pending draft replaces an earlier
+	// submitted review, while a new request overrides both.
+	names := make([]string, 0, len(states))
+	for name, state := range states {
+		if !strings.EqualFold(state, "PENDING") {
+			names = append(names, name)
+		}
+	}
+	sort.Slice(names, func(i, j int) bool {
+		iRequested, jRequested := states[names[i]] == "REQUESTED", states[names[j]] == "REQUESTED"
+		if iRequested != jRequested {
+			return !iRequested
+		}
+		return names[i] < names[j]
+	})
+	values := make([]string, 0, len(names))
+	for _, name := range names {
+		state := reviewStateTitle(states[name])
+		if state == "" {
+			values = append(values, name)
 		} else {
-			values = append(values, fmt.Sprintf("%s (%s)", item.login, item.state))
+			values = append(values, fmt.Sprintf("%s (%s)", name, state))
 		}
 	}
 	return strings.Join(values, ", ")
 }
 
 func reviewStateTitle(raw string) string {
+	switch strings.ToUpper(raw) {
+	case "CHANGES_REQUESTED":
+		return "Changes requested"
+	case "DISMISSED":
+		return "Commented"
+	}
 	parts := strings.Split(strings.ToLower(watchSafeText(raw)), "_")
 	for index, part := range parts {
 		if part != "" {
