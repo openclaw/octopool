@@ -10,7 +10,7 @@ import { queries } from "../../src/generated/sql";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { sqliteTimestamp } from "../../src/sqlite-time";
 import { terminalLogCacheKey, terminalLogCacheProof } from "../../src/terminal-log-cache";
 import type { RelayRequest } from "../../src/types";

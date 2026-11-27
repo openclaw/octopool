@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { queries } from "../../src/generated/sql";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import type { SelectionRequest } from "../../src/types";

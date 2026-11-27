@@ -4,7 +4,7 @@ import {
   proofPublicationResource,
   type PublicationOwner,
 } from "./cache-publication";
-import { publicProofCoordinatorStub } from "./pool-coordinator";
+import { publicProofCoordinatorStub } from "./pool-coordinator-client";
 import { envSecret } from "./config";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { acquireOwnedCacheFill, startOwnedCacheFill, type CacheFillOutcome } from "./cache-fill";

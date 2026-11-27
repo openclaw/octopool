@@ -1,8 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { anonymousGitHubResponseProvesPublicRepo } from "../src/public-repos";
 import type { RouteInfo } from "../src/types";
-
-vi.mock("../src/pool-coordinator", () => ({ publicProofCoordinatorStub: vi.fn() }));
 
 // Persistence and guard protocols run against native D1/DO in public-proof-publication.test.ts.
 describe("anonymous proof eligibility", () => {

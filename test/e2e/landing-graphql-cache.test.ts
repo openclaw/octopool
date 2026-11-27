@@ -6,7 +6,7 @@ import { loadIdentities } from "../../src/db";
 import { classifyRoute, validateRelayRequest } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { bearer, jsonResponse, POOL, rateHeaders, relay, seedPool } from "./harness";
 
 const path = "/repos/openclaw/octopool/pulls/42";

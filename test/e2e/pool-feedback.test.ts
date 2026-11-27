@@ -3,7 +3,7 @@ import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { queries } from "../../src/generated/sql";
 import { rateFromHeaders } from "../../src/github-rate";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import type { RecordResult } from "../../src/types";
 
 const NOW = 1_800_000_000_000;

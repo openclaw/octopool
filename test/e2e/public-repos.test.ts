@@ -8,7 +8,7 @@ import {
   PUBLIC_PROOF_EDGE_NAMESPACE,
   storePublicRepoProof,
 } from "../../src/public-repos";
-import { publicProofCoordinatorStub } from "../../src/pool-coordinator";
+import { publicProofCoordinatorStub } from "../../src/pool-coordinator-client";
 import { proofPublicationResource } from "../../src/cache-publication";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";

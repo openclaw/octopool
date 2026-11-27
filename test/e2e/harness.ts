@@ -5,7 +5,7 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { expect, vi } from "vitest";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import worker from "../../src/index";
 import { hashToken } from "../../src/encoding";
 import { clearConfigCache } from "../../src/config-cache";

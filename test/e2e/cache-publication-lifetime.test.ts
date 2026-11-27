@@ -14,7 +14,7 @@ import {
   readGitHubCache,
   readStaleGitHubCache,
 } from "../../src/cache";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import { queries } from "../../src/generated/sql";

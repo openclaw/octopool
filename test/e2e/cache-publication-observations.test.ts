@@ -5,7 +5,7 @@ import {
   proofPublicationResource,
   type PublicationOwner,
 } from "../../src/cache-publication";
-import { publicProofCoordinatorStub } from "../../src/pool-coordinator";
+import { publicProofCoordinatorStub } from "../../src/pool-coordinator-client";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { PUBLIC_PROOF_EDGE_NAMESPACE } from "../../src/public-repos";

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { githubToken } from "../../src/github-auth";
 import { withGitHubEgress } from "../../src/github-egress";
 import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";

@@ -3,7 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import { withGitHubEgress } from "../../src/github-egress";
 import { CACHE_PUBLICATION_EPOCH, proofPublicationResource } from "../../src/cache-publication";
-import { publicProofCoordinatorStub, poolCoordinatorStub } from "../../src/pool-coordinator";
+import { publicProofCoordinatorStub, poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import {
   ensurePublicGitHubRepo,
   observeAnonymousPublicRepo,

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadIdentities } from "../../src/db";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { bearer, githubUpstream, jsonResponse, POOL, relay, seedPool } from "./harness";
 import { issueEventCases } from "../fixtures/issue-event-visibility";
 import { releaseMarkdown } from "../fixtures/release-summary";

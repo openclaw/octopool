@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import type { CredentialFailureReason } from "../../src/identity-credential-error";
 import { HttpError } from "../../src/http";
 import { bearer, githubUpstream, jsonResponse, POOL, seedPool } from "./harness";

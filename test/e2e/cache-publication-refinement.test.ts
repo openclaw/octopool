@@ -8,7 +8,7 @@ import {
 } from "../../src/cache-publication";
 import { withGitHubEgress } from "../../src/github-egress";
 import { queries } from "../../src/generated/sql";
-import { publicProofCoordinatorStub } from "../../src/pool-coordinator";
+import { publicProofCoordinatorStub } from "../../src/pool-coordinator-client";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import { ensurePublicGitHubRepo, storePublicRepoProof } from "../../src/public-repos";

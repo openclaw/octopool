@@ -12,7 +12,7 @@ import {
   seedPool,
   waitForPublicationFollower,
 } from "./harness";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { githubCacheKey } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
 import { classifyRoute } from "../../src/policy";

@@ -70,7 +70,8 @@ import { classifyRoute, normalizeRouteKey, validateRelayRequest } from "./policy
 import { loadStringRewritePolicy } from "./string-rewrite-policy";
 import { readStringRewriteJSON } from "./string-rewrite-json";
 import { guardStringRewriteRead, STRING_REWRITE_LIMITS } from "./string-rewrites";
-import { poolCoordinatorStub, type PoolCoordinator } from "./pool-coordinator";
+import type { PoolCoordinator } from "./pool-coordinator";
+import { poolCoordinatorStub } from "./pool-coordinator-client";
 import { verifyPRStateHint, verifyPRStateHintLive } from "./pr-state";
 import {
   anonymousGitHubResponseProvesPublicRepo,

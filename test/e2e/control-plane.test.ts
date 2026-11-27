@@ -4,7 +4,7 @@ import { beforeClientNameUpgrade, applyClientNameUpgrade } from "./client-name-u
 import { hashToken } from "../../src/encoding";
 import { captureD1Baseline } from "./d1-baseline";
 import { insertAudit } from "../../src/db";
-import { poolCoordinatorStub } from "../../src/pool-coordinator";
+import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
 import { poolHealth } from "../../src/health";
 import {
   concurrentEnrollments,
