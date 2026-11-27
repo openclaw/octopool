@@ -1,4 +1,3 @@
-import { pruneExpiredPublicationOwners } from "./cache-publication";
 import { queries } from "./generated/sql";
 
 const BATCH_SIZE = 500;
@@ -13,7 +12,12 @@ export async function runScheduledMaintenance(env: Env): Promise<void> {
       failures.push(error);
     }
   };
-  await prune("cache_publication_owners", () => pruneExpiredPublicationOwners(env, BATCH_SIZE));
+  await prune("cache_publication_owners", async () => {
+    const result = await env.DB.prepare(queries.deleteExpiredPublicationOwners)
+      .bind(BATCH_SIZE)
+      .all();
+    return result.results.length;
+  });
   for (const [table, query] of [
     ["github_public_repo_proofs", queries.deleteExpiredPublicRepoProofs],
     ["github_cache_entries", queries.deleteExpiredGitHubCacheBatch],

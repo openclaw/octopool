@@ -5,7 +5,6 @@ import {
   CACHE_PUBLICATION_EPOCH,
   bodyPublicationResource,
   publicationBinding,
-  tryPublicationOwner,
   type PublicationOwner,
 } from "../../src/cache-publication";
 import {
@@ -15,6 +14,7 @@ import {
   readStaleGitHubCache,
 } from "../../src/cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator-client";
+import { tryPublicationOwner } from "../../src/pool-coordinator";
 import { classifyRoute } from "../../src/policy";
 import { defaultPolicy } from "../../src/config";
 import { queries } from "../../src/generated/sql";
