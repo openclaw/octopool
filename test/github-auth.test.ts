@@ -6,6 +6,8 @@ import {
   verifyGitHubOrgMemberWithToken,
 } from "../src/auth";
 import { githubToken } from "../src/github-auth";
+import { HttpError } from "../src/http";
+import { IdentityCredentialError } from "../src/identity-credential-error";
 import { withGitHubEgress } from "../src/github-egress";
 import type { Identity } from "../src/types";
 
@@ -24,9 +26,10 @@ describe("GitHub identity credentials", () => {
   });
 
   it("rejects missing identity secrets", async () => {
-    await expect(
-      githubToken(withGitHubEgress({} as Env, []), identity("pat")),
-    ).rejects.toMatchObject({
+    const result = githubToken(withGitHubEgress({} as Env, []), identity("pat"));
+    await expect(result).rejects.toBeInstanceOf(IdentityCredentialError);
+    await expect(result).rejects.toBeInstanceOf(HttpError);
+    await expect(result).rejects.toMatchObject({
       status: 503,
       code: "identity_secret_missing",
     });
