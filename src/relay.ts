@@ -1,8 +1,8 @@
 import { bodyPublicationResource, type PublicationOwner } from "./cache-publication";
 import { authenticateCaller } from "./auth";
-import { backendAdmissionStub } from "./backend-admission";
 import {
   BackendWork,
+  backendAdmissionStub,
   admitBackendWork,
   assertBackendWorkActive,
   cancelBackendWork,

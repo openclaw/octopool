@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { BackendAdmission } from "./backend-admission";
 import { relayPhase, withRelayTiming } from "./relay-timing";
 import { HttpError, parsePositiveInt } from "./http";
 import { createLocalFallbackError } from "./local-fallback";
@@ -7,6 +8,12 @@ import type { Admission } from "./backend-admission-contract";
 
 export const BACKEND_RENEW_MS = 10_000;
 const BACKEND_RELEASE_WAIT_MS = 1_000;
+
+export function backendAdmissionStub(env: Env, pool: string): DurableObjectStub<BackendAdmission> {
+  return env.BACKEND_ADMISSION.get(env.BACKEND_ADMISSION.idFromName(`pool:${pool}`), {
+    locationHint: "wnam",
+  });
+}
 
 // Pending work belongs only to this relay invocation, never another request.
 const scope = new AsyncLocalStorage<Pick<BackendWork, "signal" | "enter" | "check" | "cancel">>();

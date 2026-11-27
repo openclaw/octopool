@@ -1,8 +1,7 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi, type MockInstance } from "vitest";
-import { backendWorkSignal } from "../../src/backend-work";
-import { backendAdmissionStub } from "../../src/backend-admission";
+import { backendWorkSignal, backendAdmissionStub } from "../../src/backend-work";
 import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
 import { writeEdgeJSON } from "../../src/edge-cache";
