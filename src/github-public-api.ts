@@ -14,11 +14,8 @@ export function publicAPIRequest(
   const release = releaseRoute(route);
   if (
     !defaultGitHubJSONAccept(request.headers?.accept) ||
-    (release
-      ? scalarQuery(request.query, "ref") !== undefined
-      : request.method !== "GET" ||
-        isLandingGraphQLRoute(route) ||
-        !capabilitiesForRouteKind(route.kind).publicApi)
+    !supportsAnonymousGitHubAPI(request, route) ||
+    (release && scalarQuery(request.query, "ref") !== undefined)
   ) {
     return undefined;
   }
