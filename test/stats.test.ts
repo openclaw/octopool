@@ -226,7 +226,7 @@ type StatsStatement = { query: string; values: unknown[] };
 function statsEnv(
   bindings: unknown[][],
   rowsFor: (query: string, values: unknown[]) => Record<string, unknown>[] = () => [],
-): Env {
+): Pick<Env, "DB"> {
   const prepare = vi.fn((query: string) => ({
     bind: (...values: unknown[]): StatsStatement => ({ query, values }),
   }));
@@ -236,7 +236,7 @@ function statsEnv(
       return { results: rowsFor(query, values) };
     }),
   );
-  return { DB: { prepare, batch } } as unknown as Env;
+  return { DB: { prepare, batch } as unknown as D1Database };
 }
 
 function clientScopedBindings(bindings: unknown[][]): unknown[][] {

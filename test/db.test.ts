@@ -16,7 +16,10 @@ describe("stored pool policy loading", () => {
     const bind = vi.fn(() => ({ first }));
     const prepare = vi.fn(() => ({ bind }));
     return {
-      env: { ...env(prepare), DEFAULT_ALLOWED_OWNERS: "openclaw" } satisfies Env,
+      env: { ...env(prepare), DEFAULT_ALLOWED_OWNERS: "openclaw" } satisfies Pick<
+        Env,
+        "DB" | "DEFAULT_ALLOWED_OWNERS"
+      >,
       first,
       set: (next: string) => {
         raw = next;
@@ -139,8 +142,8 @@ describe("identity loading", () => {
   });
 });
 
-function env(prepare: ReturnType<typeof vi.fn>): Env {
+function env(prepare: ReturnType<typeof vi.fn>): Pick<Env, "DB"> {
   return {
-    DB: { prepare },
-  } as unknown as Env;
+    DB: { prepare } as unknown as D1Database,
+  };
 }

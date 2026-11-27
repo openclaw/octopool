@@ -62,7 +62,7 @@ export function parseStatsWindow(raw: string | null): StatsWindow {
 }
 
 export async function poolStats(
-  env: Env,
+  env: Pick<Env, "DB">,
   pool: string,
   caller: Caller,
   window: StatsWindow,
