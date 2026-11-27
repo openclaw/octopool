@@ -376,7 +376,10 @@ function completedResponse(response?: GitHubRelayResponse): boolean {
   return isRecord(response?.body) && response.body.status === "completed";
 }
 
-function completedCollection(response: GitHubRelayResponse | undefined, key: string): boolean {
+export function completedCollection(
+  response: GitHubRelayResponse | undefined,
+  key: string,
+): boolean {
   if (!isRecord(response?.body) || !Array.isArray(response.body[key])) {
     return false;
   }
