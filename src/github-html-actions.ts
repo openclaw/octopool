@@ -1,5 +1,5 @@
 import {
-  parseHTMLDocument as actionsDocument,
+  parseHTMLElements,
   htmlElements as actionsElements,
   htmlText as actionsText,
   elementAttribute as attribute,
@@ -33,9 +33,8 @@ export function parseActionsRunListHTML(
   owner: string,
   repo: string,
 ): { total_count: number; capped: boolean; workflow_runs: Record<string, unknown>[] } | undefined {
-  const document = actionsDocument(html);
-  if (document === undefined) return undefined;
-  const elements = actionsElements(document);
+  const elements = parseHTMLElements(html);
+  if (elements === undefined) return undefined;
   const app = repositoryAppData(elements);
   if (app.kind === "invalid") return undefined;
   if (app.kind === "present") return reactActionsRunList(app.path, app.payload, owner, repo);
@@ -275,9 +274,8 @@ export function parseActionsRunHTML(
   id: number,
   attempt?: number,
 ): Record<string, unknown> | undefined {
-  const document = actionsDocument(html);
-  if (document === undefined) return undefined;
-  const elements = actionsElements(document);
+  const elements = parseHTMLElements(html);
+  if (elements === undefined) return undefined;
   const runPath = `/${owner}/${repo}/actions/runs/${id}`;
   const summary = onlyElement(
     elements.filter(
@@ -569,9 +567,8 @@ export function actionsJobHTMLProvesCompleted(
   jobID: string,
 ): boolean {
   if (!/^[1-9][0-9]*$/.test(jobID) || !Number.isSafeInteger(Number(jobID))) return false;
-  const document = actionsDocument(html);
-  if (document === undefined) return false;
-  const pageElements = actionsElements(document);
+  const pageElements = parseHTMLElements(html);
+  if (pageElements === undefined) return false;
   const region = selectedJobRegion(pageElements);
   // Annotations are not job-state evidence. Their valid tables omit <tbody>,
   // which parse5 inserts without source locations; retain the container boundary.
@@ -641,9 +638,8 @@ export function parseActionsJobHTML(
   owner: string,
   repo: string,
 ): Record<string, unknown> | undefined {
-  const document = actionsDocument(html);
-  if (document === undefined) return undefined;
-  const pageElements = actionsElements(document);
+  const pageElements = parseHTMLElements(html);
+  if (pageElements === undefined) return undefined;
   const navigation = onlyElement(jobsNavigation(pageElements));
   const props = navigation === undefined ? undefined : actionsNavigationProps(navigation);
   const region = selectedJobRegion(pageElements);

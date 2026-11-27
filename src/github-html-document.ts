@@ -20,7 +20,7 @@ const INERT_ELEMENTS = new Set([
   "plaintext",
 ]);
 
-export function parseHTMLDocument(html: string): DefaultTreeAdapterTypes.Document | undefined {
+export function parseHTMLElements(html: string): HTMLTreeElement[] | undefined {
   let invalid = false;
   let missingDoctype = false;
   const duplicateOffsets: number[] = [];
@@ -64,7 +64,7 @@ export function parseHTMLDocument(html: string): DefaultTreeAdapterTypes.Documen
     )
   )
     invalid = true;
-  return invalid ? undefined : document;
+  return invalid ? undefined : elements;
 }
 
 export function htmlElements(
