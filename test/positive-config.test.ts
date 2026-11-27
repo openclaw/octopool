@@ -34,7 +34,7 @@ describe("positive integer configuration", () => {
   });
 
   it("retains operational defaults rather than truncating suffixed values", () => {
-    const env = { MAX_RESPONSE_BYTES: "2MiB", REQUEST_TIMEOUT_MS: "15s" } as unknown as Env;
+    const env = { MAX_RESPONSE_BYTES: "2MiB", REQUEST_TIMEOUT_MS: "15s" };
     expect(responseCapBytes(env)).toBe(2_097_152);
     expect(requestTimeoutMs(env)).toBe(15_000);
   });
