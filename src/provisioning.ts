@@ -1,11 +1,11 @@
 import {
   githubUserByLogin,
   githubUserFromToken,
-  newToken,
   verifyGitHubOrgMember,
   verifyGitHubOrgMemberWithToken,
 } from "./auth";
 import { clearConfigCache } from "./config-cache";
+import { newToken } from "./encoding";
 import { parseClientName } from "./client-name";
 import { ensureCliCaller } from "./callers";
 import { requestedLoginPool } from "./config";

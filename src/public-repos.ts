@@ -5,7 +5,7 @@ import {
   type PublicationOwner,
 } from "./cache-publication";
 import { publicProofCoordinatorStub } from "./pool-coordinator";
-import { envSecret } from "./auth";
+import { envSecret } from "./config";
 import { rethrowStringRewriteDenial, type GitHubEgressEnv } from "./github-egress";
 import { acquireOwnedCacheFill, startOwnedCacheFill, type CacheFillOutcome } from "./cache-fill";
 import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";

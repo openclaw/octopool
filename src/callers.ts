@@ -1,5 +1,4 @@
-import { newToken } from "./auth";
-import { hashToken } from "./encoding";
+import { hashToken, newToken } from "./encoding";
 import { ensurePool } from "./db";
 import { queries } from "./generated/sql";
 import { HttpError } from "./http";

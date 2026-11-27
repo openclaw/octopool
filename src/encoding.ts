@@ -67,3 +67,9 @@ export async function hashToken(token: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return bytesToBase64URL(new Uint8Array(digest));
 }
+
+export function newToken(prefix: string): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `${prefix}_${bytesToBase64URL(bytes)}`;
+}

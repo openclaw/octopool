@@ -15,3 +15,7 @@ export function requestedLoginPool(env: Env, requested: unknown): string {
   }
   return allowed;
 }
+
+export function envSecret(env: Env, name: string): string | undefined {
+  return (env as unknown as Record<string, string | undefined>)[name];
+}
