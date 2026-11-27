@@ -50,6 +50,7 @@ import { supportsAnonymousGitHubAPI } from "./github-public-api";
 import { storePublicAPIRate } from "./github-public-rate";
 import {
   GitHubTransportError,
+  hasConditionalRequestHeaders,
   isTransientGitHubStatus,
   transformedGitHubHeaders,
 } from "./github-response";
@@ -351,7 +352,7 @@ async function prepareRelay(
       route.cacheable &&
       !cacheEnabled &&
       (terminalLogJobID(base.request, route) === undefined ||
-        hasConditionalRequestHeaders(base.request))
+        hasConditionalRequestHeaders(base.request.headers))
         ? "uncacheable"
         : null,
     cacheable: cacheKey !== undefined,
@@ -369,7 +370,7 @@ async function executeRelay(state: ActiveRelay): Promise<Response> {
   }
   if (
     terminalLogJobID(state.request, state.route) !== undefined &&
-    !hasConditionalRequestHeaders(state.request)
+    !hasConditionalRequestHeaders(state.request.headers)
   ) {
     const key = terminalLogCacheKey(state.request);
     const cached = await readTerminalLogCache(state.env, key, (reason) =>
@@ -2179,7 +2180,8 @@ async function cachedRunAttemptCompleted(
   state: ActiveRelay,
   attemptRequest: RelayRequest,
 ): Promise<boolean> {
-  if (state.maxAgeSeconds === 0 || hasConditionalRequestHeaders(state.request)) return false;
+  if (state.maxAgeSeconds === 0 || hasConditionalRequestHeaders(state.request.headers))
+    return false;
   try {
     const headers = { ...attemptRequest.headers };
     if (state.request.headers?.["x-octopool-public-shape"] !== PUBLIC_SHAPES.actionsJobs) {
@@ -2252,13 +2254,6 @@ async function switchToExactRunList(state: ActiveRelay): Promise<void> {
   const cacheKey = await githubCacheKey(state.request.pool, state.cacheRequest, state.route);
   state.sharedCacheKey = cacheKey;
   await switchRelayCacheKey(state, cacheKey);
-}
-
-function hasConditionalRequestHeaders(request: RelayRequest): boolean {
-  return (
-    request.headers?.["if-none-match"] !== undefined ||
-    request.headers?.["if-modified-since"] !== undefined
-  );
 }
 
 function staleFallbackReasonFromError(error: unknown): string | undefined {

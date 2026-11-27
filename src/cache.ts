@@ -15,7 +15,11 @@ import {
 } from "./cache-policy";
 import { readEdgeJSON, writeEdgeJSON } from "./edge-cache";
 import { queries } from "./generated/sql";
-import { DEFAULT_GITHUB_API_VERSION, defaultGitHubJSONAccept } from "./github-response";
+import {
+  DEFAULT_GITHUB_API_VERSION,
+  defaultGitHubJSONAccept,
+  hasConditionalRequestHeaders,
+} from "./github-response";
 import { scalarQuery } from "./github-path";
 import {
   GITHUB_LANDING_QUERIES,
@@ -164,8 +168,7 @@ export function shouldUseGitHubCache(request: RelayRequest, route: RouteInfo): b
   if (!route.cacheable || route.logs || route.largePayload) {
     return false;
   }
-  const headers = request.headers ?? {};
-  return headers["if-none-match"] === undefined && headers["if-modified-since"] === undefined;
+  return !hasConditionalRequestHeaders(request.headers);
 }
 
 export function immutableCacheRoute(request: RelayRequest, route: RouteInfo): boolean {

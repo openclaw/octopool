@@ -83,3 +83,20 @@ export function defaultGitHubJSONAccept(value: string | undefined, allowBlank = 
     normalized === "application/vnd.github.v3+json"
   );
 }
+
+export function conditionalHeaders(
+  headers: Record<string, string> | undefined,
+): Record<string, string> {
+  return {
+    ...(headers?.["if-none-match"] === undefined
+      ? {}
+      : { "if-none-match": headers["if-none-match"] }),
+    ...(headers?.["if-modified-since"] === undefined
+      ? {}
+      : { "if-modified-since": headers["if-modified-since"] }),
+  };
+}
+
+export function hasConditionalRequestHeaders(headers: Record<string, string> | undefined): boolean {
+  return headers?.["if-none-match"] !== undefined || headers?.["if-modified-since"] !== undefined;
+}

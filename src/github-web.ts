@@ -9,7 +9,7 @@ import { mediaFormat, mediaWebRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
 import { releaseMetadataPageRequest, summaryPageRequest } from "./github-public-pages";
 import { workflowPageRequest } from "./github-public-workflows";
-import { githubResponseHeaders } from "./github-response";
+import { conditionalHeaders, githubResponseHeaders } from "./github-response";
 import { rateFromHeaders } from "./github-rate";
 import { githubResponseLocalFallbackReason } from "./local-fallback";
 import type { WebRequest } from "./github-web-types";
@@ -126,17 +126,6 @@ async function webPayload(
     rethrowStringRewriteDenial(error);
     return undefined;
   }
-}
-
-function conditionalHeaders(headers: Record<string, string> | undefined): Record<string, string> {
-  return {
-    ...(headers?.["if-none-match"] === undefined
-      ? {}
-      : { "if-none-match": headers["if-none-match"] }),
-    ...(headers?.["if-modified-since"] === undefined
-      ? {}
-      : { "if-modified-since": headers["if-modified-since"] }),
-  };
 }
 
 function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteInfo): WebRequest[] {

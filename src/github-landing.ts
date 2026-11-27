@@ -1,5 +1,5 @@
 import { GITHUB_LANDING_QUERIES, PUBLIC_SHAPES } from "./github-public-shapes";
-import { defaultGitHubJSONAccept } from "./github-response";
+import { defaultGitHubJSONAccept, hasConditionalRequestHeaders } from "./github-response";
 import { HttpError } from "./http";
 import { isRecord } from "./object";
 import type { GitHubRelayResponse, RelayRequest } from "./types";
@@ -23,8 +23,7 @@ export function landingGraphQLRequest(
     !Number.isSafeInteger(number) ||
     number > 2_147_483_647 ||
     !defaultGitHubJSONAccept(request.headers?.accept) ||
-    request.headers?.["if-none-match"] !== undefined ||
-    request.headers?.["if-modified-since"] !== undefined ||
+    hasConditionalRequestHeaders(request.headers) ||
     Object.keys(request.query ?? {}).some((name) => name !== "cursor") ||
     (cursor !== undefined &&
       ((key !== "pullRequestCIRollup" &&
