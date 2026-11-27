@@ -237,13 +237,15 @@ func renderHumanRunView(stdout io.Writer, run map[string]any, jobs []any) error 
 		); err != nil {
 			return err
 		}
-		if !strings.EqualFold(firstString(job, "conclusion"), "failure") {
+		switch strings.ToLower(firstString(job, "conclusion")) {
+		case "failure", "timed_out", "action_required", "startup_failure":
+		default:
 			continue
 		}
 		steps, _ := job["steps"].([]any)
 		for _, rawStep := range steps {
 			step, ok := rawStep.(map[string]any)
-			if !ok || !strings.EqualFold(firstString(step, "conclusion"), "failure") {
+			if !ok {
 				continue
 			}
 			if _, err := fmt.Fprintf(stdout, "  %s %s\n",
