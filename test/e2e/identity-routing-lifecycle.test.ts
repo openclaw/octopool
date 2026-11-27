@@ -11,7 +11,7 @@ import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { classifyRoute, defaultPolicy } from "../../src/policy";
 import { terminalLogCacheKey } from "../../src/terminal-log-cache";
 import { runJobsSupersetView } from "../../src/run-jobs-superset";
-import type { CredentialFailureReason } from "../../src/github-auth";
+import type { CredentialFailureReason } from "../../src/identity-credential-error";
 import {
   bearer,
   CALLER_TOKEN,

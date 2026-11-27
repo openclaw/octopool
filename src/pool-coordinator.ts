@@ -8,7 +8,10 @@ import {
   type PublicationOwner,
 } from "./cache-publication";
 import { queries } from "./generated/sql";
-import { isCredentialFailureReason, type CredentialFailureReason } from "./github-auth";
+import {
+  isCredentialFailureReason,
+  type CredentialFailureReason,
+} from "./identity-credential-error";
 import { isRateInteger, isRateSeconds } from "./github-rate";
 import type { CoordinatorSnapshot, RecordResult, SelectionRequest, SelectionResult } from "./types";
 
