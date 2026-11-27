@@ -1,6 +1,6 @@
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { policyCoordinatorStub } from "../../src/policy-coordinator";
+import { policyCoordinatorStub } from "../../src/string-rewrite-policy";
 import { observePublicationD1 } from "./publication-d1-observer";
 
 // Observe/fault the production object's actual D1 calls, not the caller's binding.

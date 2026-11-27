@@ -1,7 +1,7 @@
 import { writeOwnedGitHubCache as writeGitHubCache } from "./cache-publication-fixture";
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
-import { policyCoordinatorStub } from "../../src/policy-coordinator";
+import { policyCoordinatorStub } from "../../src/string-rewrite-policy";
 import { describe, expect, it, vi } from "vitest";
 import { clearConfigCache } from "../../src/config-cache";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";

@@ -1,7 +1,7 @@
 import { evictDurableObject, listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { restoreD1Baseline, type D1Baseline } from "./d1-baseline";
 import { OwnedWork } from "./owned-work";
-import { policyCoordinatorStub } from "../../src/policy-coordinator";
+import { policyCoordinatorStub } from "../../src/string-rewrite-policy";
 
 // All caches stay native. Only puts forwarded through this ledger are owned;
 // this is deliberately not a purge of arbitrary, untracked Cache API contents.
