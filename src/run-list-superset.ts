@@ -71,7 +71,7 @@ export function runListSupersetView(
     return undefined;
   }
   const query = request.query ?? {};
-  const allowed = new Set(["branch", "status", "page", "per_page", "limit"]);
+  const allowed = ["branch", "status", "page", "per_page", "limit"];
   if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
     return undefined;
   }

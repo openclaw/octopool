@@ -102,8 +102,8 @@ function issueListPageQuery(
 ): { perPage: number; search: string } | undefined {
   const allowed =
     kind === "issue"
-      ? new Set(["per_page", "page", "state", "creator", "assignee", "labels"])
-      : new Set(["per_page", "page", "state"]);
+      ? ["per_page", "page", "state", "creator", "assignee", "labels"]
+      : ["per_page", "page", "state"];
   const pageQuery = simplePageQuery(query, allowed);
   if (pageQuery === undefined) {
     return undefined;

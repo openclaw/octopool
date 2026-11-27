@@ -361,7 +361,7 @@ function actionsRunJobsRequest(
 function actionsListQuery(
   query: Record<string, string | string[]> | undefined,
 ): { perPage: number } | undefined {
-  const allowed = new Set(["per_page", "page", "branch", "status"]);
+  const allowed = ["per_page", "page", "branch", "status"];
   if (!validScalarQuery(query, allowed) || !firstPageQuery(query)) {
     return undefined;
   }
@@ -378,7 +378,7 @@ function actionsListQuery(
 function actionsJobsQuery(
   query: Record<string, string | string[]> | undefined,
 ): { perPage: number } | undefined {
-  const allowed = new Set(["per_page", "page", "filter"]);
+  const allowed = ["per_page", "page", "filter"];
   if (
     !validScalarQuery(query, allowed) ||
     !firstPageQuery(query) ||
