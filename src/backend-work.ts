@@ -9,7 +9,10 @@ import type { Admission } from "./backend-admission-contract";
 export const BACKEND_RENEW_MS = 10_000;
 const BACKEND_RELEASE_WAIT_MS = 1_000;
 
-export function backendAdmissionStub(env: Env, pool: string): DurableObjectStub<BackendAdmission> {
+export function backendAdmissionStub(
+  env: Pick<Env, "BACKEND_ADMISSION">,
+  pool: string,
+): DurableObjectStub<BackendAdmission> {
   return env.BACKEND_ADMISSION.get(env.BACKEND_ADMISSION.idFromName(`pool:${pool}`), {
     locationHint: "wnam",
   });
@@ -79,7 +82,7 @@ export class BackendWork {
     private readonly limit: number,
   ) {}
 
-  static limit(env: Env): number {
+  static limit(env: { CLIENT_BACKEND_CONCURRENCY?: string | undefined }): number {
     // Eight foreground CLI slots can overlap detached refreshes or cleanup.
     return parsePositiveInt(env.CLIENT_BACKEND_CONCURRENCY, 16);
   }
