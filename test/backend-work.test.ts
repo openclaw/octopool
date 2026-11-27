@@ -29,7 +29,7 @@ function fixture() {
     },
   } as unknown as ExecutionContext;
   const input = new AbortController();
-  const work = new BackendWork(admission, '["caller","client"]', BackendWork.limit({} as Env));
+  const work = new BackendWork(admission, '["caller","client"]', BackendWork.limit({}));
   const run = (handler: () => Promise<unknown>) =>
     work.run(input.signal, ctx, handler).then(
       (value) => ({ value }),
@@ -44,8 +44,8 @@ function fixture() {
 
 it("reserves server headroom beyond the eight CLI slots and honors a configured limit", () => {
   for (const value of [undefined, "", "invalid"])
-    expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: value } as Env)).toBe(16);
-  expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: "3" } as unknown as Env)).toBe(3);
+    expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: value })).toBe(16);
+  expect(BackendWork.limit({ CLIENT_BACKEND_CONCURRENCY: "3" })).toBe(3);
 });
 
 it("acknowledges normal permit release before returning the response to the CLI", async () => {

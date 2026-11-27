@@ -54,7 +54,9 @@ async function policyRequest(request: Request, env: Env): Promise<Response> {
   throw stringRewritePolicyUnavailable();
 }
 
-export function policyCoordinatorStub(env: Env): DurableObjectStub<PolicyCoordinator> {
+export function policyCoordinatorStub(
+  env: Pick<Env, "POLICY_COORDINATOR">,
+): DurableObjectStub<PolicyCoordinator> {
   // This name is an authority boundary: every pool, reader and writer uses it.
   const id = env.POLICY_COORDINATOR.idFromName("string-rewrite-policy");
   return env.POLICY_COORDINATOR.get(id, { locationHint: "wnam" });
