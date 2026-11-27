@@ -19,25 +19,18 @@ var (
 )
 
 func main() {
+	var err error
 	if isGHArgv(os.Args[0]) {
 		args := os.Args[1:]
-		var err error
 		if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 			err = execRealGH(context.Background(), args, os.Stdout, os.Stderr)
 		} else {
 			err = runGH(context.Background(), args, os.Stdout, os.Stderr)
 		}
-		if err != nil {
-			var exit exitCodeError
-			if errors.As(err, &exit) {
-				os.Exit(exit.Code)
-			}
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		return
+	} else {
+		err = run(context.Background(), os.Args[1:], os.Stdout, os.Stderr)
 	}
-	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err != nil {
 		var exit exitCodeError
 		if errors.As(err, &exit) {
 			os.Exit(exit.Code)
