@@ -8,6 +8,7 @@ import { actionsPageRequest } from "./github-public-actions";
 import { mediaFormat, mediaWebRequest } from "./github-public-content";
 import { gitRefRequest } from "./github-public-git";
 import { releaseMetadataPageRequest, summaryPageRequest } from "./github-public-pages";
+import { workflowPageRequest } from "./github-public-workflows";
 import { githubResponseHeaders } from "./github-response";
 import { rateFromHeaders } from "./github-rate";
 import { githubResponseLocalFallbackReason } from "./local-fallback";
@@ -151,7 +152,8 @@ function webRequests(env: GitHubEgressEnv, request: RelayRequest, route: RouteIn
   return [
     releaseMetadataPageRequest(capBytes, request, route),
     gitRefRequest(env, request, route),
-    summaryPageRequest(env, request, route),
+    summaryPageRequest(capBytes, request, route),
+    workflowPageRequest(env, request, route),
     actionsPageRequest(env, request, route),
     publicApi,
   ].filter((candidate) => candidate !== undefined);

@@ -5,7 +5,6 @@ import { parsePullRequestHTML } from "../src/github-html-embedded";
 import { summaryPageRequest } from "../src/github-public-pages";
 import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
 import { githubCacheKey } from "../src/cache";
-import { withGitHubEgress } from "../src/github-egress";
 
 function fixture(name: string): string {
   return readFileSync(
@@ -127,11 +126,7 @@ describe("PR summary v2", () => {
         headers: { "x-octopool-public-shape": shape },
       });
       const route = classifyRoute(request, defaultPolicy("openclaw"));
-      const page = summaryPageRequest(
-        withGitHubEgress({ REQUEST_TIMEOUT_MS: "15000" } as unknown as Env, []),
-        request,
-        route,
-      );
+      const page = summaryPageRequest(2_097_152, request, route);
       expect(page?.url).toBe("https://github.com/openclaw/openclaw/pull/154425");
       const response = await page?.payload(
         new TextEncoder().encode(fixture("merged")),
