@@ -85,7 +85,7 @@ async function verifyPRStateHintInternal(
 }
 
 async function freshPRStateProof(
-  env: Env,
+  env: Pick<Env, "DB">,
   route: RouteInfo,
   number: string,
   stateHint: string,
@@ -97,7 +97,7 @@ async function freshPRStateProof(
 }
 
 async function upsertPRStateProof(
-  env: Env,
+  env: Pick<Env, "DB">,
   route: RouteInfo,
   number: string,
   stateHint: string,

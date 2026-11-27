@@ -121,7 +121,7 @@ export async function ensurePublicGitHubRepo(
 }
 
 async function readAuthoritativeProof(
-  env: Env,
+  env: Pick<Env, "DB">,
   owner: string,
   repo: string,
   at: string,
@@ -351,7 +351,7 @@ async function fetchPublicRepoPageProof(
 }
 
 export async function storePublicRepoProof(
-  env: Env,
+  env: Pick<Env, "DB" | "PUBLIC_REPO_TTL_SECONDS" | "PUBLIC_REPO_NEGATIVE_TTL_SECONDS">,
   owner: string,
   repo: string,
   isPublic: boolean,
@@ -417,7 +417,11 @@ export async function storePublicRepoProof(
   return "shared";
 }
 
-function publicProofExpiresAt(env: Env, isPublic: boolean, checkedAt: string): string {
+function publicProofExpiresAt(
+  env: Pick<Env, "PUBLIC_REPO_TTL_SECONDS" | "PUBLIC_REPO_NEGATIVE_TTL_SECONDS">,
+  isPublic: boolean,
+  checkedAt: string,
+): string {
   const vars = env as unknown as Record<string, string | undefined>;
   const ttlSeconds = isPublic
     ? parsePositiveInt(vars.PUBLIC_REPO_TTL_SECONDS, 30)
@@ -439,7 +443,7 @@ function publicCheckMayUseHistoricalProof(response: Response): boolean {
 }
 
 async function coveringPublicRepoProofSource(
-  env: Env,
+  env: Pick<Env, "DB">,
   route: RouteInfo,
   cacheCreatedAt: string,
   options: {
@@ -485,7 +489,7 @@ async function coveringPublicRepoProofSource(
 }
 
 async function rejectFreshNegativePublicRepoProof(
-  env: Env,
+  env: Pick<Env, "DB">,
   owner: string,
   repo: string,
 ): Promise<PublicRepoProof | undefined> {
@@ -510,7 +514,7 @@ async function rejectFreshNegativePublicRepoProof(
 }
 
 function readD1PublicRepoProof(
-  env: Env,
+  env: Pick<Env, "DB">,
   query: string,
   owner: string,
   repo: string,
