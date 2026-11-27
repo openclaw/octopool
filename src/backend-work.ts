@@ -82,7 +82,7 @@ export class BackendWork {
     private readonly limit: number,
   ) {}
 
-  static limit(env: { CLIENT_BACKEND_CONCURRENCY?: string }): number {
+  static limit(env: { CLIENT_BACKEND_CONCURRENCY?: string | undefined }): number {
     // Eight foreground CLI slots can overlap detached refreshes or cleanup.
     return parsePositiveInt(env.CLIENT_BACKEND_CONCURRENCY, 16);
   }
