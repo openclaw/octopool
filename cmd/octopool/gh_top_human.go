@@ -77,7 +77,7 @@ func renderHumanPRView(stdout io.Writer, pr map[string]any, reviews []any) error
 		{"title", firstString(pr, "title")},
 		{"state", state},
 		{"author", nestedStringValue(pr, "user", "login")},
-		{"labels", joinedObjectStrings(pr["labels"], "name")},
+		{"labels", humanViewLabels(pr["labels"])},
 		{"assignees", joinedObjectStrings(pr["assignees"], "login")},
 		{"reviewers", latestReviewers(pr, reviews)},
 		{"projects", ""},
@@ -284,7 +284,7 @@ func relayHumanIssueView(ctx context.Context, stdout io.Writer, repo string, num
 		{"title", firstString(issue, "title")},
 		{"state", strings.ToUpper(firstString(issue, "state"))},
 		{"author", nestedStringValue(issue, "user", "login")},
-		{"labels", joinedObjectStrings(issue["labels"], "name")},
+		{"labels", humanViewLabels(issue["labels"])},
 		{"comments", numberText(issue["comments"])},
 		{"assignees", joinedObjectStrings(issue["assignees"], "login")},
 		{"projects", ""},
@@ -347,6 +347,19 @@ func writeHumanBody(stdout io.Writer, body string) error {
 	// including for empty bodies.
 	_, err := fmt.Fprintln(stdout, bodySafeText(body))
 	return err
+}
+
+// Views sort labels case-insensitively, preserving ties and the source slice.
+// Other human fields and issue-list labels retain their acquisition order.
+func humanViewLabels(raw any) string {
+	labels, _ := raw.([]any)
+	labels = append([]any(nil), labels...)
+	sort.SliceStable(labels, func(i, j int) bool {
+		left, _ := labels[i].(map[string]any)
+		right, _ := labels[j].(map[string]any)
+		return strings.ToLower(firstString(left, "name")) < strings.ToLower(firstString(right, "name"))
+	})
+	return joinedObjectStrings(labels, "name")
 }
 
 func joinedObjectStrings(raw any, key string) string {
