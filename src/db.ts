@@ -9,12 +9,18 @@ type PoolRow = {
   policy_json: string;
 };
 
-export async function ensurePool(env: Env, pool: string): Promise<void> {
+export async function ensurePool(
+  env: Pick<Env, "DB" | "DEFAULT_ALLOWED_OWNERS">,
+  pool: string,
+): Promise<void> {
   const policy = JSON.stringify(defaultPolicy(env.DEFAULT_ALLOWED_OWNERS));
   await env.DB.prepare(queries.ensurePool).bind(pool, policy).run();
 }
 
-export async function loadPoolPolicy(env: Env, pool: string): Promise<PoolPolicy | null> {
+export async function loadPoolPolicy(
+  env: Pick<Env, "DB" | "DEFAULT_ALLOWED_OWNERS">,
+  pool: string,
+): Promise<PoolPolicy | null> {
   return relayPhasePromise("pool_policy", () =>
     cachedConfigLookup(`policy:${pool}`, async () => {
       const row = await env.DB.prepare(queries.getPoolPolicy).bind(pool).first<PoolRow>();
@@ -27,7 +33,7 @@ export async function loadPoolPolicy(env: Env, pool: string): Promise<PoolPolicy
 }
 
 export async function loadIdentities(
-  env: Env,
+  env: Pick<Env, "DB">,
   pool: string,
   route: RouteInfo,
   // fresh: authoritative-recheck moments (e.g. proving a cached row's source
@@ -68,7 +74,7 @@ export async function loadIdentities(
 }
 
 export async function insertAudit(
-  env: Env,
+  env: Pick<Env, "DB">,
   event: {
     requestId: string;
     callerId: string;
@@ -118,7 +124,7 @@ export async function insertAudit(
 
 // Wait for the frozen response snapshot so the audit and header agree.
 export function scheduleRelayAudit(
-  env: Env,
+  env: Pick<Env, "DB">,
   ctx: ExecutionContext,
   event: Parameters<typeof insertAudit>[1],
 ): void {
