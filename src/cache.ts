@@ -211,7 +211,7 @@ export function requestCacheMaxAgeSeconds(request: RelayRequest): number | undef
 }
 
 export async function readGitHubCache(
-  env: Env,
+  env: Pick<Env, "DB">,
   cacheKey: string,
   ctx?: ExecutionContext,
   maxAgeSeconds?: number,
@@ -222,7 +222,7 @@ export async function readGitHubCache(
 }
 
 export async function readGitHubCacheWithSource(
-  env: Env,
+  env: Pick<Env, "DB">,
   cacheKey: string,
   ctx?: ExecutionContext,
   maxAgeSeconds?: number,
@@ -243,7 +243,7 @@ export async function readGitHubCacheWithSource(
 
 // Each pass, including post-acquisition rechecks, needs a new storage snapshot.
 export function createGitHubCacheCandidateReader(
-  env: Env,
+  env: Pick<Env, "DB">,
   cacheKeys: string[],
   ctx?: ExecutionContext,
   maxAgeSeconds?: number,
@@ -330,7 +330,7 @@ function sharedGitHubCacheResponse(
 }
 
 export async function readRunListCacheCandidates(
-  env: Env,
+  env: Pick<Env, "DB">,
   request: RelayRequest,
   repoPath: string,
   runId: number,
@@ -455,7 +455,7 @@ function withinRequestedMaxAge(cached: CachedGitHubResponse, maxAgeSeconds?: num
 }
 
 export async function readStaleGitHubCache(
-  env: Env,
+  env: Pick<Env, "DB">,
   cacheKey: string,
   route: RouteInfo,
   maxAgeSeconds?: number,
@@ -470,7 +470,7 @@ export async function readStaleGitHubCache(
 }
 
 export async function readStaleGitHubCacheCandidates(
-  env: Env,
+  env: Pick<Env, "DB">,
   cacheKeys: string[],
   route: RouteInfo,
   maxAgeSeconds?: number,
@@ -565,7 +565,7 @@ function staleCacheAllowed(row: CacheRow, route: RouteInfo): boolean {
 }
 
 export async function writeGitHubCache(
-  env: Env,
+  env: Pick<Env, "DB">,
   cacheKey: string,
   request: RelayRequest,
   route: RouteInfo,

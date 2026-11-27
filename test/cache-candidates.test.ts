@@ -85,7 +85,7 @@ function fixture(
       }),
       batch,
     },
-  } as unknown as Env;
+  } as unknown as Pick<Env, "DB">;
   return { env, first, batch, match, rows, edges };
 }
 

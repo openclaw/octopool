@@ -1138,7 +1138,7 @@ describe("github cache policy", () => {
     });
 
     await expect(
-      readGitHubCache({ DB: { prepare } } as unknown as Env, "cache-key"),
+      readGitHubCache({ DB: { prepare } } as unknown as Pick<Env, "DB">, "cache-key"),
     ).resolves.toMatchObject({
       body: { number: 42 },
     });
@@ -1168,7 +1168,7 @@ describe("github cache policy", () => {
           bind,
         }),
       },
-    } as unknown as Env;
+    } as unknown as Pick<Env, "DB">;
 
     await expect(
       writeGitHubCache(env, "cache-key", request, route, response({ number: 42 }), fixtureOwner()),
@@ -1193,7 +1193,7 @@ describe("github cache policy", () => {
     vi.stubGlobal("caches", { default: { put } });
     const first = vi.fn(async () => ({ publication_id: 1, publication_token: "fixture" }));
     const bind = vi.fn((..._args: unknown[]) => ({ first }));
-    const env = { DB: { prepare: () => ({ bind }) } } as unknown as Env;
+    const env = { DB: { prepare: () => ({ bind }) } } as unknown as Pick<Env, "DB">;
     const request = validateRelayRequest({
       pool: "maintainers",
       method: "GET",
@@ -1488,7 +1488,7 @@ function response(body: unknown): GitHubRelayResponse {
   };
 }
 
-function cacheRowEnv(overrides: Record<string, unknown>): Env {
+function cacheRowEnv(overrides: Record<string, unknown>): Pick<Env, "DB"> {
   const row = {
     publication_epoch: CACHE_PUBLICATION_EPOCH,
     status: 200,
@@ -1504,10 +1504,10 @@ function cacheRowEnv(overrides: Record<string, unknown>): Env {
   return cacheDBEnv(async () => row);
 }
 
-function cacheDBEnv(first: () => Promise<unknown>): Env {
+function cacheDBEnv(first: () => Promise<unknown>): Pick<Env, "DB"> {
   return {
     DB: { prepare: () => ({ bind: () => ({ first }) }) },
-  } as unknown as Env;
+  } as unknown as Pick<Env, "DB">;
 }
 
 function sqliteUTC(ms: number): string {

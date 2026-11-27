@@ -38,7 +38,10 @@ describe("cache lookup miss observations", () => {
     vi.spyOn(Date, "now").mockReturnValue(now);
     vi.stubGlobal("caches", { default: { match: async () => undefined } });
     const first = vi.fn(async () => (overrides === null ? null : { ...freshRow(), ...overrides }));
-    const env = { DB: { prepare: () => ({ bind: () => ({ first }) }) } } as unknown as Env;
+    const env = { DB: { prepare: () => ({ bind: () => ({ first }) }) } } as unknown as Pick<
+      Env,
+      "DB"
+    >;
     const misses: CacheMissReason[] = [];
     expect(
       await readGitHubCache(env, "key", undefined, maxAge, (reason) => misses.push(reason)),
@@ -53,7 +56,10 @@ describe("cache lookup miss observations", () => {
       vi.spyOn(Date, "now").mockReturnValue(now);
       vi.stubGlobal("caches", { default: { match: async () => undefined } });
       const first = vi.fn(async () => freshRow());
-      const env = { DB: { prepare: () => ({ bind: () => ({ first }) }) } } as unknown as Env;
+      const env = { DB: { prepare: () => ({ bind: () => ({ first }) }) } } as unknown as Pick<
+        Env,
+        "DB"
+      >;
       const onMiss = vi.fn();
       const cached = await readGitHubCache(env, "key", undefined, maxAge, onMiss);
       expect(cached !== undefined).toBe(maxAge !== 0);
