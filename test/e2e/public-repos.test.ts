@@ -10,7 +10,8 @@ import {
 } from "../../src/public-repos";
 import { publicProofCoordinatorStub } from "../../src/pool-coordinator";
 import { proofPublicationResource } from "../../src/cache-publication";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { withGitHubEgress } from "../../src/github-egress";
 import { parseSQLiteTimestamp, sqliteTimestamp } from "../../src/sqlite-time";
 import { observePublicationD1 } from "./publication-d1-observer";

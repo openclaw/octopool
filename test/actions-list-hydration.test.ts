@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { withGitHubEgress } from "../src/github-egress";
 import { parseActionsRunHTML, parseActionsRunListHTML } from "../src/github-html-actions";
 import { callGitHubWeb } from "../src/github-web";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 
 const fixture = (name: string) =>
   readFileSync(

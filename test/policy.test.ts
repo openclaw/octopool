@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HttpError } from "../src/http";
-import { classifyRoute, defaultPolicy, parsePolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy, parsePolicy } from "../src/config";
 import { malformedStoredPolicies, restrictivePolicy } from "./fixtures/stored-policy";
 import {
   additionalDeniedRepoSearchQueries,

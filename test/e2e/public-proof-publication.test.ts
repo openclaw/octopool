@@ -11,7 +11,8 @@ import {
   PUBLIC_PROOF_EDGE_NAMESPACE,
 } from "../../src/public-repos";
 import { deleteEdgeJSON, readEdgeJSON, writeEdgeJSON } from "../../src/edge-cache";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { sqliteTimestamp } from "../../src/sqlite-time";
 import { queries } from "../../src/generated/sql";
 import { ownedWork } from "./owned-work";

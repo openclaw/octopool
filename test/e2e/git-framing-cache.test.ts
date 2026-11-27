@@ -5,7 +5,8 @@ import { acquireOwnedCacheFill } from "../../src/cache-fill";
 import { bodyPublicationResource } from "../../src/cache-publication";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
+import { classifyRoute, validateRelayRequest } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import type { Identity } from "../../src/types";
 import { gitCacheKeys } from "../fixtures/git-cache-keys";
 import {

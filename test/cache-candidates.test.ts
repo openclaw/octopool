@@ -9,7 +9,8 @@ import {
 } from "../src/cache";
 import { CACHE_PUBLICATION_EPOCH } from "../src/cache-publication";
 import { queries } from "../src/generated/sql";
-import { classifyRoute, defaultPolicy } from "../src/policy";
+import { classifyRoute } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { sqliteTimestamp } from "../src/sqlite-time";
 
 const now = Date.parse("2026-10-10T12:00:00Z");

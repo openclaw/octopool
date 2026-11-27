@@ -15,7 +15,8 @@ import {
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { githubCacheKey } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 import { ownedWork } from "./owned-work";
 import { exactRun, historicalHead, runPage } from "../fixtures/actions-ownership";

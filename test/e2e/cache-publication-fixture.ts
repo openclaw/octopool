@@ -5,7 +5,8 @@ import { writeGitHubCache } from "../../src/cache";
 import { acquireOwnedCacheFill } from "../../src/cache-fill";
 import { bodyPublicationResource } from "../../src/cache-publication";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
+import { classifyRoute, validateRelayRequest } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import type { GitHubRelayResponse, Identity, RelayRequest, RouteInfo } from "../../src/types";
 
 // Synthetic fixture evidence is observed only after the real grant commits.

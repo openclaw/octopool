@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import {
   filterRunListSuperset,
   runListSupersetUnderfilled,

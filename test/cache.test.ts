@@ -15,7 +15,8 @@ import {
 } from "../src/cache";
 import { cacheTTLSeconds, staleCacheSeconds } from "../src/cache-policy";
 import { parseIssueHTML } from "../src/github-html-embedded";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import type { GitHubRelayResponse } from "../src/types";
 
 describe("github cache policy", () => {

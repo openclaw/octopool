@@ -3,7 +3,8 @@ import { URL as NodeURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parsePullRequestHTML } from "../src/github-html-embedded";
 import { summaryPageRequest } from "../src/github-public-pages";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { githubCacheKey } from "../src/cache";
 
 function fixture(name: string): string {

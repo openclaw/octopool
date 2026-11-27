@@ -15,7 +15,8 @@ import {
   readStaleGitHubCache,
 } from "../../src/cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { queries } from "../../src/generated/sql";
 import { POOL, seedPool } from "./harness";
 import { ownedWork } from "./owned-work";

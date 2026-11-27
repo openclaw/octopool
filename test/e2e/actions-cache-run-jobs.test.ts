@@ -6,7 +6,8 @@ import { poolCoordinatorStub } from "../../src/pool-coordinator";
 import { historicalHead, runPage } from "../fixtures/actions-ownership";
 import { GITHUB_EDGE_CACHE_NAMESPACE, githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { seedPublicRepoProof, writeOwnedGitHubCache } from "./cache-publication-fixture";
 
 type RelayEnvelope = {

@@ -7,7 +7,8 @@ import { githubCacheKey, readEdgeGitHubCache } from "../../src/cache";
 import { loadIdentities } from "../../src/db";
 import { deleteEdgeJSON } from "../../src/edge-cache";
 import { poolCoordinatorStub } from "../../src/pool-coordinator";
-import { classifyRoute, defaultPolicy } from "../../src/policy";
+import { classifyRoute } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { bearer, jsonResponse, POOL, seedPool } from "./harness";
 import {
   appIdentity,

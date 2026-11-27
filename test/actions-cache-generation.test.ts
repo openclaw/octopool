@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { githubCacheKey } from "../src/cache";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../src/policy";
+import { classifyRoute, validateRelayRequest } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 import { runListSupersetView } from "../src/run-list-superset";
 import { legacyActionsKey } from "./fixtures/actions-legacy-cache";
 import { currentV2ActionsKeys } from "./fixtures/actions-current-v2-cache";

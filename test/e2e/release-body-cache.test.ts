@@ -6,7 +6,8 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey } from "../../src/cache";
 import { deleteEdgeJSON } from "../../src/edge-cache";
-import { classifyRoute, defaultPolicy, validateRelayRequest } from "../../src/policy";
+import { classifyRoute, validateRelayRequest } from "../../src/policy";
+import { defaultPolicy } from "../../src/config";
 import { seedPublicRepoProof as recordPublicGitHubRepo } from "./cache-publication-fixture";
 import { legacyReleaseKey, releaseMarkdown } from "../fixtures/release-summary";
 import {

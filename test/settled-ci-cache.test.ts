@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cacheTTLSeconds, staleCacheSeconds } from "../src/cache-policy";
-import { classifyRoute, defaultPolicy } from "../src/policy";
+import { classifyRoute } from "../src/policy";
+import { defaultPolicy } from "../src/config";
 
 const now = Date.parse("2026-09-28T12:00:00Z");
 const ago = (seconds: number) => new Date(now - seconds * 1_000).toISOString();
