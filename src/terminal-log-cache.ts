@@ -105,7 +105,7 @@ export async function terminalLogCacheProof(
 }
 
 async function cachedJobProvesCompleted(
-  env: Env,
+  env: Pick<Env, "DB">,
   request: RelayRequest,
   jobID: string,
 ): Promise<boolean> {
@@ -137,7 +137,10 @@ export function terminalLogNeedsRevalidation(
   );
 }
 
-export async function deleteTerminalLogCache(env: Env, key: string): Promise<void> {
+export async function deleteTerminalLogCache(
+  env: Pick<Env, "ACTIONS_LOGS">,
+  key: string,
+): Promise<void> {
   try {
     await env.ACTIONS_LOGS.delete(key);
   } catch (error) {
@@ -146,7 +149,7 @@ export async function deleteTerminalLogCache(env: Env, key: string): Promise<voi
 }
 
 export async function readTerminalLogCache(
-  env: Env,
+  env: Pick<Env, "ACTIONS_LOGS">,
   key: string,
   onMiss?: CacheMissObserver,
 ): Promise<CachedTerminalLog | undefined> {
@@ -200,7 +203,7 @@ export async function readTerminalLogCache(
 }
 
 export async function publishTerminalLogCache(
-  env: Env,
+  env: Pick<Env, "ACTIONS_LOGS">,
   key: string,
   response: GitHubRelayResponse,
 ): Promise<void> {

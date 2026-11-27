@@ -88,7 +88,10 @@ describe("cache lookup miss observations", () => {
             arrayBuffer: async () => new ArrayBuffer(0),
           },
     );
-    const env = { ACTIONS_LOGS: { get, delete: async () => {} } } as unknown as Env;
+    const env = { ACTIONS_LOGS: { get, delete: async () => {} } } as unknown as Pick<
+      Env,
+      "ACTIONS_LOGS"
+    >;
     const onMiss = vi.fn();
     expect(await readTerminalLogCache(env, "key", onMiss)).toBeUndefined();
     expect(onMiss).toHaveBeenCalledExactlyOnceWith(reason);
