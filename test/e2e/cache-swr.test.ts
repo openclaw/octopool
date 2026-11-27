@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../../src/index";
-import { backendAdmissionStub } from "../../src/backend-admission";
+import { backendAdmissionStub } from "../../src/backend-work";
 import { GITHUB_EDGE_CACHE_NAMESPACE } from "../../src/cache";
 import { bodyPublicationResource } from "../../src/cache-publication";
 import { deleteEdgeJSON } from "../../src/edge-cache";

@@ -4,7 +4,7 @@ import worker from "../../src/index";
 import { withGitHubEgress } from "../../src/github-egress";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { githubCacheKey, readGitHubCache } from "../../src/cache";
-import { backendAdmissionStub } from "../../src/backend-admission";
+import { backendAdmissionStub } from "../../src/backend-work";
 import { CACHE_PUBLICATION_EPOCH } from "../../src/cache-publication";
 import { queries } from "../../src/generated/sql";
 import { deleteEdgeJSON } from "../../src/edge-cache";

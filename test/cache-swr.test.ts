@@ -1,5 +1,4 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { backendAdmissionStub } from "../src/backend-admission";
 import { scheduleCacheRefresh } from "../src/cache-swr";
 import {
   cachePolicyForRouteKind,
@@ -9,7 +8,6 @@ import {
 import { ROUTES, type RouteKind } from "../src/route-manifest";
 import { fakeCacheFillCoordinator, fixtureOwner } from "./cache-fill-test-support";
 
-vi.mock("../src/backend-admission", () => ({ backendAdmissionStub: vi.fn() }));
 afterEach(() => vi.useRealTimers());
 
 it("caps refreshes across clients at eight and frees capacity after completion", async () => {
@@ -18,9 +16,12 @@ it("caps refreshes across clients at eight and frees capacity after completion",
     renew: vi.fn(async () => true),
     release: vi.fn(async (): Promise<void> => undefined),
   };
-  vi.mocked(backendAdmissionStub).mockReturnValue(
-    admission as unknown as ReturnType<typeof backendAdmissionStub>,
-  );
+  const env = {
+    BACKEND_ADMISSION: {
+      idFromName: (name: string) => name,
+      get: () => admission,
+    },
+  } as unknown as Env;
   const coordinator = {
     ...fakeCacheFillCoordinator([]),
     tryAcquirePublication: vi.fn(async (resource: string) => fixtureOwner(resource, resource)),
@@ -33,7 +34,7 @@ it("caps refreshes across clients at eight and frees capacity after completion",
   const refresh = vi.fn(() => gate.promise);
   const schedule = (index: number) =>
     scheduleCacheRefresh(
-      {} as Env,
+      env,
       ctx,
       coordinator,
       "pool",
@@ -57,7 +58,6 @@ it("caps refreshes across clients at eight and frees capacity after completion",
   } finally {
     gate.resolve();
     while (background.length) await Promise.all(background.splice(0));
-    vi.mocked(backendAdmissionStub).mockReset();
   }
 });
 
