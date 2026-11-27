@@ -32,6 +32,7 @@ import {
 import { coalesceGitHubCacheMiss } from "./cache-coalesce";
 import {
   cacheResponseEligible,
+  completedCollection,
   supportsStaleWhileRevalidate,
   withinSWRWindow,
 } from "./cache-policy";
@@ -1182,7 +1183,7 @@ async function finalizeRelaySuccess(state: ActiveRelay, result: RelaySuccess): P
     }
     throw createLocalFallbackError("pagination_exhausted");
   }
-  if (completedRunJobsResponse(result.github)) {
+  if (completedCollection(result.github, "jobs")) {
     state.route = await proveRunAttemptCompleted(state);
   }
   const cacheKey = state.cacheKey;
@@ -2132,15 +2133,6 @@ function rejectIncompleteRunJobs(state: ActiveRelay, response: GitHubRelayRespon
     recordCacheMiss(state, "unusable");
     throw createLocalFallbackError("pagination_exhausted");
   }
-}
-
-function completedRunJobsResponse(response: GitHubRelayResponse): boolean {
-  return (
-    isRecord(response.body) &&
-    Array.isArray(response.body.jobs) &&
-    response.body.jobs.length > 0 &&
-    response.body.jobs.every((job) => isRecord(job) && job.status === "completed")
-  );
 }
 
 async function proveRunAttemptCompleted(state: ActiveRelay): Promise<RouteInfo> {
