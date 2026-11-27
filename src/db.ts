@@ -9,15 +9,6 @@ type PoolRow = {
   policy_json: string;
 };
 
-type IdentityRow = {
-  id: string;
-  kind: "pat" | "github_app";
-  login: string;
-  secret_ref: string;
-  installation_id: number | null;
-  weight: number;
-};
-
 export async function ensurePool(env: Env, pool: string): Promise<void> {
   const policy = JSON.stringify(defaultPolicy(env.DEFAULT_ALLOWED_OWNERS));
   await env.DB.prepare(queries.ensurePool).bind(pool, policy).run();
@@ -51,7 +42,7 @@ export async function loadIdentities(
     return lookup(`identities:${pool}:*`, async () => {
       const rows = await env.DB.prepare(queries.listActiveIdentitiesForPool)
         .bind(pool)
-        .all<IdentityRow>();
+        .all<Identity>();
       return rows.results;
     });
   }
@@ -59,7 +50,7 @@ export async function loadIdentities(
     return lookup(`identities:${pool}:public`, async () => {
       const rows = await env.DB.prepare(queries.listActivePublicIdentitiesForPool)
         .bind(pool)
-        .all<IdentityRow>();
+        .all<Identity>();
       return rows.results;
     });
   }
@@ -68,7 +59,7 @@ export async function loadIdentities(
   const identities = await lookup(`identities:${pool}:${owner}/${repo}`, async () => {
     const rows = await env.DB.prepare(queries.listActiveIdentitiesForRoute)
       .bind(pool, owner, repo)
-      .all<IdentityRow>();
+      .all<Identity>();
     return rows.results;
   });
   return route.kind === "graphql_read"
