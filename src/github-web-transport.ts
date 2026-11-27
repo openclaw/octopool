@@ -75,7 +75,7 @@ export async function fetchWebResponse(
 export async function fetchPublicPage(
   url: string,
   capBytes: number,
-  env: Pick<GitHubEgressEnv, "githubEgress" | "REQUEST_TIMEOUT_MS">,
+  env: Pick<GitHubEgressEnv, "githubEgress"> & { REQUEST_TIMEOUT_MS?: string },
   accept = "text/html",
   options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string | undefined> {
