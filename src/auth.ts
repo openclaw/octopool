@@ -1,4 +1,5 @@
-import { bytesToBase64URL, hashToken } from "./encoding";
+import { hashToken } from "./encoding";
+import { envSecret } from "./config";
 import { relayPhase } from "./relay-timing";
 import { cachedConfigLookup, invalidateConfigValue } from "./config-cache";
 import { normalizeClientName } from "./client-name";
@@ -81,12 +82,6 @@ export async function authenticateAdmin(request: Request, env: Env): Promise<voi
   if (!ok) {
     throw new HttpError(401, "invalid_admin_auth", "Invalid admin token");
   }
-}
-
-export function newToken(prefix: string): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return `${prefix}_${bytesToBase64URL(bytes)}`;
 }
 
 export async function githubUserFromToken(
@@ -517,10 +512,6 @@ async function constantTimeEqual(left: string, right: string): Promise<boolean> 
     diff |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
   }
   return diff === 0;
-}
-
-export function envSecret(env: Env, name: string): string | undefined {
-  return (env as unknown as Record<string, string | undefined>)[name];
 }
 
 function githubHeaders(token?: string): Record<string, string> {
