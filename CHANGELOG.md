@@ -4,6 +4,8 @@
 
 - Sort labels case-insensitively in human issue and pull request views, matching native gh while preserving label order in JSON and issue lists.
 
+- Show every step of failed jobs in human run views, including jobs that timed out or require action, matching native gh.
+
 - Match native gh reviewer summaries in human PR views: show the latest review state, sort completed reviews before requests, and keep team and user names distinct.
 
 - Preserve SQL literals and comments containing query annotation text when generating Worker queries.

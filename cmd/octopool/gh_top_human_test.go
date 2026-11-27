@@ -576,30 +576,63 @@ func TestHumanListWebFlagDelegates(t *testing.T) {
 	}
 }
 
-func TestHumanRunViewRendersFailedSteps(t *testing.T) {
-	setHumanTestSeams(t, time.Date(2026, 7, 18, 4, 21, 25, 0, time.UTC))
-	relayTestServer(t, func(body map[string]any) any {
-		if strings.HasSuffix(body["path"].(string), "/jobs") {
-			return map[string]any{"total_count": 1, "jobs": []map[string]any{{
-				"id": 9, "name": "test", "status": "completed", "conclusion": "failure",
-				"started_at": "2026-07-17T21:00:00Z", "completed_at": "2026-07-17T21:02:00Z",
-				"steps": []map[string]any{
-					{"name": "Build", "status": "completed", "conclusion": "success"},
-					{"name": "Unit tests", "status": "completed", "conclusion": "failure"},
-				},
-			}}}
-		}
-		return map[string]any{
-			"id": 42, "status": "completed", "conclusion": "failure", "head_branch": "main",
-			"name": "CI", "event": "push", "created_at": "2026-07-17T20:59:00Z", "run_attempt": 1,
-			"html_url": "https://github.com/openclaw/octopool/actions/runs/42",
-		}
-	})
-	var out bytes.Buffer
-	result := runGHTopLevel(t.Context(), []string{"run", "view", "42", "-R", "openclaw/octopool"}, &out)
-	assertGHComplete(t, result)
-	if !strings.Contains(out.String(), "  X Unit tests\n") || strings.Contains(out.String(), "Build") {
-		t.Fatalf("failed steps only must render, got %q", out.String())
+func TestHumanRunViewRendersAllStepsForFailedJobs(t *testing.T) {
+	for _, tt := range []struct {
+		conclusion string
+		glyph      string
+		showSteps  bool
+	}{
+		{"failure", "X", true},
+		{"timed_out", "X", true},
+		{"action_required", "X", true},
+		{"startup_failure", "X", true},
+		{"success", "✓", false},
+		{"cancelled", "X", false},
+	} {
+		t.Run(tt.conclusion, func(t *testing.T) {
+			setHumanTestSeams(t, time.Date(2026, 7, 18, 4, 21, 25, 0, time.UTC))
+			var paths []string
+			relayTestServer(t, func(body map[string]any) any {
+				path, _ := body["path"].(string)
+				paths = append(paths, path)
+				switch path {
+				case "/repos/acme/repo/actions/runs/42/attempts/1/jobs":
+					return map[string]any{"total_count": 1, "jobs": []map[string]any{{
+						"id": 9, "name": "test", "status": "completed", "conclusion": tt.conclusion,
+						"started_at": "2026-07-17T21:00:00Z", "completed_at": "2026-07-17T21:02:00Z",
+						"steps": []map[string]any{
+							{"name": "Build\x1b", "status": "completed", "conclusion": "success"},
+							{"name": "Unit tests", "status": "completed", "conclusion": "failure"},
+							{"name": "Publish", "status": "completed", "conclusion": "skipped"},
+						},
+					}}}
+				case "/repos/acme/repo/actions/runs/42":
+					return map[string]any{
+						"id": 42, "status": "completed", "conclusion": "failure", "head_branch": "main",
+						"name": "CI", "event": "push", "created_at": "2026-07-17T21:21:25Z", "run_attempt": 1,
+						"html_url": "https://github.com/acme/repo/actions/runs/42",
+					}
+				default:
+					t.Errorf("unexpected path %q", path)
+					return nil
+				}
+			})
+			var out, stderr bytes.Buffer
+			if err := runGH(t.Context(), []string{"run", "view", "42", "-R", "acme/repo"}, &out, &stderr); err != nil {
+				t.Fatalf("runGH: %v, stderr=%q", err, stderr.String())
+			}
+			want := "\nX main CI · 42\nTriggered via push about 7 hours ago\n\nJOBS\n" + tt.glyph + " test in 2m0s (ID 9)\n"
+			if tt.showSteps {
+				want += "  ✓ Build\n  X Unit tests\n  - Publish\n"
+			}
+			want += "\nFor more information about the job, try: gh run view --job=9\nView this run on GitHub: https://github.com/acme/repo/actions/runs/42\n"
+			if out.String() != want || stderr.Len() != 0 {
+				t.Fatalf("output=%q stderr=%q, want=%q", out.String(), stderr.String(), want)
+			}
+			if got := strings.Join(paths, ","); got != "/repos/acme/repo/actions/runs/42,/repos/acme/repo/actions/runs/42/attempts/1/jobs" {
+				t.Fatalf("requests=%q", got)
+			}
+		})
 	}
 }
 
