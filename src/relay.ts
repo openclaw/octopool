@@ -109,7 +109,6 @@ import {
   readTerminalLogCache,
   recordTerminalLogProof,
   terminalLogCacheKey,
-  terminalLogCacheProof,
   terminalLogJobID,
   terminalLogNeedsRevalidation,
   type CachedTerminalLog,
