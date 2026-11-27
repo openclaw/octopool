@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve SQL literals and comments containing query annotation text when generating Worker queries.
+
 - Restore token-free issue summaries for GitHub’s current embedded page data while preserving Markdown bodies, author identities, and complete labels.
 
 - Restore token-free workflow lists and workflow views for GitHub’s current embedded JSON catalogues, falling back when the catalogue is incomplete.
